@@ -1,11 +1,20 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
-import type { AgentEvent, AgentEventStream, Harness } from '@earendil-works/pi-durable'
+import type {
+  AgentEvent,
+  AgentEventStream,
+  Harness,
+  SubmissionRecord,
+} from '@earendil-works/pi-durable'
 import type { AgentSendEvent } from './protocol.ts'
 
 const context = BACKGROUND_CONTEXT
 
 type Delivery = { events: readonly AgentSendEvent[]; close?: boolean }
+
+function isSettled(record: SubmissionRecord | undefined): record is SubmissionRecord {
+  return record?.status === 'done' || record?.status === 'unanswered'
+}
 
 /** One observer per byte stream; cancellation releases only that observer. */
 function eventStream(
@@ -85,7 +94,7 @@ export async function sendEvents(
   try {
     const submissionId = await admit()
     const existing = await receipt()
-    const settled = existing?.status === 'done' || existing?.status === 'unanswered'
+    const settled = isSettled(existing)
     if (settled) {
       // A retry or very fast response needs a snapshot taken after the terminal commit.
       await watch.stop()
@@ -102,7 +111,7 @@ export async function sendEvents(
         active = event.run?.inputs.some((id) => id === submissionId) ?? false
         // Overflow may have replaced the terminal notification; recover it from storage.
         const current = await receipt()
-        if (current?.status === 'done' || current?.status === 'unanswered') {
+        if (isSettled(current)) {
           const latest = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
           try {
             return {
@@ -119,7 +128,7 @@ export async function sendEvents(
         return event.record.id === submissionId
           ? {
               events: [event],
-              close: event.record.status === 'done' || event.record.status === 'unanswered',
+              close: isSettled(event.record),
             }
           : { events: [] }
       }

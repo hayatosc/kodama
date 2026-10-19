@@ -1,5 +1,5 @@
 import type AgentService from '../src/index.ts'
-import { validateId, validateMessage } from '../src/validation.ts'
+import { parseAgentId, parseMessage } from '../src/validation.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
 
@@ -13,18 +13,17 @@ export async function handleCli(
     return new Response('Unauthorized', { status: 401 })
   }
   if (request.method !== 'POST') return new Response('Use POST', { status: 405 })
-  const [, prefix, action, agentId] = new URL(request.url).pathname.split('/')
+  const [, prefix, action, rawAgentId] = new URL(request.url).pathname.split('/')
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
-    validateId(agentId, 'agentId', 64)
+    const agentId = parseAgentId(rawAgentId)
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)
       return Response.json({ cancelled: true })
     }
     if (action !== 'send') return new Response('Not found', { status: 404 })
-    const message: unknown = await request.json()
-    validateMessage(message)
+    const message = parseMessage(await request.json())
     const stream = await service.send(agentId, message)
     return new Response(stream, {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' },

@@ -5,7 +5,7 @@ import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../src/harness.ts'
-import { validateMessage } from '../src/validation.ts'
+import { parseMessage } from '../src/validation.ts'
 import { handleCli } from '../cli/handler.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -170,9 +170,9 @@ describe('agent RPC', () => {
     await expect(
       Promise.resolve(stub.sendMessage({ requestId: 'large', content: 'x'.repeat(16_001) })),
     ).rejects.toThrow('content')
-    expect(() =>
-      validateMessage({ requestId: 'mode', content: 'Hello', whenBusy: 'reject' }),
-    ).toThrow('whenBusy')
+    expect(() => parseMessage({ requestId: 'mode', content: 'Hello', whenBusy: 'reject' })).toThrow(
+      'whenBusy',
+    )
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 

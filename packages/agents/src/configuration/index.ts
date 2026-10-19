@@ -1,75 +1,70 @@
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import * as v from 'valibot'
+import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
+import type { AgentEnv } from '../env.ts'
 import type { AgentConfig } from '../protocol.ts'
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default.ts'
-import { resolveTools } from '../tools/index.ts'
+import { isRegisteredTool, resolveTools } from '../tools/index.ts'
 
-export function defaultAgentConfig(provider: string, modelId: string): AgentConfig {
+export type DefaultModelEnv = Pick<AgentEnv, 'DEFAULT_MODEL_PROVIDER' | 'DEFAULT_MODEL_ID'>
+
+const THINKING_LEVELS = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const satisfies readonly ModelThinkingLevel[]
+const SYSTEM_PROMPT_MAX_LENGTH = 64_000
+
+export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
   return {
-    model: { provider, modelId },
+    model: { provider: env.DEFAULT_MODEL_PROVIDER, modelId: env.DEFAULT_MODEL_ID },
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     thinkingLevel: 'off',
     tools: [],
   }
 }
 
-export function parseAgentConfig(value: unknown, models: Models): AgentConfig {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    Object.keys(value).some(
-      (key) => !['model', 'systemPrompt', 'thinkingLevel', 'tools'].includes(key),
-    ) ||
-    !('model' in value) ||
-    typeof value.model !== 'object' ||
-    value.model === null ||
-    !('provider' in value.model) ||
-    typeof value.model.provider !== 'string' ||
-    !('modelId' in value.model) ||
-    typeof value.model.modelId !== 'string' ||
-    Object.keys(value.model).some((key) => !['provider', 'modelId'].includes(key))
-  ) {
-    throw new TypeError('Expected an agent configuration with a provider and modelId')
-  }
-  if (!models.getModel(value.model.provider, value.model.modelId)) {
-    throw new TypeError(`Unknown model: ${value.model.provider}/${value.model.modelId}`)
-  }
-  if (
-    !('systemPrompt' in value) ||
-    typeof value.systemPrompt !== 'string' ||
-    value.systemPrompt.length > 64_000
-  ) {
-    throw new TypeError('systemPrompt must be a string of at most 64000 characters')
-  }
-  if (
-    !('thinkingLevel' in value) ||
-    (value.thinkingLevel !== 'off' &&
-      value.thinkingLevel !== 'minimal' &&
-      value.thinkingLevel !== 'low' &&
-      value.thinkingLevel !== 'medium' &&
-      value.thinkingLevel !== 'high' &&
-      value.thinkingLevel !== 'xhigh' &&
-      value.thinkingLevel !== 'max')
-  ) {
-    throw new TypeError('Invalid thinkingLevel')
-  }
-  if (!('tools' in value) || !Array.isArray(value.tools))
-    throw new TypeError('tools must be an array')
-  const tools: string[] = []
-  for (const name of value.tools) {
-    if (typeof name !== 'string' || tools.includes(name))
-      throw new TypeError('tools must contain unique tool names')
-    tools.push(name)
-  }
-  resolveTools(tools)
-  return {
-    model: { provider: value.model.provider, modelId: value.model.modelId },
-    systemPrompt: value.systemPrompt,
-    thinkingLevel: value.thinkingLevel,
-    tools,
-  }
+/** Complete configuration accepted over RPC; unknown fields are rejected rather than ignored. */
+export function agentConfigSchema(models: Models) {
+  const modelMessage = 'Expected an agent configuration with a provider and modelId'
+  return v.strictObject(
+    {
+      model: v.pipe(
+        v.strictObject({ provider: v.string(), modelId: v.string() }, modelMessage),
+        v.check(
+          ({ provider, modelId }) => models.getModel(provider, modelId) !== undefined,
+          (issue) => `Unknown model: ${issue.input.provider}/${issue.input.modelId}`,
+        ),
+      ),
+      systemPrompt: v.pipe(
+        v.string(),
+        v.maxLength(
+          SYSTEM_PROMPT_MAX_LENGTH,
+          `systemPrompt must be a string of at most ${SYSTEM_PROMPT_MAX_LENGTH} characters`,
+        ),
+      ),
+      thinkingLevel: v.picklist(THINKING_LEVELS, 'Invalid thinkingLevel'),
+      tools: v.pipe(
+        v.array(v.string(), 'tools must be an array'),
+        v.check(
+          (tools) => new Set(tools).size === tools.length,
+          'tools must contain unique tool names',
+        ),
+        v.check(
+          (tools) => tools.every(isRegisteredTool),
+          (issue) => `Unknown tool: ${issue.input.find((name) => !isRegisteredTool(name))}`,
+        ),
+      ),
+    },
+    modelMessage,
+  ) satisfies v.GenericSchema<unknown, AgentConfig>
 }
 
 export function agentChange(config: AgentConfig): AgentChange {

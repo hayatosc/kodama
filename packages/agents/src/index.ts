@@ -7,7 +7,7 @@ import type {
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
-import { validateId } from './validation.ts'
+import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent.ts'
 
@@ -17,46 +17,43 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return new Response('Use a Cloudflare RPC service binding.', { status: 404 })
   }
 
+  /** Every method resolves the agent through here so IDs are validated at the RPC boundary. */
+  #agent(agentId: string) {
+    return this.env.AGENTS.getByName(parseAgentId(agentId))
+  }
+
   async getConfig(agentId: string): Promise<AgentConfig> {
-    validateId(agentId, 'agentId', 64)
-    return this.env.AGENTS.getByName(agentId).getConfig()
+    return this.#agent(agentId).getConfig()
   }
 
   async subscribe(agentId: string): Promise<ReadableStream<Uint8Array>> {
-    validateId(agentId, 'agentId', 64)
-    return this.env.AGENTS.getByName(agentId).subscribe()
+    return this.#agent(agentId).subscribe()
   }
 
   async send(agentId: string, message: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
-    validateId(agentId, 'agentId', 64)
-    return this.env.AGENTS.getByName(agentId).send(message)
+    return this.#agent(agentId).send(message)
   }
 
   async setConfig(agentId: string, config: AgentConfig): Promise<AgentConfig> {
-    validateId(agentId, 'agentId', 64)
-    return this.env.AGENTS.getByName(agentId).setConfig(config)
+    return this.#agent(agentId).setConfig(config)
   }
 
   async cancel(agentId: string): Promise<void> {
-    validateId(agentId, 'agentId', 64)
-    return this.env.AGENTS.getByName(agentId).cancel()
+    return this.#agent(agentId).cancel()
   }
 
   async sendMessage(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
-    validateId(agentId, 'agentId', 64)
-    const submissionId = await this.env.AGENTS.getByName(agentId).sendMessage(message)
+    const submissionId = await this.#agent(agentId).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
   }
 
   async snapshot(agentId: string): Promise<AgentSnapshotResponse> {
-    validateId(agentId, 'agentId', 64)
-    using snapshot = await this.env.AGENTS.getByName(agentId).snapshot()
+    using snapshot = await this.#agent(agentId).snapshot()
     return { agentId, snapshot }
   }
 
   async submission(agentId: string, requestId: string): Promise<SubmissionResponse | undefined> {
-    validateId(agentId, 'agentId', 64)
-    using submission = await this.env.AGENTS.getByName(agentId).submission(requestId)
+    using submission = await this.#agent(agentId).submission(requestId)
     return submission === undefined ? undefined : { agentId, submission }
   }
 }

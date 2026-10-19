@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { parseArgs } from 'node:util'
-import { validateId, validateMessage } from '../src/validation.ts'
+import { parseAgentId, parseMessage } from '../src/validation.ts'
 import { readLocalToken } from './token.ts'
 import { printStream } from './stream.ts'
 
@@ -26,11 +26,11 @@ Retry with the same request ID and content to avoid duplicate input.
 Ctrl+C disconnects; use cancel to stop the agent's work.`)
     return
   }
-  const [action, agentId, content] = positionals
+  const [action, rawAgentId, content] = positionals
   if (action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
     throw new Error('Expected send, snapshot, or cancel; see nr agent --help')
   }
-  validateId(agentId, 'agentId', 64)
+  const agentId = parseAgentId(rawAgentId)
   if (positionals.length !== (action === 'send' ? 3 : 2)) {
     throw new Error('Unexpected arguments; quote the message and see nr agent --help')
   }
@@ -39,7 +39,7 @@ Ctrl+C disconnects; use cancel to stop the agent's work.`)
     content,
     whenBusy: values.steer ? 'steer' : 'followUp',
   }
-  if (action === 'send') validateMessage(message)
+  if (action === 'send') parseMessage(message)
   const token = readLocalToken()
   if (action === 'send') console.error(`agent=${agentId} requestId=${message.requestId}`)
   let response: Response

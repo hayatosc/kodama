@@ -6,6 +6,8 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 
 - `packages/agents/src/index.ts`: service-binding RPC entrypoint.
 - `src/agent.ts`, `src/harness.ts`, and `src/events.ts`: durable state, runtime composition, and SSE streaming.
+- `src/recovery.ts` and `src/projection.ts`: recovery alarm scheduling and Pi-to-RPC result mapping.
+- `src/validation.ts`: valibot schemas for untrusted RPC input; failures throw `TypeError`.
 - `src/configuration/`, `src/models/`, `src/prompts/`, and `src/tools/`: configuration, providers, prompts, and registered tools.
 - `src/protocol.ts`: transport types; consumers should use type-only imports.
 - `packages/agents/test/agent.test.ts`: Workers integration tests.

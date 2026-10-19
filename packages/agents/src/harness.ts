@@ -1,7 +1,7 @@
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
 import type { HarnessOptions } from '@earendil-works/pi-durable'
-import type { AgentEnv } from './env.ts'
 import { agentChange, defaultAgentConfig } from './configuration/index.ts'
+import type { DefaultModelEnv } from './configuration/index.ts'
 import { createAgentModels } from './models/index.ts'
 import type { ModelProviderEnv } from './models/index.ts'
 import { agentTools } from './tools/index.ts'
@@ -22,9 +22,7 @@ const RETRY_POLICY = {
 }
 
 /** Compose registered capabilities; persisted per-agent choices select what is enabled. */
-export function createAgentOptions(
-  env: Pick<AgentEnv, 'DEFAULT_MODEL_PROVIDER' | 'DEFAULT_MODEL_ID'> & ModelProviderEnv,
-): HarnessOptions {
+export function createAgentOptions(env: DefaultModelEnv & ModelProviderEnv): HarnessOptions {
   const extension = defineExtension({ name: 'kodama', tools: agentTools })
   const registry = createRegistry()
   registry.install(extension)
@@ -41,11 +39,7 @@ export function createAgentOptions(
     },
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
-        ? configure(
-            tx,
-            conversation.id,
-            agentChange(defaultAgentConfig(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)),
-          )
+        ? configure(tx, conversation.id, agentChange(defaultAgentConfig(env)))
         : undefined,
   }
 }

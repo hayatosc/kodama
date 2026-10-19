@@ -1,60 +1,61 @@
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { configure, Harness, ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
-import type { TaskId } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { createAgentOptions } from './harness.ts'
 import { sendEvents, subscribeEvents } from './events.ts'
 import {
   agentChange,
+  agentConfigSchema,
   defaultAgentConfig,
   initializeAgentConfig,
-  parseAgentConfig,
   readAgentConfig,
 } from './configuration/index.ts'
 import { createAgentModels } from './models/index.ts'
+import { toAgentSnapshot, toSubmissionStatus } from './projection.ts'
+import { RecoveryAlarm } from './recovery.ts'
 import type { AgentEnv } from './env.ts'
 import type {
-  AgentMessage,
   AgentConfig,
   AgentSnapshot,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionStatus,
 } from './protocol.ts'
-import { validateId, validateMessage } from './validation.ts'
+import { parseAgentId, parseInput, parseMessage, parseRequestId } from './validation.ts'
 
 const context = BACKGROUND_CONTEXT
-const RECOVERY_DELAY_MS = 60_000
+
+async function openHarness(ctx: DurableObjectState, env: AgentEnv): Promise<Harness> {
+  const storage = await openDurableObjectSqliteStorage(ctx.storage)
+  const harness = await Harness.open(
+    storage,
+    {
+      ...createAgentOptions(env),
+      onReport: (error) => console.error('Agent background task failed', error),
+    },
+    context,
+  )
+  void harness.closed.then((end) => {
+    if (end.reason === 'failed') ctx.abort('Agent storage failed')
+  })
+  return harness
+}
 
 /** One named object owns one agent and its durable Pi session. */
 export class Agent extends DurableObject<AgentEnv> {
   readonly #ready: Promise<Harness>
-  readonly #watching = new Set<TaskId>()
-  #alarmUpdate: Promise<void> = Promise.resolve()
+  readonly #recovery: RecoveryAlarm
 
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
+    this.#recovery = new RecoveryAlarm(ctx.storage)
     this.#ready = ctx.blockConcurrencyWhile(async () => {
-      const storage = await openDurableObjectSqliteStorage(ctx.storage)
-      const harness = await Harness.open(
-        storage,
-        {
-          ...createAgentOptions(env),
-          onReport: (error) => console.error('Agent background task failed', error),
-        },
-        context,
-      )
-      void harness.closed.then((end) => {
-        if (end.reason === 'failed') ctx.abort('Agent storage failed')
-      })
+      const harness = await openHarness(ctx, env)
       try {
         await harness.root(context)
-        await initializeAgentConfig(
-          harness,
-          defaultAgentConfig(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID),
-        )
-        await this.#refreshAlarm(harness)
+        await initializeAgentConfig(harness, defaultAgentConfig(env))
+        await this.#recovery.refresh(harness)
         return harness
       } catch (error) {
         await harness.close(context)
@@ -63,17 +64,17 @@ export class Agent extends DurableObject<AgentEnv> {
     })
   }
 
-  async sendMessage(message: SendMessageRequest): Promise<number> {
-    validateMessage(message)
+  async sendMessage(request: SendMessageRequest): Promise<number> {
+    const message = parseMessage(request)
     const harness = await this.#ready
     const conversation = await harness.root(context)
     // Persist a wakeup before admitting input, including the admission-to-scheduler crash window.
-    const submission = await this.#serializeAlarmUpdate(async () => {
+    const submission = await this.#recovery.serialize(async () => {
       const config = await readAgentConfig(harness)
       if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
         throw new Error(`Credentials are not configured for provider: ${config.model.provider}`)
       }
-      await this.ctx.storage.setAlarm(Date.now() + RECOVERY_DELAY_MS)
+      await this.#recovery.arm()
       return conversation.submit(
         {
           type: 'input',
@@ -84,12 +85,12 @@ export class Agent extends DurableObject<AgentEnv> {
         context,
       )
     })
-    await this.#refreshAlarm(harness)
+    await this.#recovery.refresh(harness)
     return submission.id
   }
 
-  async send(message: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
-    validateMessage(message)
+  async send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+    const message = parseMessage(request)
     return sendEvents(await this.#ready, message.requestId, () => this.sendMessage(message))
   }
 
@@ -103,9 +104,9 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Replace configuration while idle; history and request receipts are retained. */
   async setConfig(value: AgentConfig): Promise<AgentConfig> {
-    const config = parseAgentConfig(value, createAgentModels(this.env))
+    const config = parseInput(agentConfigSchema(createAgentModels(this.env)), value)
     const harness = await this.#ready
-    return this.#serializeAlarmUpdate(async () => {
+    return this.#recovery.serialize(async () => {
       const { tasks } = await harness.inspect(context)
       if (tasks.length > 0)
         throw new Error('Agent is busy; retry configuration after it becomes idle')
@@ -125,13 +126,13 @@ export class Agent extends DurableObject<AgentEnv> {
     const harness = await this.#ready
     const conversation = await harness.root(context)
     await conversation.abort(context)
-    await this.#refreshAlarm(harness)
+    await this.#recovery.refresh(harness)
   }
 
   /** Deliver to another agent through DO RPC; acceptance does not wait for its model response. */
-  async sendTo(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
-    validateId(agentId, 'agentId', 64)
-    validateMessage(message)
+  async sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
+    parseAgentId(agentId)
+    const message = parseMessage(request)
     const submissionId = await this.env.AGENTS.getByName(agentId).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
   }
@@ -140,76 +141,23 @@ export class Agent extends DurableObject<AgentEnv> {
     const harness = await this.#ready
     const stream = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
     try {
-      const snapshot = stream.snapshot
-      const messages: AgentMessage[] = []
-      for (const entry of snapshot.entries) {
-        for (const message of entry.model ?? []) {
-          if (message.role !== 'user' && message.role !== 'assistant') continue
-          const text =
-            typeof message.content === 'string'
-              ? message.content
-              : message.content
-                  .filter((part) => part.type === 'text')
-                  .map((part) => part.text)
-                  .join('\n')
-          messages.push({ entryId: entry.id, role: message.role, text })
-        }
-      }
-      return { messages, busy: snapshot.run !== undefined || snapshot.inbox.length > 0 }
+      return toAgentSnapshot(stream.snapshot)
     } finally {
       await stream.stop()
     }
   }
 
   async submission(requestId: string): Promise<SubmissionStatus | undefined> {
-    validateId(requestId, 'requestId', 128)
+    parseRequestId(requestId)
     const harness = await this.#ready
     const submission = await harness.commit(
       (tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestId),
       context,
     )
-    if (submission === undefined) return undefined
-    const { id } = submission
-    if (submission.status !== 'unanswered') return { id, requestId, status: submission.status }
-    const { status, reason, detail } = submission
-    if (detail === undefined) return { id, requestId, status, reason }
-    const text = typeof detail === 'string' ? detail : JSON.stringify(detail)
-    return { id, requestId, status, reason, detail: text }
+    return submission === undefined ? undefined : toSubmissionStatus(requestId, submission)
   }
 
   override async alarm(): Promise<void> {
-    await this.#refreshAlarm(await this.#ready)
-  }
-
-  #serializeAlarmUpdate<T>(operation: () => Promise<T>): Promise<T> {
-    const update = this.#alarmUpdate.then(operation, operation)
-    this.#alarmUpdate = update.then(
-      () => {},
-      () => {},
-    )
-    return update
-  }
-
-  #refreshAlarm(harness: Harness): Promise<void> {
-    return this.#serializeAlarmUpdate(async () => {
-      const { tasks } = await harness.inspect(context)
-      const runnable = tasks.filter((task) => task.state.kind !== 'blocked')
-      if (runnable.length === 0) {
-        await this.ctx.storage.deleteAlarm()
-        return
-      }
-      await this.ctx.storage.setAlarm(Date.now() + RECOVERY_DELAY_MS)
-      // waitForTask enables Pi's scheduler; the recovery alarm must already be durable.
-      for (const task of runnable) {
-        const id = task.record.id
-        if (this.#watching.has(id)) continue
-        this.#watching.add(id)
-        void harness
-          .waitForTask(id, context)
-          .then(() => this.#refreshAlarm(harness))
-          .catch((error: unknown) => console.error('Agent recovery failed', error))
-          .finally(() => this.#watching.delete(id))
-      }
-    })
+    await this.#recovery.refresh(await this.#ready)
   }
 }
