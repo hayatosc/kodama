@@ -1,0 +1,13 @@
+{
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": { "correctness": "error" },
+  "ignorePatterns": ["**/.cloudflare/**", "**/.wrangler/**"],
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unsafe-type-assertion": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-non-null-assertion": "error"
+  }
+}

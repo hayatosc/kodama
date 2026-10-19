@@ -1,0 +1,5 @@
+# Set the keys for the providers you use. Leave the others empty.
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+XAI_API_KEY=
