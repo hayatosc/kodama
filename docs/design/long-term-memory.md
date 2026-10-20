@@ -166,7 +166,8 @@ memory_records(
   kind          -- fact | event | instruction | task
   key           -- normalized topic key for facts and instructions
   content
-  provenance    -- JSON: agentId, generation, entry range, tool, writer
+  provenance    -- JSON: agentId, generation, entry range, trigger, writer
+                --   trigger: user_request | agent_judgment | extraction | consolidation
   observed_at, created_at
   superseded_by -- id of the record that replaced this one
   invalid_at    -- set when contradicted
@@ -218,17 +219,28 @@ for things to be remembered.
 
 All writes below are done by the memory agent.
 
-1. **Remember on request.** When a user says "remember …" or gives a standing instruction
-   ("always …", "from now on …"), the working agent calls `remember` in that turn, like
-   OpenClaw ("If you want your agent to remember something, just ask it"). One-off tasks are
-   not remembered; the working agent decides which is which, as Hermes does when it ignores
-   facts mentioned in passing.
+1. **Remember during the turn.** The working agent calls `remember` in two cases:
+   - **The user asks.** "Remember …", or a standing instruction ("always …", "from now on …").
+     OpenClaw works the same way ("If you want your agent to remember something, just ask
+     it").
+   - **The agent judges it worth keeping.** Nobody said "remember", but the agent sees that a
+     later session will need it: a decision and its reason, a correction from the user, a
+     lesson from a failure, or a durable fact it had to look up. Hermes and the Claude memory
+     tool let the agent manage its memory this way.
+
+   The prompt says what is worth keeping and what is not, following Grok Build: keep
+   conventions, decisions with their reasons, and durable facts; leave out task state,
+   tentative conclusions, secrets, and anything the repository or its docs already cover.
+   One-off tasks are not remembered. At most a few `remember` calls are accepted per turn.
+
+   Both cases take the same path:
    1. The tool validates the request with valibot, caps its size, and scans it for injection
       patterns.
    2. It creates a `MemoryWorkflow` instance right away, with the request and the IDs of the
       entries it came from. The instance ID is a hash of the agent ID, the source entry, and
-      the content, so a tool call repeated after a restart cannot start a second run: Workflows rejects an ID
-      that is still in use, and the tool treats that error as already started.
+      the content, so a tool call repeated after a restart cannot start a second run:
+      Workflows rejects an ID that is still in use, and the tool treats that error as already
+      started.
    3. It returns without waiting, so the turn is not held up and the session object is not
       billed for the memory agent's model time.
    4. The run classifies the request (usually an instruction or a fact), reconciles it with
@@ -237,8 +249,20 @@ All writes below are done by the memory agent.
    5. The run then tells the session object that memory changed. The new block appears in the
       always-loaded memory at the next idle boundary; until then the instruction is still in the
       current context. Other agents that read the same scope see it on their next refresh.
-      Later extraction sees the same message in the transcript and finds an equivalent record, so
-      it writes nothing new.
+
+   Later extraction sees the same message in the transcript and finds an equivalent record, so
+   it writes nothing new.
+
+   The record's provenance says which case it came from (`user_request` or `agent_judgment`).
+   A user request is written as asked, unless it conflicts with a record the user made
+   earlier, in which case the newer one supersedes it. An agent judgment is a candidate: the
+   memory agent may decline it as a duplicate or as low value, it starts with lower importance,
+   and consolidation archives it if it is never used. Saving everything the agent notices would
+   repeat the error propagation that selective addition avoids (2505.16067).
+
+   Background extraction (below) remains the safety net for what neither the user nor the agent
+   flagged in the moment.
+
 2. **Extraction.** The session object starts a run when the agent has been idle for a while
    (its alarm) and always before rotation. It does not touch Pi's compaction:
    1. Read the entries after the agent's extraction checkpoint through a paged RPC on the
@@ -350,8 +374,9 @@ Each phase ships with workerd integration tests that mock the model.
 2. **Long-term memory in D1 and the memory agent.** Schema and migrations, `MemoryWorkflow`
    with extraction and its checkpoint, `remember` with its immediate run, the read tools, and
    the always-loaded section.
-   Tests: a `remember` call starts a run in the same turn and its record is in D1 before the
-   agent goes idle; repeating the tool call starts no second run; a fact stated before several
+   Tests: a `remember` call, from a user request or from the agent's own judgment, starts a run
+   in the same turn and its record is in D1 before the agent goes idle; repeating the tool call
+   starts no second run; an agent-judged duplicate is declined; a fact stated before several
    compactions is found in D1 afterwards; a newer fact
    supersedes an older one; an interrupted extraction repeated writes no duplicates; a failed
    extraction leaves the checkpoint in place and the conversation unaffected.
