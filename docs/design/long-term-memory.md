@@ -135,11 +135,11 @@ skill."
 | Session          | the agent's Durable Object (unchanged) | Pi Durable session of the current generation; a frozen copy of the always-loaded memory; recent request receipts | one generation, then wiped  |
 | Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, shared-memory proposals, skill index and ledger, generation index           | kept                        |
 | Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations (JSONL + manifest with SHA-256), skill bodies                                    | retention rule              |
-| Memory agent     | Cloudflare Workflows `MemoryWorkflow`  | one run per job; durable step results                                                                            | per run                     |
 | Optional         | Vectorize                              | embeddings of memory records                                                                                     | added only if search misses |
 
-No new Durable Object classes are added. Agents read D1 and R2 through Worker bindings; only
-the memory agent writes long-term memory.
+No new Durable Object classes are added. The memory agent is an ordinary `Agent` instance
+(see below). Agents read D1 and R2 through Worker bindings; only the memory agent writes
+long-term memory.
 
 D1 fits long-term memory because it supports FTS5, keeps 30 days of point-in-time recovery
 (Time Travel), and can be read by the UI Worker and by maintenance jobs without waking an
@@ -159,27 +159,27 @@ facts when they matter for the work.
 
 ### Components and calls
 
-There is no Durable Object for memory. The memory agent talks to D1 directly and calls the
-agent's own session object only for two things.
+There is no Durable Object class for memory. The memory agent is the `Agent` with ID `memory`:
+the same class, Pi session, inbox, and recovery alarm as every other agent, with its own
+configuration.
 
 ```text
-Agent DO (one per agentId; Pi session)
-  |-- reads ---------------> D1 MEMORY_DB      memory_search, skills, always-loaded memory
-  |-- creates -------------> MemoryWorkflow    remember, idle extraction, before rotation
-  `-- writes --------------> R2 ARCHIVE        transcript export at rotation
+Working Agent DO (agentId)
+  |-- reads ----------------------> D1 MEMORY_DB      memory_search, skills, always-loaded memory
+  |-- sendTo('memory', job) ------> Agent DO memory   remember, idle extraction, before rotation
+  `-- writes ---------------------> R2 ARCHIVE        transcript export at rotation
 
-MemoryWorkflow (memory agent; no Durable Object of its own)
-  |-- reads and writes ----> D1 MEMORY_DB
-  |-- reads ---------------> R2 ARCHIVE        evidence for consolidation, skill bodies
-  |-- RPC readEntries -----> Agent DO          extraction only, paged
-  `-- RPC memoryChanged ---> Agent DO          refresh always-loaded memory at the next idle
+Agent DO memory (the memory agent)
+  |-- reads and writes -----------> D1 MEMORY_DB      through its memory-writing tools
+  |-- reads ----------------------> R2 ARCHIVE        evidence for consolidation, skill bodies
+  |-- RPC readEntries ------------> Working Agent DO  extraction only, paged
+  `-- RPC memoryChanged ----------> Working Agent DO  refresh always-loaded memory at the next idle
 
-Cron trigger ------------> MemoryWorkflow    daily consolidation
+Cron trigger --------------------> Agent DO memory   daily consolidation
 ```
 
-`MemoryWorkflow` is exported from the same Worker as `Agent`, so it reaches agent objects
-through the existing `AGENTS` binding. The new bindings are `MEMORY_DB` (D1), `ARCHIVE` (R2),
-and `MEMORY_WORKFLOW` (Workflows).
+The only new bindings are `MEMORY_DB` (D1) and `ARCHIVE` (R2). The Worker's `scheduled`
+handler delivers the daily consolidation job with `sendMessage`.
 
 ### D1 schema
 
@@ -207,9 +207,9 @@ Rules that shape the tables:
   a fact the user states again later gets a new record instead of colliding with a superseded
   one.
 - **One active record per topic.** A partial unique index on `(scope, kind, topic_key)` where
-  `status = 'active'` makes superseding safe without locks: a run marks the old record
-  superseded and inserts the new one in one `batch()` (a D1 transaction). If another run got
-  there first, the insert violates the index and the whole batch rolls back; the run rereads and
+  `status = 'active'` makes superseding safe without locks: the memory agent marks the old record
+  superseded and inserts the new one in one `batch()` (a D1 transaction). If another write got there
+  first, the insert violates the index and the whole batch rolls back; the memory agent rereads and
   tries again.
 - **`superseded_by` is not a foreign key.** D1 enforces foreign keys immediately, and the old
   row is marked before the new row exists.
@@ -217,8 +217,9 @@ Rules that shape the tables:
   `consolidation`. (`trigger` would collide with an SQL keyword.)
 - **Validity in time** comes from `observed_at` (when it became true) and the ledger entry that
   superseded or invalidated it. There is no separate validity table.
-- **Checkpoints** have one writer per agent: the session object starts at most one extraction
-  run at a time. If two ever overlapped, content-addressed IDs would make the overlap harmless.
+- **Checkpoints** have one writer: the memory agent, which handles its inbox one job at a time.
+  If two jobs ever covered the same range, content-addressed IDs would make the overlap
+  harmless.
 - **One open generation per agent**, enforced by a partial unique index on `generations`.
 
 Main queries:
@@ -300,7 +301,7 @@ A Pi prompt section renders two capped blocks from D1 records (see the main quer
 the agent's own memory and a small shared block. Each block has a character budget shown in
 the prompt (Hermes shows `[67% — 1,474/2,200 chars]`). The session object reads the blocks
 from D1 when a generation starts and when the memory agent
-reports a finished run while the agent is idle, and keeps the rendered text in a Pi document.
+reports a finished job while the agent is idle, and keeps the rendered text in a Pi document.
 Requests in between read that copy, so the prompt prefix stays stable and no request waits on
 D1.
 
@@ -309,20 +310,33 @@ D1.
 Long-term memory has one writer: the **memory agent**. Working agents only read memory and ask
 for things to be remembered.
 
-- **What it is.** A Cloudflare Workflow (`MemoryWorkflow`), not a kodama agent. Each job is a
-  fresh run with its own model configuration, usually a cheaper model than the working agents
-  use. It keeps no conversation of its own, so it never needs compaction or rotation.
-- **Why a Workflow.** Steps are durable and retried, so an interrupted job resumes without
-  repeating finished steps. A Workflow waiting on a model response is not billed for CPU time,
-  while a Durable Object waiting on the same response is billed for duration.
-- **Runs do not conflict.** An extraction run's instance ID is derived from the agent ID and
-  the checkpoint, and the checkpoint advances with a compare-and-set in D1, so two extraction
-  runs never write the same range. Every run supersedes a record only with a compare-and-set
-  on the record's current version, so a remember run and an extraction run cannot both replace
-  the same fact.
+- **What it is.** An `Agent` instance with ID `memory`, using the class every agent uses. Its
+  configuration gives it a cheaper model, a memory-keeping system prompt, and the
+  memory-writing tools (`memory_write`, `memory_supersede`, `memory_decline`, `read_entries`,
+  `skill_propose`, `shared_propose`, `notify_memory_changed`). Those tools are registered like
+  any other, and configuration validation rejects them on any agent other than `memory`, so
+  `setConfig` cannot give a working agent write access. `memory` is a reserved agent ID.
+- **How jobs arrive.** Through the existing agent-to-agent primitive: `sendTo('memory', …)`
+  or `sendMessage`. Admission is durable and does not wait for the model, so callers are not
+  held up. Pi queues jobs that arrive while the memory agent is busy and runs them one at a
+  time, which makes it the single writer without locks.
+- **Idempotency.** A job's `requestId` is a hash of the source agent, the source entry, and the
+  content. A repeated delivery with the same request ID returns the existing submission instead
+  of running the job twice.
+- **Its own context.** Jobs are independent. The memory agent resets its context between jobs
+  (a per-agent setting applied when a submission settles, using Pi's `reset()`), so each job
+  starts small, and its storage is reclaimed by the same in-place
+  rotation as any agent. Background extraction is disabled for the memory agent itself, so it
+  never feeds on its own transcript.
+- **Cost.** It is billed Durable Object duration while it waits on its model. At an assumed
+  1,000 jobs a day of 10 seconds each, that is about 37,500 GB-s a month, or $0.47 beyond the
+  allowance. Reusing `Agent` is worth that.
+- **Supersession safety.** Every write supersedes a record only through the partial unique
+  index (see D1 schema), so even a manual operator write cannot leave two active records for a
+  topic.
 - **Working agents keep a small tool surface**: `memory_search`, `history_search`,
-  `skill_search`, `skill_load`, and `remember`. `remember` starts a memory-agent run at once;
-  it does not write memory records itself.
+  `skill_search`, `skill_load`, and `remember`. `remember` sends a job to the memory agent at
+  once; it does not write memory records itself.
 
 ### Write paths
 
@@ -345,17 +359,16 @@ All writes below are done by the memory agent.
    Both cases take the same path:
    1. The tool validates the request with valibot, caps its size, and scans it for injection
       patterns.
-   2. It creates a `MemoryWorkflow` instance right away, with the request and the IDs of the
-      entries it came from. The instance ID is a hash of the agent ID, the source entry, and
-      the content, so a tool call repeated after a restart cannot start a second run:
-      Workflows rejects an ID that is still in use, and the tool treats that error as already
-      started.
-   3. It returns without waiting, so the turn is not held up and the session object is not
-      billed for the memory agent's model time.
-   4. The run classifies the request (usually an instruction or a fact), reconciles it with
+   2. It sends a job to the memory agent right away with `sendTo('memory', …)`, carrying the
+      request, its origin, and the IDs of the entries it came from. The request ID is a hash of
+      the agent ID, the source entry, and the content, so a tool call repeated after a restart
+      finds the existing submission instead of starting a second job.
+   3. It returns once the job is durably admitted, so the turn is not held up and the working
+      agent is not billed for the memory agent's model time.
+   4. The memory agent classifies the request (usually an instruction or a fact), reconciles it with
       existing records (a new instruction supersedes the one it replaces), and writes it to
       D1. It is one small model call, not a scan of the transcript.
-   5. The run then tells the session object that memory changed. The new block appears in the
+   5. It then tells the working agent's object that memory changed. The new block appears in the
       always-loaded memory at the next idle boundary; until then the instruction is still in the
       current context. Other agents that read the same scope see it on their next refresh.
 
@@ -372,24 +385,24 @@ All writes below are done by the memory agent.
    Background extraction (below) remains the safety net for what neither the user nor the agent
    flagged in the moment.
 
-2. **Extraction.** The session object starts a run when the agent has been idle for a while
+2. **Extraction.** The working agent sends an extraction job when it has been idle for a while
    (its alarm) and always before rotation. It does not touch Pi's compaction:
-   1. Read the entries after the agent's extraction checkpoint through a paged RPC on the
-      session object, which uses `scanEntries`.
+   1. The memory agent reads the entries after the checkpoint with its `read_entries` tool,
+      which calls a paged RPC on the working agent's object (`scanEntries` inside).
    2. Extract candidate records with a configurable, cheaper model.
    3. Verify each candidate against the cited entries; drop unsupported ones.
    4. Reconcile with existing records in D1: add, supersede, invalidate, or skip (Mem0's
       ADD/UPDATE/DELETE/NOOP, but superseding instead of deleting).
    5. Advance the checkpoint in D1 in the same batch as the writes.
-      Record IDs are content-addressed and writes use `INSERT OR IGNORE`, so a run that is
-      interrupted and repeated writes no duplicates.
-3. **Consolidation** at most about once a day, as a scheduled run over D1 rather than inside
-   agent objects (sleep-time compute; OpenClaw and Devin dreaming): merge duplicates, resolve
-   contradictions, decay events, rebuild always-loaded blocks within budget with delta edits
-   (never a full rewrite), induce skills, and prepare shared-memory proposals for review. It
-   reads archived transcripts from R2 when it needs evidence. Extraction is a fixed pipeline;
-   consolidation is where the memory agent needs a tool loop, because it has to look for
-   evidence and decide what to merge.
+      Record IDs are content-addressed and writes use `INSERT OR IGNORE`, so a job that is
+      interrupted and resumed writes no duplicates.
+3. **Consolidation** at most about once a day, as a job the cron trigger sends to the memory agent,
+   working over D1 instead of waking every agent (sleep-time compute; OpenClaw and Devin dreaming):
+   merge duplicates, resolve contradictions, decay events, rebuild always-loaded blocks within
+   budget with delta edits (never a full rewrite), induce skills, and prepare shared-memory
+   proposals for review. It reads archived transcripts from R2 when it needs evidence. Extraction
+   follows fixed steps in the prompt; consolidation uses the tool loop more freely, because it has
+   to look for evidence and decide what to merge.
 
 ### Read paths
 
@@ -423,7 +436,7 @@ Rotation runs only when the session is idle and when one of these is true:
 Steps, with progress recorded in the D1 generation index so a restart can resume:
 
 1. Save the agent configuration and mark generation N as exporting.
-2. Start a memory-agent run up to the last entry and wait for it to finish.
+2. Send an extraction job up to the last entry and wait until its submission is settled.
 3. Export generation N to R2 in pages, write the manifest, and verify counts and hashes.
 4. Store the handoff note (Pi's latest compaction summary plus open tasks) in the generation
    index.
@@ -470,9 +483,8 @@ rotating before the object grows large keeps that bounded either way.
   commit. The trade-off is coarser live streaming to the UI.
 - Close `subscribe()` streams that nobody watches, or move observation to WebSocket hibernation.
 - Rotate before the session object grows large; archived bytes cost about 13 times less in R2.
-- Run the memory agent as a Workflow: waiting on its model costs no CPU time, while the same
-  wait inside a Durable Object is billed as duration.
-- Run consolidation as one scheduled job over D1 instead of waking every agent.
+- Give the memory agent a cheaper model; it does not need the working agents' model.
+- Run consolidation as one job over D1 in the memory agent instead of waking every agent.
 
 ## Phases
 
@@ -482,14 +494,16 @@ Each phase ships with workerd integration tests that mock the model.
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
 2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration, the shared
-   segmentation function with its version, `MemoryWorkflow` with extraction and its
-   checkpoint, `remember` with its immediate run, the read tools, and the always-loaded section.
-   Tests: a `remember` call, from a user request or from the agent's own judgment, starts a run
-   in the same turn and its record is in D1 before the agent goes idle; repeating the tool call
-   starts no second run; an agent-judged duplicate is declined; a fact stated before several
-   compactions is found in D1 afterwards; a newer fact supersedes an older one; an interrupted
-   extraction repeated writes no duplicates; a failed extraction leaves the checkpoint in place
-   and the conversation unaffected.
+   segmentation function with its version, the `memory` agent's configuration and tools,
+   extraction and its checkpoint, `remember` with its immediate job, the read tools, and the
+   always-loaded section.
+   Tests: a `remember` call, from a user request or from the agent's own judgment, sends a job in
+   the same turn and its record is in D1 before the agent goes idle; repeating the tool call
+   creates no second submission; an agent-judged duplicate is declined; memory-writing tools are
+   rejected on any agent but `memory`; a fact stated before several compactions is found in D1
+   afterwards; a newer fact supersedes an older one; an interrupted extraction resumed writes no
+   duplicates; a failed extraction leaves the checkpoint in place and the conversation
+   unaffected.
 3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
    switch; storage is wiped only after a verified export.
@@ -513,9 +527,11 @@ Each phase ships with workerd integration tests that mock the model.
 - **Each working agent writes its own memory** (the earlier version of this plan). It puts
   memory tools and instructions into every request, spends the working model on bookkeeping,
   and leaves several writers per scope. Letta abandoned this shape for the same reasons.
-- **The memory agent as a kodama agent** (a Durable Object with its own Pi session). It would
-  accumulate its own transcript, need its own rotation, and bill duration while it waits on the
-  model. Nothing in its job needs a long-lived conversation.
+- **The memory agent as a Cloudflare Workflow** (the previous version of this plan). Workflows
+  are not billed while waiting on the model, but they would duplicate what `Agent` and Pi
+  Durable already provide (durable admission, deduplication by request ID, a serial inbox,
+  recovery) with a second execution model, its own tools, and its own tests. The saved
+  duration is small (see the cost estimate above).
 - **Own the compaction summary** through Pi's `beforeCompact` hook (extract memories and
   return an anchored summary). It couples memory to Pi's compaction task and makes kodama
   responsible for summary quality without evidence that Pi's summary is the problem. The hook
