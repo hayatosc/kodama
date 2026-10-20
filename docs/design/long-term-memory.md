@@ -230,19 +230,49 @@ Main queries:
 - `memory_search`: `memory_fts MATCH ?` joined to active records in the allowed scopes, ranked
   by `bm25()` and then by recency and importance in code. It updates `use_count` and
   `last_used_at` of the returned rows in one statement, which costs one row written per result.
-- Short queries: the trigram tokenizer needs at least three characters, so two-character
-  Japanese words such as 「使う」 return nothing. Queries shorter than three characters fall
-  back to `LIKE` within the scope.
+
+#### Japanese search with Intl.Segmenter
+
+FTS5's default `unicode61` tokenizer only splits on spaces and punctuation, so a Japanese
+sentence would be one token. Instead of the `trigram` tokenizer, the Worker splits text into
+words with `Intl.Segmenter` and stores them space-separated in a `search_text` column; FTS5
+then indexes those words with `unicode61`. This finds two-character words such as 「使う」,
+which `trigram` cannot (it needs at least three characters), should keep the index smaller (trigram indexes every character position), and
+ranks with `bm25()` over words. It needs no tokenizer beyond the one D1 is certain to have.
+
+Writing `search_text`:
+
+1. Normalize with NFKC and lowercase (full-width 「ＰＮＰＭ」 becomes `pnpm`).
+2. Segment with `new Intl.Segmenter('ja', { granularity: 'word' })` and keep `isWordLike`
+   segments.
+3. Merge adjacent katakana segments into one word. The dictionary splits unknown loanwords
+   into fragments (「リポジトリ」 becomes 「リ / ポジ / トリ」), which would make prefix search
+   fail.
+4. Append the original pieces of each merged katakana run after the words, so the second half
+   of a compound still matches (「マネージャー」 finds 「パッケージマネージャー」). Phrases
+   match the merged form because the pieces come after the sentence.
+
+Querying:
+
+- Each whitespace-separated chunk of the query is segmented the same way and becomes a phrase
+  (`"pnpm を 使う"`); chunks are joined with `AND`.
+- If that returns nothing, the same query is retried with a prefix on the last word of each
+  phrase (`"デプ"*` finds 「デプロイ」).
+
+`search_version` records which segmentation produced a row. If the rules or the runtime's ICU
+data change, consolidation re-segments rows with an older version; the FTS5 triggers update
+the index.
 
 Retention: consolidation deletes archived events and old ledger rows in small batches (D1
 asks for large deletes to be split). Time Travel covers restores of the whole database for 30
 days.
 
 The schema was checked with SQLite 3.45: the partial index rejects a second active record for
-a topic, a stale superseding batch rolls back, and Japanese searches of three or more
-characters match through the trigram tokenizer. Cloudflare documents FTS5 support in D1 but
-does not name tokenizers, so trigram support in production D1 still has to be verified in
-phase 2.
+a topic, and a stale superseding batch rolls back. `Intl.Segmenter` was run in workerd
+(2026-10-12) and gave the same segments as Node. With the rules above, 「使う」, 「リポジトリ」,
+「リポ」, 「デプ」, 「マネージャー」, 「レビュー」, 「ＰＮＰＭ 使う」, and 「pnpmを使う」 all
+found their records. The known cost is noise from single-character katakana fragments in
+`search_text`.
 
 ### Lifetimes by kind
 
@@ -441,8 +471,8 @@ Each phase ships with workerd integration tests that mock the model.
 1. **Measure and reduce cost.** Set the progress interval explicitly; measure rows written,
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
-2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration (and a check
-   that the trigram tokenizer works in production D1), `MemoryWorkflow` with extraction and its
+2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration, the shared
+   segmentation function with its version, `MemoryWorkflow` with extraction and its
    checkpoint, `remember` with its immediate run, the read tools, and the always-loaded section.
    Tests: a `remember` call, from a user request or from the agent's own judgment, starts a run
    in the same turn and its record is in D1 before the agent goes idle; repeating the tool call

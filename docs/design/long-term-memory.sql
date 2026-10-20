@@ -7,6 +7,10 @@ CREATE TABLE memory_records (
   kind TEXT NOT NULL CHECK (kind IN ('fact', 'event', 'instruction', 'task')),
   topic_key TEXT,
   content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 2000),
+  -- Words of topic_key and content split by Intl.Segmenter, NFKC-normalized, lowercased,
+  -- joined by spaces. search_version names the segmentation so rows can be re-split later.
+  search_text TEXT NOT NULL,
+  search_version INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'superseded', 'invalid', 'archived')),
   superseded_by TEXT,
@@ -37,21 +41,22 @@ CREATE INDEX memory_records_by_scope ON memory_records (scope, status, kind, imp
 CREATE INDEX memory_records_by_source
   ON memory_records (source_agent_id, source_generation, source_entry_from);
 
+-- Text is segmented in the Worker, so FTS5 only splits on the spaces it inserted.
 CREATE VIRTUAL TABLE memory_fts USING fts5 (
-  content, topic_key,
-  content = 'memory_records', content_rowid = 'rowid', tokenize = 'trigram'
+  search_text,
+  content = 'memory_records', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
 );
 CREATE TRIGGER memory_records_ai AFTER INSERT ON memory_records BEGIN
-  INSERT INTO memory_fts (rowid, content, topic_key) VALUES (new.rowid, new.content, new.topic_key);
+  INSERT INTO memory_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
 CREATE TRIGGER memory_records_ad AFTER DELETE ON memory_records BEGIN
-  INSERT INTO memory_fts (memory_fts, rowid, content, topic_key)
-    VALUES ('delete', old.rowid, old.content, old.topic_key);
+  INSERT INTO memory_fts (memory_fts, rowid, search_text)
+    VALUES ('delete', old.rowid, old.search_text);
 END;
-CREATE TRIGGER memory_records_au AFTER UPDATE OF content, topic_key ON memory_records BEGIN
-  INSERT INTO memory_fts (memory_fts, rowid, content, topic_key)
-    VALUES ('delete', old.rowid, old.content, old.topic_key);
-  INSERT INTO memory_fts (rowid, content, topic_key) VALUES (new.rowid, new.content, new.topic_key);
+CREATE TRIGGER memory_records_au AFTER UPDATE OF search_text ON memory_records BEGIN
+  INSERT INTO memory_fts (memory_fts, rowid, search_text)
+    VALUES ('delete', old.rowid, old.search_text);
+  INSERT INTO memory_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
 
 CREATE TABLE extraction_checkpoints (
@@ -72,6 +77,8 @@ CREATE TABLE generations (
   ended_at INTEGER,
   config_json TEXT,
   handoff TEXT,
+  handoff_search_text TEXT,
+  search_version INTEGER,
   archive_prefix TEXT,
   archive_sha256 TEXT,
   entry_count INTEGER,
@@ -83,19 +90,22 @@ CREATE UNIQUE INDEX generations_one_open
   ON generations (agent_id) WHERE status <> 'closed';
 
 CREATE VIRTUAL TABLE generations_fts USING fts5 (
-  handoff, content = 'generations', content_rowid = 'rowid', tokenize = 'trigram'
+  handoff_search_text,
+  content = 'generations', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
 );
-CREATE TRIGGER generations_au AFTER UPDATE OF handoff ON generations BEGIN
-  INSERT INTO generations_fts (generations_fts, rowid, handoff)
-    SELECT 'delete', old.rowid, old.handoff WHERE old.handoff IS NOT NULL;
-  INSERT INTO generations_fts (rowid, handoff)
-    SELECT new.rowid, new.handoff WHERE new.handoff IS NOT NULL;
+CREATE TRIGGER generations_au AFTER UPDATE OF handoff_search_text ON generations BEGIN
+  INSERT INTO generations_fts (generations_fts, rowid, handoff_search_text)
+    SELECT 'delete', old.rowid, old.handoff_search_text WHERE old.handoff_search_text IS NOT NULL;
+  INSERT INTO generations_fts (rowid, handoff_search_text)
+    SELECT new.rowid, new.handoff_search_text WHERE new.handoff_search_text IS NOT NULL;
 END;
 
 CREATE TABLE skills (
   scope TEXT NOT NULL,
   name TEXT NOT NULL CHECK (name NOT GLOB '*[^a-z0-9-]*' AND length(name) BETWEEN 1 AND 64),
   description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
+  search_text TEXT NOT NULL,
+  search_version INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'stale', 'archived')),
   version INTEGER NOT NULL DEFAULT 1,
   r2_key TEXT NOT NULL,
@@ -111,15 +121,16 @@ CREATE TABLE skills (
 CREATE INDEX skills_by_status ON skills (scope, status, last_used_at);
 
 CREATE VIRTUAL TABLE skills_fts USING fts5 (
-  name, description, content = 'skills', content_rowid = 'rowid', tokenize = 'trigram'
+  search_text,
+  content = 'skills', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
 );
 CREATE TRIGGER skills_ai AFTER INSERT ON skills BEGIN
-  INSERT INTO skills_fts (rowid, name, description) VALUES (new.rowid, new.name, new.description);
+  INSERT INTO skills_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
-CREATE TRIGGER skills_au AFTER UPDATE OF name, description ON skills BEGIN
-  INSERT INTO skills_fts (skills_fts, rowid, name, description)
-    VALUES ('delete', old.rowid, old.name, old.description);
-  INSERT INTO skills_fts (rowid, name, description) VALUES (new.rowid, new.name, new.description);
+CREATE TRIGGER skills_au AFTER UPDATE OF search_text ON skills BEGIN
+  INSERT INTO skills_fts (skills_fts, rowid, search_text)
+    VALUES ('delete', old.rowid, old.search_text);
+  INSERT INTO skills_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
 
 CREATE TABLE shared_proposals (
