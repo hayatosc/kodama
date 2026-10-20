@@ -119,6 +119,12 @@ skill."
 8. **Freeze what is always loaded.** Hermes freezes its memory snapshot per session to keep the
    prompt cache; Pi re-sends changed sections as new system entries. Always-loaded memory should
    change only at idle or rotation boundaries.
+9. **Give memory its own writer.** Letta moved memory editing out of the conversing agent into
+   a sleep-time agent, because bundling memory management with conversation made the agent
+   slower and less reliable; the primary agent keeps only search tools. Cloudflare Agent Memory:
+   "The primary agent should never burn context on storage strategy." Hermes can run its memory
+   review on a cheaper model (about 3–5 times cheaper). A single writer also settles the
+   consistency problem from finding 7.
 
 ## Design
 
@@ -129,10 +135,11 @@ skill."
 | Session          | the agent's Durable Object (unchanged) | Pi Durable session of the current generation; a frozen copy of the always-loaded memory; recent request receipts | one generation, then wiped  |
 | Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, shared-memory proposals, skill index and ledger, generation index           | kept                        |
 | Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations (JSONL + manifest with SHA-256), skill bodies                                    | retention rule              |
+| Memory agent     | Cloudflare Workflows `MemoryWorkflow`  | one run per job; durable step results                                                                            | per run                     |
 | Optional         | Vectorize                              | embeddings of memory records                                                                                     | added only if search misses |
 
-No new Durable Object classes are added. The session object reads and writes D1 and R2
-through Worker bindings.
+No new Durable Object classes are added. Agents read D1 and R2 through Worker bindings; only
+the memory agent writes long-term memory.
 
 D1 fits long-term memory because it supports FTS5, keeps 30 days of point-in-time recovery
 (Time Travel), and can be read by the UI Worker and by maintenance jobs without waking an
@@ -141,11 +148,11 @@ into more databases (for example per agent group) if one ever fills up.
 
 ### Memory scopes
 
-| Scope                                                      | Contents                                                   | Writes                                        |
-| ---------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------- |
-| **Context**                                                | current turns, compaction summary                          | Pi, inside the session object                 |
-| **Agent** (`agent:<id>`)                                   | the agent's notes, learned conventions, events, its skills | the agent; consolidation                      |
-| **Shared** (`shared:<space>`, for example `shared:global`) | team conventions, shared facts, shared skills              | proposals from agents, accepted by a reviewer |
+| Scope                                                      | Contents                                                   | Writes                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------ |
+| **Context**                                                | current turns, compaction summary                          | Pi, inside the session object  |
+| **Agent** (`agent:<id>`)                                   | the agent's notes, learned conventions, events, its skills | the memory agent               |
+| **Shared** (`shared:<space>`, for example `shared:global`) | team conventions, shared facts, shared skills              | the memory agent, after review |
 
 There is no per-person memory. Facts about the people an agent works with are ordinary agent
 facts when they matter for the work.
@@ -182,19 +189,40 @@ Hard deletion is an operator action (privacy), not something the agent does.
 
 A Pi prompt section renders capped blocks: the agent's notes and a small shared block. Each
 block has a character budget shown in the prompt (Hermes shows `[67% — 1,474/2,200 chars]`).
-The session object reads the blocks from D1 when a generation starts and after a background
-extraction run (which happens while the agent is idle), and keeps the rendered text in a Pi
-document. Requests in between read that copy, so
-the prompt prefix stays stable and no request waits on D1.
+The session object reads the blocks from D1 when a generation starts and when the memory agent
+reports a finished run while the agent is idle, and keeps the rendered text in a Pi document.
+Requests in between read that copy, so the prompt prefix stays stable and no request waits on
+D1.
+
+### The memory agent
+
+Long-term memory has one writer: the **memory agent**. Working agents only read memory and ask
+for things to be remembered.
+
+- **What it is.** A Cloudflare Workflow (`MemoryWorkflow`), not a kodama agent. Each job is a
+  fresh run with its own model configuration, usually a cheaper model than the working agents
+  use. It keeps no conversation of its own, so it never needs compaction or rotation.
+- **Why a Workflow.** Steps are durable and retried, so an interrupted job resumes without
+  repeating finished steps. A Workflow waiting on a model response is not billed for CPU time,
+  while a Durable Object waiting on the same response is billed for duration.
+- **One run at a time per agent.** The run's instance ID is derived from the agent ID and the
+  checkpoint, and the checkpoint advances with a compare-and-set in D1, so two runs never write
+  the same range.
+- **Working agents keep a small tool surface**: `memory_search`, `history_search`,
+  `skill_search`, `skill_load`, and `remember`. `remember` writes a request to an inbox table
+  in D1 and starts a run soon; it does not write memory records itself.
 
 ### Write paths
 
-1. **Explicit tool** `memory` with `remember`, `update`, `forget`, and `search`. Input is
-   validated with valibot, size-capped, and scanned for injection patterns before it is
-   written to D1.
-2. **Background extraction** when the agent has been idle for a while (the session object's
-   alarm) and always before rotation. It does not touch Pi's compaction:
-   1. Read the entries after the agent's extraction checkpoint with `scanEntries`.
+All writes below are done by the memory agent.
+
+1. **Requests to remember.** A working agent's `remember` call (validated with valibot,
+   size-capped, scanned for injection patterns) lands in the inbox. The next run turns it into
+   records, subject to the same reconciliation as everything else.
+2. **Extraction.** The session object starts a run when the agent has been idle for a while
+   (its alarm) and always before rotation. It does not touch Pi's compaction:
+   1. Read the entries after the agent's extraction checkpoint through a paged RPC on the
+      session object, which uses `scanEntries`.
    2. Extract candidate records with a configurable, cheaper model.
    3. Verify each candidate against the cited entries; drop unsupported ones.
    4. Reconcile with existing records in D1: add, supersede, invalidate, or skip (Mem0's
@@ -202,11 +230,13 @@ the prompt prefix stays stable and no request waits on D1.
    5. Advance the checkpoint in D1 in the same batch as the writes.
       Record IDs are content-addressed and writes use `INSERT OR IGNORE`, so a run that is
       interrupted and repeated writes no duplicates.
-3. **Consolidation** at most about once a day, as a scheduled Worker job over D1 rather than
-   inside agent objects (sleep-time compute; OpenClaw and Devin dreaming): merge duplicates,
-   resolve contradictions, decay events, rebuild always-loaded blocks within budget with delta
-   edits (never a full rewrite), and propose skills. It reads archived transcripts from R2 when
-   it needs evidence.
+3. **Consolidation** at most about once a day, as a scheduled run over D1 rather than inside
+   agent objects (sleep-time compute; OpenClaw and Devin dreaming): merge duplicates, resolve
+   contradictions, decay events, rebuild always-loaded blocks within budget with delta edits
+   (never a full rewrite), induce skills, and prepare shared-memory proposals for review. It
+   reads archived transcripts from R2 when it needs evidence. Extraction is a fixed pipeline;
+   consolidation is where the memory agent needs a tool loop, because it has to look for
+   evidence and decide what to merge.
 
 ### Read paths
 
@@ -240,7 +270,7 @@ Rotation runs only when the session is idle and when one of these is true:
 Steps, with progress recorded in the D1 generation index so a restart can resume:
 
 1. Save the agent configuration and mark generation N as exporting.
-2. Run extraction up to the last entry.
+2. Start a memory-agent run up to the last entry and wait for it to finish.
 3. Export generation N to R2 in pages, write the manifest, and verify counts and hashes.
 4. Store the handoff note (Pi's latest compaction summary plus open tasks) in the generation
    index.
@@ -263,17 +293,18 @@ rotating before the object grows large keeps that bounded either way.
   bundled files in R2.
 - **Disclosure**: a prompt section lists at most a few dozen names and descriptions; the rest
   are found with `skill_search`. `skill_load` reads a body from R2.
-- **Creation**: consolidation proposes a skill only from a procedure that succeeded at least
+- **Creation**: the memory agent, during consolidation, proposes a skill only from a procedure that succeeded at least
   twice, with the trajectories cited, and includes the failure lessons. A proposal becomes active
-  after a replay or check passes; shared skills also need review. The agent does not write
-  skills ahead of doing the work.
+  after a replay or check passes; shared skills also need review. Working agents do not
+  write skills, and nobody writes skills ahead of doing the work.
 - **Curation**: stale after 14 days unused, archived after 30, pinned skills exempt, archived
   skills restorable, every change logged with its writer.
 
 ### Shared memory and safety
 
-- Agents never write shared records directly. `memory_propose` creates a pending record with
-  provenance; a reviewer (an operator RPC, or a designated curator agent) accepts or rejects it.
+- Shared records are never written directly. The memory agent creates a pending proposal with
+  provenance from agent-scope records that more than one agent relies on; a reviewer accepts or
+  rejects it. Until there is a review UI, an operator RPC does this.
 - Each shared record has one writer; updates create new versions instead of rewriting a block.
 - Content from untrusted sources is stored as evidence with its source and is not promoted to
   always-loaded memory without review (OpenClaw does the same for untrusted reports).
@@ -285,6 +316,8 @@ rotating before the object grows large keeps that bounded either way.
   commit. The trade-off is coarser live streaming to the UI.
 - Close `subscribe()` streams that nobody watches, or move observation to WebSocket hibernation.
 - Rotate before the session object grows large; archived bytes cost about 13 times less in R2.
+- Run the memory agent as a Workflow: waiting on its model costs no CPU time, while the same
+  wait inside a Durable Object is billed as duration.
 - Run consolidation as one scheduled job over D1 instead of waking every agent.
 
 ## Phases
@@ -294,8 +327,9 @@ Each phase ships with workerd integration tests that mock the model.
 1. **Measure and reduce cost.** Set the progress interval explicitly; measure rows written,
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
-2. **Long-term memory in D1.** Schema and migrations, the `memory` tool, the always-loaded
-   section, and background extraction with its checkpoint.
+2. **Long-term memory in D1 and the memory agent.** Schema and migrations, `MemoryWorkflow`
+   with extraction and its checkpoint, the inbox and `remember`, the read tools, and the
+   always-loaded section.
    Tests: a fact stated before several compactions is found in D1 afterwards; a newer fact
    supersedes an older one; an interrupted extraction repeated writes no duplicates; a failed
    extraction leaves the checkpoint in place and the conversation unaffected.
@@ -303,7 +337,7 @@ Each phase ships with workerd integration tests that mock the model.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
    switch; storage is wiped only after a verified export.
 4. **Skills.** D1 index, R2 bodies, disclosure, proposal from consolidation, curation.
-5. **Shared memory.** Shared scopes, proposals, and review.
+5. **Shared memory.** Shared scopes, proposals from the memory agent, and review.
 6. **Evaluation.** Probe questions after compaction and rotation (recall, artifacts,
    continuation, decisions, as in Factory's evaluation) and LongMemEval-style checks for
    knowledge updates, temporal questions, and abstention.
@@ -319,6 +353,12 @@ Each phase ships with workerd integration tests that mock the model.
 - **Memory as markdown files in R2 only** (like OpenClaw and Hermes on disk). Cheapest storage
   and easy to edit by hand, but search needs a separate index and R2 has no transactions.
   Exporting D1 memory to markdown for people to read can be added later.
+- **Each working agent writes its own memory** (the earlier version of this plan). It puts
+  memory tools and instructions into every request, spends the working model on bookkeeping,
+  and leaves several writers per scope. Letta abandoned this shape for the same reasons.
+- **The memory agent as a kodama agent** (a Durable Object with its own Pi session). It would
+  accumulate its own transcript, need its own rotation, and bill duration while it waits on the
+  model. Nothing in its job needs a long-lived conversation.
 - **Own the compaction summary** through Pi's `beforeCompact` hook (extract memories and
   return an anchored summary). It couples memory to Pi's compaction task and makes kodama
   responsible for summary quality without evidence that Pi's summary is the problem. The hook
@@ -333,9 +373,9 @@ Each phase ships with workerd integration tests that mock the model.
 
 ## Open questions
 
-- Who reviews shared-memory proposals: a person through the UI, or a curator agent?
+- Who reviews shared-memory proposals: a person through the UI, or the memory agent with stricter rules?
 - How long must archived transcripts be kept, and who may delete them?
-- Which model and budget should extraction and consolidation use?
+- Which model and budget should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
 
 ## Sources
