@@ -3,6 +3,7 @@
 状態：提案。
 この文書の内容はまだ実装していない。
 英語版は [long-term-memory.md](long-term-memory.md) にある。
+判断ごとの理由は [long-term-memory-rationale.ja.md](long-term-memory-rationale.ja.md) にある。
 
 Kodama のエージェントは、1つの会話で何週間も何か月も動き続ける。
 この設計では、大事なことをエージェントの DO の外にある長期記憶に残し、Pi のセッションは DO に置いたままにし、セッションの古い行を消して保存領域が増え続けないようにする。

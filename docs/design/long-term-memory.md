@@ -2,6 +2,7 @@
 
 Status: proposal. Nothing in this document is implemented yet.
 A Japanese version is in [long-term-memory.ja.md](long-term-memory.ja.md).
+The reasons for each decision are in [long-term-memory-rationale.md](long-term-memory-rationale.md).
 
 Kodama agents run for weeks or months in one conversation. This design keeps what matters in
 long-term memory outside the agent's Durable Object, keeps the Pi session in the object, and
