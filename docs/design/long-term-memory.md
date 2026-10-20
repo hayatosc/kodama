@@ -21,12 +21,12 @@ Each agent is one SQLite-backed Durable Object that owns a Pi Durable session.
   section changes also stay. Pi has no API to prune them.
 - **The hard limit is 10 GB per object.** At the limit, writes fail with `SQLITE_FULL`; reads
   and deletes still succeed (Durable Objects FAQ). An agent that hits it stops working.
-- **Summaries of summaries drift.** Pi summarizes the previous summary again together with the
-  newer history (spec §8.7). Repeated lossy rewriting loses rare details ("summarization
-  drift", arXiv 2603.07670), can collapse context abruptly (ACE, arXiv 2510.04618: 18,282 →
-  122 tokens and accuracy below baseline), and loses more facts as compaction frequency rises
-  when nothing reversible backs it (arXiv 2607.08032: recall 0.33–0.56 vs. about 0.95 with a
-  retrievable archive).
+- **Summaries cannot hold everything.** Pi's summary uses the coding agent's structured
+  checkpoint format and carries the earlier summary forward (spec §8.7), which is the right
+  default. Any summary still loses rare details over many cycles ("summarization drift", arXiv
+  2603.07670), and loses more facts as compaction frequency rises when nothing reversible backs
+  it (arXiv 2607.08032: recall 0.33–0.56 vs. about 0.95 with a retrievable archive). The answer
+  is to keep facts and the raw record outside the summary, not to replace Pi's summarizer.
 - **One endless session is the worst case for learning.** Hermes Agent documents this for
   gateway chats: a single session "grows expensive (compaction runs repeatedly over an
   ever-longer history) and the learning loop … almost never gets to fire."
@@ -89,15 +89,20 @@ skill."
 1. **Keep the raw record retrievable.** Reversible compaction (archive + retrieval) beats
    overwrite-only summaries (2607.08032). OpenClaw, Hermes, and Cloudflare all keep raw
    history. Deleting from hot storage is fine; deleting the only copy is not.
-2. **Mask before summarizing.** Hiding old tool outputs matched LLM summarization at about half
-   the cost on SWE-bench Verified, and summarization lengthened trajectories by 15%
-   (2508.21433). OpenClaw's session pruning and Anthropic's context editing do the same.
-3. **Merge summaries incrementally.** Anchored, sectioned summaries that merge only the newly
-   cut span (Factory) and delta updates instead of full rewrites (ACE) avoid collapse.
-4. **Extract memories at compaction time.** It is the last chance before detail leaves the
-   context (OpenClaw memory flush, Cloudflare ingestion). Extraction and updating are where
-   memory systems create and accumulate errors (HaluMem 2511.03506), so extracted items need
-   verification against the transcript and provenance.
+2. **Leave compaction to Pi.** Pi already selects the cut, summarizes in a structured format,
+   carries the earlier summary forward, retries, and recovers from context overflow. The
+   evidence for custom summarizers is from other settings (ACE rewrites a playbook, not a
+   conversation) or vendor-measured (Factory). Owning the summary would mean owning its prompt,
+   failures, and regressions for an unproven gain. Observation masking (2508.21433) is the same
+   kind of optimization and waits until measurements show tool output dominating the context.
+3. **Extract memories from the transcript, not from the compaction.** OpenClaw flushes memory
+   before compaction because its context is the only place the agent looks. In kodama,
+   compaction removes nothing from storage, so entries stay readable (`scanEntries`) until the
+   session is rotated. Extraction can run in the background after the agent goes idle (like Grok
+   Build and Hermes) and must run before rotation.
+4. **Verify what is extracted.** Extraction and updating are where memory systems create and
+   accumulate errors (HaluMem 2511.03506), so extracted items need verification against the
+   transcript and provenance.
 5. **Facts and episodes need different lifetimes.** Facts are superseded, not decayed; episodes
    decay with recency (2604.11364, Zep edge invalidation, Generative Agents decay 0.995).
    Models still accept stale facts (STALE 2605.06527: 55.2%), so supersession must be explicit.
@@ -113,7 +118,7 @@ skill."
    (Letta). Shared writes need provenance, a single writer per record, and review.
 8. **Freeze what is always loaded.** Hermes freezes its memory snapshot per session to keep the
    prompt cache; Pi re-sends changed sections as new system entries. Always-loaded memory should
-   change only at compaction or rotation boundaries.
+   change only at idle or rotation boundaries.
 
 ## Design
 
@@ -177,8 +182,9 @@ Hard deletion is an operator action (privacy), not something the agent does.
 
 A Pi prompt section renders capped blocks: the agent's notes and a small shared block. Each
 block has a character budget shown in the prompt (Hermes shows `[67% — 1,474/2,200 chars]`).
-The session object reads the blocks from D1 when a generation starts and after a compaction is
-placed, and keeps the rendered text in a Pi document. Requests in between read that copy, so
+The session object reads the blocks from D1 when a generation starts and after a background
+extraction run (which happens while the agent is idle), and keeps the rendered text in a Pi
+document. Requests in between read that copy, so
 the prompt prefix stays stable and no request waits on D1.
 
 ### Write paths
@@ -186,17 +192,16 @@ the prompt prefix stays stable and no request waits on D1.
 1. **Explicit tool** `memory` with `remember`, `update`, `forget`, and `search`. Input is
    validated with valibot, size-capped, and scanned for injection patterns before it is
    written to D1.
-2. **Pre-compaction flush** through Pi's `beforeCompact` hook, which receives the entries and
-   messages about to be summarized:
-   1. Extract candidate records with a configurable, cheaper model.
-   2. Verify each candidate against the cited messages; drop unsupported ones.
-   3. Reconcile with existing records in D1: add, supersede, invalidate, or skip (Mem0's
+2. **Background extraction** when the agent has been idle for a while (the session object's
+   alarm) and always before rotation. It does not touch Pi's compaction:
+   1. Read the entries after the agent's extraction checkpoint with `scanEntries`.
+   2. Extract candidate records with a configurable, cheaper model.
+   3. Verify each candidate against the cited entries; drop unsupported ones.
+   4. Reconcile with existing records in D1: add, supersede, invalidate, or skip (Mem0's
       ADD/UPDATE/DELETE/NOOP, but superseding instead of deleting).
-   4. Return an anchored summary: keep the previous summary's sections (intent, decisions and
-      their reasons, artifacts touched, open tasks, constraints) and merge only the new span.
-   5. If anything fails, return `undefined` so Pi's built-in compaction still runs.
-      Hooks can run again after a restart, so record IDs are content-addressed and writes use
-      `INSERT OR IGNORE`; `api.memo` keeps the extraction result of one compaction task.
+   5. Advance the checkpoint in D1 in the same batch as the writes.
+      Record IDs are content-addressed and writes use `INSERT OR IGNORE`, so a run that is
+      interrupted and repeated writes no duplicates.
 3. **Consolidation** at most about once a day, as a scheduled Worker job over D1 rather than
    inside agent objects (sleep-time compute; OpenClaw and Devin dreaming): merge duplicates,
    resolve contradictions, decay events, rebuild always-loaded blocks within budget with delta
@@ -212,13 +217,12 @@ the prompt prefix stays stable and no request waits on D1.
   reads the matching archived transcript from R2. It is the safety net for details that
   extraction missed.
 
-### Context trimming
+### Compaction
 
-- Keep Pi compaction and set its policy explicitly in `src/harness.ts`.
-- Add observation masking with a `beforeRequest` hook: replace tool results older than the last
-  N tool rounds with a placeholder that keeps the tool name and a short head. Masking is
-  positional and deterministic so the cached prefix stays stable. Storage is unchanged; the
-  original result stays retrievable.
+Compaction is Pi's job. Kodama keeps Pi's defaults and changes the policy in `src/harness.ts`
+only if measurements call for it. If tool output later turns out to dominate the context,
+observation masking through a `beforeRequest` hook is the first thing to try, before any change
+to the summary.
 
 ### Reclaiming session storage: in-place rotation
 
@@ -229,15 +233,17 @@ no routing layer is needed.
 Rotation runs only when the session is idle and when one of these is true:
 
 - `ctx.storage.sql.databaseSize` passes a threshold (for example 1 GB);
-- the number of compactions in the generation passes a limit, to stop summary-of-summary drift;
+- the number of compactions in the generation passes a limit, so the next generation starts
+  from curated memory instead of a long chain of summaries;
 - a natural boundary, such as a long idle period (Hermes recommends `/new` at boundaries).
 
 Steps, with progress recorded in the D1 generation index so a restart can resume:
 
 1. Save the agent configuration and mark generation N as exporting.
-2. Flush memory for the span not yet flushed.
+2. Run extraction up to the last entry.
 3. Export generation N to R2 in pages, write the manifest, and verify counts and hashes.
-4. Store the handoff note (latest anchored summary plus open tasks) in the generation index.
+4. Store the handoff note (Pi's latest compaction summary plus open tasks) in the generation
+   index.
 5. Inside `blockConcurrencyWhile`: close the harness, call `ctx.storage.deleteAll()`, reopen
    Pi, restore the configuration, start from the handoff note (`reset(handoff)`), write the
    recent request receipts, and re-arm the alarm (`deleteAll()` also removes the alarm at this
@@ -285,14 +291,14 @@ rotating before the object grows large keeps that bounded either way.
 
 Each phase ships with workerd integration tests that mock the model.
 
-1. **Measure and reduce cost.** Configure compaction and the progress interval explicitly;
-   measure rows written and database size per turn; add observation masking.
-   Tests: masking leaves storage unchanged and keeps the prefix stable; row counts per turn stay
-   under a recorded budget.
+1. **Measure and reduce cost.** Set the progress interval explicitly; measure rows written,
+   database size, and context size per turn.
+   Tests: row counts per turn stay under a recorded budget.
 2. **Long-term memory in D1.** Schema and migrations, the `memory` tool, the always-loaded
-   section, and the `beforeCompact` flush with anchored summaries.
-   Tests: a fact survives several compactions; a newer fact supersedes an older one; a failed
-   extraction falls back to Pi's summary; a re-run hook writes no duplicates.
+   section, and background extraction with its checkpoint.
+   Tests: a fact stated before several compactions is found in D1 afterwards; a newer fact
+   supersedes an older one; an interrupted extraction repeated writes no duplicates; a failed
+   extraction leaves the checkpoint in place and the conversation unaffected.
 3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
    switch; storage is wiped only after a verified export.
@@ -313,6 +319,11 @@ Each phase ships with workerd integration tests that mock the model.
 - **Memory as markdown files in R2 only** (like OpenClaw and Hermes on disk). Cheapest storage
   and easy to edit by hand, but search needs a separate index and R2 has no transactions.
   Exporting D1 memory to markdown for people to read can be added later.
+- **Own the compaction summary** through Pi's `beforeCompact` hook (extract memories and
+  return an anchored summary). It couples memory to Pi's compaction task and makes kodama
+  responsible for summary quality without evidence that Pi's summary is the problem. The hook
+  stays available if evaluation probes show losses that memory and `history_search` cannot
+  cover.
 - **Ask Pi Durable for pruning.** Deleting entries before the active head would conflict with
   Pi's immutable-entry invariant and fork semantics. Worth raising upstream, not worth waiting
   for.
