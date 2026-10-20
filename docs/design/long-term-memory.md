@@ -6,7 +6,7 @@ A Japanese explanation is in [long-term-memory.ja.md](long-term-memory.ja.md).
 Kodama agents are meant to run like an always-on bot: one agent keeps answering and working
 in the same conversation for weeks or months. This document proposes how an agent remembers
 what matters and lets go of the rest, so that neither its model context nor its Durable Object
-storage grows without bound.
+storage grows without bound, and without making Durable Objects the store for everything.
 
 ## Problem
 
@@ -30,6 +30,44 @@ Each agent is one SQLite-backed Durable Object that owns a Pi Durable session.
 - **One endless session is the worst case for learning.** Hermes Agent documents this for
   gateway chats: a single session "grows expensive (compaction runs repeatedly over an
   ever-longer history) and the learning loop … almost never gets to fire."
+
+## Where the Cloudflare cost comes from
+
+Prices are from the Cloudflare pricing pages (Workers Paid, October 2026). Allowances below are
+per account per month.
+
+| Item                              | Price                                                  | Included     |
+| --------------------------------- | ------------------------------------------------------ | ------------ |
+| Durable Object duration           | $12.50 per million GB-s, billed on 128 MB while active | 400,000 GB-s |
+| Durable Object or D1 rows written | $1.00 per million rows (deletes count)                 | 50 million   |
+| Durable Object or D1 rows read    | $0.001 per million rows                                | 25 billion   |
+| Durable Object SQLite storage     | $0.20 per GB-month                                     | 5 GB         |
+| D1 storage                        | $0.75 per GB-month                                     | 5 GB         |
+| R2 Standard storage               | $0.015 per GB-month                                    | —            |
+| R2 writes / reads                 | $4.50 / $0.36 per million operations                   | —            |
+
+What this means for one agent that streams model output 8 hours a day for 30 days, counted
+beyond the allowances:
+
+| Cost source                                                                                                              | Estimate                   | Lever                            |
+| ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | -------------------------------- |
+| Pi progress commits while streaming: at most one commit per 100 ms (`progress.partialIntervalMs`), at least one row each | ≥ 8.6 million rows, ≥ $8.6 | raise the interval               |
+| Duration while waiting on the model                                                                                      | 108,000 GB-s, $1.35        | unavoidable while the model runs |
+| An open `subscribe()` stream all day (no hibernation)                                                                    | 324,000 GB-s, $4.05        | close streams nobody watches     |
+| 1 GB of transcript kept in the object                                                                                    | $0.20 per month            | archive to R2 ($0.015)           |
+
+The rows per progress commit have not been measured. Phase 1 measures them with
+`SqlStorageCursor.rowsWritten` in the integration tests.
+
+Two conclusions follow:
+
+1. **The largest costs are write volume and active time, not stored bytes.** Moving data out of
+   Durable Objects does not reduce them; tuning Pi's progress interval and stream lifetime does.
+2. **Long-term memory does not belong in the agent's Durable Object.** Per row and per GB a
+   Durable Object is not more expensive than D1, but memory must outlive the session (the
+   session object is wiped to reclaim storage), must be shared between agents, and must be
+   readable by the UI and by maintenance jobs without waking agent objects. Each of these
+   pushes memory into a separate store.
 
 ## What existing systems do
 
@@ -79,37 +117,50 @@ skill."
 
 ## Design
 
+### Storage layers
+
+| Layer            | Store                                  | Contents                                                                                                         | Lifetime                    |
+| ---------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Session          | the agent's Durable Object (unchanged) | Pi Durable session of the current generation; a frozen copy of the always-loaded memory; recent request receipts | one generation, then wiped  |
+| Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, shared-memory proposals, skill index and ledger, generation index           | kept                        |
+| Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations (JSONL + manifest with SHA-256), skill bodies                                    | retention rule              |
+| Optional         | Vectorize                              | embeddings of memory records                                                                                     | added only if search misses |
+
+No new Durable Object classes are added. The session object reads and writes D1 and R2
+through Worker bindings.
+
+D1 fits long-term memory because it supports FTS5, keeps 30 days of point-in-time recovery
+(Time Travel), and can be read by the UI Worker and by maintenance jobs without waking an
+agent. A database holds up to 10 GB; memory records are small, and D1 is designed to be split
+into more databases (for example per agent group) if one ever fills up.
+
 ### Memory scopes
 
-| Scope       | Owner                                     | Contents                                                       | Writes                                        |
-| ----------- | ----------------------------------------- | -------------------------------------------------------------- | --------------------------------------------- |
-| **Context** | session (Pi)                              | current turns, compaction summary                              | Pi                                            |
-| **Agent**   | `AgentHome(agentId)`                      | the agent's notes, learned conventions, episodes, its skills   | the agent; consolidation                      |
-| **Peer**    | `AgentHome(agentId)`, keyed by peer       | what this agent knows about each person or agent it talks with | the agent; consolidation                      |
-| **Shared**  | `MemorySpace(name)`, for example `global` | team conventions, shared facts, shared skills                  | proposals from agents, accepted by a reviewer |
+| Scope                                                      | Contents                                                   | Writes                                        |
+| ---------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| **Context**                                                | current turns, compaction summary                          | Pi, inside the session object                 |
+| **Agent** (`agent:<id>`)                                   | the agent's notes, learned conventions, events, its skills | the agent; consolidation                      |
+| **Shared** (`shared:<space>`, for example `shared:global`) | team conventions, shared facts, shared skills              | proposals from agents, accepted by a reviewer |
 
-Peer memory stays per agent by default, like Honcho's per-peer profiles, so one user's
-statements do not leak into another user's context. A shared peer profile can come later with
-explicit read and write policies (Collaborative Memory, arXiv 2505.18279).
+There is no per-person memory. Facts about the people an agent works with are ordinary agent
+facts when they matter for the work.
 
 ### Record model
-
-One table per store, plus an FTS5 index (SQLite FTS5 is available in Durable Objects; the
-Cloudflare Agents SDK uses it):
 
 ```text
 memory_records(
   id            -- content-addressed: hash(scope, kind, key?, content)
-  scope         -- agent | peer:<id> | shared:<name>
+  scope         -- agent:<id> | shared:<space>
   kind          -- fact | event | instruction | task
   key           -- normalized topic key for facts and instructions
   content
-  provenance    -- JSON: agentId, epoch, entry range, peerId, tool, writer
+  provenance    -- JSON: agentId, generation, entry range, tool, writer
   observed_at, created_at
   superseded_by -- id of the record that replaced this one
   invalid_at    -- set when contradicted
   importance, use_count, last_used_at, pinned
 )
+memory_fts      -- FTS5 over content and key
 ```
 
 Lifetimes by kind:
@@ -124,39 +175,42 @@ Hard deletion is an operator action (privacy), not something the agent does.
 
 ### Always-loaded memory
 
-A Pi prompt section renders capped blocks: agent notes, the current peer's profile, and a small
-shared block. Each block has a character budget shown in the prompt (Hermes shows
-`[67% — 1,474/2,200 chars]`). The rendered text is a snapshot stored in a Pi document and
-refreshed only after a compaction is placed or at rotation.
+A Pi prompt section renders capped blocks: the agent's notes and a small shared block. Each
+block has a character budget shown in the prompt (Hermes shows `[67% — 1,474/2,200 chars]`).
+The session object reads the blocks from D1 when a generation starts and after a compaction is
+placed, and keeps the rendered text in a Pi document. Requests in between read that copy, so
+the prompt prefix stays stable and no request waits on D1.
 
 ### Write paths
 
 1. **Explicit tool** `memory` with `remember`, `update`, `forget`, and `search`. Input is
    validated with valibot, size-capped, and scanned for injection patterns before it is
-   accepted.
+   written to D1.
 2. **Pre-compaction flush** through Pi's `beforeCompact` hook, which receives the entries and
    messages about to be summarized:
    1. Extract candidate records with a configurable, cheaper model.
    2. Verify each candidate against the cited messages; drop unsupported ones.
-   3. Reconcile with existing records: add, supersede, invalidate, or skip (Mem0's
+   3. Reconcile with existing records in D1: add, supersede, invalidate, or skip (Mem0's
       ADD/UPDATE/DELETE/NOOP, but superseding instead of deleting).
    4. Return an anchored summary: keep the previous summary's sections (intent, decisions and
       their reasons, artifacts touched, open tasks, constraints) and merge only the new span.
    5. If anything fails, return `undefined` so Pi's built-in compaction still runs.
-      Hooks can run again after a restart, so record IDs are content-addressed and writes are
-      idempotent; `api.memo` keeps the extraction result of one compaction task.
-3. **Idle review and consolidation** on the home object's alarm, after the agent has been idle
-   for a while and at most about once a day (sleep-time compute; OpenClaw dreaming; Devin
-   dreaming): merge duplicates, resolve contradictions, decay events, rebuild always-loaded
-   blocks within budget with delta edits (never a full rewrite), and propose skills.
+      Hooks can run again after a restart, so record IDs are content-addressed and writes use
+      `INSERT OR IGNORE`; `api.memo` keeps the extraction result of one compaction task.
+3. **Consolidation** at most about once a day, as a scheduled Worker job over D1 rather than
+   inside agent objects (sleep-time compute; OpenClaw and Devin dreaming): merge duplicates,
+   resolve contradictions, decay events, rebuild always-loaded blocks within budget with delta
+   edits (never a full rewrite), and propose skills. It reads archived transcripts from R2 when
+   it needs evidence.
 
 ### Read paths
 
 - Always-loaded blocks (above).
-- `memory_search`: FTS5 BM25 ranked with recency and importance, plus the record's provenance in
-  the result. Vectors (Vectorize) are an optional later channel.
-- `history_search`: searches archived epochs (see rotation) by their summaries and an FTS index
-  of user and assistant text. It is the safety net for details that extraction missed.
+- `memory_search`: FTS5 BM25 in D1, ranked with recency and importance, with each record's
+  provenance in the result.
+- `history_search`: searches the generation index (handoff notes and summaries) in D1, then
+  reads the matching archived transcript from R2. It is the safety net for details that
+  extraction missed.
 
 ### Context trimming
 
@@ -166,124 +220,119 @@ refreshed only after a compaction is placed or at rotation.
   positional and deterministic so the cached prefix stays stable. Storage is unchanged; the
   original result stays retrievable.
 
-### Storage: epoch rotation
+### Reclaiming session storage: in-place rotation
 
-Pi cannot delete entries, so storage is reclaimed by moving the conversation to a fresh
-object and deleting the old one, like Hermes' compaction lineage.
-
-```text
-AgentService (RPC entrypoint)
-  └─ AgentHome(agentId)          config, current epoch, agent/peer memory, skills, archive index
-       └─ AgentSession(agentId.N) Pi Durable session for epoch N (today's Agent class)
-MemorySpace(name)                 shared memory and skills
-R2 bucket ARCHIVE                 epoch transcripts: JSONL + manifest with SHA-256
-```
-
-The current `Agent` class becomes `AgentSession`. Epoch 0 keeps the existing object name
-(`agentId`) so current agents migrate without copying. Later epochs use `agentId.N`; agent IDs
-cannot contain `.`, so names never collide.
+Pi cannot delete entries, so the session object is wiped and restarted from a handoff note.
+Because long-term memory lives in D1, rotation keeps the same object and the same agent ID;
+no routing layer is needed.
 
 Rotation runs only when the session is idle and when one of these is true:
 
-- `ctx.storage.sql.databaseSize` passes a threshold (default well under 10 GB, for example 1 GB);
-- the number of compactions in the epoch passes a limit, to stop summary-of-summary drift;
+- `ctx.storage.sql.databaseSize` passes a threshold (for example 1 GB);
+- the number of compactions in the generation passes a limit, to stop summary-of-summary drift;
 - a natural boundary, such as a long idle period (Hermes recommends `/new` at boundaries).
 
-Steps, recorded in `AgentHome` as a resumable state machine driven by its alarm:
+Steps, with progress recorded in the D1 generation index so a restart can resume:
 
-1. Flush: run extraction over the span not yet flushed.
-2. Write the handoff note: the latest anchored summary plus open tasks.
-3. Create epoch N+1 with the stored configuration and start it from the handoff note
-   (`reset(handoff)`), then switch the pointer in `AgentHome`.
-4. Export epoch N to R2 in pages, write the manifest, and verify counts and hashes.
-5. Index the epoch for `history_search`, then call `deleteAll()` on epoch N.
+1. Save the agent configuration and mark generation N as exporting.
+2. Flush memory for the span not yet flushed.
+3. Export generation N to R2 in pages, write the manifest, and verify counts and hashes.
+4. Store the handoff note (latest anchored summary plus open tasks) in the generation index.
+5. Inside `blockConcurrencyWhile`: close the harness, call `ctx.storage.deleteAll()`, reopen
+   Pi, restore the configuration, start from the handoff note (`reset(handoff)`), write the
+   recent request receipts, and re-arm the alarm (`deleteAll()` also removes the alarm at this
+   compatibility date). Mark generation N+1 active.
 
-`AgentHome` buffers messages that arrive during steps 3–5 and keeps a short-lived map from
-recent request IDs to their epoch, so retries and `submission()` still find their receipts.
-Subscribers of epoch N see their stream end and reconnect; clients already have to accept a
-replacement snapshot.
-
-Archive retention is a configurable R2 lifecycle rule. Deleting an archive is a privacy delete;
-compaction is not.
+If a message arrives before step 5, rotation is abandoned and retried later. Kodama keeps a
+small receipts table of recent request IDs, so retries and `submission()` still resolve after
+the switch. Subscribers see their stream end and reconnect; clients already accept a
+replacement snapshot. Whether `deleteAll()` is billed per deleted row has not been verified;
+rotating before the object grows large keeps that bounded either way.
 
 ### Skills (procedural memory)
 
 - **Format**: Agent Skills (`SKILL.md` with `name` and `description` frontmatter), compatible
   with Hermes, OpenClaw, and Claude Code.
-- **Stores**: per-agent skills in `AgentHome`; shared skills in `MemorySpace`. Large bodies go
-  to R2 (SQLite rows are limited to 2 MB).
+- **Stores**: the index (name, description, scope, status, use count, R2 key) in D1; bodies and
+  bundled files in R2.
 - **Disclosure**: a prompt section lists at most a few dozen names and descriptions; the rest
-  are found with `skill_search`. `skill_load` returns a body.
+  are found with `skill_search`. `skill_load` reads a body from R2.
 - **Creation**: consolidation proposes a skill only from a procedure that succeeded at least
   twice, with the trajectories cited, and includes the failure lessons. A proposal becomes active
   after a replay or check passes; shared skills also need review. The agent does not write
   skills ahead of doing the work.
-- **Curation**: use counts; stale after 14 days, archived after 30, pinned skills exempt,
-  archived skills restorable, every change logged with its writer.
+- **Curation**: stale after 14 days unused, archived after 30, pinned skills exempt, archived
+  skills restorable, every change logged with its writer.
 
 ### Shared memory and safety
 
 - Agents never write shared records directly. `memory_propose` creates a pending record with
   provenance; a reviewer (an operator RPC, or a designated curator agent) accepts or rejects it.
 - Each shared record has one writer; updates create new versions instead of rewriting a block.
-- Content from untrusted peers is stored as evidence with its source and is not promoted to
+- Content from untrusted sources is stored as evidence with its source and is not promoted to
   always-loaded memory without review (OpenClaw does the same for untrusted reports).
 - Never store secrets; redact before writing (Codex and Grok Build exclude secrets).
 
-### Protocol changes
+### Cost controls
 
-Peer memory needs to know who is speaking. `SendMessageRequest` gains optional
-`peer: { id, displayName? }` and `channel?` fields. The UI Worker or bot adapter sets them after
-authenticating the sender; the agent never trusts a peer ID from message text. New RPC methods
-cover memory inspection, export, deletion, proposal review, and rotation status.
+- Raise `progress.partialIntervalMs` (for example to 500–1000 ms) after measuring rows per
+  commit. The trade-off is coarser live streaming to the UI.
+- Close `subscribe()` streams that nobody watches, or move observation to WebSocket hibernation.
+- Rotate before the session object grows large; archived bytes cost about 13 times less in R2.
+- Run consolidation as one scheduled job over D1 instead of waking every agent.
 
 ## Phases
 
 Each phase ships with workerd integration tests that mock the model.
 
-1. **Measure and tune.** Configure compaction explicitly; report database size, entry count,
-   and compaction count in the snapshot; add observation masking.
-   Tests: masking leaves storage unchanged and keeps the prefix stable across requests.
-2. **Agent memory.** Add `AgentHome` with `memory_records` and FTS5, the `memory` tool, the
-   always-loaded section, and the `beforeCompact` flush with anchored summaries.
+1. **Measure and reduce cost.** Configure compaction and the progress interval explicitly;
+   measure rows written and database size per turn; add observation masking.
+   Tests: masking leaves storage unchanged and keeps the prefix stable; row counts per turn stay
+   under a recorded budget.
+2. **Long-term memory in D1.** Schema and migrations, the `memory` tool, the always-loaded
+   section, and the `beforeCompact` flush with anchored summaries.
    Tests: a fact survives several compactions; a newer fact supersedes an older one; a failed
    extraction falls back to Pi's summary; a re-run hook writes no duplicates.
-3. **Epoch rotation.** Route through `AgentHome`, add `AgentSession` epochs, R2 export, and
-   `history_search`.
+3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
-   switch; old storage is deleted only after verified export.
-4. **Skills.** Stores, disclosure, proposal from consolidation, curation.
-5. **Shared memory and peers.** `MemorySpace`, proposals and review, peer-scoped memory, protocol
-   fields.
+   switch; storage is wiped only after a verified export.
+4. **Skills.** D1 index, R2 bodies, disclosure, proposal from consolidation, curation.
+5. **Shared memory.** Shared scopes, proposals, and review.
 6. **Evaluation.** Probe questions after compaction and rotation (recall, artifacts,
    continuation, decisions, as in Factory's evaluation) and LongMemEval-style checks for
    knowledge updates, temporal questions, and abstention.
 
 ## Alternatives considered
 
-- **Keep one object forever.** Simplest, and 10 GB is far for text-only chat. It still has no
-  way to free storage, keeps drifting summaries, and fails hard at the limit. Phases 1–2 work in
-  this mode; rotation can wait until measurements call for it.
+- **Everything in Durable Objects** (a memory object per agent and per shared space). It works,
+  but memory dies with a wiped session unless copied out, shared memory needs extra objects
+  that stay awake, and the UI or maintenance jobs would wake those objects to read.
+- **Keep one session object forever.** Simplest, and 10 GB is far for text-only chat. It still
+  has no way to free storage, keeps drifting summaries, and fails hard at the limit. Phases 1–2
+  work in this mode; rotation can wait until measurements call for it.
+- **Memory as markdown files in R2 only** (like OpenClaw and Hermes on disk). Cheapest storage
+  and easy to edit by hand, but search needs a separate index and R2 has no transactions.
+  Exporting D1 memory to markdown for people to read can be added later.
 - **Ask Pi Durable for pruning.** Deleting entries before the active head would conflict with
   Pi's immutable-entry invariant and fork semantics. Worth raising upstream, not worth waiting
   for.
-- **Cloudflare Agent Memory.** It matches this design closely (one Durable Object per profile,
-  ingestion at compaction, supersession) and `cf` already has an `agentMemory` binding. It is in
-  private beta. Keep the store behind an interface so a profile can back `MemorySpace` later.
-- **Vector-first memory.** Embeddings help paraphrased queries, but FTS5 needs no extra service
-  and keeps writes transactional. Add Vectorize after the probes show misses.
+- **Cloudflare Agent Memory.** It matches this design closely and `cf` already has an
+  `agentMemory` binding, but it is in private beta. Keep the memory store behind an interface
+  so it can be swapped in later.
 
 ## Open questions
 
 - Who reviews shared-memory proposals: a person through the UI, or a curator agent?
-- How long must raw transcripts be kept, and who may delete them?
+- How long must archived transcripts be kept, and who may delete them?
 - Which model and budget should extraction and consolidation use?
-- Should peer profiles ever be shared between agents, and with whose consent?
+- How coarse may live streaming to the UI become in exchange for fewer writes?
 
 ## Sources
 
 - Pi Durable 1.2.0 README and spec: https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md
-- Durable Objects limits and FAQ: https://developers.cloudflare.com/durable-objects/platform/limits/
+- Durable Objects pricing, limits, FAQ, SQLite storage API: https://developers.cloudflare.com/durable-objects/platform/pricing/
+- D1 pricing, limits, Time Travel, SQL statements (FTS5): https://developers.cloudflare.com/d1/platform/pricing/
+- R2 pricing: https://developers.cloudflare.com/r2/pricing/
 - OpenClaw memory, compaction, sessions: https://docs.openclaw.ai/concepts/memory
 - Hermes Agent memory, sessions, skills, curator: https://hermes-agent.nousresearch.com/docs/user-guide/features/memory
 - Grok Build memory: https://x.ai/news/grok-build-memory
