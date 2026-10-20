@@ -54,23 +54,19 @@ while pruning, the archive index of their own entries.
 There is no per-person scope. `sharedSpaces` (a new `AgentConfig` field, default `["global"]`,
 validated like `tools`) lists the shared spaces an agent reads.
 
-When records of several scopes share a `(kind, topic_key)`, one of them applies:
-
-1. a shared record with `required = 1` (a team rule);
-2. otherwise the agent's own record;
-3. otherwise the record of the earliest space in `sharedSpaces`.
-
-An agent record that contradicts a required shared record is not loaded; consolidation marks it
-`invalid` with a ledger row.
+An agent record may set `overrides` to the ID of a shared record. For that agent, the agent record
+replaces the shared one, unless the shared record has `required = 1` (a team rule): then the agent
+record is not loaded, and consolidation marks it `invalid` with a ledger row. Other agents keep the
+shared record.
 
 ### Kinds
 
-| Kind          | Topic key | Lifetime                                                                   |
-| ------------- | --------- | -------------------------------------------------------------------------- |
-| `fact`        | required  | no decay; a new fact with the same key supersedes the old one              |
-| `instruction` | required  | as `fact`; multi-step instructions become skill candidates                 |
-| `event`       | none      | ranked by recency (half-life 30 days); archived after the retention window |
-| `task`        | none      | dropped when done                                                          |
+| Kind          | Lifetime                                                                   |
+| ------------- | -------------------------------------------------------------------------- |
+| `fact`        | no decay; replaced only by a newer record that supersedes it by ID         |
+| `instruction` | as `fact`; multi-step instructions become skill candidates                 |
+| `event`       | ranked by recency (half-life 30 days); archived after the retention window |
+| `task`        | dropped when done                                                          |
 
 `origin` is one of `user_request`, `agent_judgment`, `extraction`, `consolidation`, or
 `proposal`. Summaries of archived entries are not memory records; they live in the archive index.
@@ -110,15 +106,19 @@ SHA-256 of the job ID and Pi's tool call ID, so running a recorded tool call aga
    plain `INSERT` of new records, the ledger row, the `scope_revisions` increment, and the
    `memory_ops` row.
 
-Writes never use `INSERT OR IGNORE`. A duplicate record ID, a second active record for a topic, or
-a replayed `op_id` fails a statement, and `batch()` rolls the whole operation back. The memory
+Writes never use `INSERT OR IGNORE`. A duplicate record ID or a replayed `op_id` fails a
+statement, and `batch()` rolls the whole operation back. The memory
 agent runs one job at a time (see [Jobs](#jobs)), so the read in step 2 stays valid until step 3;
 the constraints are the backstop. Working agents update only `use_count` and `last_used_at`,
 which do not change `revision`.
 
 Other rules:
 
-- Record ID: SHA-256 of scope, kind, topic key, content, source agent, and first source entry.
+- Superseding names the old record: `memory_supersede(oldId, oldRevision, content)`. Before
+  writing, the memory agent finds candidates with `memory_search`; there is no topic key. The new
+  record has the old record's scope. Changing a record of another scope goes through `overrides`
+  or a shared proposal.
+- Record ID: SHA-256 of scope, kind, content, source agent, and first source entry.
 - `superseded_by` is not a foreign key, because D1 checks foreign keys immediately and the old
   row is updated before the new row exists.
 - Entry IDs are never reused, so checkpoints and archive ranges are keyed by agent and entry ID
@@ -173,7 +173,8 @@ function; consolidation re-segments rows with an older version.
   the `scheduled` handler.
 - Fixed configuration built in code: model from `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`,
   the memory-keeping system prompt. `setConfig` throws.
-- Its own registry holds the tools `memory_write`, `memory_supersede`, `memory_decline`,
+- Its own registry holds the tools `memory_search`, `memory_write`, `memory_supersede`,
+  `memory_decline`,
   `read_entries`, `skill_write`, `skill_archive`, `shared_propose`, and `notify_memory_changed`.
   Each writing tool applies its change as an operation (see
   [Applying a write](#applying-a-write)). `skill_write` accepts only agent scopes. The working
@@ -566,7 +567,8 @@ throwing from an injected hook and then reopen the object.
    promotion and override of skills, `listProposals`, `decideProposal`, `apply_proposal`.
    Tests:
    - an agent sees only the shared spaces in its `sharedSpaces`;
-   - a required shared record wins over an agent record with the same topic;
+   - an agent record that overrides a shared record replaces it for that agent only;
+   - a required shared record stays loaded and the agent record that overrides it does not;
    - two agents with the same procedure produce one promotion proposal;
    - applying it creates the shared skill, moves usage, and archives only sources whose name now
      resolves to it;
@@ -813,16 +815,16 @@ through the `MEMORY_AGENT` binding. `AgentService` cannot reach it.
 
 ### 7. Four kinds; facts are superseded, events decay
 
-**Decision.** Records are `fact`, `instruction`, `event`, or `task`. Facts and instructions carry a
-topic key, and a newer record with the same key supersedes the older one. Events are ranked down by
-recency.
+**Decision.** Records are `fact`, `instruction`, `event`, or `task`. A newer fact or instruction
+supersedes an older one by naming its ID, found by search. Events are ranked down by recency.
 
 **Reasons.**
 
-- The four kinds and topic-key supersession (marked `superseded`, not deleted) follow Cloudflare
-  Agent Memory.
-- Mem0 (2504.19413) chooses ADD, UPDATE, DELETE, or NOOP for each candidate. Step 4 of extraction
-  (add, supersede, invalidate, or skip) is the same choice.
+- The four kinds and supersession that marks the old record `superseded` instead of deleting it
+  follow Cloudflare Agent Memory.
+- Mem0 (2504.19413) retrieves similar memories and chooses ADD, UPDATE, DELETE, or NOOP for each
+  candidate. Step 4 of extraction (add, supersede, invalidate, or skip) is the same choice, and the
+  target is named by ID in the same way.
 - Applying time decay to facts is a category error (2604.11364). Zep (2501.13956) handles outdated
   facts with edge invalidation. Events do decay with recency (Generative Agents, 2304.03442, decay
   factor 0.995).
@@ -830,6 +832,12 @@ recency.
 
 **Rejected.**
 
+- **Topic keys** (Cloudflare Agent Memory gives facts and instructions a normalized topic key, and
+  a new memory with the same key supersedes the old one). A key lets the database keep one active
+  record per topic, but only if the model produces the same key for the same topic every time. A
+  varying key silently stops supersession, and a key that is too coarse supersedes an unrelated
+  fact. With one writer running one job at a time, the database guarantee is not needed, and
+  duplicates from rewording are merged by consolidation.
 - **A per-person scope** (Hermes's Honcho keeps a separate peer profile per counterpart). Kodama
   constraint: memory of the people an agent talks to is not needed.
 

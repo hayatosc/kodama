@@ -6,9 +6,8 @@ CREATE TABLE memory_records (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL CHECK (scope GLOB 'agent:*' OR scope GLOB 'shared:*'),
   kind TEXT NOT NULL CHECK (kind IN ('fact', 'event', 'instruction', 'task')),
-  topic_key TEXT,
   content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 2000),
-  -- Words of topic_key and content from Intl.Segmenter, normalized and joined by spaces:
+  -- Words of content from Intl.Segmenter, normalized and joined by spaces:
   -- merged katakana words first, then the original segments that differ (see the design doc).
   -- search_version names the segmentation rules so rows can be re-split later.
   search_text TEXT NOT NULL,
@@ -26,7 +25,9 @@ CREATE TABLE memory_records (
   run_id TEXT NOT NULL,
   importance REAL NOT NULL DEFAULT 0.5 CHECK (importance BETWEEN 0 AND 1),
   pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
-  -- A shared instruction or fact that agent records with the same topic cannot override.
+  -- For an agent record: the ID of a shared record it replaces for this agent. Not a foreign key.
+  overrides TEXT,
+  -- A shared instruction or fact that agent records cannot override.
   required INTEGER NOT NULL DEFAULT 0 CHECK (required IN (0, 1)),
   -- Working agents update use_count and last_used_at; they never change revision.
   use_count INTEGER NOT NULL DEFAULT 0,
@@ -36,18 +37,15 @@ CREATE TABLE memory_records (
   updated_at INTEGER NOT NULL,
   -- Incremented on every status or content change; writes compare it with the value they read.
   revision INTEGER NOT NULL DEFAULT 1,
-  CHECK ((kind IN ('fact', 'instruction')) = (topic_key IS NOT NULL)),
   CHECK ((status = 'superseded') = (superseded_by IS NOT NULL)),
+  CHECK (overrides IS NULL OR scope GLOB 'agent:*'),
   CHECK (required = 0 OR (scope GLOB 'shared:*' AND kind IN ('fact', 'instruction')))
 );
 
--- At most one active record per topic: a write that would leave two fails and rolls back.
-CREATE UNIQUE INDEX memory_records_active_topic
-  ON memory_records (scope, kind, topic_key)
-  WHERE status = 'active' AND topic_key IS NOT NULL;
 CREATE INDEX memory_records_by_scope ON memory_records (scope, status, kind, importance DESC);
 CREATE INDEX memory_records_by_source
   ON memory_records (source_agent_id, source_entry_from);
+CREATE INDEX memory_records_by_override ON memory_records (overrides) WHERE overrides IS NOT NULL;
 
 -- Text is segmented in the Worker, so FTS5 only splits on the spaces it inserted.
 CREATE VIRTUAL TABLE memory_fts USING fts5 (
@@ -199,7 +197,8 @@ CREATE TABLE shared_proposals (
   id TEXT PRIMARY KEY,
   space TEXT NOT NULL,
   target TEXT NOT NULL CHECK (target IN ('record', 'skill')),
-  -- For a record: '<scope>/<kind>/<topic_key>'; for a skill: '<scope>/<name>'.
+  -- For a record: the ID of the record it replaces, or '<scope>' for a new one;
+  -- for a skill: '<scope>/<name>'.
   target_key TEXT NOT NULL,
   -- Revision of the target the proposal was written against; NULL when the target is new.
   base_revision INTEGER,
