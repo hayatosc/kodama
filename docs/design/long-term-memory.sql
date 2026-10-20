@@ -71,10 +71,9 @@ CREATE TABLE skills (
   scope TEXT NOT NULL,
   name TEXT NOT NULL CHECK (name NOT GLOB '*[^a-z0-9-]*' AND length(name) BETWEEN 1 AND 64),
   description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
-  search_text TEXT NOT NULL,
-  search_version INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'stale', 'archived')),
   version INTEGER NOT NULL DEFAULT 1,
+  -- Prefix of the skill directory in R2; SKILL.md and bundled files live below it.
   r2_key TEXT NOT NULL,
   content_sha256 TEXT NOT NULL,
   evidence_json TEXT NOT NULL,
@@ -86,19 +85,6 @@ CREATE TABLE skills (
   PRIMARY KEY (scope, name)
 );
 CREATE INDEX skills_by_status ON skills (scope, status, last_used_at);
-
-CREATE VIRTUAL TABLE skills_fts USING fts5 (
-  search_text,
-  content = 'skills', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
-);
-CREATE TRIGGER skills_ai AFTER INSERT ON skills BEGIN
-  INSERT INTO skills_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
-END;
-CREATE TRIGGER skills_au AFTER UPDATE OF search_text ON skills BEGIN
-  INSERT INTO skills_fts (skills_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, old.search_text);
-  INSERT INTO skills_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
-END;
 
 CREATE TABLE shared_proposals (
   id TEXT PRIMARY KEY,

@@ -168,6 +168,7 @@ AgentService (public RPC entrypoint)
 
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, skills, always-loaded memory
+  |-- read (SkillsEnv) -----------> R2 ARCHIVE           SKILL.md and bundled files
   |-- MEMORY_AGENT.sendMessage ---> MemoryAgent DO       remember, idle extraction, before pruning
   `-- writes ---------------------> R2 ARCHIVE           entries about to be pruned
 
@@ -189,14 +190,14 @@ subscribe to, or configure the memory agent, and a user agent named `memory` is 
 The proposed schema is in [long-term-memory.sql](long-term-memory.sql). It ships as a D1
 migration managed with `cf d1 migrations`.
 
-| Table                     | Rows                                                                                  | Written by                     |
-| ------------------------- | ------------------------------------------------------------------------------------- | ------------------------------ |
-| `memory_records`          | one memory: fact, event, instruction, or task, with scope, status, origin, and source | memory agent                   |
-| `memory_fts`              | FTS5 index over `memory_records` (external content, kept in sync by triggers)         | triggers                       |
-| `extraction_checkpoints`  | last extracted entry per agent                                                        | memory agent                   |
-| `skills` and `skills_fts` | skill index (name, description, status, R2 key, evidence) and its search index        | memory agent                   |
-| `shared_proposals`        | pending, accepted, or rejected proposals for shared memory                            | memory agent; reviewer decides |
-| `memory_ledger`           | append-only log of every change, including declined candidates                        | memory agent, reviewer         |
+| Table                    | Rows                                                                                  | Written by                     |
+| ------------------------ | ------------------------------------------------------------------------------------- | ------------------------------ |
+| `memory_records`         | one memory: fact, event, instruction, or task, with scope, status, origin, and source | memory agent                   |
+| `memory_fts`             | FTS5 index over `memory_records` (external content, kept in sync by triggers)         | triggers                       |
+| `extraction_checkpoints` | last extracted entry per agent                                                        | memory agent                   |
+| `skills`                 | skill index: name, description, status, R2 directory, evidence, use count             | memory agent                   |
+| `shared_proposals`       | pending, accepted, or rejected proposals for shared memory                            | memory agent; reviewer decides |
+| `memory_ledger`          | append-only log of every change, including declined candidates                        | memory agent, reviewer         |
 
 There is no table of sessions or generations. Pi never reuses entry IDs, and pruning keeps the
 same session, so an agent's entries form one sequence for its whole life. Archives are keyed by
@@ -344,9 +345,10 @@ for things to be remembered.
 - **Supersession safety.** Every write supersedes a record only through the partial unique
   index (see D1 schema), so even a manual operator write cannot leave two active records for a
   topic.
-- **Working agents keep a small tool surface**: `memory_search`, `history_search`,
-  `skill_search`, `skill_load`, and `remember`. `remember` sends a job to the memory agent at
-  once; it does not write memory records itself.
+- **Working agents keep a small tool surface**: `memory_search`, `history_search`, `remember`,
+  and Pi Durable's standard `read` tool for skills. `remember` sends a job to the memory agent
+  at once; it does not write memory records itself. The only columns working agents write are
+  usage counters (`use_count`, `last_used_at`), as single atomic increments.
 
 ### Write paths
 
@@ -489,17 +491,39 @@ toward the limit as they do today.
 
 ### Skills (procedural memory)
 
-- **Format**: Agent Skills (`SKILL.md` with `name` and `description` frontmatter), compatible
-  with Hermes, OpenClaw, and Claude Code.
-- **Stores**: the index (name, description, scope, status, use count, R2 key) in D1; bodies and
-  bundled files in R2.
-- **Disclosure**: a prompt section lists at most a few dozen names and descriptions; the rest
-  are found with `skill_search`. `skill_load` reads a body from R2.
-- **Creation**: the memory agent, during consolidation, proposes a skill only from a
-  procedure that succeeded at least twice, with the trajectories cited, and includes the
-  failure lessons. A proposal becomes active after a replay or check passes; shared skills also
-  need review. Working agents do not write skills, and nobody writes skills ahead of doing the
-  work.
+Skills load the way Pi loads them. Pi Durable ships no skills implementation of its own; its
+spec shows a host-defined `Skills` extension whose `skills` section lists the skills, and Pi's
+coding agent follows the Agent Skills specification: the system prompt carries each skill's
+name, description, and path, and the model reads `SKILL.md` with its file `read` tool when a
+task calls for it. Kodama does the same, with R2 in place of a local directory.
+
+- **Format**: Agent Skills directories (`SKILL.md` with `name` and `description`
+  frontmatter, plus optional `references/`, `assets/`, and `scripts/`), compatible with Pi,
+  Hermes, OpenClaw, and Claude Code.
+- **Stores**: each skill directory in R2 under `skills/<scope>/<name>/`; the index (name,
+  description, scope, status, R2 directory, use count) in D1.
+- **Listing**: a `skills` extension adds a `skills` section that renders the active skills of
+  the agent's scope and the shared scope as name, description, and path
+  (`/skills/<scope>/<name>/SKILL.md`). Like the always-loaded memory, the rendered text changes
+  only at idle boundaries, so the prompt prefix stays stable.
+- **Loading**: the standard `read` tool from `@earendil-works/pi-durable/tools`, through the
+  conversation's `env`. Kodama supplies `SkillsEnv`, a read-only `ExecutionEnv` that maps
+  `/skills/...` to R2 objects: the read methods (`readTextFile`, `readTextLines`,
+  `openBinaryReader`, `listDir`, `fileInfo`, `exists`, and the path helpers) work, and writes,
+  `exec`, and `watch` return `not_supported`. Relative paths inside a skill resolve against its
+  directory, as the Agent Skills specification expects. `SkillsEnv` is checked with Pi's
+  `registerEnvConformance()` for the read operations.
+- **Scripts**: there is no shell in a Durable Object, so bundled scripts can be read but not
+  run. A skill that needs to run code waits for a sandboxed environment.
+- **Usage**: an `afterTool` hook on `read` counts a use when the path is a `SKILL.md`, which
+  feeds curation.
+- **Size**: everything active is listed, as in Pi. Curation keeps the active set small (flat
+  selection degrades past about 64 skills), so there is no separate skill search.
+- **Creation**: the memory agent, during consolidation, proposes a skill only from a procedure
+  that succeeded at least twice, with the trajectories cited, and includes the failure lessons.
+  It writes the directory to R2 and the index row to D1. A proposal becomes active after a
+  replay or check passes; shared skills also need review. Working agents do not write skills,
+  and nobody writes skills ahead of doing the work.
 - **Curation**: stale after 14 days unused, archived after 30, pinned skills exempt, archived
   skills restorable, every change logged with its writer.
 
@@ -546,7 +570,11 @@ Each phase ships with workerd integration tests that mock the model.
    recovery, and cancels; `snapshot()` is unchanged; request IDs inside the retention window stay
    deduplicated; rows are deleted only after a verified export; `databaseSize` falls. The suite
    runs again on every Pi upgrade.
-4. **Skills.** D1 index, R2 bodies, disclosure, proposal from consolidation, curation.
+4. **Skills.** The `skills` extension and section, `SkillsEnv` over R2 with the standard `read`
+   tool, usage counting, proposal from consolidation, curation.
+   Tests: the section lists active skills with their paths; `read` returns `SKILL.md` and a
+   bundled reference by relative path; writes and `exec` through `SkillsEnv` fail; a skill read
+   increments its use count; `SkillsEnv` passes the read part of `registerEnvConformance()`.
 5. **Shared memory.** Shared scopes, proposals from the memory agent, and review.
 6. **Evaluation.** Probe questions after compaction and pruning (recall, artifacts,
    continuation, decisions, as in Factory's evaluation) and LongMemEval-style checks for
@@ -577,6 +605,9 @@ Each phase ships with workerd integration tests that mock the model.
   Durable already provide (durable admission, deduplication by request ID, a serial inbox,
   recovery) with a second execution model, its own tools, and its own tests. The saved
   duration is small (see the cost estimate above).
+- **Custom skill tools** (`skill_load` and `skill_search`, the earlier version of this plan). They
+  would duplicate Pi's `read` tool and break skills that refer to their bundled files by
+  relative path.
 - **Own the compaction summary** through Pi's `beforeCompact` hook (extract memories and
   return an anchored summary). It couples memory to Pi's compaction task and makes kodama
   responsible for summary quality without evidence that Pi's summary is the problem. The hook
