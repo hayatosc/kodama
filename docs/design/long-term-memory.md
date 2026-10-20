@@ -1,6 +1,7 @@
 # Long-term memory for long-running agents
 
 Status: proposal. Nothing in this document is implemented yet.
+A Japanese explanation is in [long-term-memory.ja.md](long-term-memory.ja.md).
 
 Kodama agents are meant to run like an always-on bot: one agent keeps answering and working
 in the same conversation for weeks or months. This document proposes how an agent remembers
