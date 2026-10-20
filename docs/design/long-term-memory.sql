@@ -16,9 +16,8 @@ CREATE TABLE memory_records (
     CHECK (status IN ('active', 'superseded', 'invalid', 'archived')),
   superseded_by TEXT,
   origin TEXT NOT NULL
-    CHECK (origin IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'rotation')),
+    CHECK (origin IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'archive')),
   source_agent_id TEXT NOT NULL,
-  source_generation INTEGER NOT NULL,
   source_entry_from INTEGER,
   source_entry_to INTEGER,
   run_id TEXT NOT NULL,
@@ -40,7 +39,7 @@ CREATE UNIQUE INDEX memory_records_active_topic
   WHERE status = 'active' AND topic_key IS NOT NULL;
 CREATE INDEX memory_records_by_scope ON memory_records (scope, status, kind, importance DESC);
 CREATE INDEX memory_records_by_source
-  ON memory_records (source_agent_id, source_generation, source_entry_from);
+  ON memory_records (source_agent_id, source_entry_from);
 
 -- Text is segmented in the Worker, so FTS5 only splits on the spaces it inserted.
 CREATE VIRTUAL TABLE memory_fts USING fts5 (
@@ -60,15 +59,12 @@ CREATE TRIGGER memory_records_au AFTER UPDATE OF search_text ON memory_records B
   INSERT INTO memory_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
 
--- generation is the agent's session generation, kept in its Durable Object and in the R2
--- manifest of each archived generation; entry IDs restart after rotation.
+-- Pi never reuses entry IDs, so one checkpoint per agent covers its whole life.
 CREATE TABLE extraction_checkpoints (
-  agent_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
+  agent_id TEXT PRIMARY KEY,
   last_entry_id INTEGER NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (agent_id, generation)
+  updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE skills (

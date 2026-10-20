@@ -18,7 +18,7 @@ Each agent is one SQLite-backed Durable Object that owns a Pi Durable session.
 - **Storage is not bounded.** Pi entries are immutable and never removed. A compaction or
   `reset()` only moves the context head: "A head on an entry changes subsequent context; it
   does not remove older entries from storage" (Pi Durable spec §2.1). Terminal task records and
-  section changes also stay. Pi has no API to prune them.
+  section changes also stay. Pi has no public API to prune them.
 - **The hard limit is 10 GB per object.** At the limit, writes fail with `SQLITE_FULL`; reads
   and deletes still succeed (Durable Objects FAQ). An agent that hits it stops working.
 - **Summaries cannot hold everything.** Pi's summary uses the coding agent's structured
@@ -64,10 +64,9 @@ Two conclusions follow:
 1. **The largest costs are write volume and active time, not stored bytes.** Moving data out of
    Durable Objects does not reduce them; tuning Pi's progress interval and stream lifetime does.
 2. **Long-term memory does not belong in the agent's Durable Object.** Per row and per GB a
-   Durable Object is not more expensive than D1, but memory must outlive the session (the
-   session object is wiped to reclaim storage), must be shared between agents, and must be
-   readable by the UI and by maintenance jobs without waking agent objects. Each of these
-   pushes memory into a separate store.
+   Durable Object is not more expensive than D1, but memory must be shared between agents and
+   readable by the UI and by maintenance jobs without waking agent objects, and the session's
+   own rows are pruned over time. Each of these pushes memory into a separate store.
 
 ## What existing systems do
 
@@ -97,9 +96,9 @@ skill."
    kind of optimization and waits until measurements show tool output dominating the context.
 3. **Extract memories from the transcript, not from the compaction.** OpenClaw flushes memory
    before compaction because its context is the only place the agent looks. In kodama,
-   compaction removes nothing from storage, so entries stay readable (`scanEntries`) until the
-   session is rotated. Extraction can run in the background after the agent goes idle (like Grok
-   Build and Hermes) and must run before rotation.
+   compaction removes nothing from storage, so entries stay readable (`scanEntries`) until they
+   are pruned. Extraction can run in the background after the agent goes idle (like Grok Build
+   and Hermes) and must run before pruning.
 4. **Verify what is extracted.** Extraction and updating are where memory systems create and
    accumulate errors (HaluMem 2511.03506), so extracted items need verification against the
    transcript and provenance.
@@ -118,7 +117,7 @@ skill."
    (Letta). Shared writes need provenance, a single writer per record, and review.
 8. **Freeze what is always loaded.** Hermes freezes its memory snapshot per session to keep the
    prompt cache; Pi re-sends changed sections as new system entries. Always-loaded memory should
-   change only at idle or rotation boundaries.
+   change only at idle boundaries.
 9. **Give memory its own writer.** Letta moved memory editing out of the conversing agent into
    a sleep-time agent, because bundling memory management with conversation made the agent
    slower and less reliable; the primary agent keeps only search tools. Cloudflare Agent Memory:
@@ -130,12 +129,12 @@ skill."
 
 ### Storage layers
 
-| Layer            | Store                                  | Contents                                                                                                         | Lifetime                    |
-| ---------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| Session          | the agent's Durable Object (unchanged) | Pi Durable session of the current generation; a frozen copy of the always-loaded memory; recent request receipts | one generation, then wiped  |
-| Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, extraction checkpoints, shared-memory proposals, skill index, and ledger    | kept                        |
-| Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations, each with a manifest (config, handoff note, receipts, SHA-256), skill bodies    | retention rule              |
-| Optional         | Vectorize                              | embeddings of memory records                                                                                     | added only if search misses |
+| Layer            | Store                                  | Contents                                                                                                      | Lifetime                    |
+| ---------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Session          | the agent's Durable Object (unchanged) | Pi Durable session; a frozen copy of the always-loaded memory                                                 | old rows pruned             |
+| Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, extraction checkpoints, shared-memory proposals, skill index, and ledger | kept                        |
+| Archive          | R2 bucket `ARCHIVE`                    | pruned entries in chunks, each with a manifest (entry range, summary, counts, SHA-256), skill bodies          | retention rule              |
+| Optional         | Vectorize                              | embeddings of memory records                                                                                  | added only if search misses |
 
 The only new Durable Object class is `MemoryAgent`, a subclass of `Agent` that is reachable
 only from inside the Worker (see below). Agents read D1 and R2 through Worker bindings; only
@@ -169,8 +168,8 @@ AgentService (public RPC entrypoint)
 
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, skills, always-loaded memory
-  |-- MEMORY_AGENT.sendMessage ---> MemoryAgent DO       remember, idle extraction, before rotation
-  `-- writes ---------------------> R2 ARCHIVE           transcript and manifest at rotation
+  |-- MEMORY_AGENT.sendMessage ---> MemoryAgent DO       remember, idle extraction, before pruning
+  `-- writes ---------------------> R2 ARCHIVE           entries about to be pruned
 
 MemoryAgent DO (the single instance "memory")
   |-- reads and writes -----------> D1 MEMORY_DB         through its memory-writing tools
@@ -194,29 +193,19 @@ migration managed with `cf d1 migrations`.
 | ------------------------- | ------------------------------------------------------------------------------------- | ------------------------------ |
 | `memory_records`          | one memory: fact, event, instruction, or task, with scope, status, origin, and source | memory agent                   |
 | `memory_fts`              | FTS5 index over `memory_records` (external content, kept in sync by triggers)         | triggers                       |
-| `extraction_checkpoints`  | last extracted entry per agent and generation                                         | memory agent                   |
+| `extraction_checkpoints`  | last extracted entry per agent                                                        | memory agent                   |
 | `skills` and `skills_fts` | skill index (name, description, status, R2 key, evidence) and its search index        | memory agent                   |
 | `shared_proposals`        | pending, accepted, or rejected proposals for shared memory                            | memory agent; reviewer decides |
 | `memory_ledger`           | append-only log of every change, including declined candidates                        | memory agent, reviewer         |
 
-Request receipts stay in the agent's Durable Object; they belong to the session, not to
-long-term memory.
-
-There is no generations table. Each role it had has a simpler home:
-
-| Need                                        | Where it lives                                                               |
-| ------------------------------------------- | ---------------------------------------------------------------------------- |
-| Current generation number                   | the agent's Durable Object; after a wipe, restored from the last R2 manifest |
-| Rotation progress                           | the agent's Durable Object until the wipe; the R2 manifest after it          |
-| Saved config, handoff note, recent receipts | the R2 manifest of the generation (`archive/<agentId>/<n>/manifest.json`)    |
-| Archive location                            | derived from agent ID and generation number                                  |
-| Searching past generations                  | a `rotation` event record per generation in `memory_records`                 |
-| One rotation at a time                      | the agent's Durable Object runs rotation inside `blockConcurrencyWhile`      |
+There is no table of sessions or generations. Pi never reuses entry IDs, and pruning keeps the
+same session, so an agent's entries form one sequence for its whole life. Archives are keyed by
+entry range.
 
 Rules that shape the tables:
 
-- **Record IDs** are a SHA-256 of scope, kind, topic key, content, and source (agent,
-  generation, first entry). Repeating the same run writes nothing new (`INSERT OR IGNORE`), and
+- **Record IDs** are a SHA-256 of scope, kind, topic key, content, and source (agent and first
+  entry). Repeating the same run writes nothing new (`INSERT OR IGNORE`), and
   a fact the user states again later gets a new record instead of colliding with a superseded
   one.
 - **One active record per topic.** A partial unique index on `(scope, kind, topic_key)` where
@@ -227,7 +216,7 @@ Rules that shape the tables:
 - **`superseded_by` is not a foreign key.** D1 enforces foreign keys immediately, and the old
   row is marked before the new row exists.
 - **`origin`** records why a record exists: `user_request`, `agent_judgment`, `extraction`,
-  `consolidation`, or `rotation` (the summary of an archived generation). (`trigger` would collide
+  `consolidation`, or `archive` (the summary of an archived range of entries). (`trigger` would collide
   with an SQL keyword.)
 - **Validity in time** comes from `observed_at` (when it became true) and the ledger entry that
   superseded or invalidated it. There is no separate validity table.
@@ -304,7 +293,7 @@ did not, as described above.
 - **event**: ranked by recency (half-life configurable, 30 days by default, as in OpenClaw) and
   archived after the retention window.
 - **instruction**: multi-step instructions become skill candidates during consolidation.
-- **task**: dropped when done or at rotation, after the handoff note records open tasks.
+- **task**: dropped when done.
 
 Hard deletion is an operator action (privacy), not something the agent does.
 
@@ -313,8 +302,8 @@ Hard deletion is an operator action (privacy), not something the agent does.
 A Pi prompt section renders two capped blocks from D1 records (see the main queries above):
 the agent's own memory and a small shared block. Each block has a character budget shown in
 the prompt (Hermes shows `[67% — 1,474/2,200 chars]`). The session object reads the blocks
-from D1 when a generation starts and when the memory agent
-reports a finished job while the agent is idle, and keeps the rendered text in a Pi document.
+from D1 when it starts and when the memory agent reports a finished job while the agent is
+idle, and keeps the rendered text in a Pi document.
 Requests in between read that copy, so the prompt prefix stays stable and no request waits on
 D1.
 
@@ -329,14 +318,14 @@ for things to be remembered.
   `MEMORY_MODEL_ID`, the memory-keeping system prompt), its tool registry, the reset after each
   job, and no background extraction of its own transcript. `setConfig` is not available on it.
 - **Internal only.** Its binding is not part of `AgentService`, so it receives jobs only from
-  kodama's own code: working agents' tools, rotation, and the `scheduled` handler. It never
+  kodama's own code: working agents' tools, pruning, and the `scheduled` handler. It never
   talks to users and has no conversation anyone watches.
 - **Tools only it has.** `memory_write`, `memory_supersede`, `memory_decline`, `read_entries`,
   `skill_propose`, `shared_propose`, and `notify_memory_changed` are registered only in
   `MemoryAgent`'s registry. Working agents' registry does not contain them, so no configuration
   can enable them elsewhere.
 - **Structured jobs.** A job is a JSON message validated with valibot (`remember`, `extract`,
-  `record_generation`, `consolidate`), not free chat.
+  `record_archive`, `consolidate`), not free chat.
 - **How jobs arrive.** Through the `sendMessage` method every agent already has, called on the
   `MEMORY_AGENT` binding. Admission is durable and does not wait for the model, so callers are not
   held up. Pi queues jobs that arrive while the memory agent is busy and runs them one at a
@@ -346,8 +335,8 @@ for things to be remembered.
   of running the job twice.
 - **Its own context.** Jobs are independent. The memory agent resets its context between jobs (a
   per-agent setting applied when a submission settles, using Pi's `reset()`), so each job starts
-  small, and its storage is reclaimed by the same in-place rotation as any agent, without the
-  extraction step and with an empty handoff. Background extraction is disabled for the memory agent
+  small, and its storage is reclaimed by the same pruning as any agent, without the extraction
+  step. Background extraction is disabled for the memory agent
   itself, so it never feeds on its own transcript.
 - **Cost.** It is billed Durable Object duration while it waits on its model. At an assumed
   1,000 jobs a day of 10 seconds each, that is about 37,500 GB-s a month, or $0.47 beyond the
@@ -407,7 +396,7 @@ All writes below are done by the memory agent.
    flagged in the moment.
 
 2. **Extraction.** The working agent sends an extraction job when it has been idle for a while
-   (its alarm) and always before rotation. It does not touch Pi's compaction:
+   (its alarm) and always before pruning. It does not touch Pi's compaction:
    1. The memory agent reads the entries after the checkpoint with its `read_entries` tool,
       which calls a paged RPC on the working agent's object (`scanEntries` inside).
    2. Extract candidate records with a configurable, cheaper model.
@@ -430,10 +419,9 @@ All writes below are done by the memory agent.
 - Always-loaded blocks (above).
 - `memory_search`: FTS5 BM25 in D1, ranked with recency and importance, with each record's
   provenance in the result.
-- `history_search`: searches the `rotation` event records (one summary per archived
-  generation) in D1, then reads that generation's archived transcript from R2, whose location
-  follows from the agent ID and generation number. It is the safety net for details that
-  extraction missed.
+- `history_search`: searches the `archive` event records (one summary per archived range) in
+  D1, then reads that range from R2, whose key follows from the agent ID and the entry range.
+  It is the safety net for details that extraction missed.
 
 ### Compaction
 
@@ -442,45 +430,62 @@ only if measurements call for it. If tool output later turns out to dominate the
 observation masking through a `beforeRequest` hook is the first thing to try, before any change
 to the summary.
 
-### Reclaiming session storage: in-place rotation
+### Reclaiming session storage: archive and prune
 
-Pi cannot delete entries, so the session object is wiped and restarted from a handoff note.
-Because long-term memory lives in D1, rotation keeps the same object and the same agent ID;
-no routing layer is needed.
+When storage fills up, the agent archives its oldest entries to R2 and deletes them. The
+conversation, its active context, and the object stay as they are.
 
-Rotation runs only when the session is idle and when one of these is true:
+**What may be deleted.** Pi builds the model context only from the newest head marker onward:
+after a compaction or reset, generation writes a fresh system entry with every section and tool
+in effect (spec §2.1, rule 10). Entries before that head are read only by the history scan
+`entries()`, which kodama does not use. So the prunable set is:
 
-- `ctx.storage.sql.databaseSize` passes a threshold (for example 1 GB);
-- the number of compactions in the generation passes a limit, so the next generation starts
-  from curated memory instead of a long chain of summaries;
-- a natural boundary, such as a long idle period (Hermes recommends `/new` at boundaries).
+- entries of the root conversation whose ID is below the newest head (`P`);
+- terminal task records, with their task-scoped documents and revisions;
+- settled submissions older than the request-ID retention window (30 days by default);
+- the `record_ids` rows of everything above.
 
-Steps, run by the agent's own Durable Object:
+Pi already keeps only the latest version of its own documents such as `pi.live`, so documents
+need no pruning.
 
-1. Send an `extract` job up to the last entry and wait until its submission is settled.
-2. Export generation N to `archive/<agentId>/<n>/` in R2 in pages and verify counts and hashes.
-3. Write `archive/<agentId>/<n>/manifest.json` last: the configuration, the handoff note (Pi's
-   latest compaction summary plus open tasks), recent request receipts, counts, and hashes.
-   The manifest's existence means the export is complete.
-4. Send a `record_generation` job so the memory agent stores the handoff note as a `rotation`
-   event record for `history_search`.
-5. Inside `blockConcurrencyWhile`: close the harness, call `ctx.storage.deleteAll()`, reopen
-   Pi, restore the configuration, start from the handoff note (`reset(handoff)`), write the
-   receipts and the generation number N+1, and re-arm the alarm (`deleteAll()` also removes the
-   alarm at this compatibility date).
+**When.** Only while the agent is idle (no live tasks), only while the root conversation is the
+only conversation (kodama creates no others today; if it ever does, pruning skips), and when
+`ctx.storage.sql.databaseSize` passes a threshold (for example 1 GB) or the prunable entries
+pass a count. Deletes still succeed at the 10 GB limit (Durable Objects FAQ), so pruning can
+recover an object that is already full.
 
-`deleteAll()` is atomic on SQLite-backed objects, so a crash leaves either the old generation
-intact or an empty object. If the object starts with an empty store, it lists
-`archive/<agentId>/` in R2; when a manifest exists it restores generation N+1 from the newest
-one, and otherwise it starts generation 0 as a new agent. A crash before step 5 leaves the old
-generation in place, and the next rotation attempt skips the export when the manifest is
-already there.
+**Steps**, run by the agent's own Durable Object:
 
-If a message arrives before step 5, rotation is abandoned and retried later. Kodama keeps a
-small receipts table of recent request IDs, so retries and `submission()` still resolve after
-the switch. Subscribers see their stream end and reconnect; clients already accept a
-replacement snapshot. Whether `deleteAll()` is billed per deleted row has not been verified;
-rotating before the object grows large keeps that bounded either way.
+1. If the extraction checkpoint is below `P - 1`, send an `extract` job up to `P - 1` and wait
+   until it settles.
+2. Export the entries from the last pruned ID to `P - 1` to
+   `archive/<agentId>/<first>-<last>.jsonl` in R2, then write the chunk's manifest (range,
+   counts, SHA-256, and the head marker's summary) and verify it. Exporting again writes the same
+   keys, so a retry is harmless.
+3. Send a `record_archive` job so the memory agent stores the summary as an `archive` event
+   record for `history_search`.
+4. Inside `blockConcurrencyWhile`: close the harness, delete the prunable rows in one
+   `transactionSync`, record `P` as the pruned boundary in a small kodama table, reopen the
+   harness, and refresh the recovery alarm.
+
+The transaction is atomic and the export comes first, so a crash leaves either nothing deleted
+or a complete, verified archive. The model context and `snapshot()` are the same before and
+after; open `subscribe()` streams end when the harness closes and reconnect to the same state.
+
+**Checked.** A workerd integration test (run once, not committed) sent three messages, compacted,
+then deleted six of eight entries and all four terminal tasks. After eviction the agent answered
+a new message, the model request contained the summary and none of the deleted text,
+`snapshot()` showed the summary, the kept reply, and the new turn, and a retry of a pruned
+turn's request ID returned its original submission without calling the model. In local workerd,
+deleting 75% of a 20 MB table shrank `databaseSize` from 20.5 MB to 5.1 MB; production has not
+been measured. Pruning old submissions has not been tested yet.
+
+**Risk.** Pruning writes to Pi's internal tables, which are not a public API. Kodama pins the Pi
+version, keeps pruning in one module, and runs a pruning test suite on every Pi upgrade
+(continue the conversation, compact again, evict, recover from the alarm, cancel, deduplicate
+request IDs, and compare snapshots). An official retention API in Pi Durable would replace the
+module; kodama should propose one upstream. Until pruning ships, agents simply keep growing
+toward the limit as they do today.
 
 ### Skills (procedural memory)
 
@@ -513,7 +518,7 @@ rotating before the object grows large keeps that bounded either way.
 - Raise `progress.partialIntervalMs` (for example to 500–1000 ms) after measuring rows per
   commit. The trade-off is coarser live streaming to the UI.
 - Close `subscribe()` streams that nobody watches, or move observation to WebSocket hibernation.
-- Rotate before the session object grows large; archived bytes cost about 13 times less in R2.
+- Prune before the session object grows large; archived bytes cost about 13 times less in R2.
 - Give the memory agent a cheaper model; it does not need the working agents' model.
 - Run consolidation as one job over D1 in the memory agent instead of waking every agent.
 
@@ -535,24 +540,29 @@ Each phase ships with workerd integration tests that mock the model.
    several compactions is found in D1 afterwards; a newer fact supersedes an older one; an
    interrupted extraction resumed writes no duplicates; a failed extraction leaves the checkpoint in
    place and the conversation unaffected.
-3. **In-place rotation.** R2 export with manifests, recovery from an empty store, `rotation`
-   records and `history_search`, receipts.
-   Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
-   switch; storage is wiped only after a verified export.
+3. **Archive and prune.** R2 export with manifests, the pruning module, `archive` records and
+   `history_search`.
+   Tests: after pruning, the conversation continues, compacts again, survives eviction and alarm
+   recovery, and cancels; `snapshot()` is unchanged; request IDs inside the retention window stay
+   deduplicated; rows are deleted only after a verified export; `databaseSize` falls. The suite
+   runs again on every Pi upgrade.
 4. **Skills.** D1 index, R2 bodies, disclosure, proposal from consolidation, curation.
 5. **Shared memory.** Shared scopes, proposals from the memory agent, and review.
-6. **Evaluation.** Probe questions after compaction and rotation (recall, artifacts,
+6. **Evaluation.** Probe questions after compaction and pruning (recall, artifacts,
    continuation, decisions, as in Factory's evaluation) and LongMemEval-style checks for
    knowledge updates, temporal questions, and abstention.
 
 ## Alternatives considered
 
 - **Everything in Durable Objects** (a memory object per agent and per shared space). It works,
-  but memory dies with a wiped session unless copied out, shared memory needs extra objects
-  that stay awake, and the UI or maintenance jobs would wake those objects to read.
-- **Keep one session object forever.** Simplest, and 10 GB is far for text-only chat. It still
-  has no way to free storage, keeps drifting summaries, and fails hard at the limit. Phases 1–2
-  work in this mode; rotation can wait until measurements call for it.
+  but shared memory needs extra objects that stay awake, and the UI or maintenance jobs would
+  wake those objects to read.
+- **Never prune.** Simplest, and 10 GB is far for text-only chat. It still fails hard at the
+  limit. Phases 1–2 work in this mode; pruning can wait until measurements call for it.
+- **Wipe the object and restart from a handoff note** (in-place rotation, the previous version
+  of this plan). It uses only public Pi APIs (`reset()` and `deleteAll()`), but it breaks the
+  conversation's continuity, needs restore-from-manifest logic and a generation number, and
+  drops every subscriber. It remains the fallback if a Pi change ever makes pruning unsafe.
 - **Memory as markdown files in R2 only** (like OpenClaw and Hermes on disk). Cheapest storage
   and easy to edit by hand, but search needs a separate index and R2 has no transactions.
   Exporting D1 memory to markdown for people to read can be added later.
@@ -562,9 +572,6 @@ Each phase ships with workerd integration tests that mock the model.
 - **The memory agent as an `Agent` with a reserved ID** in the public namespace. It works, but
   every public RPC method would need to reject that ID, and tool restrictions would depend on
   configuration checks. A subclass with its own binding keeps both out of reach structurally.
-- **A generations table in D1.** Everything it held has a simpler home (see D1 schema), and
-  rotation state is safer next to the data it describes: in the object until the wipe, in the
-  manifest after it.
 - **The memory agent as a Cloudflare Workflow** (the previous version of this plan). Workflows
   are not billed while waiting on the model, but they would duplicate what `Agent` and Pi
   Durable already provide (durable admission, deduplication by request ID, a serial inbox,
@@ -575,9 +582,10 @@ Each phase ships with workerd integration tests that mock the model.
   responsible for summary quality without evidence that Pi's summary is the problem. The hook
   stays available if evaluation probes show losses that memory and `history_search` cannot
   cover.
-- **Ask Pi Durable for pruning.** Deleting entries before the active head would conflict with
-  Pi's immutable-entry invariant and fork semantics. Worth raising upstream, not worth waiting
-  for.
+- **Wait for an official pruning API in Pi Durable.** The better end state: Pi knows its own
+  invariants (entries are immutable and IDs are never reused; forks read their parents). Worth
+  proposing upstream, not worth waiting for; kodama's pruning module is shaped so it can be
+  swapped for such an API.
 - **Cloudflare Agent Memory.** It matches this design closely and `cf` already has an
   `agentMemory` binding, but it is in private beta. Keep the memory store behind an interface
   so it can be swapped in later.
@@ -586,7 +594,7 @@ Each phase ships with workerd integration tests that mock the model.
 
 - Who reviews shared-memory proposals: a person through the UI, or the memory agent with
   stricter rules?
-- How long must archived transcripts be kept, and who may delete them?
+- How long must archived entries be kept, and who may delete them?
 - Which model and budget should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
 
