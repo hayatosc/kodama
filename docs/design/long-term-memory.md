@@ -205,20 +205,40 @@ for things to be remembered.
 - **Why a Workflow.** Steps are durable and retried, so an interrupted job resumes without
   repeating finished steps. A Workflow waiting on a model response is not billed for CPU time,
   while a Durable Object waiting on the same response is billed for duration.
-- **One run at a time per agent.** The run's instance ID is derived from the agent ID and the
-  checkpoint, and the checkpoint advances with a compare-and-set in D1, so two runs never write
-  the same range.
+- **Runs do not conflict.** An extraction run's instance ID is derived from the agent ID and
+  the checkpoint, and the checkpoint advances with a compare-and-set in D1, so two extraction
+  runs never write the same range. Every run supersedes a record only with a compare-and-set
+  on the record's current version, so a remember run and an extraction run cannot both replace
+  the same fact.
 - **Working agents keep a small tool surface**: `memory_search`, `history_search`,
-  `skill_search`, `skill_load`, and `remember`. `remember` writes a request to an inbox table
-  in D1 and starts a run soon; it does not write memory records itself.
+  `skill_search`, `skill_load`, and `remember`. `remember` starts a memory-agent run at once;
+  it does not write memory records itself.
 
 ### Write paths
 
 All writes below are done by the memory agent.
 
-1. **Requests to remember.** A working agent's `remember` call (validated with valibot,
-   size-capped, scanned for injection patterns) lands in the inbox. The next run turns it into
-   records, subject to the same reconciliation as everything else.
+1. **Remember on request.** When a user says "remember …" or gives a standing instruction
+   ("always …", "from now on …"), the working agent calls `remember` in that turn, like
+   OpenClaw ("If you want your agent to remember something, just ask it"). One-off tasks are
+   not remembered; the working agent decides which is which, as Hermes does when it ignores
+   facts mentioned in passing.
+   1. The tool validates the request with valibot, caps its size, and scans it for injection
+      patterns.
+   2. It creates a `MemoryWorkflow` instance right away, with the request and the IDs of the
+      entries it came from. The instance ID is a hash of the agent ID, the source entry, and
+      the content, so a tool call repeated after a restart cannot start a second run: Workflows rejects an ID
+      that is still in use, and the tool treats that error as already started.
+   3. It returns without waiting, so the turn is not held up and the session object is not
+      billed for the memory agent's model time.
+   4. The run classifies the request (usually an instruction or a fact), reconciles it with
+      existing records (a new instruction supersedes the one it replaces), and writes it to
+      D1. It is one small model call, not a scan of the transcript.
+   5. The run then tells the session object that memory changed. The new block appears in the
+      always-loaded memory at the next idle boundary; until then the instruction is still in the
+      current context. Other agents that read the same scope see it on their next refresh.
+      Later extraction sees the same message in the transcript and finds an equivalent record, so
+      it writes nothing new.
 2. **Extraction.** The session object starts a run when the agent has been idle for a while
    (its alarm) and always before rotation. It does not touch Pi's compaction:
    1. Read the entries after the agent's extraction checkpoint through a paged RPC on the
@@ -328,9 +348,11 @@ Each phase ships with workerd integration tests that mock the model.
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
 2. **Long-term memory in D1 and the memory agent.** Schema and migrations, `MemoryWorkflow`
-   with extraction and its checkpoint, the inbox and `remember`, the read tools, and the
-   always-loaded section.
-   Tests: a fact stated before several compactions is found in D1 afterwards; a newer fact
+   with extraction and its checkpoint, `remember` with its immediate run, the read tools, and
+   the always-loaded section.
+   Tests: a `remember` call starts a run in the same turn and its record is in D1 before the
+   agent goes idle; repeating the tool call starts no second run; a fact stated before several
+   compactions is found in D1 afterwards; a newer fact
    supersedes an older one; an interrupted extraction repeated writes no duplicates; a failed
    extraction leaves the checkpoint in place and the conversation unaffected.
 3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
