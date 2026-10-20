@@ -16,7 +16,7 @@ CREATE TABLE memory_records (
     CHECK (status IN ('active', 'superseded', 'invalid', 'archived')),
   superseded_by TEXT,
   origin TEXT NOT NULL
-    CHECK (origin IN ('user_request', 'agent_judgment', 'extraction', 'consolidation')),
+    CHECK (origin IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'rotation')),
   source_agent_id TEXT NOT NULL,
   source_generation INTEGER NOT NULL,
   source_entry_from INTEGER,
@@ -60,6 +60,8 @@ CREATE TRIGGER memory_records_au AFTER UPDATE OF search_text ON memory_records B
   INSERT INTO memory_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
 END;
 
+-- generation is the agent's session generation, kept in its Durable Object and in the R2
+-- manifest of each archived generation; entry IDs restart after rotation.
 CREATE TABLE extraction_checkpoints (
   agent_id TEXT NOT NULL,
   generation INTEGER NOT NULL,
@@ -68,38 +70,6 @@ CREATE TABLE extraction_checkpoints (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (agent_id, generation)
 );
-
-CREATE TABLE generations (
-  agent_id TEXT NOT NULL,
-  generation INTEGER NOT NULL,
-  status TEXT NOT NULL
-    CHECK (status IN ('active', 'exporting', 'exported', 'switching', 'closed')),
-  started_at INTEGER NOT NULL,
-  ended_at INTEGER,
-  config_json TEXT,
-  handoff TEXT,
-  handoff_search_text TEXT,
-  search_version INTEGER,
-  archive_prefix TEXT,
-  archive_sha256 TEXT,
-  entry_count INTEGER,
-  byte_size INTEGER,
-  compaction_count INTEGER,
-  PRIMARY KEY (agent_id, generation)
-);
-CREATE UNIQUE INDEX generations_one_open
-  ON generations (agent_id) WHERE status <> 'closed';
-
-CREATE VIRTUAL TABLE generations_fts USING fts5 (
-  handoff_search_text,
-  content = 'generations', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
-);
-CREATE TRIGGER generations_au AFTER UPDATE OF handoff_search_text ON generations BEGIN
-  INSERT INTO generations_fts (generations_fts, rowid, handoff_search_text)
-    SELECT 'delete', old.rowid, old.handoff_search_text WHERE old.handoff_search_text IS NOT NULL;
-  INSERT INTO generations_fts (rowid, handoff_search_text)
-    SELECT new.rowid, new.handoff_search_text WHERE new.handoff_search_text IS NOT NULL;
-END;
 
 CREATE TABLE skills (
   scope TEXT NOT NULL,

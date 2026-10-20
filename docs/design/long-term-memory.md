@@ -133,13 +133,13 @@ skill."
 | Layer            | Store                                  | Contents                                                                                                         | Lifetime                    |
 | ---------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | Session          | the agent's Durable Object (unchanged) | Pi Durable session of the current generation; a frozen copy of the always-loaded memory; recent request receipts | one generation, then wiped  |
-| Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, shared-memory proposals, skill index and ledger, generation index           | kept                        |
-| Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations (JSONL + manifest with SHA-256), skill bodies                                    | retention rule              |
+| Long-term memory | one D1 database `MEMORY_DB`            | memory records and their FTS5 index, extraction checkpoints, shared-memory proposals, skill index, and ledger    | kept                        |
+| Archive          | R2 bucket `ARCHIVE`                    | transcripts of past generations, each with a manifest (config, handoff note, receipts, SHA-256), skill bodies    | retention rule              |
 | Optional         | Vectorize                              | embeddings of memory records                                                                                     | added only if search misses |
 
-No new Durable Object classes are added. The memory agent is an ordinary `Agent` instance
-(see below). Agents read D1 and R2 through Worker bindings; only the memory agent writes
-long-term memory.
+The only new Durable Object class is `MemoryAgent`, a subclass of `Agent` that is reachable
+only from inside the Worker (see below). Agents read D1 and R2 through Worker bindings; only
+the memory agent writes long-term memory.
 
 D1 fits long-term memory because it supports FTS5, keeps 30 days of point-in-time recovery
 (Time Travel), and can be read by the UI Worker and by maintenance jobs without waking an
@@ -159,27 +159,31 @@ facts when they matter for the work.
 
 ### Components and calls
 
-There is no Durable Object class for memory. The memory agent is the `Agent` with ID `memory`:
-the same class, Pi session, inbox, and recovery alarm as every other agent, with its own
-configuration.
+The memory agent is a `MemoryAgent`: a subclass of `Agent` with the same Pi session, inbox,
+and recovery alarm, exported as its own Durable Object class with a single instance. Only
+internal callers hold its binding.
 
 ```text
-Working Agent DO (agentId)
-  |-- reads ----------------------> D1 MEMORY_DB      memory_search, skills, always-loaded memory
-  |-- sendTo('memory', job) ------> Agent DO memory   remember, idle extraction, before rotation
-  `-- writes ---------------------> R2 ARCHIVE        transcript export at rotation
+AgentService (public RPC entrypoint)
+  `-- AGENTS ---------------------> Agent DO (agentId)   MemoryAgent is not reachable from here
 
-Agent DO memory (the memory agent)
-  |-- reads and writes -----------> D1 MEMORY_DB      through its memory-writing tools
-  |-- reads ----------------------> R2 ARCHIVE        evidence for consolidation, skill bodies
-  |-- RPC readEntries ------------> Working Agent DO  extraction only, paged
-  `-- RPC memoryChanged ----------> Working Agent DO  refresh always-loaded memory at the next idle
+Agent DO (agentId)
+  |-- reads ----------------------> D1 MEMORY_DB         memory_search, skills, always-loaded memory
+  |-- MEMORY_AGENT.sendMessage ---> MemoryAgent DO       remember, idle extraction, before rotation
+  `-- writes ---------------------> R2 ARCHIVE           transcript and manifest at rotation
 
-Cron trigger --------------------> Agent DO memory   daily consolidation
+MemoryAgent DO (the single instance "memory")
+  |-- reads and writes -----------> D1 MEMORY_DB         through its memory-writing tools
+  |-- reads ----------------------> R2 ARCHIVE           evidence for consolidation, skill bodies
+  |-- AGENTS readEntries ---------> Agent DO             extraction only, paged
+  `-- AGENTS memoryChanged -------> Agent DO             refresh always-loaded memory at the next idle
+
+scheduled handler --------------> MemoryAgent DO       daily consolidation
 ```
 
-The only new bindings are `MEMORY_DB` (D1) and `ARCHIVE` (R2). The Worker's `scheduled`
-handler delivers the daily consolidation job with `sendMessage`.
+The new bindings are `MEMORY_AGENT` (Durable Object), `MEMORY_DB` (D1), and `ARCHIVE` (R2).
+`AgentService` resolves only `AGENTS`, so neither the UI nor any other RPC caller can send to,
+subscribe to, or configure the memory agent, and a user agent named `memory` is unrelated to it.
 
 ### D1 schema
 
@@ -191,14 +195,23 @@ migration managed with `cf d1 migrations`.
 | `memory_records`          | one memory: fact, event, instruction, or task, with scope, status, origin, and source | memory agent                   |
 | `memory_fts`              | FTS5 index over `memory_records` (external content, kept in sync by triggers)         | triggers                       |
 | `extraction_checkpoints`  | last extracted entry per agent and generation                                         | memory agent                   |
-| `generations`             | one row per session generation: status, saved config, handoff note, R2 archive        | agent DO during rotation       |
-| `generations_fts`         | FTS5 index over handoff notes for `history_search`                                    | triggers                       |
 | `skills` and `skills_fts` | skill index (name, description, status, R2 key, evidence) and its search index        | memory agent                   |
 | `shared_proposals`        | pending, accepted, or rejected proposals for shared memory                            | memory agent; reviewer decides |
 | `memory_ledger`           | append-only log of every change, including declined candidates                        | memory agent, reviewer         |
 
 Request receipts stay in the agent's Durable Object; they belong to the session, not to
 long-term memory.
+
+There is no generations table. Each role it had has a simpler home:
+
+| Need                                        | Where it lives                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------- |
+| Current generation number                   | the agent's Durable Object; after a wipe, restored from the last R2 manifest |
+| Rotation progress                           | the agent's Durable Object until the wipe; the R2 manifest after it          |
+| Saved config, handoff note, recent receipts | the R2 manifest of the generation (`archive/<agentId>/<n>/manifest.json`)    |
+| Archive location                            | derived from agent ID and generation number                                  |
+| Searching past generations                  | a `rotation` event record per generation in `memory_records`                 |
+| One rotation at a time                      | the agent's Durable Object runs rotation inside `blockConcurrencyWhile`      |
 
 Rules that shape the tables:
 
@@ -213,14 +226,14 @@ Rules that shape the tables:
   tries again.
 - **`superseded_by` is not a foreign key.** D1 enforces foreign keys immediately, and the old
   row is marked before the new row exists.
-- **`origin`** records why a record exists: `user_request`, `agent_judgment`, `extraction`, or
-  `consolidation`. (`trigger` would collide with an SQL keyword.)
+- **`origin`** records why a record exists: `user_request`, `agent_judgment`, `extraction`,
+  `consolidation`, or `rotation` (the summary of an archived generation). (`trigger` would collide
+  with an SQL keyword.)
 - **Validity in time** comes from `observed_at` (when it became true) and the ledger entry that
   superseded or invalidated it. There is no separate validity table.
 - **Checkpoints** have one writer: the memory agent, which handles its inbox one job at a time.
   If two jobs ever covered the same range, content-addressed IDs would make the overlap
   harmless.
-- **One open generation per agent**, enforced by a partial unique index on `generations`.
 
 Main queries:
 
@@ -310,24 +323,32 @@ D1.
 Long-term memory has one writer: the **memory agent**. Working agents only read memory and ask
 for things to be remembered.
 
-- **What it is.** An `Agent` instance with ID `memory`, using the class every agent uses. Its
-  configuration gives it a cheaper model, a memory-keeping system prompt, and the
-  memory-writing tools (`memory_write`, `memory_supersede`, `memory_decline`, `read_entries`,
-  `skill_propose`, `shared_propose`, `notify_memory_changed`). Those tools are registered like
-  any other, and configuration validation rejects them on any agent other than `memory`, so
-  `setConfig` cannot give a working agent write access. `memory` is a reserved agent ID.
-- **How jobs arrive.** Through the existing agent-to-agent primitive: `sendTo('memory', …)`
-  or `sendMessage`. Admission is durable and does not wait for the model, so callers are not
+- **What it is.** `MemoryAgent extends Agent`, with one instance named `memory`. It reuses the
+  whole `Agent` implementation and overrides only what makes it the memory agent: a fixed
+  configuration built in code (a cheaper model from `MEMORY_MODEL_PROVIDER` and
+  `MEMORY_MODEL_ID`, the memory-keeping system prompt), its tool registry, the reset after each
+  job, and no background extraction of its own transcript. `setConfig` is not available on it.
+- **Internal only.** Its binding is not part of `AgentService`, so it receives jobs only from
+  kodama's own code: working agents' tools, rotation, and the `scheduled` handler. It never
+  talks to users and has no conversation anyone watches.
+- **Tools only it has.** `memory_write`, `memory_supersede`, `memory_decline`, `read_entries`,
+  `skill_propose`, `shared_propose`, and `notify_memory_changed` are registered only in
+  `MemoryAgent`'s registry. Working agents' registry does not contain them, so no configuration
+  can enable them elsewhere.
+- **Structured jobs.** A job is a JSON message validated with valibot (`remember`, `extract`,
+  `record_generation`, `consolidate`), not free chat.
+- **How jobs arrive.** Through the `sendMessage` method every agent already has, called on the
+  `MEMORY_AGENT` binding. Admission is durable and does not wait for the model, so callers are not
   held up. Pi queues jobs that arrive while the memory agent is busy and runs them one at a
   time, which makes it the single writer without locks.
 - **Idempotency.** A job's `requestId` is a hash of the source agent, the source entry, and the
   content. A repeated delivery with the same request ID returns the existing submission instead
   of running the job twice.
-- **Its own context.** Jobs are independent. The memory agent resets its context between jobs
-  (a per-agent setting applied when a submission settles, using Pi's `reset()`), so each job
-  starts small, and its storage is reclaimed by the same in-place
-  rotation as any agent. Background extraction is disabled for the memory agent itself, so it
-  never feeds on its own transcript.
+- **Its own context.** Jobs are independent. The memory agent resets its context between jobs (a
+  per-agent setting applied when a submission settles, using Pi's `reset()`), so each job starts
+  small, and its storage is reclaimed by the same in-place rotation as any agent, without the
+  extraction step and with an empty handoff. Background extraction is disabled for the memory agent
+  itself, so it never feeds on its own transcript.
 - **Cost.** It is billed Durable Object duration while it waits on its model. At an assumed
   1,000 jobs a day of 10 seconds each, that is about 37,500 GB-s a month, or $0.47 beyond the
   allowance. Reusing `Agent` is worth that.
@@ -359,7 +380,7 @@ All writes below are done by the memory agent.
    Both cases take the same path:
    1. The tool validates the request with valibot, caps its size, and scans it for injection
       patterns.
-   2. It sends a job to the memory agent right away with `sendTo('memory', …)`, carrying the
+   2. It sends a `remember` job to the memory agent right away with `sendMessage`, carrying the
       request, its origin, and the IDs of the entries it came from. The request ID is a hash of
       the agent ID, the source entry, and the content, so a tool call repeated after a restart
       finds the existing submission instead of starting a second job.
@@ -409,8 +430,9 @@ All writes below are done by the memory agent.
 - Always-loaded blocks (above).
 - `memory_search`: FTS5 BM25 in D1, ranked with recency and importance, with each record's
   provenance in the result.
-- `history_search`: searches the generation index (handoff notes and summaries) in D1, then
-  reads the matching archived transcript from R2. It is the safety net for details that
+- `history_search`: searches the `rotation` event records (one summary per archived
+  generation) in D1, then reads that generation's archived transcript from R2, whose location
+  follows from the agent ID and generation number. It is the safety net for details that
   extraction missed.
 
 ### Compaction
@@ -433,17 +455,26 @@ Rotation runs only when the session is idle and when one of these is true:
   from curated memory instead of a long chain of summaries;
 - a natural boundary, such as a long idle period (Hermes recommends `/new` at boundaries).
 
-Steps, with progress recorded in the D1 generation index so a restart can resume:
+Steps, run by the agent's own Durable Object:
 
-1. Save the agent configuration and mark generation N as exporting.
-2. Send an extraction job up to the last entry and wait until its submission is settled.
-3. Export generation N to R2 in pages, write the manifest, and verify counts and hashes.
-4. Store the handoff note (Pi's latest compaction summary plus open tasks) in the generation
-   index.
+1. Send an `extract` job up to the last entry and wait until its submission is settled.
+2. Export generation N to `archive/<agentId>/<n>/` in R2 in pages and verify counts and hashes.
+3. Write `archive/<agentId>/<n>/manifest.json` last: the configuration, the handoff note (Pi's
+   latest compaction summary plus open tasks), recent request receipts, counts, and hashes.
+   The manifest's existence means the export is complete.
+4. Send a `record_generation` job so the memory agent stores the handoff note as a `rotation`
+   event record for `history_search`.
 5. Inside `blockConcurrencyWhile`: close the harness, call `ctx.storage.deleteAll()`, reopen
    Pi, restore the configuration, start from the handoff note (`reset(handoff)`), write the
-   recent request receipts, and re-arm the alarm (`deleteAll()` also removes the alarm at this
-   compatibility date). Mark generation N+1 active.
+   receipts and the generation number N+1, and re-arm the alarm (`deleteAll()` also removes the
+   alarm at this compatibility date).
+
+`deleteAll()` is atomic on SQLite-backed objects, so a crash leaves either the old generation
+intact or an empty object. If the object starts with an empty store, it lists
+`archive/<agentId>/` in R2; when a manifest exists it restores generation N+1 from the newest
+one, and otherwise it starts generation 0 as a new agent. A crash before step 5 leaves the old
+generation in place, and the next rotation attempt skips the export when the manifest is
+already there.
 
 If a message arrives before step 5, rotation is abandoned and retried later. Kodama keeps a
 small receipts table of recent request IDs, so retries and `submission()` still resolve after
@@ -494,17 +525,18 @@ Each phase ships with workerd integration tests that mock the model.
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
 2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration, the shared
-   segmentation function with its version, the `memory` agent's configuration and tools,
-   extraction and its checkpoint, `remember` with its immediate job, the read tools, and the
-   always-loaded section.
+   segmentation function with its version, `MemoryAgent` with its fixed configuration and tools,
+   extraction and its checkpoint, `remember` with its immediate job, the read tools, and the always-loaded
+   section.
    Tests: a `remember` call, from a user request or from the agent's own judgment, sends a job in
-   the same turn and its record is in D1 before the agent goes idle; repeating the tool call
-   creates no second submission; an agent-judged duplicate is declined; memory-writing tools are
-   rejected on any agent but `memory`; a fact stated before several compactions is found in D1
-   afterwards; a newer fact supersedes an older one; an interrupted extraction resumed writes no
-   duplicates; a failed extraction leaves the checkpoint in place and the conversation
-   unaffected.
-3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
+   the same turn and its record is in D1 before the agent goes idle; repeating the tool call creates
+   no second submission; an agent-judged duplicate is declined; working agents have no
+   memory-writing tools and `AgentService` cannot reach the memory agent; a fact stated before
+   several compactions is found in D1 afterwards; a newer fact supersedes an older one; an
+   interrupted extraction resumed writes no duplicates; a failed extraction leaves the checkpoint in
+   place and the conversation unaffected.
+3. **In-place rotation.** R2 export with manifests, recovery from an empty store, `rotation`
+   records and `history_search`, receipts.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
    switch; storage is wiped only after a verified export.
 4. **Skills.** D1 index, R2 bodies, disclosure, proposal from consolidation, curation.
@@ -527,6 +559,12 @@ Each phase ships with workerd integration tests that mock the model.
 - **Each working agent writes its own memory** (the earlier version of this plan). It puts
   memory tools and instructions into every request, spends the working model on bookkeeping,
   and leaves several writers per scope. Letta abandoned this shape for the same reasons.
+- **The memory agent as an `Agent` with a reserved ID** in the public namespace. It works, but
+  every public RPC method would need to reject that ID, and tool restrictions would depend on
+  configuration checks. A subclass with its own binding keeps both out of reach structurally.
+- **A generations table in D1.** Everything it held has a simpler home (see D1 schema), and
+  rotation state is safer next to the data it describes: in the object until the wipe, in the
+  manifest after it.
 - **The memory agent as a Cloudflare Workflow** (the previous version of this plan). Workflows
   are not billed while waiting on the model, but they would duplicate what `Agent` and Pi
   Durable already provide (durable admission, deduplication by request ID, a serial inbox,
