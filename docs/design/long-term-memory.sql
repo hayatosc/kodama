@@ -68,23 +68,39 @@ CREATE TABLE extraction_checkpoints (
 );
 
 CREATE TABLE skills (
-  scope TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope GLOB 'agent:*' OR scope GLOB 'shared:*'),
   name TEXT NOT NULL CHECK (name NOT GLOB '*[^a-z0-9-]*' AND length(name) BETWEEN 1 AND 64),
   description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
   status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'stale', 'archived')),
   version INTEGER NOT NULL DEFAULT 1,
-  -- Prefix of the skill directory in R2; SKILL.md and bundled files live below it.
+  -- R2 directory of the current version: skills/<scope>/<name>/v<version>/
   r2_key TEXT NOT NULL,
   content_sha256 TEXT NOT NULL,
   evidence_json TEXT NOT NULL,
+  -- For an agent skill that overrides a shared one: '<scope>/<name>@<version>'.
+  based_on TEXT,
+  -- For an agent skill merged into a shared one: '<scope>/<name>'.
+  absorbed_into TEXT,
   pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
-  use_count INTEGER NOT NULL DEFAULT 0,
-  last_used_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (scope, name)
+  PRIMARY KEY (scope, name),
+  CHECK (absorbed_into IS NULL OR (scope GLOB 'agent:*' AND status = 'archived'))
 );
-CREATE INDEX skills_by_status ON skills (scope, status, last_used_at);
+CREATE INDEX skills_by_status ON skills (scope, status);
+CREATE INDEX skills_by_name ON skills (name, status);
+
+-- Uses per agent, so shared skills can be curated by who still uses them.
+CREATE TABLE skill_usage (
+  scope TEXT NOT NULL,
+  name TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  use_count INTEGER NOT NULL DEFAULT 0,
+  last_used_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, name, agent_id),
+  FOREIGN KEY (scope, name) REFERENCES skills (scope, name) ON DELETE CASCADE
+);
+CREATE INDEX skill_usage_by_agent ON skill_usage (agent_id, last_used_at);
 
 CREATE TABLE shared_proposals (
   id TEXT PRIMARY KEY,

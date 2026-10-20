@@ -65,14 +65,15 @@ There is no per-person scope.
 The schema is [long-term-memory.sql](long-term-memory.sql), applied as a D1 migration with
 `cf d1 migrations`.
 
-| Table                    | Rows                                                       |
-| ------------------------ | ---------------------------------------------------------- |
-| `memory_records`         | one memory record                                          |
-| `memory_fts`             | FTS5 index over `memory_records.search_text` (triggers)    |
-| `extraction_checkpoints` | last extracted entry per agent                             |
-| `skills`                 | skill index: name, description, status, R2 directory, uses |
-| `shared_proposals`       | proposals for shared memory and their decisions            |
-| `memory_ledger`          | append-only log of every change, including declined items  |
+| Table                    | Rows                                                          |
+| ------------------------ | ------------------------------------------------------------- |
+| `memory_records`         | one memory record                                             |
+| `memory_fts`             | FTS5 index over `memory_records.search_text` (triggers)       |
+| `extraction_checkpoints` | last extracted entry per agent                                |
+| `skills`                 | skill index: name, description, status, version, R2 directory |
+| `skill_usage`            | skill uses per agent                                          |
+| `shared_proposals`       | proposals for shared memory and their decisions               |
+| `memory_ledger`          | append-only log of every change, including declined items     |
 
 Rules:
 
@@ -122,11 +123,11 @@ function; consolidation re-segments rows with an older version.
 - Fixed configuration built in code: model from `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`,
   the memory-keeping system prompt. `setConfig` throws.
 - Its own registry holds the tools `memory_write`, `memory_supersede`, `memory_decline`,
-  `read_entries`, `skill_propose`, `shared_propose`, and `notify_memory_changed`. The working
-  agents' registry does not contain them.
+  `read_entries`, `skill_write`, `skill_archive`, `shared_propose`, and `notify_memory_changed`.
+  `skill_write` accepts only agent scopes. The working agents' registry does not contain them.
 - Jobs are JSON messages validated with valibot: `remember`, `extract`, `record_archive`,
-  `consolidate`. They arrive through `sendMessage` on `MEMORY_AGENT`; Pi queues them and runs one
-  at a time.
+  `consolidate`, `apply_proposal`. They arrive through `sendMessage` on `MEMORY_AGENT`; Pi queues
+  them and runs one at a time.
 - A job's `requestId` is a hash of the source agent, the source entry, and the content, so a
   repeated delivery returns the existing submission.
 - After each job settles, the memory agent calls `reset()` on its root conversation. Its own
@@ -219,27 +220,76 @@ and run the pruning tests on every Pi upgrade.
 
 ## Skills
 
-- Agent Skills directories (`SKILL.md` with `name` and `description`, optional `references/`,
-  `assets/`, `scripts/`) in R2 under `skills/<scope>/<name>/`; index rows in D1 `skills`.
-- A `skills` extension adds a `skills` section listing active skills of the agent's scope and the
-  shared scope as name, description, and path `/skills/<scope>/<name>/SKILL.md`. The list is
-  refreshed with the always-loaded memory.
+Skills follow the Agent Skills format: a directory with `SKILL.md` (`name`, `description`) and
+optional `references/`, `assets/`, and `scripts/`.
+
+### Scopes and visibility
+
+| Scope             | Visible to                                    | Changed by                                      |
+| ----------------- | --------------------------------------------- | ----------------------------------------------- |
+| `agent:<agentId>` | that agent                                    | memory agent                                    |
+| `shared:<space>`  | agents whose `sharedSpaces` include `<space>` | memory agent, only through an accepted proposal |
+
+- `sharedSpaces` is a new `AgentConfig` field (default `["global"]`), validated like `tools`.
+  Shared memory records use the same field.
+- An agent skill shadows a shared skill with the same name. Between shared spaces, the earlier
+  space in `sharedSpaces` wins. Each name appears once in the listing.
+
+### Storage and versions
+
+- Each version is its own R2 directory, `skills/<scope>/<name>/v<version>/`. A new version never
+  overwrites files that a read may be using.
+- The `skills` row points to the current version (`version`, `r2_key`).
+- `skill_usage` counts uses per skill and agent. Working agents upsert it.
+
+### Listing and loading
+
+- A `skills` extension adds a `skills` section with the visible active skills as name,
+  description, and path `/skills/<scope>/<name>/SKILL.md`: agent skills first, then shared
+  skills by this agent's uses, then by all agents' uses, at most 50. The list is refreshed with
+  the always-loaded memory.
 - The model loads a skill with the `read` tool from `@earendil-works/pi-durable/tools`. The
-  conversation's `env` is `SkillsEnv`, a read-only `ExecutionEnv` that maps `/skills/...` to R2:
-  read methods work; writes, `exec`, and `watch` return `not_supported`. Relative paths resolve
-  against the skill directory. Scripts can be read but not run.
-- An `afterTool` hook on `read` increments the skill's `use_count` when the path ends in
-  `SKILL.md`.
-- The memory agent proposes a skill during consolidation only from a procedure that succeeded at
-  least twice, citing the trajectories and the failure lessons. It becomes active after a replay
-  or check passes; shared skills also need review.
-- Curation: `stale` after 14 days unused, `archived` after 30; pinned skills are exempt; archived
-  skills can be restored.
+  conversation's `env` is `SkillsEnv`, a read-only `ExecutionEnv` that resolves
+  `/skills/<scope>/<name>/...` to the current version's R2 directory. Paths of skills the agent
+  cannot see return not found. Writes, `exec`, and `watch` return `not_supported`. Relative paths
+  resolve against the skill directory. Scripts can be read but not run.
+- An `afterTool` hook on `read` upserts `skill_usage` when the path ends in `SKILL.md`.
+
+### Lifecycle
+
+All changes are made by the memory agent during `consolidate` and logged in `memory_ledger`.
+
+- **Create.** An agent skill, from a procedure that succeeded at least twice in that agent's
+  trajectories, with the trajectories and failure lessons as evidence. It is written as
+  `proposed`, and becomes `active` after a replay or check passes.
+- **Update an agent skill.** A new version from new evidence of the same agent, after a check.
+- **Promote.** When agent skills of two or more agents describe the same procedure, or an
+  operator asks, the memory agent merges them into one `shared_proposals` row (target `skill`)
+  that lists the sources. When it is accepted, the memory agent writes `shared:<space>/<name>`
+  version 1, archives the source agent skills with `absorbed_into`, and moves their
+  `skill_usage` rows to the shared skill.
+- **Update a shared skill.** Only through a proposal with evidence from the agents that use it,
+  accepted by review. It becomes a new version.
+- **Override.** When a shared skill keeps failing for one agent while a different procedure
+  succeeds, the memory agent writes an agent skill with the same name and `based_on` set to the
+  shared version. It shadows the shared skill for that agent only. When several agents override
+  a shared skill the same way, that becomes an update proposal for the shared skill.
+- **Curate.** An agent skill becomes `stale` after 14 days without use by its agent and
+  `archived` after 30. A shared skill becomes `stale` after 30 days without use by any agent and
+  `archived` after 60. Pinned skills are exempt. Archived skills can be restored.
+
+### Review
+
+`AgentService` gains `listProposals(space)` and `decideProposal(id, decision, reason)` for the
+UI server, which authenticates the reviewer. `decideProposal` records the decision in
+`shared_proposals` and sends an `apply_proposal` job to the memory agent, which performs the
+write.
 
 ## Shared memory
 
 - The memory agent creates a `shared_proposals` row from agent-scope records that more than one
-  agent relies on. A reviewer accepts or rejects it through an operator RPC.
+  agent relies on. A reviewer decides it through `decideProposal` (see Skills, Review).
+- Agents read the shared spaces listed in their `sharedSpaces`.
 - Accepted proposals become new record versions; shared records are never rewritten in place.
 - Content from untrusted sources is stored as an `event` with its source and is never pinned or
   promoted to the always-loaded memory without review.
@@ -247,16 +297,20 @@ and run the pruning tests on every Pi upgrade.
 
 ## Configuration
 
-| Setting                         | Default                                  |
-| ------------------------------- | ---------------------------------------- |
-| `progress.partialIntervalMs`    | 100 ms (to be raised after measurement)  |
-| `MEMORY_MODEL_PROVIDER` / `_ID` | none                                     |
-| idle delay before `extract`     | to be set                                |
-| always-loaded budget            | 2,200 characters (agent), 1,000 (shared) |
-| pruning threshold               | 1 GB                                     |
-| submission retention            | 30 days                                  |
-| event half-life                 | 30 days                                  |
-| skill stale / archive           | 14 / 30 days                             |
+| Setting                          | Default                                  |
+| -------------------------------- | ---------------------------------------- |
+| `progress.partialIntervalMs`     | 100 ms (to be raised after measurement)  |
+| `MEMORY_MODEL_PROVIDER` / `_ID`  | none                                     |
+| idle delay before `extract`      | to be set                                |
+| always-loaded budget             | 2,200 characters (agent), 1,000 (shared) |
+| pruning threshold                | 1 GB                                     |
+| submission retention             | 30 days                                  |
+| event half-life                  | 30 days                                  |
+| agent skill stale / archive      | 14 / 30 days                             |
+| shared skill stale / archive     | 30 / 60 days                             |
+| skills listed per agent          | 50                                       |
+| agents needed to promote a skill | 2                                        |
+| `sharedSpaces`                   | `["global"]`                             |
 
 ## Phases
 
@@ -279,17 +333,25 @@ Each phase ships with workerd integration tests that mock the model.
    Tests: after pruning the conversation continues, compacts again, survives eviction and alarm
    recovery, and cancels; `snapshot()` is unchanged; request IDs inside the retention window stay
    deduplicated; rows are deleted only after a verified export; `databaseSize` falls.
-4. **Skills.** `skills` extension, `SkillsEnv`, usage hook, proposals, curation.
-   Tests: the section lists active skills with paths; `read` returns `SKILL.md` and a bundled
-   file by relative path; writes and `exec` through `SkillsEnv` fail; reading `SKILL.md`
-   increments `use_count`; `SkillsEnv` passes the read part of `registerEnvConformance()`.
-5. **Shared memory.** Shared scopes, proposals, review RPC.
+4. **Skills.** `skills` extension, `SkillsEnv`, `skill_usage` hook, agent-skill lifecycle,
+   curation.
+   Tests: the section lists visible active skills with paths, agent skills first; an agent skill
+   shadows a shared skill of the same name; `read` returns `SKILL.md` and a bundled file by
+   relative path; a path of a skill the agent cannot see returns not found; writes and `exec`
+   through `SkillsEnv` fail; a new version does not change files of the previous one; reading
+   `SKILL.md` upserts `skill_usage`; `SkillsEnv` passes the read part of
+   `registerEnvConformance()`.
+5. **Shared memory and shared skills.** `sharedSpaces`, shared records, promotion and override of
+   skills, `listProposals`, `decideProposal`, `apply_proposal`.
+   Tests: an agent sees only the shared spaces in its `sharedSpaces`; two agents with the same
+   procedure produce one promotion proposal; accepting it creates the shared skill, archives the
+   sources with `absorbed_into`, and moves their usage; a rejected proposal changes nothing; a
+   shared skill changes only through an accepted proposal.
 6. **Evaluation.** Probe questions after compaction and pruning: recall, files touched,
    continuation, decisions, knowledge updates, temporal questions, abstention.
 
 ## Open questions
 
-- Who reviews shared-memory proposals: a person through the UI, or the memory agent?
 - How long must archived entries be kept, and who may delete them?
 - Which model should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
