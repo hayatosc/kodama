@@ -337,10 +337,11 @@ rotating before the object grows large keeps that bounded either way.
   bundled files in R2.
 - **Disclosure**: a prompt section lists at most a few dozen names and descriptions; the rest
   are found with `skill_search`. `skill_load` reads a body from R2.
-- **Creation**: the memory agent, during consolidation, proposes a skill only from a procedure that succeeded at least
-  twice, with the trajectories cited, and includes the failure lessons. A proposal becomes active
-  after a replay or check passes; shared skills also need review. Working agents do not
-  write skills, and nobody writes skills ahead of doing the work.
+- **Creation**: the memory agent, during consolidation, proposes a skill only from a
+  procedure that succeeded at least twice, with the trajectories cited, and includes the
+  failure lessons. A proposal becomes active after a replay or check passes; shared skills also
+  need review. Working agents do not write skills, and nobody writes skills ahead of doing the
+  work.
 - **Curation**: stale after 14 days unused, archived after 30, pinned skills exempt, archived
   skills restorable, every change logged with its writer.
 
@@ -420,7 +421,8 @@ Each phase ships with workerd integration tests that mock the model.
 
 ## Open questions
 
-- Who reviews shared-memory proposals: a person through the UI, or the memory agent with stricter rules?
+- Who reviews shared-memory proposals: a person through the UI, or the memory agent with
+  stricter rules?
 - How long must archived transcripts be kept, and who may delete them?
 - Which model and budget should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
