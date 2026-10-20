@@ -92,54 +92,31 @@ CREATE TABLE extraction_checkpoints (
   updated_at INTEGER NOT NULL
 );
 
--- One row per archived range of entries in R2. Written by the agent's pruning code, not by a
--- model, and kept as long as the R2 object exists.
+-- Catalog of archived ranges. The entries, their search index, and the summary are R2 objects
+-- under r2_prefix; this row is written by the agent's pruning code, not by a model, after the
+-- objects are verified, and is kept as long as they exist.
 CREATE TABLE archive_segments (
   id TEXT PRIMARY KEY, -- '<agentId>/<first>-<last>'
   agent_id TEXT NOT NULL,
   first_entry INTEGER NOT NULL,
   last_entry INTEGER NOT NULL,
   entry_count INTEGER NOT NULL,
-  r2_key TEXT NOT NULL,
+  -- archive/<agentId>/<first>-<last>; the objects are .jsonl, .manifest.json, .index.json, and
+  -- .summary.json once the record_archive job has written it.
+  r2_prefix TEXT NOT NULL,
   sha256 TEXT NOT NULL,
   bytes INTEGER NOT NULL,
+  -- Times of the first and last entry, for history_search periods.
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  has_summary INTEGER NOT NULL DEFAULT 0 CHECK (has_summary IN (0, 1)),
   -- 1 once extraction has covered this range; extraction may read it from R2 after pruning.
   extracted INTEGER NOT NULL DEFAULT 0 CHECK (extracted IN (0, 1)),
   created_at INTEGER NOT NULL,
   UNIQUE (agent_id, first_entry),
   CHECK (first_entry <= last_entry)
 );
-
--- Searchable text of archived entries ('text') and the segment summary ('summary'). byte_start
--- and byte_end locate the entries in the segment's JSONL object for an R2 range read.
-CREATE TABLE archive_chunks (
-  id TEXT PRIMARY KEY,
-  segment_id TEXT NOT NULL REFERENCES archive_segments (id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('text', 'summary')),
-  first_entry INTEGER NOT NULL,
-  last_entry INTEGER NOT NULL,
-  byte_start INTEGER NOT NULL,
-  byte_end INTEGER NOT NULL,
-  search_text TEXT NOT NULL,
-  search_version INTEGER NOT NULL
-);
-CREATE INDEX archive_chunks_by_segment ON archive_chunks (segment_id, first_entry);
-CREATE VIRTUAL TABLE archive_fts USING fts5 (
-  search_text,
-  content = 'archive_chunks', content_rowid = 'rowid', tokenize = 'unicode61 remove_diacritics 2'
-);
-CREATE TRIGGER archive_chunks_ai AFTER INSERT ON archive_chunks BEGIN
-  INSERT INTO archive_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
-END;
-CREATE TRIGGER archive_chunks_ad AFTER DELETE ON archive_chunks BEGIN
-  INSERT INTO archive_fts (archive_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, old.search_text);
-END;
-CREATE TRIGGER archive_chunks_au AFTER UPDATE OF search_text ON archive_chunks BEGIN
-  INSERT INTO archive_fts (archive_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, old.search_text);
-  INSERT INTO archive_fts (rowid, search_text) VALUES (new.rowid, new.search_text);
-END;
+CREATE INDEX archive_segments_by_time ON archive_segments (agent_id, last_at DESC);
 
 CREATE TABLE skills (
   scope TEXT NOT NULL CHECK (scope GLOB 'agent:*' OR scope GLOB 'shared:*'),

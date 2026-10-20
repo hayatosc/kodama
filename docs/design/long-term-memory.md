@@ -10,22 +10,22 @@ prunes the session's old rows so storage stays bounded.
 
 ## Components
 
-| Store                        | Binding        | Contents                                                                                |
-| ---------------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule    |
-| `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, `memory`) and its job queue                             |
-| D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive index, skills, proposals, ledger |
-| R2 bucket                    | `ARCHIVE`      | archived entries (`archive/`), skill directories and blobs (`skills/`)                  |
+| Store                        | Binding        | Contents                                                                                  |
+| ---------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
+| Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule      |
+| `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, `memory`) and its job queue                               |
+| D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skills, proposals, ledger |
+| R2 bucket                    | `ARCHIVE`      | archived entries and their search indexes (`archive/`), skills (`skills/`)                |
 
 ```text
 AgentService (public RPC entrypoint)
   `-- AGENTS ---------------------> Agent DO (agentId)   MemoryAgent is not reachable from here
 
 Agent DO (agentId)
-  |-- reads ----------------------> D1 MEMORY_DB         memory_search, history_search, revisions
-  |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive index (pruning)
+  |-- reads ----------------------> D1 MEMORY_DB         memory_search, archive catalog, revisions
+  |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
   |-- read (SkillsEnv) -----------> R2 ARCHIVE           SKILL.md and bundled files
-  |-- writes ---------------------> R2 ARCHIVE           entries about to be pruned
+  |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
   `-- MEMORY_AGENT.enqueue -------> MemoryAgent DO       remember, extract, record_archive
 
 MemoryAgent DO ("memory")
@@ -40,7 +40,7 @@ scheduled handler --------------> MemoryAgent DO       consolidate (daily)
 ```
 
 Only the memory agent changes memory records and skills. Working agents write usage counters and,
-while pruning, the archive index of their own entries.
+while pruning, the archive catalog of their own entries.
 
 ## Memory model
 
@@ -69,7 +69,8 @@ shared record.
 | `task`        | dropped when done                                                          |
 
 `origin` is one of `user_request`, `agent_judgment`, `extraction`, `consolidation`, or
-`proposal`. Summaries of archived entries are not memory records; they live in the archive index.
+`proposal`. Summaries of archived entries are not memory records; they live next to the archived
+entries in R2.
 Hard deletion is an operator action.
 
 ### D1 schema
@@ -77,20 +78,19 @@ Hard deletion is an operator action.
 The schema is [long-term-memory.sql](long-term-memory.sql), applied as a D1 migration with
 `cf d1 migrations`.
 
-| Table                           | Rows                                                         |
-| ------------------------------- | ------------------------------------------------------------ |
-| `memory_records`                | one memory record                                            |
-| `memory_fts`                    | FTS5 index over `memory_records.search_text` (triggers)      |
-| `memory_ops`                    | one applied write operation and its result                   |
-| `scope_revisions`               | revision of each scope's always-loaded records and skills    |
-| `extraction_checkpoints`        | last extracted entry per agent                               |
-| `archive_segments`              | one archived range of entries in R2                          |
-| `archive_chunks`, `archive_fts` | searchable text and summaries of archived entries            |
-| `skills`                        | skill index: name, description, status, content hash         |
-| `skill_writes`                  | a skill update recorded before its files are overwritten     |
-| `skill_usage`                   | skill uses per agent                                         |
-| `shared_proposals`              | proposals for shared memory, their decisions and application |
-| `memory_ledger`                 | append-only log of every change, including declined items    |
+| Table                    | Rows                                                         |
+| ------------------------ | ------------------------------------------------------------ |
+| `memory_records`         | one memory record                                            |
+| `memory_fts`             | FTS5 index over `memory_records.search_text` (triggers)      |
+| `memory_ops`             | one applied write operation and its result                   |
+| `scope_revisions`        | revision of each scope's always-loaded records and skills    |
+| `extraction_checkpoints` | last extracted entry per agent                               |
+| `archive_segments`       | catalog entry of one archived range in R2                    |
+| `skills`                 | skill index: name, description, status, content hash         |
+| `skill_writes`           | a skill update recorded before its files are overwritten     |
+| `skill_usage`            | skill uses per agent                                         |
+| `shared_proposals`       | proposals for shared memory, their decisions and application |
+| `memory_ledger`          | append-only log of every change, including declined items    |
 
 ### Applying a write
 
@@ -138,7 +138,7 @@ contradiction the memory agent cannot settle stays as `conflict` for review.
 ### Search text
 
 `search_text` holds normalized words joined by spaces, and FTS5 indexes it with
-`unicode61 remove_diacritics 2`. One shared function produces it for records, archive chunks, and
+`unicode61 remove_diacritics 2`. One shared function produces it for records, archive indexes, and
 queries:
 
 1. NFKC-normalize and lowercase.
@@ -160,19 +160,22 @@ function; consolidation re-segments rows with an older version.
 - `memory_search`: `memory_fts MATCH ?` joined to active records in the allowed scopes, ordered
   by `bm25()`, then reranked by recency and importance. Increment `use_count` and set
   `last_used_at` on the returned rows in one statement.
-- `history_search`: `archive_fts MATCH ?` joined to this agent's `archive_chunks`, both raw text
-  and summaries, ordered by `bm25()` and recency; read the matched byte ranges from R2. If nothing
-  matches, scan this agent's segments newest first within the period the tool gives, reading at
-  most 4 MB per call, and match the normalized query against the entries.
+- `history_search`: see [Archive index](#archive-index).
 
 ## Memory agent
 
 - `class MemoryAgent extends Agent`, exported as its own Durable Object class, one instance
-  named `memory`.
-- Not part of `AgentService`. Jobs come only from working agents, pruning, `decideProposal`, and
-  the `scheduled` handler.
+  named `memory`. It inherits `Agent` as it is, including `subscribe`, `snapshot`, and
+  `submission`, so a UI can later watch its jobs through an authenticated `AgentService` method.
+- Not part of `AgentService` for now. Jobs come only from working agents, pruning,
+  `decideProposal`, and the `scheduled` handler.
+- `sendMessage`, `send`, and `sendTo` throw, because jobs enter only through `enqueue`; input
+  that bypasses the queue would break one job at a time. `cancel` stops the running job, which the
+  runner retries like a failure.
 - Fixed configuration built in code: model from `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`,
   the memory-keeping system prompt. `setConfig` throws.
+- `Agent` gains protected factories for its harness options and default configuration, which
+  `MemoryAgent` overrides to supply its registry and fixed configuration.
 - Its own registry holds the tools `memory_search`, `memory_write`, `memory_supersede`,
   `memory_decline`,
   `read_entries`, `skill_write`, `skill_archive`, `shared_propose`, and `notify_memory_changed`.
@@ -319,27 +322,30 @@ Prunable rows, where `P` is the `head` of the newest head marker in the root con
 - the matching `record_ids` rows.
 
 Pruning runs when `ctx.storage.sql.databaseSize` is above the threshold (1 GB by default) or the
-prunable entries exceed a count. Its state is a `prune_runs` table in the agent's SQLite, outside
-Pi's tables, with one unfinished run at a time:
+prunable entries exceed a count. A run covers at most 16 MB of entries, so that building its files
+fits the object's memory and CPU limits; runs repeat until the size is below the threshold. Its
+state is a `prune_runs` table in the agent's SQLite, outside Pi's tables, with one unfinished run at
+a time:
 
-| State      | What is confirmed                                        |
-| ---------- | -------------------------------------------------------- |
-| `prepared` | the range from the last pruned entry to `P - 1` is fixed |
-| `exported` | the entries and the manifest are in R2 and verified      |
-| `indexed`  | `archive_segments` and its chunks are in D1              |
-| `deleted`  | the rows are gone from the Durable Object                |
+| State      | What is confirmed                                             |
+| ---------- | ------------------------------------------------------------- |
+| `prepared` | the range from the last pruned entry, up to `P - 1`, is fixed |
+| `exported` | the entries, manifest, and index are in R2 and verified       |
+| `indexed`  | the `archive_segments` row is in D1                           |
+| `deleted`  | the rows are gone from the Durable Object                     |
 
 On start and on the `prune` alarm, an unfinished run continues from its state.
 
 1. **Prepare.** Fix the range and record `prepared`. If the extraction checkpoint is below
    `P - 1`, enqueue an `extract` job; pruning does not wait for it, because extraction can read
    the segment from R2 later.
-2. **Export.** Write the entries to `archive/<agentId>/<first>-<last>.jsonl` and its manifest
-   (range, count, SHA-256), read both back to verify, and record `exported`. The keys depend only
-   on the range, so a repeated export overwrites the same objects.
-3. **Index.** In code, without a model, insert the `archive_segments` row and its text chunks in
-   one `batch()` (see [Archive index](#archive-index)), read the segment row back, and record
-   `indexed`. Then enqueue `record_archive` for the summary.
+2. **Export.** Under `archive/<agentId>/<first>-<last>`, write the entries (`.jsonl`), the
+   manifest (`.manifest.json`: range, count, times, SHA-256, Pi Durable version), and the search
+   index built in code (`.index.json`, see [Archive index](#archive-index)). Read them back to
+   verify, and record `exported`. The keys depend only on the range, so a repeated export
+   overwrites the same objects.
+3. **Catalog.** Insert the `archive_segments` row, read it back, and record `indexed`. Then
+   enqueue `record_archive` for the summary.
 4. **Delete.** Inside `blockConcurrencyWhile`, which here does only local SQLite work and stays
    far below its 30-second limit, check again:
    - `harness.inspect()` reports no live task, background compaction included, because a
@@ -351,6 +357,8 @@ On start and on the `prune` alarm, an unfinished run continues from its state.
    If any check fails, keep the run `indexed` and set the `prune` alarm 10 minutes later.
    Otherwise close the harness, delete the prunable rows, store `P` as the pruned boundary, and
    record `deleted` in one `transactionSync`, then reopen the harness and refresh the alarms.
+   The deleted entries are those of the run's range; tasks and submissions follow the rules
+   above.
 
 Steps 1–3 run while the agent keeps working; only step 4 needs it to be idle.
 
@@ -364,14 +372,29 @@ and run the pruning tests on every Pi upgrade.
 
 ### Archive index
 
-- `archive_segments`: one row per archived range, with its R2 key, size, SHA-256, and whether
-  extraction has covered it.
-- `archive_chunks` of kind `text`: the text of user and assistant messages, tool names and
-  arguments, and the first 2,000 characters of each tool result, grouped into chunks of about
-  2,000 characters, with their search text and their byte range in the JSONL object.
-- `archive_chunks` of kind `summary`: written by the `record_archive` job.
-- Segments and chunks are deleted only together with their R2 objects, by the operator's
-  retention action. Consolidation never expires them.
+Each archived range has its search index in R2, next to its entries:
+
+- `.index.json` is written by the pruning code. It splits the text of user and assistant
+  messages, tool names and arguments, and the first 2,000 characters of each tool result into
+  chunks of about 2,000 characters. For each chunk it stores the entry range and the byte range in
+  the `.jsonl` object; for each normalized word (from the search-text function) it lists the
+  chunks that contain it. It records the `search_version` it was built with.
+- `.summary.json` is written by the `record_archive` job: the summary and its normalized words.
+  Writing it sets `has_summary` on the catalog row.
+- The `archive_segments` row in D1 is the catalog: range, times, size, SHA-256, and whether
+  extraction and the summary are done. It is small, one row per range.
+- The objects and the row are deleted only together, by the operator's retention action.
+  Consolidation never expires them.
+
+`history_search(query, before?)`:
+
+1. List this agent's catalog rows newest first, starting before `before` if given.
+2. Read their `.summary.json` and `.index.json` objects in that order until 4 MB have been read.
+3. A chunk matches when it contains every query word; if none matches, retry with each word as a
+   prefix. Rank matches by the number of matched words, then recency.
+4. Read the matched byte ranges from the `.jsonl` objects and return them with their entry IDs
+   and times, plus the oldest time searched. The model passes that time as `before` to search
+   further back.
 
 ## Skills
 
@@ -493,7 +516,8 @@ UI server, which authenticates the reviewer.
 | pruning retry after a failed check | 10 minutes                               |
 | submission retention               | 30 days                                  |
 | archive chunk / tool result index  | 2,000 / 2,000 characters                 |
-| `history_search` fallback read     | 4 MB per call                            |
+| `history_search` index read        | 4 MB per call                            |
+| entries per pruning run            | at most 16 MB                            |
 | job retries                        | 1 minute, 10 minutes, 1 hour             |
 | consolidation job size             | one scope, 200 records                   |
 | unreferenced skill object grace    | 1 day                                    |
@@ -534,7 +558,8 @@ throwing from an injected hook and then reopen the object.
    - a resumed extraction writes no duplicates;
    - a failed extraction keeps the checkpoint and does not affect the conversation;
    - Japanese queries such as 「使う」, 「リポ」, 「サーバレス」 find their records.
-3. **Pruning.** R2 export and manifests, `prune_runs`, the archive index, the pruning module,
+3. **Pruning.** R2 export, manifests, and indexes, `prune_runs`, the archive catalog, the pruning
+   module,
    `record_archive`, `history_search`, the hard threshold.
    Tests:
    - after pruning the conversation continues, compacts again, survives eviction and alarm
@@ -546,6 +571,8 @@ throwing from an injected hook and then reopen the object.
    - a stop after indexing resumes and deletes once;
    - a word that appears only in the raw entries, not in the summary, finds them through
      `history_search`;
+   - when the read budget stops a search, it returns the oldest time searched, and a search with
+     that time as `before` continues further back;
    - with the memory agent stopped, pruning still reclaims storage and extraction later reads
      the segment from R2;
    - above the hard threshold new input is rejected as retryable;
@@ -703,8 +730,8 @@ One agent streaming model output 8 hours a day for 30 days, beyond the allowance
 ### 3. Raw entries are archived to R2 and pruned from the Durable Object
 
 **Decision.** Entries that compaction has moved out of the context are written to R2 and verified,
-indexed in D1 by code, and then deleted from the Durable Object. A summary is added later by the
-memory agent. The object is never wiped.
+indexed in R2 and cataloged in D1 by code, and then deleted from the Durable Object. A summary is
+added later by the memory agent. The object is never wiped.
 
 **Reasons.**
 
@@ -764,7 +791,8 @@ search tools and `remember` only.
 ### 5. The memory agent is an internal `Agent` subclass
 
 **Decision.** `class MemoryAgent extends Agent` is its own Durable Object class, reached only
-through the `MEMORY_AGENT` binding. `AgentService` cannot reach it.
+through the `MEMORY_AGENT` binding. It inherits `Agent` as it is; only the methods that would
+bypass its job queue throw. `AgentService` cannot reach it yet.
 
 **Reasons (kodama constraint).**
 
@@ -773,6 +801,8 @@ through the `MEMORY_AGENT` binding. `AgentService` cannot reach it.
   (decision 14).
 - A subclass with its own binding makes two things structural: public RPC cannot reach it, and its
   tools live in a separate registry.
+- Inheriting `subscribe` and `snapshot` keeps the memory agent's work observable like any agent's,
+  so a UI can show it later without new code in the agent.
 
 **Rejected.**
 
@@ -861,9 +891,9 @@ and when `scope_revisions` shows a newer revision before a turn.
 ### 9. Search starts with D1 FTS5 and Intl.Segmenter
 
 **Decision.** Text segmented with `Intl.Segmenter` is indexed by FTS5 (`unicode61 remove_diacritics
-2`), ranked by BM25, and reranked by recency and importance. The same applies to the raw text of
-archived entries, with a bounded scan of R2 as the fallback. Vector search is not in the first
-version.
+2`), ranked by BM25, and reranked by recency and importance. The raw text of archived entries is
+indexed with the same words in per-range index files in R2, read newest first within a budget.
+Vector search is not in the first version.
 
 **Reasons.**
 
@@ -876,6 +906,11 @@ version.
   「使う」, 「リポジトリ」, 「リポ」, 「デプ」, 「マネージャー」, 「レビュー」, 「サーバレス」 and
   「サーバーレス」, 「ベストプラクティス」, and 「ＰＮＰＭ 使う」.
 
+- The archive index lives in R2 next to the entries it indexes (kodama constraint). It grows with
+  the transcripts, tool output included, while D1 is one database of at most 10 GB for all agents
+  and costs fifty times more per GB. In R2 the index and its entries are kept and deleted
+  together, and building it needs no D1 batch limits.
+
 **Rejected.**
 
 - **FTS5's trigram tokenizer.** Trigram needs queries of at least three characters, so two-character
@@ -883,6 +918,8 @@ version.
   larger. `unicode61` alone treats a Japanese sentence without spaces as one token.
 - **Vectors and RRF from the start** (Cloudflare Agent Memory, OpenClaw hybrid search). Start with
   full-text search, measure what it misses, then decide whether to add vectors.
+- **The archive index as FTS5 in D1** (the previous version of this plan). One global ranking over
+  all archived text, but the index would soon dominate the shared D1 database.
 
 ### 10. Procedures are skills, loaded the way Pi loads them
 
@@ -1041,7 +1078,8 @@ machine whose final step rechecks its conditions in a short exclusive section.
 - `blockConcurrencyWhile` has a 30-second timeout, so it cannot cover R2 transfers; only the local
   recheck and deletion run inside it.
 - `sendMessage` returns when a submission is admitted, not when the memory agent finishes. Pruning
-  therefore deletes only after its own code has written the archive index, not after a job is
+  therefore deletes only after its own code has written the archive index and catalog, not after
+  a job is
   merely accepted.
 
 **Rejected.**
@@ -1068,8 +1106,11 @@ To check before the design is settled:
 - **A read during a skill update can see old and new files mixed** until the update finishes.
   Updates run only in consolidation and `apply_proposal`, and `SKILL.md` is written last, so this
   is accepted (Hermes has the same behavior).
+- **`history_search` reads index files newest first within a budget**, so it has no ranking
+  across all ranges, and finding something old takes several calls with `before`. The number of
+  ranges a call covers depends on index size, which is not measured.
 - **D1 is one database of at most 10 GB for all agents.** Extracted records are small, but
-  ledger rows, archive chunks, and proposals add up. Consolidation records the size; when to split
+  ledger rows and proposals add up. Consolidation records the size; when to split
   the database is not decided.
 - **Shared-skill curation windows (30 and 60 days), agents needed to promote (2), and the list
   limit (50)** are not taken directly from outside evidence. 50 leaves a margin under the numbers
