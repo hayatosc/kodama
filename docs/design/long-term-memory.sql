@@ -7,8 +7,9 @@ CREATE TABLE memory_records (
   kind TEXT NOT NULL CHECK (kind IN ('fact', 'event', 'instruction', 'task')),
   topic_key TEXT,
   content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 2000),
-  -- Words of topic_key and content split by Intl.Segmenter, NFKC-normalized, lowercased,
-  -- joined by spaces. search_version names the segmentation so rows can be re-split later.
+  -- Words of topic_key and content from Intl.Segmenter, normalized and joined by spaces:
+  -- merged katakana words first, then the original segments that differ (see the design doc).
+  -- search_version names the segmentation rules so rows can be re-split later.
   search_text TEXT NOT NULL,
   search_version INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'active'

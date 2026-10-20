@@ -237,27 +237,37 @@ FTS5's default `unicode61` tokenizer only splits on spaces and punctuation, so a
 sentence would be one token. Instead of the `trigram` tokenizer, the Worker splits text into
 words with `Intl.Segmenter` and stores them space-separated in a `search_text` column; FTS5
 then indexes those words with `unicode61`. This finds two-character words such as 「使う」,
-which `trigram` cannot (it needs at least three characters), should keep the index smaller (trigram indexes every character position), and
-ranks with `bm25()` over words. It needs no tokenizer beyond the one D1 is certain to have.
+which `trigram` cannot (it needs at least three characters). It should also keep the index
+smaller, since trigram indexes every character position, and it ranks with `bm25()` over
+words. It needs no tokenizer beyond the default one that D1 is certain to have.
+
+This is the approach of
+[個人開発に無料の日本語全文検索を](https://zenn.dev/coji/articles/cloudflare-d1-fts5-japanese-search-api)
+(Coji Mizoguchi, 2026), with katakana handling and a prefix retry added after testing.
 
 Writing `search_text`:
 
 1. Normalize with NFKC and lowercase (full-width 「ＰＮＰＭ」 becomes `pnpm`).
 2. Segment with `new Intl.Segmenter('ja', { granularity: 'word' })` and keep `isWordLike`
    segments.
-3. Merge adjacent katakana segments into one word. The dictionary splits unknown loanwords
-   into fragments (「リポジトリ」 becomes 「リ / ポジ / トリ」), which would make prefix search
-   fail.
-4. Append the original pieces of each merged katakana run after the words, so the second half
-   of a compound still matches (「マネージャー」 finds 「パッケージマネージャー」). Phrases
-   match the merged form because the pieces come after the sentence.
+3. In each segment, drop long vowel marks after katakana, as the article proposes, so 「サーバ」
+   and 「サーバー」 match. This runs after segmentation; doing it before changes how the
+   dictionary splits the text. The cost is conflating pairs such as 「ラーメン」 and 「ラメン」.
+4. Merge adjacent katakana segments into one word. The dictionary splits unknown loanwords
+   into fragments (「リポジトリ」 becomes 「リ / ポジ / トリ」), which makes prefix search fail.
+5. Append the original segments that differ from the merged words, so a part of a compound
+   still matches (「マネージャー」 finds 「パッケージマネージャー」).
 
 Querying:
 
-- Each whitespace-separated chunk of the query is segmented the same way and becomes a phrase
-  (`"pnpm を 使う"`); chunks are joined with `AND`.
-- If that returns nothing, the same query is retried with a prefix on the last word of each
-  phrase (`"デプ"*` finds 「デプロイ」).
+1. Apply the same steps to the query, quote each merged word, and join them, which FTS5 reads
+   as `AND` (`"pnpm" "を" "使う"`), as in the article.
+2. If that returns nothing, retry with each word as a prefix (`"デプ"*` finds 「デプロイ」).
+
+Known misses: a katakana word inside a longer compound that the dictionary splits differently
+in context. 「プラクティス」 alone is one segment, but 「ベストプラクティス」 is split into single
+characters, so 「プラクティス」 does not find it. Word-based search cannot fix this; trigram
+could, at the cost of the problems above.
 
 `search_version` records which segmentation produced a row. If the rules or the runtime's ICU
 data change, consolidation re-segments rows with an older version; the FTS5 triggers update
@@ -270,9 +280,9 @@ days.
 The schema was checked with SQLite 3.45: the partial index rejects a second active record for
 a topic, and a stale superseding batch rolls back. `Intl.Segmenter` was run in workerd
 (2026-10-12) and gave the same segments as Node. With the rules above, 「使う」, 「リポジトリ」,
-「リポ」, 「デプ」, 「マネージャー」, 「レビュー」, 「ＰＮＰＭ 使う」, and 「pnpmを使う」 all
-found their records. The known cost is noise from single-character katakana fragments in
-`search_text`.
+「リポ」, 「デプ」, 「マネージャー」, 「レビュー」, 「サーバレス」 and 「サーバーレス」,
+「ベストプラクティス」, 「ＰＮＰＭ 使う」, and 「pnpmを使う」 found their records; 「プラクティス」
+did not, as described above.
 
 ### Lifetimes by kind
 
