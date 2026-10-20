@@ -148,12 +148,13 @@ CREATE TABLE skills (
   name TEXT NOT NULL CHECK (name NOT GLOB '*[^a-z0-9-]*' AND length(name) BETWEEN 1 AND 64),
   description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
   status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'stale', 'archived')),
-  -- SHA-256 of the current manifest, stored in R2 at skills/.manifests/<sha256>.json. Each file
-  -- of the manifest is at skills/.blobs/<sha256>.
-  manifest_sha256 TEXT NOT NULL,
+  -- R2 directory, overwritten in place on update: skills/<scope>/<name>/
+  r2_key TEXT NOT NULL,
+  -- SHA-256 over the sorted list of each path and its file's SHA-256.
+  content_sha256 TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 1,
   evidence_json TEXT NOT NULL,
-  -- For an agent skill that overrides a shared one: '<scope>/<name>@<manifest_sha256>'.
+  -- For an agent skill that overrides a shared one: '<scope>/<name>@<content_sha256>'.
   based_on TEXT,
   -- For an agent skill merged into a shared one: '<scope>/<name>'.
   absorbed_into TEXT,
@@ -165,6 +166,21 @@ CREATE TABLE skills (
 );
 CREATE INDEX skills_by_status ON skills (scope, status);
 CREATE INDEX skills_by_name ON skills (name, status);
+
+-- A skill update recorded before any file is overwritten. The before and after files are in R2
+-- at skills/.blobs/<sha256>, so a 'pending' write can be finished by copying the after files again.
+CREATE TABLE skill_writes (
+  op_id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_revision INTEGER,
+  -- [{ path, before_sha256, after_sha256 }]; NULL before_sha256 adds a file, NULL after removes it.
+  files_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX skill_writes_pending ON skill_writes (status, created_at);
 
 -- Uses per agent, so shared skills can be curated by who still uses them.
 CREATE TABLE skill_usage (
@@ -187,7 +203,7 @@ CREATE TABLE shared_proposals (
   target_key TEXT NOT NULL,
   -- Revision of the target the proposal was written against; NULL when the target is new.
   base_revision INTEGER,
-  -- Concrete operations applied by code: record contents, or a skill manifest already in R2.
+  -- Concrete operations applied by code: record contents, or skill files already in R2 as blobs.
   payload_json TEXT NOT NULL,
   source_ids_json TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending'
@@ -212,8 +228,8 @@ CREATE TABLE memory_ledger (
   action TEXT NOT NULL,
   target TEXT NOT NULL CHECK (target IN ('record', 'skill', 'proposal')),
   target_id TEXT NOT NULL,
-  -- For a skill change: { before_manifest, after_manifest }. Manifests and blobs referenced by
-  -- retained ledger rows are kept in R2, so one change can be rolled back.
+  -- For a skill change: [{ path, before_sha256, after_sha256 }]. Blobs referenced by retained
+  -- ledger rows are kept in R2, so one change can be rolled back.
   detail_json TEXT
 );
 CREATE INDEX memory_ledger_by_target ON memory_ledger (target, target_id, seq);

@@ -15,7 +15,7 @@ prunes the session's old rows so storage stays bounded.
 | Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule    |
 | `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, `memory`) and its job queue                             |
 | D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive index, skills, proposals, ledger |
-| R2 bucket                    | `ARCHIVE`      | archived entries (`archive/`), skill blobs and manifests (`skills/`)                    |
+| R2 bucket                    | `ARCHIVE`      | archived entries (`archive/`), skill directories and blobs (`skills/`)                  |
 
 ```text
 AgentService (public RPC entrypoint)
@@ -24,7 +24,7 @@ AgentService (public RPC entrypoint)
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, history_search, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive index (pruning)
-  |-- read (SkillsEnv) -----------> R2 ARCHIVE           skill manifests and blobs
+  |-- read (SkillsEnv) -----------> R2 ARCHIVE           SKILL.md and bundled files
   |-- writes ---------------------> R2 ARCHIVE           entries about to be pruned
   `-- MEMORY_AGENT.enqueue -------> MemoryAgent DO       remember, extract, record_archive
 
@@ -90,7 +90,8 @@ The schema is [long-term-memory.sql](long-term-memory.sql), applied as a D1 migr
 | `extraction_checkpoints`        | last extracted entry per agent                               |
 | `archive_segments`              | one archived range of entries in R2                          |
 | `archive_chunks`, `archive_fts` | searchable text and summaries of archived entries            |
-| `skills`                        | skill index: name, description, status, current manifest     |
+| `skills`                        | skill index: name, description, status, content hash         |
+| `skill_writes`                  | a skill update recorded before its files are overwritten     |
 | `skill_usage`                   | skill uses per agent                                         |
 | `shared_proposals`              | proposals for shared memory, their decisions and application |
 | `memory_ledger`                 | append-only log of every change, including declined items    |
@@ -271,8 +272,8 @@ Sent once a day by the `scheduled` handler as bounded jobs. Merge duplicates, re
 contradictions, decay events, adjust importance and pinning so the always-loaded memory fits its
 budget, re-segment rows with an old `search_version`, propose skills, prepare shared proposals,
 apply any `accepted` proposal left unapplied, and delete in small batches: archived events, old
-ledger rows, and skill manifests and blobs referenced by no `skills` row or retained ledger row
-and older than one day. Record the database size (`meta.size_after`) and the record count per
+ledger rows, and skill blobs referenced by no retained ledger row or pending skill write and older
+than one day. Record the database size (`meta.size_after`) and the record count per
 scope in the ledger.
 
 ## Always-loaded memory
@@ -388,19 +389,22 @@ space in `sharedSpaces` wins. Each name appears once in the listing.
 
 ### Storage
 
-- Every file is stored once by content at `skills/.blobs/<sha256>`.
-- A manifest maps each path of a skill to its SHA-256. It is stored at
-  `skills/.manifests/<sha256>.json`, named by its own hash, and never changes.
-- The `skills` row points to the current manifest (`manifest_sha256`, `revision`).
-- An update is one operation:
-  1. upload the new blobs and the manifest (unchanged files are already there);
-  2. check that every blob and the manifest exist;
-  3. in one `batch()`, switch `manifest_sha256` (`WHERE revision = ?`) and write the ledger row
-     with the before and after manifests, the `scope_revisions` increment, and the `memory_ops`
-     row.
-- A stop before step 3 leaves only unreferenced objects, which consolidation deletes; readers keep
-  the old manifest. Unchanged files are never copied.
-- A rollback is an operation that switches back to a ledger row's before manifest.
+- Each skill is one R2 directory, `skills/<scope>/<name>/`, overwritten in place on update. The
+  `skills` row holds `content_sha256` (over each path and its file's SHA-256) and `revision`.
+- An update is one operation, recorded before any file changes so that a stop can be finished:
+  1. upload the new files to `skills/.blobs/<sha256>`, and copy there each file that will be
+     overwritten or removed (content-addressed, so a file is stored once);
+  2. insert a `pending` `skill_writes` row with the `op_id` and each changed path's before and
+     after SHA-256;
+  3. overwrite and remove the files in the skill directory, supporting files first and `SKILL.md`
+     last;
+  4. in one `batch()`, update `content_sha256` (`WHERE revision = ?`), write the ledger row with
+     the per-file hashes, the `scope_revisions` increment, and the `memory_ops` row, and mark the
+     `skill_writes` row `done`.
+- On start and before each job, the memory agent finishes every `pending` `skill_writes` row: it
+  copies the after blobs into the directory again and runs step 4. Step 3 writes the same bytes
+  each time, so a stop at any point ends in the new version.
+- A rollback is an operation that writes a ledger row's before blobs back in the same way.
 - `skill_usage` counts uses per skill and agent. Working agents upsert it.
 
 ### Listing and loading
@@ -411,9 +415,7 @@ space in `sharedSpaces` wins. Each name appears once in the listing.
   the always-loaded memory.
 - The model loads a skill with the `read` tool from `@earendil-works/pi-durable/tools`. The
   conversation's `env` is `SkillsEnv`, a read-only `ExecutionEnv` that resolves
-  `/skills/<scope>/<name>/<path>` through the skill's manifest to a blob.
-- `SkillsEnv` pins a skill's manifest at its first read and keeps the pin until the agent
-  refreshes its skill list at idle, so `SKILL.md` and its bundled files come from one manifest.
+  `/skills/<scope>/<name>/...` to the skill's R2 directory.
 - Paths of skills the agent cannot see return not found. Writes, `exec`, and `watch` return
   `not_supported`. Relative paths resolve against the skill directory. Scripts can be read but not
   run.
@@ -427,7 +429,7 @@ in `memory_ledger`.
 - **Create.** An agent skill, from a procedure that succeeded at least twice in that agent's
   trajectories, with the trajectories and failure lessons as evidence. It is written as
   `proposed`, and becomes `active` after a replay or check passes.
-- **Update an agent skill.** A new manifest from new evidence of the same agent, after a check.
+- **Update an agent skill.** Overwritten from new evidence of the same agent, after a check.
 - **Promote.** When agent skills of two or more agents describe the same procedure, or an
   operator asks, the memory agent uploads the merged skill and writes one `shared_proposals` row
   (target `skill`) that lists the sources, preferring a space every source agent reads. When it is
@@ -439,7 +441,7 @@ in `memory_ledger`.
   accepted by review and applied.
 - **Override.** When a shared skill keeps failing for one agent while a different procedure
   succeeds, the memory agent writes an agent skill with the same name and `based_on` set to the
-  shared skill and its manifest hash. It shadows the shared skill for that agent only. When
+  shared skill and its content hash. It shadows the shared skill for that agent only. When
   several agents override a shared skill the same way, that becomes an update proposal for the
   shared skill.
 - **Curate.** An agent skill becomes `stale` after 14 days without use by its agent and
@@ -452,7 +454,7 @@ in `memory_ledger`.
 UI server, which authenticates the reviewer.
 
 - A proposal stores its `target_key`, the `base_revision` it was written against, and a payload
-  of concrete operations: record contents, or a manifest already uploaded to R2. What is applied
+  of concrete operations: record contents, or skill files already uploaded as blobs. What is applied
   is exactly what was reviewed.
 - `decideProposal` moves the row from `pending` to `accepted` or `rejected` with one guarded
   update (`WHERE id = ? AND status = 'pending'`); a second decision changes nothing and returns
@@ -547,7 +549,7 @@ throwing from an injected hook and then reopen the object.
      the segment from R2;
    - above the hard threshold new input is rejected as retryable;
    - `databaseSize` falls.
-4. **Skills.** Blobs and manifests, `skills` extension, `SkillsEnv`, `skill_usage` hook,
+4. **Skills.** Blobs, `skill_writes`, `skills` extension, `SkillsEnv`, `skill_usage` hook,
    agent-skill lifecycle, curation.
    Tests:
    - the section lists visible active skills with paths, agent skills first;
@@ -555,10 +557,9 @@ throwing from an injected hook and then reopen the object.
    - `read` returns `SKILL.md` and a bundled file by relative path;
    - a path of a skill the agent cannot see returns not found;
    - writes and `exec` through `SkillsEnv` fail;
-   - a stop after each upload of an update leaves readers on the old manifest, and after the
-     switch on the new one, never a mix;
-   - a reader that pinned a manifest keeps reading it while the skill is updated;
-   - rolling back one ledger row restores the before manifest;
+   - a stop after each file write of an update is finished on restart: the skill ends in the new
+     version, `content_sha256` matches its files, and the write is `done`;
+   - rolling back one ledger row restores the before files;
    - reading `SKILL.md` upserts `skill_usage`;
    - `SkillsEnv` passes the read part of `registerEnvConformance()`.
 5. **Shared memory and shared skills.** `sharedSpaces`, scope precedence, shared records,
@@ -926,8 +927,8 @@ archived.
 - A skill starts as an agent skill and is promoted to a shared skill through review when two or
   more agents have the same procedure.
 - A shared skill changes only through an accepted proposal.
-- Skill files are stored once by content; an update switches the skill's manifest in one D1
-  batch, and the ledger keeps the before manifest for rollback.
+- Skills are overwritten in place. An update first records its per-file before and after hashes,
+  so a stop is finished on restart, and the ledger keeps the before files for rollback.
 - A shared skill is curated only after no agent uses it, over a longer window.
 
 **Reasons.**
@@ -948,13 +949,14 @@ archived.
   shared tiers, with immutable provenance.
 - Success of the same procedure in two or more agents is evidence that it is not one agent's quirk.
   This applies decision 11's "verified experience" across agents (kodama constraint).
-- The ledger follows Hermes: every skill mutation goes to an append-only ledger with per-file
-  SHA-256 before and after, file contents are stored content-addressed, and a single mutation can
-  be rolled back, including a deleted skill.
-- Switching a manifest instead of overwriting files makes an update atomic (kodama constraint).
-  Overwriting files one by one, as Hermes does, leaves a mix of old and new files as the current
-  skill if the writer stops in the middle, and the ledger does not say how far the update got.
-  With content-addressed blobs, unchanged files are still stored once.
+- Overwriting with a ledger follows Hermes. Hermes edits skills where they are found and keeps no
+  side-by-side versions. Every skill mutation goes to an append-only ledger with per-file SHA-256
+  before and after, file contents are stored content-addressed, and a single mutation can be rolled
+  back, including a deleted skill. A skill stays a plain directory, as in Hermes and Pi.
+- Recording the write before touching files handles a stop in the middle (kodama constraint).
+  Without it, a stop leaves a mix of old and new files as the current skill, and the ledger cannot
+  say how far the update got. With the after files already in blobs, finishing an update is a copy
+  that can be repeated.
 - Promotion archives a source agent skill only if that agent's name resolution then yields the
   shared skill (kodama constraint). Agents may read different shared spaces, or an earlier space
   may hold a skill with the same name; two agents succeeding with a procedure is a reason to
@@ -971,8 +973,9 @@ archived.
 
 - **One R2 directory per version** (`skills/<scope>/<name>/v<version>/`). Unchanged files are
   copied for every version.
-- **Overwrite files in place, supporting files first and `SKILL.md` last** (the previous version of
-  this plan). A stop in the middle leaves a mixed skill as the current one.
+- **Switch an immutable manifest of content-addressed files.** Readers would never see a mix, but
+  every read goes through the manifest and a reader has to pin it while it reads a skill. The
+  short mix during an update is accepted instead (see Weak points).
 - **Shared skills only** (one list for all agents). A procedure that succeeded in one agent would
   reach every agent, against decision 11, and the list would grow with the number of agents.
 - **Agent skills only.** Each agent would relearn the same procedures, and improvements would not
@@ -1054,6 +1057,9 @@ To check before the design is settled:
 - **The failure handling is checked against the Pi Durable 1.2.0 spec and SQLite, not yet run in
   workerd.** The reset ordering, the background compaction check, and D1 `batch()` rollback need
   the phase 2–4 failure tests.
+- **A read during a skill update can see old and new files mixed** until the update finishes.
+  Updates run only in consolidation and `apply_proposal`, and `SKILL.md` is written last, so this
+  is accepted (Hermes has the same behavior).
 - **D1 is one database of at most 10 GB for all agents.** Extracted records are small, but
   ledger rows, archive chunks, and proposals add up. Consolidation records the size; when to split
   the database is not decided.
