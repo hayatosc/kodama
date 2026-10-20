@@ -157,26 +157,94 @@ into more databases (for example per agent group) if one ever fills up.
 There is no per-person memory. Facts about the people an agent works with are ordinary agent
 facts when they matter for the work.
 
-### Record model
+### Components and calls
+
+There is no Durable Object for memory. The memory agent talks to D1 directly and calls the
+agent's own session object only for two things.
 
 ```text
-memory_records(
-  id            -- content-addressed: hash(scope, kind, key?, content)
-  scope         -- agent:<id> | shared:<space>
-  kind          -- fact | event | instruction | task
-  key           -- normalized topic key for facts and instructions
-  content
-  provenance    -- JSON: agentId, generation, entry range, trigger, writer
-                --   trigger: user_request | agent_judgment | extraction | consolidation
-  observed_at, created_at
-  superseded_by -- id of the record that replaced this one
-  invalid_at    -- set when contradicted
-  importance, use_count, last_used_at, pinned
-)
-memory_fts      -- FTS5 over content and key
+Agent DO (one per agentId; Pi session)
+  |-- reads ---------------> D1 MEMORY_DB      memory_search, skills, always-loaded memory
+  |-- creates -------------> MemoryWorkflow    remember, idle extraction, before rotation
+  `-- writes --------------> R2 ARCHIVE        transcript export at rotation
+
+MemoryWorkflow (memory agent; no Durable Object of its own)
+  |-- reads and writes ----> D1 MEMORY_DB
+  |-- reads ---------------> R2 ARCHIVE        evidence for consolidation, skill bodies
+  |-- RPC readEntries -----> Agent DO          extraction only, paged
+  `-- RPC memoryChanged ---> Agent DO          refresh always-loaded memory at the next idle
+
+Cron trigger ------------> MemoryWorkflow    daily consolidation
 ```
 
-Lifetimes by kind:
+`MemoryWorkflow` is exported from the same Worker as `Agent`, so it reaches agent objects
+through the existing `AGENTS` binding. The new bindings are `MEMORY_DB` (D1), `ARCHIVE` (R2),
+and `MEMORY_WORKFLOW` (Workflows).
+
+### D1 schema
+
+The proposed schema is in [long-term-memory.sql](long-term-memory.sql). It ships as a D1
+migration managed with `cf d1 migrations`.
+
+| Table                     | Rows                                                                                  | Written by                     |
+| ------------------------- | ------------------------------------------------------------------------------------- | ------------------------------ |
+| `memory_records`          | one memory: fact, event, instruction, or task, with scope, status, origin, and source | memory agent                   |
+| `memory_fts`              | FTS5 index over `memory_records` (external content, kept in sync by triggers)         | triggers                       |
+| `extraction_checkpoints`  | last extracted entry per agent and generation                                         | memory agent                   |
+| `generations`             | one row per session generation: status, saved config, handoff note, R2 archive        | agent DO during rotation       |
+| `generations_fts`         | FTS5 index over handoff notes for `history_search`                                    | triggers                       |
+| `skills` and `skills_fts` | skill index (name, description, status, R2 key, evidence) and its search index        | memory agent                   |
+| `shared_proposals`        | pending, accepted, or rejected proposals for shared memory                            | memory agent; reviewer decides |
+| `memory_ledger`           | append-only log of every change, including declined candidates                        | memory agent, reviewer         |
+
+Request receipts stay in the agent's Durable Object; they belong to the session, not to
+long-term memory.
+
+Rules that shape the tables:
+
+- **Record IDs** are a SHA-256 of scope, kind, topic key, content, and source (agent,
+  generation, first entry). Repeating the same run writes nothing new (`INSERT OR IGNORE`), and
+  a fact the user states again later gets a new record instead of colliding with a superseded
+  one.
+- **One active record per topic.** A partial unique index on `(scope, kind, topic_key)` where
+  `status = 'active'` makes superseding safe without locks: a run marks the old record
+  superseded and inserts the new one in one `batch()` (a D1 transaction). If another run got
+  there first, the insert violates the index and the whole batch rolls back; the run rereads and
+  tries again.
+- **`superseded_by` is not a foreign key.** D1 enforces foreign keys immediately, and the old
+  row is marked before the new row exists.
+- **`origin`** records why a record exists: `user_request`, `agent_judgment`, `extraction`, or
+  `consolidation`. (`trigger` would collide with an SQL keyword.)
+- **Validity in time** comes from `observed_at` (when it became true) and the ledger entry that
+  superseded or invalidated it. There is no separate validity table.
+- **Checkpoints** have one writer per agent: the session object starts at most one extraction
+  run at a time. If two ever overlapped, content-addressed IDs would make the overlap harmless.
+- **One open generation per agent**, enforced by a partial unique index on `generations`.
+
+Main queries:
+
+- Always-loaded memory: active `instruction` and `fact` records of the agent's scope and the
+  shared scope, ordered by `pinned`, `importance`, and `last_used_at`, cut to the character
+  budget in code. There is no separate block table; consolidation shapes the result by
+  adjusting importance and pinning.
+- `memory_search`: `memory_fts MATCH ?` joined to active records in the allowed scopes, ranked
+  by `bm25()` and then by recency and importance in code. It updates `use_count` and
+  `last_used_at` of the returned rows in one statement, which costs one row written per result.
+- Short queries: the trigram tokenizer needs at least three characters, so two-character
+  Japanese words such as 「使う」 return nothing. Queries shorter than three characters fall
+  back to `LIKE` within the scope.
+
+Retention: consolidation deletes archived events and old ledger rows in small batches (D1
+asks for large deletes to be split). Time Travel covers restores of the whole database for 30
+days.
+
+The schema was checked with SQLite 3.45: the partial index rejects a second active record for
+a topic, a stale superseding batch rolls back, and Japanese searches of three or more
+characters match through the trigram tokenizer. Cloudflare documents FTS5 support in D1 but
+does not name tokenizers, so trigram support in production D1 still has to be verified in
+phase 2.
+
+### Lifetimes by kind
 
 - **fact**: no decay. A new fact with the same key supersedes the old one and keeps the chain.
 - **event**: ranked by recency (half-life configurable, 30 days by default, as in OpenClaw) and
@@ -188,9 +256,10 @@ Hard deletion is an operator action (privacy), not something the agent does.
 
 ### Always-loaded memory
 
-A Pi prompt section renders capped blocks: the agent's notes and a small shared block. Each
-block has a character budget shown in the prompt (Hermes shows `[67% — 1,474/2,200 chars]`).
-The session object reads the blocks from D1 when a generation starts and when the memory agent
+A Pi prompt section renders two capped blocks from D1 records (see the main queries above):
+the agent's own memory and a small shared block. Each block has a character budget shown in
+the prompt (Hermes shows `[67% — 1,474/2,200 chars]`). The session object reads the blocks
+from D1 when a generation starts and when the memory agent
 reports a finished run while the agent is idle, and keeps the rendered text in a Pi document.
 Requests in between read that copy, so the prompt prefix stays stable and no request waits on
 D1.
@@ -372,15 +441,15 @@ Each phase ships with workerd integration tests that mock the model.
 1. **Measure and reduce cost.** Set the progress interval explicitly; measure rows written,
    database size, and context size per turn.
    Tests: row counts per turn stay under a recorded budget.
-2. **Long-term memory in D1 and the memory agent.** Schema and migrations, `MemoryWorkflow`
-   with extraction and its checkpoint, `remember` with its immediate run, the read tools, and
-   the always-loaded section.
+2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration (and a check
+   that the trigram tokenizer works in production D1), `MemoryWorkflow` with extraction and its
+   checkpoint, `remember` with its immediate run, the read tools, and the always-loaded section.
    Tests: a `remember` call, from a user request or from the agent's own judgment, starts a run
    in the same turn and its record is in D1 before the agent goes idle; repeating the tool call
    starts no second run; an agent-judged duplicate is declined; a fact stated before several
-   compactions is found in D1 afterwards; a newer fact
-   supersedes an older one; an interrupted extraction repeated writes no duplicates; a failed
-   extraction leaves the checkpoint in place and the conversation unaffected.
+   compactions is found in D1 afterwards; a newer fact supersedes an older one; an interrupted
+   extraction repeated writes no duplicates; a failed extraction leaves the checkpoint in place
+   and the conversation unaffected.
 3. **In-place rotation.** R2 export, the generation index, `history_search`, receipts.
    Tests: rotation survives eviction at every step; request IDs stay deduplicated across the
    switch; storage is wiped only after a verified export.
