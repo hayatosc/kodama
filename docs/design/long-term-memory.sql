@@ -72,12 +72,11 @@ CREATE TABLE skills (
   name TEXT NOT NULL CHECK (name NOT GLOB '*[^a-z0-9-]*' AND length(name) BETWEEN 1 AND 64),
   description TEXT NOT NULL CHECK (length(description) BETWEEN 1 AND 1024),
   status TEXT NOT NULL CHECK (status IN ('proposed', 'active', 'stale', 'archived')),
-  version INTEGER NOT NULL DEFAULT 1,
-  -- R2 directory of the current version: skills/<scope>/<name>/v<version>/
+  -- R2 directory, overwritten in place on update: skills/<scope>/<name>/
   r2_key TEXT NOT NULL,
   content_sha256 TEXT NOT NULL,
   evidence_json TEXT NOT NULL,
-  -- For an agent skill that overrides a shared one: '<scope>/<name>@<version>'.
+  -- For an agent skill that overrides a shared one: '<scope>/<name>@<content_sha256>'.
   based_on TEXT,
   -- For an agent skill merged into a shared one: '<scope>/<name>'.
   absorbed_into TEXT,
@@ -125,6 +124,8 @@ CREATE TABLE memory_ledger (
   action TEXT NOT NULL,
   target TEXT NOT NULL CHECK (target IN ('record', 'skill', 'proposal')),
   target_id TEXT NOT NULL,
+  -- For a skill change: [{ path, before_sha256, after_sha256 }]; the before files are in
+  -- R2 at skills/.blobs/<sha256>.
   detail_json TEXT
 );
 CREATE INDEX memory_ledger_by_target ON memory_ledger (target, target_id, seq);

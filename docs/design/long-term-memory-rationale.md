@@ -30,14 +30,14 @@ own constraints. The latter are marked "kodama constraint".
 
 ## Existing systems
 
-| System                                 | Always-loaded memory                                                   | Searchable memory                                       | Write trigger                                                                          | Old history                                                              | Skills                                                                                           |
-| -------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| OpenClaw                               | `MEMORY.md`, `USER.md`                                                 | daily notes, hybrid BM25 + vector, recency decay        | agent writes; silent "memory flush" turn before compaction; daily "dreaming" promotion | transcript kept on disk; `session.maintenance` prunes after 30 days      | not checked                                                                                      |
-| Hermes Agent                           | `MEMORY.md` (2,200 chars), `USER.md` (1,375 chars), frozen per session | `session_search` over SQLite FTS5                       | memory tool; background review after turns                                             | compaction starts a continuation session; `prune` deletes ended sessions | project, local, and external directories; higher precedence shadows the same name; curator       |
-| Grok Build                             | per-project and global markdown topics                                 | topic files read on demand                              | background capture after every turn; `/dream` merges                                   | not documented                                                           | not documented                                                                                   |
-| Cloudflare Agent Memory (private beta) | none                                                                   | facts, events, instructions, tasks; FTS + vectors + RRF | bulk ingestion at compaction; `remember` and `forget` tools                            | raw messages kept; facts superseded, not deleted                         | not documented                                                                                   |
-| Letta                                  | memory blocks                                                          | archival memory                                         | memory tools; sleep-time agent                                                         | git-backed memory repositories, shareable across agents                  | not checked                                                                                      |
-| Pi                                     | none                                                                   | none                                                    | none                                                                                   | entries never removed                                                    | global and project directories; the first discovered skill wins a name collision, with a warning |
+| System                                 | Always-loaded memory                                                   | Searchable memory                                       | Write trigger                                                                          | Old history                                                              | Skills                                                                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenClaw                               | `MEMORY.md`, `USER.md`                                                 | daily notes, hybrid BM25 + vector, recency decay        | agent writes; silent "memory flush" turn before compaction; daily "dreaming" promotion | transcript kept on disk; `session.maintenance` prunes after 30 days      | not checked                                                                                                                            |
+| Hermes Agent                           | `MEMORY.md` (2,200 chars), `USER.md` (1,375 chars), frozen per session | `session_search` over SQLite FTS5                       | memory tool; background review after turns                                             | compaction starts a continuation session; `prune` deletes ended sessions | project, local, and external directories; higher precedence shadows the same name; edited in place, rolled back from a ledger; curator |
+| Grok Build                             | per-project and global markdown topics                                 | topic files read on demand                              | background capture after every turn; `/dream` merges                                   | not documented                                                           | not documented                                                                                                                         |
+| Cloudflare Agent Memory (private beta) | none                                                                   | facts, events, instructions, tasks; FTS + vectors + RRF | bulk ingestion at compaction; `remember` and `forget` tools                            | raw messages kept; facts superseded, not deleted                         | not documented                                                                                                                         |
+| Letta                                  | memory blocks                                                          | archival memory                                         | memory tools; sleep-time agent                                                         | git-backed memory repositories, shareable across agents                  | not checked                                                                                                                            |
+| Pi                                     | none                                                                   | none                                                    | none                                                                                   | entries never removed                                                    | global and project directories; the first discovered skill wins a name collision, with a warning                                       |
 
 All of them keep procedures apart from facts as **skills**: name and description in the prompt,
 body loaded when relevant (Anthropic's progressive disclosure). Claude Code: "If an entry is a
@@ -339,7 +339,7 @@ archived.
 - A skill starts as an agent skill and is promoted to a shared skill through review when two or
   more agents have the same procedure.
 - A shared skill changes only through an accepted proposal.
-- Each version has its own R2 directory.
+- Skill updates overwrite files in place, and the previous files can be restored from the ledger.
 - A shared skill is curated only after no agent uses it, over a longer window.
 
 **Reasons.**
@@ -360,8 +360,11 @@ archived.
   shared tiers, with immutable provenance.
 - Success of the same procedure in two or more agents is evidence that it is not one agent's quirk.
   This applies decision 11's "verified experience" across agents (kodama constraint).
-- Separate version directories keep a new version from replacing files of a skill that is being
-  read (kodama constraint).
+- Overwriting with a ledger follows Hermes. Hermes edits skills where they are found and keeps no
+  side-by-side versions. Instead, every skill mutation goes to an append-only ledger with per-file
+  SHA-256 before and after, file contents are stored content-addressed, and a single mutation can
+  be rolled back, including a deleted skill. With overwriting, no current-version number has to
+  stay consistent between D1 and R2, and only changed files add blobs.
 - Shared skills are kept longer because they passed review and serve several agents. Hermes's
   curator by default curates only agent-created skills, because bundled skills disappearing silently
   looks like a broken install. Kodama curates shared skills too, with twice the window, and archived
@@ -372,6 +375,9 @@ archived.
 
 **Rejected.**
 
+- **One R2 directory per version** (`skills/<scope>/<name>/v<version>/`). A read never sees files
+  replaced under it, but unchanged files are copied for every version and the current version
+  number has to stay consistent between D1 and R2. No existing system does this.
 - **Shared skills only** (one list for all agents). A procedure that succeeded in one agent would
   reach every agent, against decision 11, and the list would grow with the number of agents.
 - **Agent skills only.** Each agent would relearn the same procedures, and improvements would not
@@ -408,6 +414,9 @@ To check before the design is settled:
 - **Rows written per progress commit** are not measured (phase 1). The cost estimate of decision 1
   assumes one row, a lower bound.
 - **A known search miss:** 「プラクティス」 alone does not match 「ベストプラクティス」.
+- **A read during a skill update can see old and new files mixed.** Supporting files are written
+  first and `SKILL.md` last, and updates happen only during consolidation, so this is accepted
+  (Hermes has the same behavior).
 - **Shared-skill curation windows (30 and 60 days), agents needed to promote (2), and the list
   limit (50)** are not taken directly from outside evidence. 50 leaves a margin under the numbers
   in 2607.10113; the rest are kodama choices.
