@@ -216,8 +216,8 @@ Rules that shape the tables:
 - **`superseded_by` is not a foreign key.** D1 enforces foreign keys immediately, and the old
   row is marked before the new row exists.
 - **`origin`** records why a record exists: `user_request`, `agent_judgment`, `extraction`,
-  `consolidation`, or `archive` (the summary of an archived range of entries). (`trigger` would collide
-  with an SQL keyword.)
+  `consolidation`, or `archive` (the summary of an archived range of entries). (`trigger` would
+  collide with an SQL keyword.)
 - **Validity in time** comes from `observed_at` (when it became true) and the ledger entry that
   superseded or invalidated it. There is no separate validity table.
 - **Checkpoints** have one writer: the memory agent, which handles its inbox one job at a time.
@@ -531,8 +531,8 @@ Each phase ships with workerd integration tests that mock the model.
    Tests: row counts per turn stay under a recorded budget.
 2. **Long-term memory in D1 and the memory agent.** The schema as a D1 migration, the shared
    segmentation function with its version, `MemoryAgent` with its fixed configuration and tools,
-   extraction and its checkpoint, `remember` with its immediate job, the read tools, and the always-loaded
-   section.
+   extraction and its checkpoint, `remember` with its immediate job, the read tools, and the
+   always-loaded section.
    Tests: a `remember` call, from a user request or from the agent's own judgment, sends a job in
    the same turn and its record is in D1 before the agent goes idle; repeating the tool call creates
    no second submission; an agent-judged duplicate is declined; working agents have no
