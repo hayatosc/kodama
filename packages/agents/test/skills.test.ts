@@ -3,20 +3,21 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { memoryDb } from '../src/memory/records.ts'
-import type { OperationContext, Scope } from '../src/memory/records.ts'
-import { memoryLedger, skills, skillUsage, skillWrites } from '../src/memory/schema.ts'
-import { SkillsEnv } from '../src/memory/skills-env.ts'
+import { memoryDb } from '../src/memory/store/db.ts'
+import type { OperationContext } from '../src/memory/store/statements.ts'
+import type { Scope } from '../src/memory/store/schema.ts'
+import { memoryLedger, skills, skillUsage, skillWrites } from '../src/memory/store/schema.ts'
+import { SkillsEnv } from '../src/memory/skills/env.ts'
+import { curateSkills } from '../src/memory/skills/curation.ts'
 import {
-  curateSkills,
   finishPendingSkillWrites,
   rollbackSkill,
   setSkillStatus,
-  skillDir,
-  visibleSkills,
   writeSkill,
-} from '../src/memory/skills.ts'
-import { MEMORY_AGENT_NAME } from '../src/memory/working.ts'
+} from '../src/memory/skills/write.ts'
+import { skillDir } from '../src/memory/skills/paths.ts'
+import { visibleSkills } from '../src/memory/skills/usage.ts'
+import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'
 import {
   isMemoryAgentRequest,
   requestBody,

@@ -13,17 +13,17 @@ import {
 import type { Harness, HarnessOptions, Submission } from '@earendil-works/pi-durable'
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
 import * as v from 'valibot'
-import { Agent } from '../agent/agent.ts'
-import type { AlarmPurpose } from '../alarms.ts'
-import type { AgentEnv } from '../env.ts'
-import { harnessSettings } from '../harness.ts'
-import { createAgentModels } from '../models/index.ts'
-import type { AgentConfig, SendMessageRequest, SendMessageResponse } from '../protocol.ts'
-import { memoryJobs } from '../storage/local-schema.ts'
+import { Agent } from '../../agent/agent.ts'
+import type { AlarmPurpose } from '../../alarms.ts'
+import type { AgentEnv } from '../../env.ts'
+import { harnessSettings } from '../../harness.ts'
+import { createAgentModels } from '../../models/index.ts'
+import type { AgentConfig, SendMessageRequest, SendMessageResponse } from '../../protocol.ts'
+import { memoryJobs } from '../../storage/local-schema.ts'
 import { isCodeJob, JOB_PRIORITY, jobId, parseMemoryJob } from './jobs.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from './jobs.ts'
-import { createMemoryAgentTools } from './memory-tools.ts'
-import type { RunningJob } from './memory-tools.ts'
+import { createMemoryAgentTools } from './tools/index.ts'
+import type { RunningJob } from './tools/common.ts'
 import { jobPrompt, MEMORY_SYSTEM_PROMPT } from './prompts.ts'
 import {
   changedScopes,
@@ -36,11 +36,12 @@ import {
   resegmentRecords,
   SETTLED_JOB_RETENTION_MS,
 } from './consolidation.ts'
-import { acceptedProposals, applyProposal } from './proposals.ts'
-import { needsPrune } from './prune.ts'
-import { curateSkills, finishPendingSkillWrites, forgetSkillBlobs } from './skills.ts'
-import { memoryDb } from './records.ts'
-import { memoryLedger, memoryOps } from './schema.ts'
+import { acceptedProposals, applyProposal } from '../shared/apply.ts'
+import { needsPrune } from '../archive/prune.ts'
+import { curateSkills, forgetSkillBlobs } from '../skills/curation.ts'
+import { finishPendingSkillWrites } from '../skills/write.ts'
+import { memoryDb } from '../store/db.ts'
+import { memoryLedger, memoryOps } from '../store/schema.ts'
 
 const context = BACKGROUND_CONTEXT
 /** While a job runs, the object wakes this often to resume it after an eviction. */

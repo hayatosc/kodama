@@ -1,9 +1,13 @@
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { applyOperation, memoryDb, searchMemory } from '../src/memory/records.ts'
-import type { NewRecord, OperationContext, Scope } from '../src/memory/records.ts'
-import { memoryRecords, scopeRevisions } from '../src/memory/schema.ts'
+import { applyOperation } from '../src/memory/store/records.ts'
+import { memoryDb } from '../src/memory/store/db.ts'
+import { searchMemory } from '../src/memory/store/search.ts'
+import type { NewRecord } from '../src/memory/store/records.ts'
+import type { OperationContext } from '../src/memory/store/statements.ts'
+import type { Scope } from '../src/memory/store/schema.ts'
+import { memoryRecords, scopeRevisions } from '../src/memory/store/schema.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)

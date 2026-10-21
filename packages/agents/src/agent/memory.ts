@@ -1,13 +1,11 @@
 /** Long-term memory as one working agent object uses it (Working agents, Extract). */
 import type { Extension, Harness } from '@earendil-works/pi-durable'
-import { extractionCheckpoint, memoryDb } from '../memory/records.ts'
-import { SkillsEnv } from '../memory/skills-env.ts'
-import {
-  AlwaysLoadedMemory,
-  createWorkingMemoryExtension,
-  MEMORY_AGENT_NAME,
-} from '../memory/working.ts'
-import type { WorkingMemoryDeps } from '../memory/working.ts'
+import { extractionCheckpoint, memoryDb } from '../memory/store/db.ts'
+import { SkillsEnv } from '../memory/skills/env.ts'
+import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
+import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
+import { MEMORY_AGENT_NAME } from '../memory/memory-agent/jobs.ts'
+import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { latestEntryId } from './entries.ts'
 
 /** An agent idle this long gets its new entries extracted into long-term memory. */

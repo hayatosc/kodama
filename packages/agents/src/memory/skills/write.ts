@@ -1,67 +1,29 @@
 /**
- * Skills: Agent Skills directories in R2, their rows in D1, writes that a stop can finish,
- * visibility, usage, and curation (docs/design/long-term-memory.md, Skills).
+ * Writing skills: overwriting a directory in place as one operation that a stop can finish,
+ * status changes, and rollback (docs/design/long-term-memory.md, Storage).
  */
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
-import type { MemoryDb, OperationContext, OperationResult, Scope } from './records.ts'
-import { appliedResult, bumpScope, claimRevision, insertOp } from './records.ts'
-import { memoryLedger, skillUsage, skills, skillWrites } from './schema.ts'
-import { readableScopes } from './working.ts'
+import type { MemoryDb } from '../store/db.ts'
+import { memoryLedger, skills, skillWrites } from '../store/schema.ts'
+import type { Scope } from '../store/schema.ts'
+import {
+  appliedResult,
+  bumpScope,
+  claimRevision,
+  errorText,
+  insertOp,
+} from '../store/statements.ts'
+import type { OperationContext, OperationResult } from '../store/statements.ts'
+import { blobKey, isSkillFilePath, isSkillName, parseSkillMd, skillDir, splitKey } from './paths.ts'
+import type { SkillStatus } from './paths.ts'
 
-export const SKILL_LIST_LIMIT = 50
 export const MAX_SKILL_FILES = 32
 export const MAX_SKILL_FILE_BYTES = 256 * 1024
-const DAY_MS = 24 * 60 * 60 * 1000
-/** Days without use before a skill becomes stale, then archived. */
-export const SKILL_CURATION_DAYS = { agent: [14, 30], shared: [30, 60] } as const
-/** Blobs no retained ledger row or pending write needs are deleted after this long. */
-export const SKILL_BLOB_GRACE_MS = DAY_MS
 
-const SKILL_NAME = /^[a-z0-9-]{1,64}$/
-const SEGMENT = /^(?!\.+$)[A-Za-z0-9._-]{1,100}$/
-const SUPPORT_DIRS = new Set(['references', 'assets', 'scripts'])
-
-export type Skill = typeof skills.$inferSelect
-export type SkillStatus = Skill['status']
 type SkillWriteRow = typeof skillWrites.$inferSelect
 type Statement = BatchItem<'sqlite'>
-
-export interface VisibleSkill {
-  scope: Scope
-  name: string
-  description: string
-}
-
-export function skillDir(scope: Scope, name: string): string {
-  return `skills/${scope}/${name}/`
-}
-
-export function blobKey(sha256: string): string {
-  return `skills/.blobs/${sha256}`
-}
-
-/** The path a working agent reads a skill's instructions at. */
-export function skillPath(skill: { scope: Scope; name: string }): string {
-  return `/${skillDir(skill.scope, skill.name)}SKILL.md`
-}
-
-export function isSkillName(name: string): boolean {
-  return SKILL_NAME.test(name)
-}
-
-/** `SKILL.md`, or a file below `references/`, `assets/`, or `scripts/`. */
-export function isSkillFilePath(path: string): boolean {
-  if (path === 'SKILL.md') return true
-  const [dir, ...rest] = path.split('/')
-  return (
-    dir !== undefined &&
-    SUPPORT_DIRS.has(dir) &&
-    rest.length > 0 &&
-    rest.every((s) => SEGMENT.test(s))
-  )
-}
 
 async function sha256Hex(bytes: Uint8Array | string): Promise<string> {
   const data = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
@@ -69,22 +31,7 @@ async function sha256Hex(bytes: Uint8Array | string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** `name` and `description` from the YAML frontmatter of a `SKILL.md`. */
-export function parseSkillMd(text: string): { name: string; description: string } | undefined {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
-  if (match?.[1] === undefined) return undefined
-  const fields = new Map<string, string>()
-  for (const line of match[1].split(/\r?\n/)) {
-    const field = /^([a-z_-]+):\s*(.*)$/.exec(line)
-    if (field?.[1] === undefined || field[2] === undefined) continue
-    fields.set(field[1], field[2].trim().replace(/^(["'])(.*)\1$/, '$2'))
-  }
-  const name = fields.get('name')
-  const description = fields.get('description')
-  return name === undefined || description === undefined ? undefined : { name, description }
-}
-
-const changesSchema = v.array(
+export const changesSchema = v.array(
   v.object({ path: v.string(), before: v.nullable(v.string()), after: v.nullable(v.string()) }),
 )
 const writeMetaSchema = v.object({
@@ -333,14 +280,6 @@ async function finishSkillWrite(
   return { ...result, replayed: false }
 }
 
-function errorText(error: unknown): string {
-  const parts: string[] = []
-  for (let cause: unknown = error; cause instanceof Error; cause = cause.cause) {
-    parts.push(cause.message)
-  }
-  return parts.join(' ')
-}
-
 function skillLedger(
   db: MemoryDb,
   ctx: OperationContext,
@@ -475,171 +414,4 @@ export async function rollbackSkill(
     evidence: `rollback of ledger row ${ledgerSeq}`,
     ...(current.basedOn === null ? {} : { basedOn: current.basedOn }),
   })
-}
-
-function isScope(value: string): value is Scope {
-  return value.startsWith('agent:') || value.startsWith('shared:')
-}
-
-/** `<scope>/<name>` into its parts; scopes contain no `/`. */
-export function splitKey(key: string): [Scope, string] {
-  const index = key.lastIndexOf('/')
-  const scope = key.slice(0, index)
-  if (index < 0 || !isScope(scope)) throw new TypeError(`Invalid skill key: ${key}`)
-  return [scope, key.slice(index + 1)]
-}
-
-/**
- * The skills an agent sees: its own, then shared ones whose name it does not use, the earlier
- * shared space winning. Agent skills first, then shared by this agent's uses and all agents' uses.
- */
-export async function visibleSkills(
-  db: MemoryDb,
-  agentId: string,
-  sharedSpaces: readonly string[],
-): Promise<VisibleSkill[]> {
-  const scopes = readableScopes(agentId, sharedSpaces)
-  const rows = await db
-    .select()
-    .from(skills)
-    .where(and(inArray(skills.scope, scopes), inArray(skills.status, ['active', 'stale'])))
-  if (rows.length === 0) return []
-  const usage = await db.select().from(skillUsage).where(inArray(skillUsage.scope, scopes))
-  const uses = (skill: Skill, mine: boolean) =>
-    usage
-      .filter(
-        (u) => u.scope === skill.scope && u.name === skill.name && (!mine || u.agentId === agentId),
-      )
-      .reduce((sum, u) => sum + u.useCount, 0)
-  const own = scopes[0]
-  const agentSkills = rows
-    .filter((skill) => skill.scope === own)
-    .sort((a, b) => uses(b, true) - uses(a, true))
-  const taken = new Set(agentSkills.map((skill) => skill.name))
-  const shared: Skill[] = []
-  for (const scope of scopes.slice(1)) {
-    for (const skill of rows.filter((row) => row.scope === scope)) {
-      if (taken.has(skill.name)) continue
-      taken.add(skill.name)
-      shared.push(skill)
-    }
-  }
-  shared.sort((a, b) => uses(b, true) - uses(a, true) || uses(b, false) - uses(a, false))
-  return [...agentSkills, ...shared]
-    .slice(0, SKILL_LIST_LIMIT)
-    .map(({ scope, name, description }) => ({ scope, name, description }))
-}
-
-/** Count one use of a skill by an agent; a skill removed meanwhile is ignored. */
-export async function recordSkillUse(
-  db: MemoryDb,
-  skill: { scope: Scope; name: string },
-  agentId: string,
-  now: number,
-): Promise<void> {
-  const key = and(
-    eq(skillUsage.scope, skill.scope),
-    eq(skillUsage.name, skill.name),
-    eq(skillUsage.agentId, agentId),
-  )
-  try {
-    // Only this agent writes its row; a use counted twice at the same moment may be lost.
-    const current = await db.select().from(skillUsage).where(key).get()
-    const useCount = (current?.useCount ?? 0) + 1
-    await db
-      .insert(skillUsage)
-      .values({ scope: skill.scope, name: skill.name, agentId, useCount, lastUsedAt: now })
-      .onConflictDoUpdate({
-        target: [skillUsage.scope, skillUsage.name, skillUsage.agentId],
-        set: { useCount, lastUsedAt: now },
-      })
-  } catch (error) {
-    if (!/constraint/i.test(errorText(error))) throw error
-  }
-}
-
-/**
- * Mark skills stale or archived after days without use (agent skills by their agent, shared
- * skills by anyone), and active again once used. Pinned skills are left alone.
- */
-export async function curateSkills(db: MemoryDb, runId: string, now: number): Promise<number> {
-  const rows = await db
-    .select()
-    .from(skills)
-    .where(and(inArray(skills.status, ['active', 'stale']), eq(skills.pinned, false)))
-  let changed = 0
-  for (const skill of rows) {
-    const agentId = skill.scope.startsWith('agent:')
-      ? skill.scope.slice('agent:'.length)
-      : undefined
-    const usage = await db
-      .select({ lastUsedAt: skillUsage.lastUsedAt })
-      .from(skillUsage)
-      .where(
-        and(
-          eq(skillUsage.scope, skill.scope),
-          eq(skillUsage.name, skill.name),
-          agentId === undefined ? undefined : eq(skillUsage.agentId, agentId),
-        ),
-      )
-    const lastUse = Math.max(skill.updatedAt, ...usage.map((u) => u.lastUsedAt))
-    const [staleDays, archiveDays] = SKILL_CURATION_DAYS[agentId === undefined ? 'shared' : 'agent']
-    const idle = now - lastUse
-    const status: SkillStatus =
-      idle >= archiveDays * DAY_MS ? 'archived' : idle >= staleDays * DAY_MS ? 'stale' : 'active'
-    if (status === skill.status) continue
-    const result = await setSkillStatus(
-      db,
-      {
-        opId: `curate:${skill.scope}/${skill.name}@${skill.revision}`,
-        jobId: runId,
-        runId,
-        actor: 'consolidation',
-        now,
-      },
-      { scope: skill.scope, name: skill.name, revision: skill.revision, status },
-    )
-    if (result.status === 'applied') changed++
-  }
-  return changed
-}
-
-/**
- * Delete blobs older than the grace period that no retained ledger row or pending write names.
- * Ledger rows outlive the rollback window by design, so a blob lives as long as its rollback can.
- */
-export async function forgetSkillBlobs(
-  db: MemoryDb,
-  bucket: R2Bucket,
-  now: number,
-): Promise<number> {
-  const referenced = new Set<string>()
-  const ledger = await db
-    .select({ detailJson: memoryLedger.detailJson })
-    .from(memoryLedger)
-    .where(and(eq(memoryLedger.target, 'skill'), eq(memoryLedger.action, 'write')))
-  const pending = await db
-    .select({ filesJson: skillWrites.filesJson })
-    .from(skillWrites)
-    .where(eq(skillWrites.status, 'pending'))
-  for (const json of [
-    ...ledger.map((row) => row.detailJson),
-    ...pending.map((row) => row.filesJson),
-  ]) {
-    if (json === null) continue
-    const parsed = v.safeParse(changesSchema, JSON.parse(json))
-    if (!parsed.success) continue
-    for (const change of parsed.output) {
-      if (change.before !== null) referenced.add(change.before)
-      if (change.after !== null) referenced.add(change.after)
-    }
-  }
-  const page = await bucket.list({ prefix: blobKey(''), limit: 1000 })
-  const stale = page.objects.filter(
-    (object) =>
-      !referenced.has(object.key.slice(blobKey('').length)) &&
-      object.uploaded.getTime() < now - SKILL_BLOB_GRACE_MS,
-  )
-  if (stale.length > 0) await bucket.delete(stale.map((object) => object.key))
-  return stale.length
 }

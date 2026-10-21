@@ -1,13 +1,8 @@
 /** Jobs of the memory agent (docs/design/long-term-memory.md, Jobs). */
 import * as v from 'valibot'
-import { AgentIdSchema } from '../validation.ts'
-import type { Scope } from './schema.ts'
-
-const SCOPE_PATTERN = /^(?:agent|shared):[a-zA-Z0-9_-]{1,64}$/
-
-export function isScope(value: unknown): value is Scope {
-  return typeof value === 'string' && SCOPE_PATTERN.test(value)
-}
+import { AgentIdSchema } from '../../validation.ts'
+import type { Scope } from '../store/schema.ts'
+import { isScope } from '../store/scopes.ts'
 
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')
 const EntryIdSchema = v.pipe(v.number(), v.integer(), v.minValue(0))
@@ -97,3 +92,6 @@ export function parseMemoryJob(value: unknown): MemoryJob {
   if (result.success) return result.output
   throw new TypeError(result.issues[0].message)
 }
+
+/** The one memory agent object; jobs are enqueued at this name. */
+export const MEMORY_AGENT_NAME = 'memory'

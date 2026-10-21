@@ -16,8 +16,8 @@ import type {
   ShellExecResult,
   TextLineReader,
 } from '@earendil-works/pi-durable/env'
-import type { VisibleSkill } from './skills.ts'
-import { skillDir } from './skills.ts'
+import type { VisibleSkill } from './paths.ts'
+import { skillDir } from './paths.ts'
 
 const ROOT = '/skills'
 

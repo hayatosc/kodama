@@ -3,10 +3,12 @@
  * (docs/design/long-term-memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { applyOperation, termStatements } from './records.ts'
-import type { MemoryDb, MemoryRecord, Scope } from './records.ts'
-import { memoryLedger, memoryRecords, memoryTerms, revisionClaims } from './schema.ts'
-import { SEARCH_VERSION } from './search-text.ts'
+import { applyOperation } from '../store/records.ts'
+import { termStatements } from '../store/statements.ts'
+import type { MemoryDb, MemoryRecord } from '../store/db.ts'
+import type { Scope } from '../store/schema.ts'
+import { memoryLedger, memoryRecords, memoryTerms, revisionClaims } from '../store/schema.ts'
+import { SEARCH_VERSION } from '../store/search-text.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const LEDGER_RETENTION_MS = 90 * DAY_MS

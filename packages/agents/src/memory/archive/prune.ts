@@ -21,9 +21,9 @@ import {
 } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import * as v from 'valibot'
-import type { AgentEnv } from '../env.ts'
-import { pruneRuns } from '../storage/local-schema.ts'
-import type { LocalDb } from '../storage/local.ts'
+import type { AgentEnv } from '../../env.ts'
+import { pruneRuns } from '../../storage/local-schema.ts'
+import type { LocalDb } from '../../storage/local.ts'
 import {
   piConversations,
   piDocumentRevisions,
@@ -31,10 +31,10 @@ import {
   piEntries,
   piRecordIds,
   piTasks,
-} from '../storage/pi-tables.ts'
-import { buildSegment, exportSegment, segmentId, segmentPrefix } from './archive.ts'
-import { extractionCheckpoint, memoryDb } from './records.ts'
-import { archiveSegments } from './schema.ts'
+} from '../../storage/pi-tables.ts'
+import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
+import { extractionCheckpoint, memoryDb } from '../store/db.ts'
+import { archiveSegments } from '../store/schema.ts'
 
 const context = BACKGROUND_CONTEXT
 const GIB = 1024 * 1024 * 1024

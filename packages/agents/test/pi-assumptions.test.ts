@@ -11,8 +11,8 @@ import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/stora
 import { inArray } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../src/harness.ts'
-import { memoryDb } from '../src/memory/records.ts'
-import { memoryOps } from '../src/memory/schema.ts'
+import { memoryDb } from '../src/memory/store/db.ts'
+import { memoryOps } from '../src/memory/store/schema.ts'
 import { createAgentModels } from '../src/models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'

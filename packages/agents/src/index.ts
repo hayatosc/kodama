@@ -7,11 +7,11 @@ import type {
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
-import { MEMORY_AGENT_NAME } from './memory/working.ts'
+import { MEMORY_AGENT_NAME } from './memory/memory-agent/jobs.ts'
 import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent/agent.ts'
-export { MemoryAgent } from './memory/memory-agent.ts'
+export { MemoryAgent } from './memory/memory-agent/memory-agent.ts'
 
 /** Service-binding RPC entrypoint for the UI server and other trusted Workers. */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {

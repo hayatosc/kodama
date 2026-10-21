@@ -1,22 +1,17 @@
 /**
- * Archived ranges of entries in R2, their search index, and `history_search`
- * (docs/design/long-term-memory.md, Pruning, Archive index).
+ * Archived ranges of entries in R2: building, exporting, and reading a segment, its search index,
+ * and its summary (docs/design/long-term-memory.md, Pruning, Archive index).
  */
 import type { EntryRecord } from '@earendil-works/pi-durable'
-import { and, desc, eq, lt } from 'drizzle-orm'
 import * as v from 'valibot'
-import type { MemoryDb } from './records.ts'
-import { archiveSegments } from './schema.ts'
-import { SEARCH_VERSION, searchWords, storedSearchText } from './search-text.ts'
-import { entryText } from './transcript.ts'
-import type { EntryText } from './transcript.ts'
+import { SEARCH_VERSION, storedSearchText } from '../store/search-text.ts'
+import { entryText } from '../transcript.ts'
+import type { EntryText } from '../transcript.ts'
 
 export const ARCHIVE_FORMAT = 1
 /** Pi Durable version whose entry records the archive holds. */
 export const PI_DURABLE_VERSION = '1.2.0'
 export const CHUNK_CHARS = 2_000
-export const HISTORY_READ_BUDGET_BYTES = 4 * 1024 * 1024
-const HIT_TEXT_LIMIT = 4_000
 
 /** A Pi `entries` row: its ID and the record JSON exactly as stored. */
 export interface EntryRow {
@@ -223,7 +218,7 @@ export async function readSegment(
   return parseLines(await object.text())
 }
 
-const indexSchema = v.object({
+export const indexSchema = v.object({
   format: v.number(),
   searchVersion: v.number(),
   chunks: v.array(
@@ -237,9 +232,9 @@ const indexSchema = v.object({
   ),
   words: v.record(v.string(), v.array(v.number())),
 })
-const summarySchema = v.object({ summary: v.string(), words: v.array(v.string()) })
+export const summarySchema = v.object({ summary: v.string(), words: v.array(v.string()) })
 
-async function readJson<T>(
+export async function readJson<T>(
   bucket: R2Bucket,
   key: string,
   schema: v.GenericSchema<unknown, T>,
@@ -290,114 +285,4 @@ export async function writeSummary(
 ): Promise<void> {
   const words = [...new Set(storedSearchText(summary).split(' '))].filter((word) => word.length > 0)
   await bucket.put(`${prefix}.summary.json`, JSON.stringify({ summary, words }))
-}
-
-/** Chunks containing every word: merged words, then original segments, then prefixes. */
-function matchChunks(index: SegmentIndex, query: string): number[] {
-  const { merged, segments } = searchWords(query)
-  const containing = (list: readonly string[], lookup: (word: string) => number[]) => {
-    if (list.length === 0) return []
-    const sets = list.map((word) => new Set(lookup(word)))
-    const [firstSet, ...rest] = sets
-    return [...(firstSet ?? [])].filter((chunk) => rest.every((set) => set.has(chunk)))
-  }
-  const exact = (word: string) => index.words[word] ?? []
-  const prefix = (word: string) =>
-    Object.entries(index.words).flatMap(([key, chunks]) => (key.startsWith(word) ? chunks : []))
-  for (const attempt of [containing(merged, exact), containing(segments, exact)]) {
-    if (attempt.length > 0) return attempt
-  }
-  return containing(merged, prefix)
-}
-
-function summaryMatches(words: readonly string[], query: string): boolean {
-  const set = new Set(words)
-  const { merged } = searchWords(query)
-  return (
-    merged.length > 0 &&
-    merged.every((word) => set.has(word) || words.some((w) => w.startsWith(word)))
-  )
-}
-
-export interface HistoryHit {
-  firstEntry: number
-  lastEntry: number
-  at: number
-  text: string
-}
-
-export interface HistoryResult {
-  hits: HistoryHit[]
-  summaries: { segmentId: string; at: number; summary: string }[]
-  /** The oldest time searched; pass it as `before` to search further back. */
-  searchedBefore: number | undefined
-  /** Every archived range of the agent was searched. */
-  complete: boolean
-}
-
-/** Search an agent's archived entries newest first, reading at most the byte budget of indexes. */
-export async function searchHistory(
-  db: MemoryDb,
-  bucket: R2Bucket,
-  agentId: string,
-  query: string,
-  options: { before?: number; limit?: number; budgetBytes?: number } = {},
-): Promise<HistoryResult> {
-  const limit = options.limit ?? 5
-  const budget = options.budgetBytes ?? HISTORY_READ_BUDGET_BYTES
-  const segments = await db
-    .select()
-    .from(archiveSegments)
-    .where(
-      and(
-        eq(archiveSegments.agentId, agentId),
-        options.before === undefined ? undefined : lt(archiveSegments.lastAt, options.before),
-      ),
-    )
-    .orderBy(desc(archiveSegments.lastAt))
-    .limit(100)
-  const result: HistoryResult = {
-    hits: [],
-    summaries: [],
-    searchedBefore: undefined,
-    complete: segments.length < 100,
-  }
-  let read = 0
-  for (const segment of segments) {
-    if (read >= budget || result.hits.length >= limit) {
-      result.complete = false
-      break
-    }
-    result.searchedBefore = segment.firstAt
-    if (segment.hasSummary) {
-      const summary = await readJson(bucket, `${segment.r2Prefix}.summary.json`, summarySchema)
-      if (summary !== undefined) {
-        read += summary.bytes
-        if (summaryMatches(summary.value.words, query)) {
-          result.summaries.push({
-            segmentId: segment.id,
-            at: segment.lastAt,
-            summary: summary.value.summary,
-          })
-        }
-      }
-    }
-    const index = await readJson(bucket, `${segment.r2Prefix}.index.json`, indexSchema)
-    if (index === undefined) continue
-    read += index.bytes
-    for (const chunkIndex of matchChunks(index.value, query).reverse()) {
-      const chunk = index.value.chunks[chunkIndex]
-      if (chunk === undefined || result.hits.length >= limit) continue
-      const entries = await readSegment(bucket, segment.r2Prefix, chunk)
-      const text = entries
-        .flatMap(({ entry }) => {
-          const line = entry === undefined ? undefined : entryText(entry)
-          return line === undefined ? [] : [`#${line.id} ${line.role}: ${line.text}`]
-        })
-        .join('\n')
-        .slice(0, HIT_TEXT_LIMIT)
-      result.hits.push({ firstEntry: chunk.first, lastEntry: chunk.last, at: chunk.at, text })
-    }
-  }
-  return result
 }

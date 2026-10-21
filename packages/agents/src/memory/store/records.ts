@@ -1,45 +1,21 @@
 /**
- * Memory records in D1: applying write operations and searching
- * (docs/design/long-term-memory.md, Applying a write, Freshness, Queries).
+ * Memory records in D1: applying write operations
+ * (docs/design/long-term-memory.md, Applying a write, Freshness).
  */
-import { and, eq, gte, inArray, lt, lte } from 'drizzle-orm'
-import type { BatchItem } from 'drizzle-orm/batch'
-import { drizzle } from 'drizzle-orm/d1'
-import type { DrizzleD1Database } from 'drizzle-orm/d1'
-import * as v from 'valibot'
-import * as schema from './schema.ts'
-import {
-  archiveSegments,
-  extractionCheckpoints,
-  memoryLedger,
-  memoryOps,
-  memoryRecords,
-  memoryTerms,
-  revisionClaims,
-  scopeRevisions,
-} from './schema.ts'
+import { and, eq, lte } from 'drizzle-orm'
+import type { MemoryDb, MemoryRecord, RecordKind, RecordOrigin } from './db.ts'
+import { archiveSegments, extractionCheckpoints, memoryLedger, memoryRecords } from './schema.ts'
 import type { Scope } from './schema.ts'
-import { SEARCH_VERSION, searchTermSets, storedTerms } from './search-text.ts'
-
-export type { Scope } from './schema.ts'
-export type MemoryDb = DrizzleD1Database<typeof schema>
-export type MemoryRecord = typeof memoryRecords.$inferSelect
-export type RecordKind = MemoryRecord['kind']
-export type RecordOrigin = MemoryRecord['origin']
-
-export function memoryDb(d1: D1Database): MemoryDb {
-  return drizzle(d1, { schema })
-}
-
-/** The extraction checkpoint of an agent: the last entry extraction has covered, or 0. */
-export async function extractionCheckpoint(db: MemoryDb, agentId: string): Promise<number> {
-  const row = await db
-    .select({ lastEntryId: extractionCheckpoints.lastEntryId })
-    .from(extractionCheckpoints)
-    .where(eq(extractionCheckpoints.agentId, agentId))
-    .get()
-  return row?.lastEntryId ?? 0
-}
+import { SEARCH_VERSION } from './search-text.ts'
+import {
+  appliedResult,
+  bumpScope,
+  claimRevision,
+  errorText,
+  insertOp,
+  termStatements,
+} from './statements.ts'
+import type { OperationContext, OperationResult, Statement, Statements } from './statements.ts'
 
 export interface NewRecord {
   scope: Scope
@@ -70,33 +46,6 @@ export type Operation =
   /** Record that the summary of an archived segment is in R2. */
   | { type: 'archive_summary'; segmentId: string }
 
-/** `stale`: the candidate is older than the record it would replace, so it was declined. */
-export type OperationResult =
-  | { status: 'applied'; recordId: string }
-  | { status: 'declined' }
-  | { status: 'stale' }
-  | { status: 'conflict'; reason: string }
-
-export interface OperationContext {
-  /** Same for every attempt of one change, for example derived from the job and tool call IDs. */
-  opId: string
-  jobId: string
-  runId: string
-  actor: string
-  now: number
-  /** Test hook that runs between the precondition read and the batch. */
-  beforeBatch?: () => Promise<void>
-}
-
-const operationResultSchema = v.variant('status', [
-  v.object({ status: v.literal('applied'), recordId: v.string() }),
-  v.object({ status: v.literal('declined') }),
-  v.object({ status: v.literal('stale') }),
-  v.object({ status: v.literal('conflict'), reason: v.string() }),
-])
-
-type Statement = BatchItem<'sqlite'>
-type Statements = [Statement, ...Statement[]]
 type Plan = { result: OperationResult; statements: Statements }
 
 async function sha256(value: string): Promise<string> {
@@ -128,15 +77,6 @@ function isStale(old: MemoryRecord, record: NewRecord): boolean {
   return newer === undefined || (old.sourceEntryTo !== null && newer <= old.sourceEntryTo)
 }
 
-/** Messages of an error and its causes; Drizzle wraps the D1 error in `cause`. */
-function errorText(error: unknown): string {
-  const parts: string[] = []
-  for (let current: unknown = error; current instanceof Error; current = current.cause) {
-    parts.push(current.message)
-  }
-  return parts.join('\n')
-}
-
 /** Rules the typed columns cannot express; a record that breaks one is a bug in the caller. */
 function validateRecord(record: NewRecord): void {
   if (record.content.length === 0 || record.content.length > 2_000) {
@@ -156,19 +96,6 @@ function validateRecord(record: NewRecord): void {
   ) {
     throw new TypeError('Only a shared fact or instruction is required')
   }
-}
-
-/** D1 binds at most 100 parameters per statement; a term row takes two. */
-const TERMS_PER_STATEMENT = 50
-
-/** Inserts of a record's search terms, in statements D1 accepts. */
-export function termStatements(db: MemoryDb, recordId: string, content: string): Statement[] {
-  const rows = storedTerms(content).map((term) => ({ term, recordId }))
-  const statements: Statement[] = []
-  for (let start = 0; start < rows.length; start += TERMS_PER_STATEMENT) {
-    statements.push(db.insert(memoryTerms).values(rows.slice(start, start + TERMS_PER_STATEMENT)))
-  }
-  return statements
 }
 
 /** The record row and its search terms. */
@@ -200,43 +127,6 @@ function insertRecord(
   return [row, ...termStatements(db, id, record.content)]
 }
 
-export function insertOp(
-  db: MemoryDb,
-  context: OperationContext,
-  op: string,
-  result: OperationResult,
-) {
-  return db.insert(memoryOps).values({
-    opId: context.opId,
-    jobId: context.jobId,
-    op,
-    resultJson: JSON.stringify(result),
-    appliedAt: context.now,
-  })
-}
-
-/**
- * Claim the revision a change moves its target to. With the update guarded by the revision it
- * read, a second writer from that revision fails here and its whole batch rolls back.
- */
-export function claimRevision(
-  db: MemoryDb,
-  context: OperationContext,
-  target: 'record' | 'checkpoint' | 'skill',
-  targetId: string,
-  revision: number,
-) {
-  return db
-    .insert(revisionClaims)
-    .values({ target, targetId, revision, opId: context.opId, claimedAt: context.now })
-}
-
-/** A new value each time; scope revisions are compared for equality only. */
-function newScopeRevision(): number {
-  const [high = 0, low = 0] = crypto.getRandomValues(new Uint32Array(2))
-  return high * 2 ** 20 + (low >>> 12)
-}
-
 function ledger(
   db: MemoryDb,
   context: OperationContext,
@@ -254,14 +144,6 @@ function ledger(
     targetId,
     detailJson: JSON.stringify(detail),
   })
-}
-
-export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
-  const revision = newScopeRevision()
-  return db
-    .insert(scopeRevisions)
-    .values({ scope, revision, updatedAt: context.now })
-    .onConflictDoUpdate({ target: scopeRevisions.scope, set: { revision, updatedAt: context.now } })
 }
 
 /** Move an active record at `revision` to `status`, claiming the next revision. */
@@ -289,20 +171,6 @@ function guardedStatusUpdate(
 
 function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
   return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
-}
-
-export async function appliedResult(
-  db: MemoryDb,
-  opId: string,
-): Promise<OperationResult | undefined> {
-  const row = await db
-    .select({ resultJson: memoryOps.resultJson })
-    .from(memoryOps)
-    .where(eq(memoryOps.opId, opId))
-    .get()
-  if (row === undefined) return undefined
-  const parsed: unknown = JSON.parse(row.resultJson)
-  return v.parse(operationResultSchema, parsed)
 }
 
 /** A conflict changes nothing but is logged, so the candidate can be evaluated again later. */
@@ -501,95 +369,4 @@ export async function applyOperation(
     return { status: 'conflict', reason, replayed: false }
   }
   return { ...result, replayed: false }
-}
-
-export interface SearchOptions {
-  query: string
-  scopes: readonly Scope[]
-  now: number
-  /** Defaults to 10. */
-  limit?: number
-  /** Count the returned records as used; the memory agent's own lookups do not. Default true. */
-  countUse?: boolean
-}
-
-const EVENT_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000
-
-/** Higher is better: importance, use, and for events, recency. */
-function score(record: MemoryRecord, now: number): number {
-  const age = Math.max(0, now - record.observedAt)
-  const recency = record.kind === 'event' ? 0.5 ** (age / EVENT_HALF_LIFE_MS) : 1
-  return (0.5 + record.importance) * recency * (1 + Math.log1p(record.useCount) / 10)
-}
-
-/** Candidates per query word, enough for a scope of a few thousand records. */
-const CANDIDATES_PER_WORD = 500
-
-/** Active records of the scopes that have `term`, or a term starting with it. */
-async function recordsWithTerm(
-  db: MemoryDb,
-  term: string,
-  prefix: boolean,
-  scopes: readonly Scope[],
-): Promise<Set<string>> {
-  const rows = await db
-    .select({ id: memoryTerms.recordId })
-    .from(memoryTerms)
-    .innerJoin(memoryRecords, eq(memoryRecords.id, memoryTerms.recordId))
-    .where(
-      and(
-        // A prefix is the range of terms from it up to the next possible string.
-        prefix
-          ? and(gte(memoryTerms.term, term), lt(memoryTerms.term, `${term}\u{10FFFF}`))
-          : eq(memoryTerms.term, term),
-        eq(memoryRecords.status, 'active'),
-        inArray(memoryRecords.scope, [...scopes]),
-      ),
-    )
-    .limit(CANDIDATES_PER_WORD)
-  return new Set(rows.map((row) => row.id))
-}
-
-/**
- * Search active records of the given scopes for every word of the query: merged words, then the
- * original segments, then merged words as prefixes. Ranked by importance, use, and for events
- * recency. Returned records count as used.
- */
-export async function searchMemory(
-  db: MemoryDb,
-  { query, scopes, now, limit = 10, countUse = true }: SearchOptions,
-): Promise<MemoryRecord[]> {
-  if (scopes.length === 0) return []
-  for (const { terms, prefix } of searchTermSets(query)) {
-    let matches: Set<string> | undefined
-    for (const term of terms) {
-      const found = await recordsWithTerm(db, term, prefix, scopes)
-      matches = matches === undefined ? found : new Set([...matches].filter((id) => found.has(id)))
-      if (matches.size === 0) break
-    }
-    if (matches === undefined || matches.size === 0) continue
-    const records = await db
-      .select()
-      .from(memoryRecords)
-      .where(inArray(memoryRecords.id, [...matches].slice(0, CANDIDATES_PER_WORD)))
-    const ranked = records
-      .map((record) => ({ record, score: score(record, now) }))
-      .sort((a, b) => b.score - a.score || b.record.updatedAt - a.record.updatedAt)
-      .slice(0, limit)
-      .map(({ record }) => record)
-    if (countUse) await countUses(db, ranked, now)
-    return ranked
-  }
-  return []
-}
-
-/** One more use of each record; a use counted twice at the same moment may be lost, which is fine. */
-async function countUses(db: MemoryDb, records: readonly MemoryRecord[], now: number) {
-  const [first, ...rest] = records.map((record) =>
-    db
-      .update(memoryRecords)
-      .set({ useCount: record.useCount + 1, lastUsedAt: now })
-      .where(eq(memoryRecords.id, record.id)),
-  )
-  if (first !== undefined) await db.batch([first, ...rest])
 }
