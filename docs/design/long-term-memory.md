@@ -75,8 +75,10 @@ Hard deletion is an operator action.
 
 ### D1 schema
 
-The schema is [long-term-memory.sql](long-term-memory.sql), applied as a D1 migration with
-`cf d1 migrations`.
+The schema is defined with Drizzle in
+[schema.ts](../../packages/agents/src/memory/schema.ts). `pnpm db:generate` writes the D1
+migrations to `packages/agents/migrations`, applied with `cf d1 migrations`. The FTS5 table and
+its triggers, which Drizzle cannot describe, are the hand-written migration `0001_memory_fts.sql`.
 
 | Table                    | Rows                                                         |
 | ------------------------ | ------------------------------------------------------------ |
@@ -107,8 +109,9 @@ SHA-256 of the job ID and Pi's tool call ID, so running a recorded tool call aga
    `memory_ops` row.
 
 Writes never use `INSERT OR IGNORE`. A duplicate record ID or a replayed `op_id` fails a
-statement, and `batch()` rolls the whole operation back. The memory
-agent runs one job at a time (see [Jobs](#jobs)), so the read in step 2 stays valid until step 3;
+statement, and `batch()` rolls the whole operation back. The `memory_ops` row is inserted right
+after the guarded update with `guard = changes()`, and `guard` must be 1, so an update that matched
+no row also rolls the batch back. The memory agent runs one job at a time (see [Jobs](#jobs)), so the read in step 2 stays valid until step 3;
 the constraints are the backstop. Working agents update only `use_count` and `last_used_at`,
 which do not change `revision`.
 
@@ -149,7 +152,7 @@ queries:
 5. For stored text only: append the original segments that differ from the merged words.
 
 A query quotes each merged word and joins them with spaces (FTS5 `AND`). If nothing matches,
-retry with each word as a prefix (`"word"*`). `search_version` stores the version of this
+retry with the original segments, then with each merged word as a prefix (`"word"*`). `search_version` stores the version of this
 function; consolidation re-segments rows with an older version.
 
 ### Queries

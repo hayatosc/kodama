@@ -1,0 +1,8 @@
+import { defineConfig } from 'drizzle-kit'
+
+/** Generates the D1 migrations applied by `cf d1 migrations` and by the tests. */
+export default defineConfig({
+  dialect: 'sqlite',
+  schema: './src/memory/schema.ts',
+  out: './migrations',
+})

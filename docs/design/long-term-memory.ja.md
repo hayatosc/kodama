@@ -75,7 +75,9 @@ scheduled ハンドラ -------------> MemoryAgent DO       consolidate（1日1�
 
 ### D1 のスキーマ
 
-スキーマは [long-term-memory.sql](long-term-memory.sql) にあり、`cf d1 migrations` で D1 のマイグレーションとして適用する。
+スキーマは Drizzle で [schema.ts](../../packages/agents/src/memory/schema.ts) に定義する。
+`pnpm db:generate` が D1 のマイグレーションを `packages/agents/migrations` に書き、`cf d1 migrations` で適用する。
+Drizzle では書けない FTS5 のテーブルとトリガーは、手で書いたマイグレーション `0001_memory_fts.sql` にする。
 
 | テーブル                 | 1行が表すもの                                                       |
 | ------------------------ | ------------------------------------------------------------------- |
@@ -104,6 +106,7 @@ scheduled ハンドラ -------------> MemoryAgent DO       consolidate（1日1�
 
 書き込みに `INSERT OR IGNORE` は使わない。
 記録の ID の重複か、すでに使った `op_id` があれば文が失敗し、`batch()` が操作全体を取り消す。
+`memory_ops` の行は条件付きの更新の直後に `guard = changes()` で入れ、`guard` は 1 でなければならないので、どの行にも当たらなかった更新もバッチ全体を取り消す。
 記憶係は仕事を1件ずつ処理する（[仕事](#仕事)を参照）ので、手順2で読んだ内容は手順3まで変わらない。
 制約は、その前提が崩れたときの最後の守りである。
 仕事をするエージェントが更新するのは `use_count` と `last_used_at` だけで、これらは `revision` を変えない。
@@ -138,7 +141,7 @@ scheduled ハンドラ -------------> MemoryAgent DO       consolidate（1日1�
 5. 保存する文字列の場合だけ、まとめた語と異なる元の断片を後ろに足す。
 
 問い合わせは、まとめた語をそれぞれ引用符で囲み、空白でつなぐ（FTS5 の `AND`）。
-何も返らなければ、各語を前方一致（`"語"*`）にしてやり直す。
+何も返らなければ、元の断片でやり直し、それでも返らなければ、まとめた語をそれぞれ前方一致（`"語"*`）にしてやり直す。
 `search_version` にはこの関数の版を入れ、統合が古い版の行を作り直す。
 
 ### 問い合わせ
