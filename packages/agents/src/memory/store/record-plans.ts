@@ -2,8 +2,8 @@
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
 import type { NewRecord, Operation } from './records.ts'
-import { memoryRecords } from '../../../drizzle/d1/schema/records.ts'
-import { SEARCH_VERSION } from './search-text.ts'
+import { memoryRecords } from '../../../drizzle/d1/schema.ts'
+import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
   bumpScope,
   claimRevision,
@@ -19,15 +19,11 @@ import type {
   Statement,
   Statements,
 } from './statements.ts'
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
+import { sha256Hex } from '../../lib/hash.ts'
 
 /** Same content from the same source gets the same ID, so a second insert fails. */
 export function recordId(record: NewRecord): Promise<string> {
-  return sha256(
+  return sha256Hex(
     JSON.stringify([
       record.scope,
       record.kind,

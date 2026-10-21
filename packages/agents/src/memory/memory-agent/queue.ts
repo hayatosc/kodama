@@ -2,8 +2,8 @@
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
 import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
-import { JOB_PRIORITY, jobId, parseMemoryJob } from './jobs.ts'
-import type { JobOutcome, JobStatus, MemoryJob } from './jobs.ts'
+import { JOB_PRIORITY, jobId, parseMemoryJob } from '../jobs.ts'
+import type { JobOutcome, JobStatus, MemoryJob } from '../jobs.ts'
 import type { RunningJob } from './tools/common.ts'
 
 export type JobRow = typeof memoryJobs.$inferSelect

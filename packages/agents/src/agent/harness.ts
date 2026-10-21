@@ -1,10 +1,10 @@
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
-import { agentChange, defaultAgentConfig } from './configuration/index.ts'
-import type { DefaultModelEnv } from './configuration/index.ts'
-import { createAgentModels } from './models/index.ts'
-import type { ModelProviderEnv } from './models/index.ts'
-import { agentTools } from './tools/index.ts'
+import { agentChange, defaultAgentConfig } from '../configuration/index.ts'
+import type { DefaultModelEnv } from '../configuration/index.ts'
+import { createAgentModels } from '../models/index.ts'
+import type { ModelProviderEnv } from '../models/index.ts'
+import { agentTools } from '../tools/index.ts'
 
 /** A request that stalls this long fails as a timeout, which the retry policy then waits out. */
 const MODEL_REQUEST_TIMEOUT_MS = 300_000

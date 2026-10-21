@@ -1,0 +1,303 @@
+/**
+ * The D1 schema of long-term memory (docs/memory.md, D1 schema): one file for the one database.
+ * `pnpm db:generate` turns this file into the migrations in ./migrations.
+ * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a
+ * constraint violation must fail the statement so that the whole `batch()` rolls back. Allowed
+ * values are the typed columns and the code that writes them; the constraints here are keys and
+ * relations between columns.
+ */
+import { isNotNull, lte } from 'drizzle-orm'
+import {
+  check,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  unique,
+} from 'drizzle-orm/sqlite-core'
+
+// Records, their search terms, operations, revisions, checkpoints, and the ledger.
+
+export type Scope = `agent:${string}` | `shared:${string}`
+export const RECORD_KINDS = ['fact', 'event', 'instruction', 'task'] as const
+export const RECORD_STATUSES = ['active', 'superseded', 'invalid', 'archived'] as const
+export const RECORD_ORIGINS = [
+  'user_request',
+  'agent_judgment',
+  'extraction',
+  'consolidation',
+  'proposal',
+] as const
+
+export const memoryRecords = sqliteTable(
+  'memory_records',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').$type<Scope>().notNull(),
+    kind: text('kind', { enum: RECORD_KINDS }).notNull(),
+    content: text('content').notNull(),
+    /** Version of the search-text function that built the record's `memory_terms`. */
+    searchVersion: integer('search_version').notNull(),
+    status: text('status', { enum: RECORD_STATUSES }).notNull().default('active'),
+    supersededBy: text('superseded_by'),
+    origin: text('origin', { enum: RECORD_ORIGINS }).notNull(),
+    sourceAgentId: text('source_agent_id').notNull(),
+    /** Inclusive range of source entries; `sourceEntryTo` orders evidence (Freshness). */
+    sourceEntryFrom: integer('source_entry_from'),
+    sourceEntryTo: integer('source_entry_to'),
+    runId: text('run_id').notNull(),
+    importance: real('importance').notNull().default(0.5),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+    /** For an agent record: the ID of a shared record it replaces for this agent. */
+    overrides: text('overrides'),
+    /** A shared instruction or fact that agent records cannot override. */
+    required: integer('required', { mode: 'boolean' }).notNull().default(false),
+    /** Updated by working agents; never changes `revision`. */
+    useCount: integer('use_count').notNull().default(0),
+    lastUsedAt: integer('last_used_at'),
+    observedAt: integer('observed_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    /** Incremented on every status or content change; writes compare it with what they read. */
+    revision: integer('revision').notNull().default(1),
+  },
+  (t) => [
+    index('memory_records_by_scope').on(t.scope, t.status, t.kind, t.importance),
+    index('memory_records_by_source').on(t.sourceAgentId, t.sourceEntryFrom),
+    index('memory_records_by_override').on(t.overrides).where(isNotNull(t.overrides)),
+  ],
+)
+
+/**
+ * One row per applied write operation, inserted by the batch that applies it, so a replay finds
+ * it and returns `resultJson` without touching any record.
+ */
+export const memoryOps = sqliteTable(
+  'memory_ops',
+  {
+    opId: text('op_id').primaryKey(),
+    jobId: text('job_id').notNull(),
+    op: text('op').notNull(),
+    resultJson: text('result_json').notNull(),
+    appliedAt: integer('applied_at').notNull(),
+  },
+  (t) => [index('memory_ops_by_job').on(t.jobId)],
+)
+
+/**
+ * Normalized words of each record (search-text.ts), the search index. Written in the batch that
+ * writes the record, and rebuilt when the search-text function changes.
+ */
+export const memoryTerms = sqliteTable(
+  'memory_terms',
+  {
+    term: text('term').notNull(),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => memoryRecords.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.term, t.recordId] }),
+    index('memory_terms_by_record').on(t.recordId),
+  ],
+)
+
+/**
+ * The revision each change moves a record, checkpoint, or skill to. A change updates its target
+ * only at the revision it read and claims the next one in the same batch, so a second writer from
+ * the same revision fails on this primary key and its whole batch rolls back.
+ */
+export const revisionClaims = sqliteTable(
+  'revision_claims',
+  {
+    target: text('target', { enum: ['record', 'checkpoint', 'skill'] }).notNull(),
+    targetId: text('target_id').notNull(),
+    revision: integer('revision').notNull(),
+    opId: text('op_id').notNull(),
+    claimedAt: integer('claimed_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.target, t.targetId, t.revision] }),
+    index('revision_claims_by_time').on(t.claimedAt),
+  ],
+)
+
+/**
+ * Set to a new random value with any change to a scope's active instructions, facts, or skills;
+ * readers compare it for equality only, so concurrent changes never need to read it first.
+ */
+export const scopeRevisions = sqliteTable('scope_revisions', {
+  scope: text('scope').$type<Scope>().primaryKey(),
+  revision: integer('revision').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+/** Pi never reuses entry IDs, so one checkpoint per agent covers its whole life. */
+export const extractionCheckpoints = sqliteTable('extraction_checkpoints', {
+  agentId: text('agent_id').primaryKey(),
+  lastEntryId: integer('last_entry_id').notNull(),
+  revision: integer('revision').notNull().default(1),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export const memoryLedger = sqliteTable(
+  'memory_ledger',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    at: integer('at').notNull(),
+    runId: text('run_id').notNull(),
+    opId: text('op_id'),
+    actor: text('actor').notNull(),
+    action: text('action').notNull(),
+    target: text('target', { enum: ['record', 'skill', 'proposal'] }).notNull(),
+    targetId: text('target_id').notNull(),
+    /** For a skill change: `[{ path, before_sha256, after_sha256 }]`, whose blobs stay in R2. */
+    detailJson: text('detail_json'),
+  },
+  (t) => [index('memory_ledger_by_target').on(t.target, t.targetId, t.seq)],
+)
+
+// The catalog of archived ranges.
+
+/**
+ * Catalog of archived ranges. The entries, search index, and summary are R2 objects under
+ * `r2Prefix`; pruning code writes the row after verifying them, and it lives as long as they do.
+ */
+export const archiveSegments = sqliteTable(
+  'archive_segments',
+  {
+    /** `<agentId>/<first>-<last>` */
+    id: text('id').primaryKey(),
+    agentId: text('agent_id').notNull(),
+    firstEntry: integer('first_entry').notNull(),
+    lastEntry: integer('last_entry').notNull(),
+    entryCount: integer('entry_count').notNull(),
+    /** `archive/<agentId>/<first>-<last>` with `.jsonl`, `.manifest.json`, `.index.json`, `.summary.json`. */
+    r2Prefix: text('r2_prefix').notNull(),
+    sha256: text('sha256').notNull(),
+    bytes: integer('bytes').notNull(),
+    firstAt: integer('first_at').notNull(),
+    lastAt: integer('last_at').notNull(),
+    hasSummary: integer('has_summary', { mode: 'boolean' }).notNull().default(false),
+    /** Extraction has covered this range; after pruning it reads the range from R2. */
+    extracted: integer('extracted', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    unique('archive_segments_start').on(t.agentId, t.firstEntry),
+    index('archive_segments_by_time').on(t.agentId, t.lastAt),
+    check('archive_segments_range', lte(t.firstEntry, t.lastEntry)),
+  ],
+)
+
+// Skills: the index, pending writes, and usage.
+
+export const SKILL_STATUSES = ['proposed', 'active', 'stale', 'archived'] as const
+
+export const skills = sqliteTable(
+  'skills',
+  {
+    scope: text('scope').$type<Scope>().notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    status: text('status', { enum: SKILL_STATUSES }).notNull(),
+    /** R2 directory, overwritten in place on update: `skills/<scope>/<name>/`. */
+    r2Key: text('r2_key').notNull(),
+    /** SHA-256 over the sorted list of each path and its file's SHA-256. */
+    contentSha256: text('content_sha256').notNull(),
+    revision: integer('revision').notNull().default(1),
+    evidenceJson: text('evidence_json').notNull(),
+    /** For an agent skill that overrides a shared one: `<scope>/<name>@<content_sha256>`. */
+    basedOn: text('based_on'),
+    /** For an agent skill merged into a shared one: `<scope>/<name>`. */
+    absorbedInto: text('absorbed_into'),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.name] }),
+    index('skills_by_status').on(t.scope, t.status),
+    index('skills_by_name').on(t.name, t.status),
+  ],
+)
+
+/**
+ * A skill update recorded before any file is overwritten. Before and after files are blobs in R2
+ * at `skills/.blobs/<sha256>`, so a pending write is finished by copying the after files again.
+ */
+export const skillWrites = sqliteTable(
+  'skill_writes',
+  {
+    opId: text('op_id').primaryKey(),
+    scope: text('scope').$type<Scope>().notNull(),
+    name: text('name').notNull(),
+    baseRevision: integer('base_revision'),
+    /** `[{ path, before_sha256, after_sha256 }]`; a null before adds a file, a null after removes it. */
+    filesJson: text('files_json').notNull(),
+    /** The skills row to write and the operation's job: what finishing the write needs. */
+    skillJson: text('skill_json').notNull(),
+    status: text('status', { enum: ['pending', 'done'] })
+      .notNull()
+      .default('pending'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('skill_writes_pending').on(t.status, t.createdAt)],
+)
+
+/** Uses per agent, so shared skills can be curated by who still uses them. */
+export const skillUsage = sqliteTable(
+  'skill_usage',
+  {
+    scope: text('scope').$type<Scope>().notNull(),
+    name: text('name').notNull(),
+    agentId: text('agent_id').notNull(),
+    useCount: integer('use_count').notNull().default(0),
+    lastUsedAt: integer('last_used_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.name, t.agentId] }),
+    foreignKey({
+      columns: [t.scope, t.name],
+      foreignColumns: [skills.scope, skills.name],
+    }).onDelete('cascade'),
+    index('skill_usage_by_agent').on(t.agentId, t.lastUsedAt),
+  ],
+)
+
+// Proposals to shared spaces.
+
+export const PROPOSAL_STATUSES = ['accepted', 'applied', 'rejected', 'conflict'] as const
+
+/**
+ * A change to a shared scope. Code checks it when it is written, with no person in the loop:
+ * `accepted` passed the checks and is not yet applied, so the memory agent applies every accepted
+ * row; `rejected` failed them, with the reason.
+ */
+export const sharedProposals = sqliteTable(
+  'shared_proposals',
+  {
+    id: text('id').primaryKey(),
+    space: text('space').notNull(),
+    target: text('target', { enum: ['record', 'skill'] }).notNull(),
+    /** For a record: the ID it replaces, or `<scope>` for a new one; for a skill: `<scope>/<name>`. */
+    targetKey: text('target_key').notNull(),
+    /** Revision of the target the proposal was written against; null when the target is new. */
+    baseRevision: integer('base_revision'),
+    /** Concrete operations applied by code: record contents, or skill files already in R2. */
+    payloadJson: text('payload_json').notNull(),
+    sourceIdsJson: text('source_ids_json').notNull(),
+    status: text('status', { enum: PROPOSAL_STATUSES }).notNull(),
+    runId: text('run_id').notNull(),
+    proposedAt: integer('proposed_at').notNull(),
+    /** The rule set that decided, such as `checks:1`. */
+    decidedBy: text('decided_by').notNull(),
+    reason: text('reason'),
+    appliedAt: integer('applied_at'),
+  },
+  (t) => [index('shared_proposals_by_status').on(t.status, t.space, t.proposedAt)],
+)

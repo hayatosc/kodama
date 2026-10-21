@@ -1,8 +1,9 @@
 /** Jobs of the memory agent (docs/memory.md, Jobs). */
 import * as v from 'valibot'
-import { AgentIdSchema } from '../../validation.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
-import { isScope } from '../store/scopes.ts'
+import { AgentIdSchema } from '../validation.ts'
+import type { Scope } from '../../drizzle/d1/schema.ts'
+import { isScope } from './store/scopes.ts'
+import { sha256Hex } from '../lib/hash.ts'
 
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')
 const EntryIdSchema = v.pipe(v.number(), v.integer(), v.minValue(0))
@@ -64,24 +65,19 @@ export function isCodeJob(job: MemoryJob): boolean {
   return job.kind === 'apply_proposal'
 }
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 /** The same job delivered twice gets the same ID, so the second delivery finds the first. */
 export function jobId(job: MemoryJob): Promise<string> {
   switch (job.kind) {
     case 'remember':
-      return sha256(
+      return sha256Hex(
         JSON.stringify([job.kind, job.sourceAgentId, job.sourceEntries.from, job.content]),
       )
     case 'extract':
-      return sha256(JSON.stringify([job.kind, job.sourceAgentId, job.afterEntry]))
+      return sha256Hex(JSON.stringify([job.kind, job.sourceAgentId, job.afterEntry]))
     case 'record_archive':
-      return sha256(JSON.stringify([job.kind, job.segmentId]))
+      return sha256Hex(JSON.stringify([job.kind, job.segmentId]))
     case 'consolidate':
-      return sha256(JSON.stringify([job.kind, job.scope, job.day]))
+      return sha256Hex(JSON.stringify([job.kind, job.scope, job.day]))
     case 'apply_proposal':
       return Promise.resolve(`apply:${job.proposalId}`)
   }

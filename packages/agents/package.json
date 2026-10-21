@@ -16,7 +16,7 @@
     "cf": "cf",
     "cf:types": "cf workers types",
     "typecheck": "cf workers types && tsc --noEmit",
-    "test": "node --experimental-strip-types --test cli/stream.test.ts && vitest run",
+    "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:generate:local": "drizzle-kit generate --config drizzle.local.config.ts"
   },

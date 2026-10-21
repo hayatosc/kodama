@@ -1,12 +1,7 @@
 /** Skill files by content: hashes, the blob store in R2, and the per-file change list (Storage). */
 import * as v from 'valibot'
 import { blobKey, MAX_SKILL_FILES } from './paths.ts'
-
-export async function sha256Hex(bytes: Uint8Array | string): Promise<string> {
-  const data = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
+import { sha256Hex } from '../../lib/hash.ts'
 
 export const changesSchema = v.array(
   v.object({ path: v.string(), before: v.nullable(v.string()), after: v.nullable(v.string()) }),

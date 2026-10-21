@@ -7,7 +7,7 @@ import type {
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
-import { MEMORY_AGENT_NAME } from './memory/memory-agent/jobs.ts'
+import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent/agent.ts'

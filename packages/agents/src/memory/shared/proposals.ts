@@ -4,14 +4,13 @@
  */
 import { and, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
-import { looksLikeInjection } from '../redact.ts'
+import { looksLikeInjection } from '../../lib/redact.ts'
 import { blobKey, isSkillName, skillDir, splitKey } from '../skills/paths.ts'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryLedger, memoryRecords } from '../../../drizzle/d1/schema/records.ts'
-import { sharedProposals } from '../../../drizzle/d1/schema/shared.ts'
-import { skills } from '../../../drizzle/d1/schema/skills.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
+import { memoryLedger, memoryRecords, sharedProposals, skills } from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
 import type { OperationContext } from '../store/statements.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 
 /** Records written by applied proposals belong to no single agent. */
 export const SHARED_SOURCE_AGENT = 'memory'
@@ -43,11 +42,6 @@ const skillPayloadSchema = v.object({
 })
 export const proposalPayloadSchema = v.variant('type', [recordPayloadSchema, skillPayloadSchema])
 export type ProposalPayload = v.InferOutput<typeof proposalPayloadSchema>
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
 
 export function sharedScope(space: string): Scope {
   if (!SPACE_PATTERN.test(space)) throw new TypeError(`Invalid shared space: ${space}`)
@@ -143,7 +137,7 @@ export async function propose(
       .get()
     baseRevision = target?.revision ?? null
   }
-  const id = await sha256(`proposal:${ctx.opId}`)
+  const id = await sha256Hex(`proposal:${ctx.opId}`)
   const reason = await rejection(db, scope, payload, input.sourceIds)
   const status = reason === undefined ? 'accepted' : 'rejected'
   await db.batch([

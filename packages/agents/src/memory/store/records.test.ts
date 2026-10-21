@@ -6,8 +6,8 @@ import { memoryDb } from './db.ts'
 import { searchMemory } from './search.ts'
 import type { NewRecord } from './records.ts'
 import type { OperationContext } from './statements.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema/records.ts'
+import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)

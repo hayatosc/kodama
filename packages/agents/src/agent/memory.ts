@@ -4,7 +4,7 @@ import { extractionCheckpoint, memoryDb } from '../memory/store/db.ts'
 import { SkillsEnv } from '../memory/skills/env.ts'
 import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
 import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
-import { MEMORY_AGENT_NAME } from '../memory/memory-agent/jobs.ts'
+import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { latestEntryId } from './entries.ts'
 

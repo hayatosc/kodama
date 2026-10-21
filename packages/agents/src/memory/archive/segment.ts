@@ -3,8 +3,9 @@
  * summary (docs/memory.md, Pruning, Archive index).
  */
 import type { EntryRecord } from '@earendil-works/pi-durable'
-import { SEARCH_VERSION, storedSearchText } from '../store/search-text.ts'
+import { SEARCH_VERSION, storedSearchText } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 
 export const ARCHIVE_FORMAT = 1
 /** Pi Durable version whose entry records the archive holds. */
@@ -82,11 +83,6 @@ function entryTime(entry: EntryRecord | undefined): number | undefined {
     if (isRecord(value) && typeof value['timestamp'] === 'number') return value['timestamp']
   }
   return undefined
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 /** The `.jsonl`, manifest, and search index of one range of entries, built in code. */

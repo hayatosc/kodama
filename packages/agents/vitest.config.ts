@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'
-import { configDefaults, defineConfig } from 'vitest/config'
+import { defineConfig } from 'vitest/config'
 
 const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/d1/migrations`)
 
@@ -25,8 +25,6 @@ function migratedColumns(folder: string): Record<string, string[]> {
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
-    // The CLI's own stream tests run in Node (`node --test`), not in workerd.
-    exclude: [...configDefaults.exclude, 'cli/stream.test.ts'],
     setupFiles: ['src/testing/setup.ts'],
     fsModuleCache: false,
     testTimeout: 15_000,

@@ -6,7 +6,7 @@ import type {
   Harness,
   SubmissionRecord,
 } from '@earendil-works/pi-durable'
-import type { AgentSendEvent } from './protocol.ts'
+import type { AgentSendEvent } from '../protocol.ts'
 
 const context = BACKGROUND_CONTEXT
 

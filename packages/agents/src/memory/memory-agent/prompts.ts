@@ -1,4 +1,4 @@
-import type { MemoryJob } from './jobs.ts'
+import type { MemoryJob } from '../jobs.ts'
 
 /** Instructions of the memory agent, the only writer of long-term memory. */
 export const MEMORY_SYSTEM_PROMPT = `You keep the long-term memory of the Kodama agents. Each message is one job. Do the job with your tools, then answer with one short line that says what you did.

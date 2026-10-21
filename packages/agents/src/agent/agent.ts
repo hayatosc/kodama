@@ -6,16 +6,16 @@ import type {
   Submission,
   SubmissionDraft,
 } from '@earendil-works/pi-durable'
-import { AlarmSchedule } from '../alarms.ts'
-import type { AlarmPurpose } from '../alarms.ts'
+import { AlarmSchedule } from './alarms.ts'
+import type { AlarmPurpose } from './alarms.ts'
 import { defaultAgentConfig, initializeAgentConfig } from '../configuration/index.ts'
 import { readSharedSpaces } from '../configuration/shared-spaces.ts'
 import type { AgentEnv } from '../env.ts'
-import { sendEvents, subscribeEvents } from '../events.ts'
-import { createAgentOptions } from '../harness.ts'
+import { sendEvents, subscribeEvents } from './events.ts'
+import { createAgentOptions } from './harness.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
-import { MEMORY_AGENT_NAME } from '../memory/memory-agent/jobs.ts'
+import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
 import type {
@@ -25,7 +25,7 @@ import type {
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
-import { RecoveryAlarm } from '../recovery.ts'
+import { RecoveryAlarm } from './recovery.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
 import { parseAgentId, parseMessage, parseRequestId } from '../validation.ts'

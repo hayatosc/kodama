@@ -5,7 +5,7 @@ import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { describe, expect, it, vi } from 'vitest'
 import { createAgentOptions } from './harness.ts'
-import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from './testing/rpc.ts'
+import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

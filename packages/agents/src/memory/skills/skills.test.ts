@@ -3,13 +3,13 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
-import { skills, skillUsage } from '../../../drizzle/d1/schema/skills.ts'
+import { skills, skillUsage } from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
 import { SkillsEnv } from './env.ts'
 import { curateSkills } from './curation.ts'
 import { setSkillStatus } from './status.ts'
 import { visibleSkills } from './usage.ts'
-import { MEMORY_AGENT_NAME } from '../memory-agent/jobs.ts'
+import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import {
   isMemoryAgentRequest,
   requestBody,

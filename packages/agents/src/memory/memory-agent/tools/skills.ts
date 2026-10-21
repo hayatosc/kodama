@@ -3,15 +3,16 @@ import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import { eq } from 'drizzle-orm'
-import { looksLikeInjection, redactSecrets } from '../../redact.ts'
+import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import { setSkillStatus } from '../../skills/status.ts'
 import { writeSkill } from '../../skills/write.ts'
 import { skillDir } from '../../skills/paths.ts'
 import type { MemoryDb } from '../../store/db.ts'
-import { skills as skillsTable } from '../../../../drizzle/d1/schema/skills.ts'
-import type { Scope } from '../../../../drizzle/d1/schema/records.ts'
-import { describe, sha256, skillRow, text, toolDb } from './common.ts'
+import { skills as skillsTable } from '../../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../../drizzle/d1/schema.ts'
+import { describe, skillRow, text, toolDb } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
+import { sha256Hex } from '../../../lib/hash.ts'
 
 export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
   const db = (): MemoryDb => toolDb(deps)
@@ -100,7 +101,7 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
         db(),
         deps.env.ARCHIVE,
         {
-          opId: await sha256(`${jobId}:${api.callId}`),
+          opId: await sha256Hex(`${jobId}:${api.callId}`),
           jobId,
           runId: jobId,
           actor: 'memory-agent',
@@ -135,7 +136,7 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
       const result = await setSkillStatus(
         db(),
         {
-          opId: await sha256(`${jobId}:${api.callId}`),
+          opId: await sha256Hex(`${jobId}:${api.callId}`),
           jobId,
           runId: jobId,
           actor: 'memory-agent',

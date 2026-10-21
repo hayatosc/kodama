@@ -2,7 +2,7 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
-import { toAgentSnapshot, toSubmissionStatus } from '../projection.ts'
+import { toAgentSnapshot, toSubmissionStatus } from './projection.ts'
 import type { AgentSnapshot, SubmissionStatus } from '../protocol.ts'
 
 const context = BACKGROUND_CONTEXT

@@ -5,15 +5,16 @@ import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import { and, eq } from 'drizzle-orm'
 import type { AgentEnv } from '../../../env.ts'
-import { looksLikeInjection, redactSecrets } from '../../redact.ts'
+import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import { memoryDb } from '../../store/db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from '../../store/db.ts'
 import { applyOperation } from '../../store/records.ts'
 import type { NewRecord, Operation } from '../../store/records.ts'
-import { skills } from '../../../../drizzle/d1/schema/skills.ts'
-import type { Scope } from '../../../../drizzle/d1/schema/records.ts'
+import { skills } from '../../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../../drizzle/d1/schema.ts'
 import type { OperationResult } from '../../store/statements.ts'
-import type { MemoryJob } from '../jobs.ts'
+import type { MemoryJob } from '../../jobs.ts'
+import { sha256Hex } from '../../../lib/hash.ts'
 
 export interface RunningJob {
   jobId: string
@@ -44,11 +45,6 @@ export const OVERRIDES = Type.Optional(
 export const ENTRY = Type.Optional(
   Type.Integer({ minimum: 0, description: 'Entry ID; extraction cites its entries' }),
 )
-
-export async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
 
 export function text(value: string) {
   return { output: [{ type: 'text' as const, text: value }] }
@@ -175,7 +171,7 @@ export function writingTool<P extends TSchema>(
       const result = await applyOperation(
         memoryDb(deps.env.MEMORY_DB),
         {
-          opId: await sha256(`${running.jobId}:${api.callId}`),
+          opId: await sha256Hex(`${running.jobId}:${api.callId}`),
           jobId: running.jobId,
           runId: running.jobId,
           actor: 'memory-agent',

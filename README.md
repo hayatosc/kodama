@@ -13,9 +13,8 @@ packages/
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
     drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint
-    src/agent/            Agent Durable Object: state, RPC, and its parts
-    src/harness.ts        Pi runtime composition
-    src/events.ts         Live SSE stream over RPC
+    src/lib/              Generic helpers that import nothing else from src/
+    src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
     src/configuration/    Per-agent configuration validation and persistence
     src/models/           Pi provider catalog and Worker credential resolution
     src/prompts/          Default system prompt

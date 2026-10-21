@@ -1,8 +1,8 @@
 /** `history_search` over an agent's archived segments (docs/memory.md, Archive index). */
 import { and, desc, eq, lt } from 'drizzle-orm'
 import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/d1/schema/archive.ts'
-import { searchWords } from '../store/search-text.ts'
+import { archiveSegments } from '../../../drizzle/d1/schema.ts'
+import { searchWords } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
 import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'
 import type { SegmentIndex } from './segment.ts'

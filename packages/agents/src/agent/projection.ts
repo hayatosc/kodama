@@ -1,5 +1,5 @@
 import type { AgentEventStream, SubmissionRecord } from '@earendil-works/pi-durable'
-import type { AgentMessage, AgentSnapshot, SubmissionStatus } from './protocol.ts'
+import type { AgentMessage, AgentSnapshot, SubmissionStatus } from '../protocol.ts'
 
 type PiSnapshot = AgentEventStream['snapshot']
 type PiModelMessage = NonNullable<PiSnapshot['entries'][number]['model']>[number]

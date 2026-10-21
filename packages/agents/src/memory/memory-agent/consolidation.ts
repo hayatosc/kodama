@@ -8,15 +8,15 @@ import { finishPendingSkillWrites } from '../skills/write.ts'
 import { applyOperation } from '../store/records.ts'
 import { termStatements } from '../store/statements.ts'
 import type { MemoryDb, MemoryRecord } from '../store/db.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
 import {
   memoryLedger,
   memoryRecords,
   memoryTerms,
   revisionClaims,
-} from '../../../drizzle/d1/schema/records.ts'
-import { SEARCH_VERSION } from '../store/search-text.ts'
-import type { MemoryJob } from './jobs.ts'
+} from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
+import { SEARCH_VERSION } from '../../lib/search-text.ts'
+import type { MemoryJob } from '../jobs.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const LEDGER_RETENTION_MS = 90 * DAY_MS

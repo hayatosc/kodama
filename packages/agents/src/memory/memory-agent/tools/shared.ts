@@ -2,12 +2,13 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
-import { looksLikeInjection, redactSecrets } from '../../redact.ts'
+import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import { propose, skillFilesAsBlobs } from '../../shared/proposals.ts'
 import type { Proposal } from '../../shared/proposals.ts'
 import type { MemoryDb } from '../../store/db.ts'
-import { CONTENT, IMPORTANCE, KIND, sha256, skillRow, text, toolDb } from './common.ts'
+import { CONTENT, IMPORTANCE, KIND, skillRow, text, toolDb } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
+import { sha256Hex } from '../../../lib/hash.ts'
 
 function proposalOutcome(proposal: Proposal): string {
   return proposal.status === 'rejected'
@@ -54,7 +55,7 @@ export function sharedTools(deps: MemoryToolDeps): ToolRegistration[] {
         throw new Error('Propose either a record or a skill')
       }
       const ctx = {
-        opId: await sha256(`${running.jobId}:${api.callId}`),
+        opId: await sha256Hex(`${running.jobId}:${api.callId}`),
         jobId: running.jobId,
         runId: running.jobId,
         actor: 'memory-agent',

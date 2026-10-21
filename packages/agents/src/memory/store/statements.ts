@@ -9,9 +9,9 @@ import {
   memoryTerms,
   revisionClaims,
   scopeRevisions,
-} from '../../../drizzle/d1/schema/records.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
-import { storedTerms } from './search-text.ts'
+} from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
+import { storedTerms } from '../../lib/search-text.ts'
 
 /** `stale`: the candidate is older than the record it would replace, so it was declined. */
 export type OperationResult =

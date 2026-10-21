@@ -24,18 +24,17 @@ packages/agents/
   drizzle.config.ts         drizzle-kit config for the D1 schema
   drizzle.local.config.ts   drizzle-kit config for kodama's tables in each Durable Object
   drizzle/
-    d1/                     D1 schema (schema/) and its generated migrations (migrations/)
+    d1/                     D1 schema (schema.ts) and its generated migrations (migrations/)
     durable-object/         schema of kodama's tables in each object, and their migrations
+    schema.test.ts          each schema matches its generated migrations
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
-    agent/                  the Agent Durable Object and its parts
-    harness.ts              Pi runtime composition shared by all agents
-    events.ts               SSE streams for send() and subscribe()
-    recovery.ts             the recovery alarm
-    alarms.ts               one alarm per object, shared by several purposes
-    validation.ts           valibot schemas for untrusted RPC input
+    env.ts                  the Worker's bindings, as a type
     protocol.ts             transport types; consumers import them with `import type`
+    validation.ts           valibot schemas for untrusted RPC input
+    lib/                    generic helpers that import nothing else from src/
+    agent/                  the Agent Durable Object, its runtime, and its parts
     configuration/          per-agent configuration: validation and persistence
     models/                 Pi provider catalog and Worker secret resolution
     prompts/                default system prompt
@@ -58,6 +57,11 @@ together and serves RPC. Behavior lives in these parts:
 | `entries.ts`     | paged conversation entries, live or from the R2 archive, for the memory agent     |
 | `memory.ts`      | the agent's use of long-term memory: extension, skills, refresh, extraction       |
 | `maintenance.ts` | pruning, its scheduling, and refusing input above the hard storage limit          |
+| `harness.ts`     | Pi runtime composition shared by all agents                                       |
+| `events.ts`      | SSE streams for `send()` and `subscribe()`                                        |
+| `alarms.ts`      | one alarm per object, shared by several purposes                                  |
+| `recovery.ts`    | the recovery alarm                                                                |
+| `projection.ts`  | mapping Pi state to RPC results                                                   |
 
 `MemoryAgent` extends `Agent`. It overrides protected methods such as `harnessOptions()`,
 `defaultConfig()`, `afterOpen()`, `onIdle()`, `onAlarm()`, and `archivesEntries()`, instead of
@@ -72,9 +76,38 @@ On every open, the agent prepares the harness before any request sees it:
 
 If Pi's storage fails, the object aborts and is recreated on the next request.
 
+## Dependencies
+
+Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
+imports say where it sits. `src/layers.test.ts` reads every source file and fails on an import
+that breaks the rule.
+
+| Layer        | Paths                                                             | May import                                  |
+| ------------ | ----------------------------------------------------------------- | ------------------------------------------- |
+| lib          | `src/lib/`                                                        | nothing in `src/`                           |
+| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`              | lib                                         |
+| settings     | `src/configuration/`, `src/models/`, `src/prompts/`, `src/tools/` | lib, contracts                              |
+| storage      | `drizzle/`, `src/storage/`                                        | lib                                         |
+| memory store | `src/memory/store/`                                               | lib, storage                                |
+| memory       | the rest of `src/memory/`, except `memory-agent/`                 | lib, contracts, storage, memory store       |
+| agent        | `src/agent/`                                                      | all of the above                            |
+| memory agent | `src/memory/memory-agent/`                                        | all of the above, including agent           |
+| entrypoint   | `src/index.ts`                                                    | lib, contracts, memory, agent, memory agent |
+
+Some consequences:
+
+- `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
+  words (`search-text.ts`), and redaction (`redact.ts`).
+- The memory parts (archive, skills, prune, shared, working) do not know the `Agent` class or the
+  memory agent. What they need from the memory agent is its input contract in
+  `src/memory/jobs.ts`: the job kinds and the object's name.
+- `MemoryAgent` extends `Agent`, so the memory agent is the one layer above `agent`.
+- Tests may import anything, including the helpers in `src/testing/`. Production code never
+  imports `src/testing/`.
+
 ## Harness
 
-[`src/harness.ts`](../packages/agents/src/harness.ts) composes the Pi runtime. Working agents and the
+[`src/agent/harness.ts`](../packages/agents/src/agent/harness.ts) composes the Pi runtime. Working agents and the
 memory agent share these settings:
 
 | Setting                 | Value                                                                   |
@@ -85,7 +118,7 @@ memory agent share these settings:
 | document/context caches | retention 0, so idle agents can be evicted                              |
 | compaction              | Pi's built-in compaction with its defaults                              |
 
-Progress commits are the largest storage cost while streaming. `src/harness.test.ts` records
+Progress commits are the largest storage cost while streaming. `src/agent/harness.test.ts` records
 the rows one turn writes.
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
@@ -253,7 +286,7 @@ primitive, not a multi-agent workflow or a model-invoked tool.
 
 ## Events
 
-[`src/events.ts`](../packages/agents/src/events.ts) turns Pi's observation API into SSE byte
+[`src/agent/events.ts`](../packages/agents/src/agent/events.ts) turns Pi's observation API into SSE byte
 streams over Cloudflare RPC. The JSON payloads are typed as `AgentSendEvent` and `AgentEvent` in
 `@kodama/agents/protocol`. `AgentEvent` is Pi's experimental event contract, pinned by the package
 version.
@@ -294,7 +327,7 @@ Delivery works like this:
 
 ## Alarms and recovery
 
-A Durable Object has one alarm. [`AlarmSchedule`](../packages/agents/src/alarms.ts) stores one due
+A Durable Object has one alarm. [`AlarmSchedule`](../packages/agents/src/agent/alarms.ts) stores one due
 time per purpose and sets the platform alarm to the earliest:
 
 | Purpose    | Meaning                                                           |
@@ -304,7 +337,7 @@ time per purpose and sets the platform alarm to the earliest:
 | `prune`    | archive and delete old entries when storage is over its threshold |
 | `jobs`     | the memory agent's job runner                                     |
 
-[`RecoveryAlarm`](../packages/agents/src/recovery.ts) keeps the `recovery` purpose set while Pi has
+[`RecoveryAlarm`](../packages/agents/src/agent/recovery.ts) keeps the `recovery` purpose set while Pi has
 runnable tasks. It arms the alarm before input is admitted, which covers the window between
 admission and Pi's scheduler.
 
@@ -353,7 +386,7 @@ Objects. It exposes RPC, not a browser page.
 | `nr format`                                   | format the repository                                                    |
 | `nr build` (in `packages/agents`)             | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
 | `nr cf:types` (in `packages/agents`)          | regenerate runtime types                                                 |
-| `nr db:generate` (in `packages/agents`)       | write a D1 migration after `drizzle/d1/schema/` changes                  |
+| `nr db:generate` (in `packages/agents`)       | write a D1 migration after `drizzle/d1/schema.ts` changes                |
 | `nr db:generate:local` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes |
 
 ### Local agent CLI
@@ -406,14 +439,15 @@ and the Vitest setup are in `src/testing/`, which production code never imports.
 | `src/testing/skills.ts`                     | writing a skill and reading it back                           |
 | `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
 | `src/agent/config.test.ts`                  | configuration over RPC and across eviction                    |
-| `src/events.test.ts`                        | `send` and `subscribe` streams                                |
-| `src/recovery.test.ts`                      | failures, cancellation, and recovery after eviction           |
-| `src/alarms.test.ts`                        | several alarm purposes in one alarm                           |
-| `src/harness.test.ts`                       | rows written per streamed turn stay under a recorded budget   |
+| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
+| `src/agent/recovery.test.ts`                | failures, cancellation, and recovery after eviction           |
+| `src/agent/alarms.test.ts`                  | several alarm purposes in one alarm                           |
+| `src/agent/harness.test.ts`                 | rows written per streamed turn stay under a recorded budget   |
 | `src/configuration/index.test.ts`           | the configuration schema                                      |
 | `src/models/index.test.ts`                  | provider credentials                                          |
 | `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
 | `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
+| `src/layers.test.ts`                        | the dependency rule below                                     |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
 module it tests, describe the observable behavior it checks, and run `nr check` before submitting.

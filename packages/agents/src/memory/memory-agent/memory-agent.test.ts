@@ -2,7 +2,7 @@ import { exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from '../store/records.ts'
-import { memoryLedger } from '../../../drizzle/d1/schema/records.ts'
+import { memoryLedger } from '../../../drizzle/d1/schema.ts'
 import {
   isMemoryAgentRequest,
   requestBody,

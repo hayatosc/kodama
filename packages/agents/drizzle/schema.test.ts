@@ -23,7 +23,7 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
   const migrated = Object.fromEntries(
     Object.entries(env.TEST_MIGRATED_COLUMNS).map(([name, columns]) => [name, [...columns].sort()]),
   )
-  // A mismatch means drizzle/d1/schema/ changed without `pnpm db:generate`.
+  // A mismatch means drizzle/d1/schema.ts changed without `pnpm db:generate`.
   expect(migrated).toEqual(declared)
 })
 

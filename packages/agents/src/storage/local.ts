@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/durable-sqlite'
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite'
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator'
 import journal from '../../drizzle/durable-object/migrations/meta/_journal.json'
-import m0000 from '../../drizzle/durable-object/migrations/0000_local_tables.sql'
+import m0000 from '../../drizzle/durable-object/migrations/0000_local_tables.sql?raw'
 import * as schema from '../../drizzle/durable-object/schema.ts'
 
 export type LocalDb = DrizzleSqliteDODatabase<typeof schema>

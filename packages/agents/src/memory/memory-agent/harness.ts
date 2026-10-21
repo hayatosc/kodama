@@ -2,7 +2,7 @@
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
 import type { HarnessOptions } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'
-import { harnessSettings } from '../../harness.ts'
+import { harnessSettings } from '../../agent/harness.ts'
 import { createAgentModels } from '../../models/index.ts'
 import type { AgentConfig } from '../../protocol.ts'
 import { MEMORY_SYSTEM_PROMPT } from './prompts.ts'

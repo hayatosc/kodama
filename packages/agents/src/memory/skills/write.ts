@@ -6,9 +6,8 @@ import { and, eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryLedger } from '../../../drizzle/d1/schema/records.ts'
-import { skills, skillWrites } from '../../../drizzle/d1/schema/skills.ts'
-import type { Scope } from '../../../drizzle/d1/schema/records.ts'
+import { memoryLedger, skills, skillWrites } from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
 import {
   appliedResult,
   bumpScope,
@@ -17,7 +16,7 @@ import {
   insertOp,
 } from '../store/statements.ts'
 import type { OperationContext, OperationResult } from '../store/statements.ts'
-import { changesSchema, contentSha256, currentFiles, sha256Hex, storeBlob } from './blobs.ts'
+import { changesSchema, contentSha256, currentFiles, storeBlob } from './blobs.ts'
 import type { FileChange } from './blobs.ts'
 import {
   blobKey,
@@ -28,6 +27,7 @@ import {
   parseSkillMd,
   skillDir,
 } from './paths.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 
 type SkillWriteRow = typeof skillWrites.$inferSelect
 type Statement = BatchItem<'sqlite'>
