@@ -25,7 +25,7 @@ function migratedColumns(folder: string): Record<string, string[]> {
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
-    setupFiles: ['src/testing/setup.ts'],
+    setupFiles: ['vitest.setup.ts'],
     fsModuleCache: false,
     testTimeout: 15_000,
   },

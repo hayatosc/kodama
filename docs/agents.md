@@ -41,7 +41,7 @@ packages/agents/
     tools/                  tool implementations and their registry
     memory/                 long-term memory (see memory.md)
     storage/                opening kodama's tables in each object's SQLite, and Pi's tables
-    testing/                test helpers and the Vitest setup; tests sit next to their modules
+    helper/                 shared test helpers; tests sit next to their modules
 ```
 
 ### The Agent Durable Object
@@ -102,8 +102,8 @@ Some consequences:
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
 - `MemoryAgent` extends `Agent`, so the memory agent is the one layer above `agent`.
-- Tests may import anything, including the helpers in `src/testing/`. Production code never
-  imports `src/testing/`.
+- Tests may import anything, including the helpers in `src/helper/`. Production code never
+  imports `src/helper/`.
 
 ## Harness
 
@@ -423,20 +423,20 @@ server if another configuration evaluation replaces it.
 
 Tests use Vitest with the Cloudflare plugin, so they run inside workerd with real RPC, Pi Durable,
 SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked, and no API key is
-needed. `vitest.config.ts` applies the generated D1 migrations. It also passes the columns from the
-drizzle-kit snapshots, so a test fails when the schema and its migrations differ.
+needed. `vitest.config.ts` reads the generated D1 migrations for the setup. It also passes the
+columns from the drizzle-kit snapshots, so a test fails when a schema and its migrations differ.
 
 Tests sit next to the module they test, as `<module>.test.ts` in the same folder. Shared helpers
-and the Vitest setup are in `src/testing/`, which production code never imports.
+are in `src/helper/`, which production code never imports, and `vitest.setup.ts` applies the D1
+migrations before the tests.
 
 | Path                                        | Contents                                                      |
 | ------------------------------------------- | ------------------------------------------------------------- |
-| `src/testing/setup.ts`                      | applies the D1 migrations before the tests                    |
-| `src/testing/model.ts`                      | mocked OpenAI Responses streams: text, tool calls, inspection |
-| `src/testing/rpc.ts`                        | a scripted default model, `waitForAnswer`, and SSE readers    |
-| `src/testing/conversation.ts`               | a long conversation that compacts, for pruning tests          |
-| `src/testing/memory.ts`                     | the memory database, records, and the memory agent            |
-| `src/testing/skills.ts`                     | writing a skill and reading it back                           |
+| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection |
+| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers    |
+| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
+| `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
+| `src/helper/skills.ts`                      | writing a skill and reading it back                           |
 | `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
 | `src/agent/config.test.ts`                  | configuration over RPC and across eviction                    |
 | `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |

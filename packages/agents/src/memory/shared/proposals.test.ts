@@ -7,7 +7,7 @@ import { memoryLedger, memoryRecords, skills } from '../../../drizzle/d1/schema.
 import type { Scope } from '../../../drizzle/d1/schema.ts'
 import { writeSkill } from '../skills/write.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import {
   context,
   db,
@@ -15,7 +15,7 @@ import {
   renderedAlwaysLoaded,
   waitForProposal,
   write,
-} from '../../testing/memory.ts'
+} from '../../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

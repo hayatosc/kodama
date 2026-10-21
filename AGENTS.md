@@ -20,7 +20,7 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
   - `shared/`: proposals to shared spaces and their application.
 - `src/storage/`: opening kodama's tables in each Durable Object's own SQLite (`local.ts`; the schema is `drizzle/durable-object/schema.ts`) and `pi-tables.ts`, Pi Durable's tables as pruning reads them; re-run `src/memory/prune/prune.test.ts` and `src/storage/pi-assumptions.test.ts` on every Pi upgrade.
 - `src/protocol.ts`: transport types; consumers should use type-only imports.
-- Tests sit next to the code they test, as `<module>.test.ts` in the same folder (for example `src/agent/agent.test.ts` for the Agent RPC and `src/memory/prune/prune.test.ts` for pruning); `drizzle/schema.test.ts` checks the schemas against their migrations. Shared helpers and the Vitest setup are in `src/testing/`; production code never imports them.
+- Tests sit next to the code they test, as `<module>.test.ts` in the same folder (for example `src/agent/agent.test.ts` for the Agent RPC and `src/memory/prune/prune.test.ts` for pruning); `drizzle/schema.test.ts` checks the schemas against their migrations. Shared test helpers are in `src/helper/` and the Vitest setup is `vitest.setup.ts`; production code never imports either.
 - `packages/agents/cloudflare.config.ts`: Worker bindings, secrets, and SQLite configuration.
 
 The abbreviated `src/` paths above are relative to `packages/agents/`.
@@ -52,7 +52,7 @@ Follow existing camelCase functions, PascalCase types/classes, and lowercase hyp
 
 ## Testing Guidelines
 
-Use Vitest with the Cloudflare plugin in workerd. Put each test next to the module it tests as `<module>.test.ts` (not in a separate `test/` folder) and describe observable behavior. Put shared mocks and helpers in `src/testing/` instead of copying them, and split a test file by `describe` before it grows past a few hundred lines. Mock external model requests while exercising real RPC, SQLite persistence, eviction, and alarms. Tests require no real API keys. No numerical coverage threshold is configured; add regression tests for changed behavior and run `nr check` before submitting.
+Use Vitest with the Cloudflare plugin in workerd. Put each test next to the module it tests as `<module>.test.ts` (not in a separate `test/` folder) and describe observable behavior. Put shared mocks and helpers in `src/helper/` instead of copying them; do not add other test-only folders or files that are not `*.test.ts`, and split a test file by `describe` before it grows past a few hundred lines. Mock external model requests while exercising real RPC, SQLite persistence, eviction, and alarms. Tests require no real API keys. No numerical coverage threshold is configured; add regression tests for changed behavior and run `nr check` before submitting.
 
 ## Commit & Pull Request Guidelines
 

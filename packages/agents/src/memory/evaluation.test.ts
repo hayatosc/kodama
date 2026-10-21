@@ -10,9 +10,9 @@ import { searchHistory } from './archive/history.ts'
 import { applyOperation } from './store/records.ts'
 import { memoryDb } from './store/db.ts'
 import type { NewRecord } from './store/records.ts'
-import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel, say } from '../testing/conversation.ts'
-import type { ToolCall } from '../testing/model.ts'
-import { toolCallResponse } from '../testing/model.ts'
+import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel, say } from '../helper/conversation.ts'
+import type { ToolCall } from '../helper/model.ts'
+import { toolCallResponse } from '../helper/model.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

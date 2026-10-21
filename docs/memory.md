@@ -769,7 +769,7 @@ and the memory agent applies the accepted ones on its own
 
 Memory is tested in workerd with a mocked model, like the rest of the agent (see
 [agents.md](agents.md#testing)). Each test sits next to the module it tests; shared
-setup lives in `src/testing/memory.ts` and `src/testing/skills.ts`. Paths below are relative to
+setup lives in `src/helper/memory.ts` and `src/helper/skills.ts`. Paths below are relative to
 `src/memory/` unless they start with `src/`.
 
 | Test file                            | Covers                                                               |

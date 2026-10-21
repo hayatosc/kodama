@@ -3,7 +3,7 @@ import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invalidateOverridesOfRequired } from '../memory-agent/consolidation.ts'
 import type { Scope } from '../../../drizzle/d1/schema.ts'
-import { db, record, renderedAlwaysLoaded, write } from '../../testing/memory.ts'
+import { db, record, renderedAlwaysLoaded, write } from '../../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

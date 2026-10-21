@@ -20,7 +20,7 @@ import {
   mockModel,
   say,
   storedEntryIds,
-} from '../../testing/conversation.ts'
+} from '../../helper/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

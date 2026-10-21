@@ -16,9 +16,9 @@ import {
   textResponse,
   toolCallResponse,
   toolResults,
-} from '../../testing/model.ts'
-import { context, db } from '../../testing/memory.ts'
-import { create, file, row, skillMd } from '../../testing/skills.ts'
+} from '../../helper/model.ts'
+import { context, db } from '../../helper/memory.ts'
+import { create, file, row, skillMd } from '../../helper/skills.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

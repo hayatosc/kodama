@@ -22,7 +22,7 @@ packages/
     src/memory/           Long-term memory, the memory agent, pruning, and skills
     src/storage/          Kodama's tables in each Durable Object's SQLite
     src/protocol.ts       Transport data types (safe to import as types in a UI)
-    src/testing/          Test helpers; tests sit next to their modules as *.test.ts
+    src/helper/           Shared test helpers; tests sit next to their modules as *.test.ts
   ui/                     Planned: web UI and its server Worker
 ```
 

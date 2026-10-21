@@ -18,6 +18,7 @@
     "cli/**/*.ts",
     "drizzle/**/*.ts",
     "*.config.ts",
+    "vitest.setup.ts",
     ".cloudflare/types/**/*.d.ts"
   ]
 }

@@ -3,9 +3,9 @@ import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { searchHistory } from './history.ts'
 import { archiveSegments } from '../../../drizzle/d1/schema.ts'
-import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from '../../testing/conversation.ts'
-import { textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
-import { db } from '../../testing/memory.ts'
+import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from '../../helper/conversation.ts'
+import { textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
+import { db } from '../../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

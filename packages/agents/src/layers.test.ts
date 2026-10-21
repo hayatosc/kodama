@@ -28,7 +28,7 @@ type Layer =
   | 'agent'
   | 'memory-agent'
   | 'entrypoint'
-  | 'testing'
+  | 'helper'
 
 /** The layer of a file, by its path relative to the package. */
 function layerOf(path: string): Layer | undefined {
@@ -41,7 +41,7 @@ function layerOf(path: string): Layer | undefined {
   if (path.startsWith('src/memory/')) return 'memory'
   if (path.startsWith('src/agent/')) return 'agent'
   if (path === 'src/index.ts') return 'entrypoint'
-  if (path.startsWith('src/testing/')) return 'testing'
+  if (path.startsWith('src/helper/')) return 'helper'
   return undefined
 }
 
@@ -56,7 +56,7 @@ const ALLOWED: Record<Layer, readonly Layer[]> = {
   agent: ['lib', 'contracts', 'settings', 'storage', 'memory-store', 'memory'],
   'memory-agent': ['lib', 'contracts', 'settings', 'storage', 'memory-store', 'memory', 'agent'],
   entrypoint: ['lib', 'contracts', 'agent', 'memory', 'memory-agent'],
-  testing: [
+  helper: [
     'lib',
     'contracts',
     'settings',
@@ -103,7 +103,7 @@ it('lets each layer import only itself and the layers below it', () => {
     for (const target of importsOf(path, text)) {
       const to = layerOf(target)
       if (to === undefined || to === from) continue
-      // Tests may use anything, including the helpers in src/testing/.
+      // Tests may use anything, including the helpers in src/helper/.
       if (isTest) continue
       if (!ALLOWED[from].includes(to)) violations.push(`${path} (${from}) -> ${target} (${to})`)
     }
