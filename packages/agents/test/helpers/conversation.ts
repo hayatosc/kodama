@@ -2,9 +2,9 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { expect, vi } from 'vitest'
-import { createAgentModels } from '../src/models/index.ts'
-import { piEntries } from '../src/storage/pi-tables.ts'
+import { vi } from 'vitest'
+import { createAgentModels } from '../../src/models/index.ts'
+import { piEntries } from '../../src/storage/pi-tables.ts'
 import {
   isMemoryAgentRequest,
   isSummaryRequest,
@@ -13,6 +13,7 @@ import {
   toolCallResponse,
   toolResults,
 } from './model.ts'
+import { waitForAnswer } from './rpc.ts'
 
 const contextWindow =
   createAgentModels(env).getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
@@ -22,18 +23,6 @@ export const BLOCKING_USAGE = contextWindow
 export const BACKGROUND_USAGE = contextWindow - 16_384 - 16_000
 // Each turn's text is about 4k tokens, so a summary keeps the last five turns of 20k tokens.
 export const FILLER = ' filler'.repeat(2_000)
-
-export async function waitForAnswer(agentId: string, requestId: string) {
-  await expect
-    .poll(
-      async () => {
-        using result = await exports.default.submission(agentId, requestId)
-        return result?.submission.status
-      },
-      { timeout: 10_000 },
-    )
-    .toBe('done')
-}
 
 /**
  * Scripted model: answers that report `usage(n)` for the n-th answer request, summaries that wait

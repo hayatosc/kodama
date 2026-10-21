@@ -1,0 +1,79 @@
+/** Helpers of the long-term memory tests: the memory database, records, and the memory agent. */
+import { runInDurableObject } from 'cloudflare:test'
+import { env } from 'cloudflare:workers'
+import { and, eq } from 'drizzle-orm'
+import { expect } from 'vitest'
+import { MEMORY_AGENT_NAME } from '../../src/memory/memory-agent/jobs.ts'
+import { memoryDb } from '../../src/memory/store/db.ts'
+import { applyOperation } from '../../src/memory/store/records.ts'
+import type { NewRecord } from '../../src/memory/store/records.ts'
+import { memoryRecords } from '../../src/memory/store/schema/records.ts'
+import { sharedProposals } from '../../src/memory/store/schema/shared.ts'
+import type { OperationContext } from '../../src/memory/store/statements.ts'
+import { AlwaysLoadedMemory } from '../../src/memory/working/always-loaded.ts'
+import { alwaysLoaded } from '../../src/storage/local-schema.ts'
+import { openLocalDb } from '../../src/storage/local.ts'
+
+export const db = memoryDb(env.MEMORY_DB)
+export const memoryAgent = () => env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME)
+
+/** A fresh operation, as if from its own job. */
+export function context(now = Date.now()): OperationContext {
+  const opId = crypto.randomUUID()
+  return { opId, jobId: opId, runId: opId, actor: 'test', now }
+}
+
+/** Write a record directly, as the memory agent would; returns its ID. */
+export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): Promise<string> {
+  const result = await applyOperation(db, context(), {
+    type: 'write',
+    record: { origin: 'agent_judgment', observedAt: Date.now(), ...record },
+  })
+  if (result.status !== 'applied') throw new Error(`write ${result.status}`)
+  return result.recordId
+}
+
+export function record(id: string) {
+  return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
+}
+
+export async function activeContents(agentId: string): Promise<string[]> {
+  const rows = await db
+    .select({ content: memoryRecords.content })
+    .from(memoryRecords)
+    .where(and(eq(memoryRecords.scope, `agent:${agentId}`), eq(memoryRecords.status, 'active')))
+  return rows.map((row) => row.content)
+}
+
+/** The always-loaded text an agent object has stored. */
+export function storedAlwaysLoaded(agentId: string): Promise<string> {
+  return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()?.text ?? ''
+  })
+}
+
+/** The always-loaded text rendered now for an agent that reads `spaces`. */
+export function renderedAlwaysLoaded(agentId: string, spaces: string[]): Promise<string> {
+  return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    const memory = new AlwaysLoadedMemory({
+      env,
+      agentId: () => agentId,
+      local: () => Promise.resolve(local),
+      sharedSpaces: () => Promise.resolve(spaces),
+    })
+    await memory.refresh()
+    return memory.text()
+  })
+}
+
+export async function waitForProposal(id: string, status: string): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        (await db.select().from(sharedProposals).where(eq(sharedProposals.id, id)).get())?.status,
+      { timeout: 10_000 },
+    )
+    .toBe(status)
+}
