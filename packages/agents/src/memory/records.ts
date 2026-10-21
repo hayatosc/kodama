@@ -2,7 +2,7 @@
  * Memory records in D1: applying write operations and searching
  * (docs/design/long-term-memory.md, Applying a write, Freshness, Queries).
  */
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, lte, sql } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import { drizzle } from 'drizzle-orm/d1'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
@@ -10,6 +10,7 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import * as v from 'valibot'
 import * as schema from './schema.ts'
 import {
+  archiveSegments,
   extractionCheckpoints,
   memoryLedger,
   memoryOps,
@@ -71,6 +72,8 @@ export type Operation =
   | { type: 'decline'; candidate: string; reason: string }
   /** Record that extraction has covered an agent's entries through `lastEntryId`. */
   | { type: 'checkpoint'; agentId: string; lastEntryId: number }
+  /** Record that the summary of an archived segment is in R2. */
+  | { type: 'archive_summary'; segmentId: string }
 
 /** `stale`: the candidate is older than the record it would replace, so it was declined. */
 export type OperationResult =
@@ -359,7 +362,38 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
               )
       return {
         result,
-        statements: [advance, insertOp(db, context, op.type, result, current !== undefined)],
+        statements: [
+          advance,
+          insertOp(db, context, op.type, result, current !== undefined),
+          db
+            .update(archiveSegments)
+            .set({ extracted: true })
+            .where(
+              and(
+                eq(archiveSegments.agentId, op.agentId),
+                lte(archiveSegments.lastEntry, op.lastEntryId),
+              ),
+            ),
+        ],
+      }
+    }
+    case 'archive_summary': {
+      const segment = await db
+        .select({ id: archiveSegments.id })
+        .from(archiveSegments)
+        .where(eq(archiveSegments.id, op.segmentId))
+        .get()
+      if (segment === undefined) return conflict(db, context, op.segmentId, 'missing_segment')
+      const result: OperationResult = { status: 'applied', recordId: op.segmentId }
+      return {
+        result,
+        statements: [
+          db
+            .update(archiveSegments)
+            .set({ hasSummary: true })
+            .where(eq(archiveSegments.id, op.segmentId)),
+          insertOp(db, context, op.type, result, true),
+        ],
       }
     }
     case 'decline': {

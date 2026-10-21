@@ -11,7 +11,7 @@ const KATAKANA_WORD = /^[\p{Script=Katakana}ー]+$/u
 /** サーバー and サーバ are the same word: drop a long-vowel mark after katakana. */
 const LONG_VOWEL_AFTER_KATAKANA = /([ァ-ヴ])ー+/g
 
-type Words = { segments: string[]; merged: string[] }
+export type Words = { segments: string[]; merged: string[] }
 
 /** Word-like segments, normalized; and the same with adjacent katakana segments merged. */
 function words(text: string): Words {
@@ -32,6 +32,11 @@ function words(text: string): Words {
     previousWasKatakana = katakana
   }
   return { segments, merged }
+}
+
+/** The words of a query or of stored text: merged words and the original segments. */
+export function searchWords(text: string): Words {
+  return words(text)
 }
 
 /** Text for an indexed column: merged words, then the original segments that differ. */

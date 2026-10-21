@@ -49,6 +49,11 @@ export class AlarmSchedule {
     })
   }
 
+  /** When `purpose` is due, if it is scheduled. */
+  get(purpose: AlarmPurpose): Promise<number | undefined> {
+    return this.#serialize(() => this.#storage.get<number>(KEY_PREFIX + purpose))
+  }
+
   /** Wake for `purpose` at `at` unless it is already due earlier. */
   setNoLaterThan(purpose: AlarmPurpose, at: number): Promise<void> {
     return this.#serialize(async () => {

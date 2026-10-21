@@ -9,6 +9,8 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { AgentEnv } from '../env.ts'
 import { alwaysLoaded, rememberTurns } from '../storage/local-schema.ts'
 import type { LocalDb } from '../storage/local.ts'
+import { searchHistory } from './archive.ts'
+import type { HistoryResult } from './archive.ts'
 import { memoryDb, searchMemory } from './records.ts'
 import type { MemoryRecord, Scope } from './records.ts'
 import { looksLikeInjection, redactSecrets } from './redact.ts'
@@ -21,7 +23,7 @@ export const REVISION_CHECK_INTERVAL_MS = 60_000
 export const REMEMBER_LIMIT_PER_TURN = 3
 
 export interface WorkingMemoryDeps {
-  env: Pick<AgentEnv, 'MEMORY_DB' | 'MEMORY_AGENT'>
+  env: Pick<AgentEnv, 'MEMORY_DB' | 'MEMORY_AGENT' | 'ARCHIVE'>
   agentId: () => string
   local: () => Promise<LocalDb>
   /** Shared spaces the agent reads, earliest first. */
@@ -207,6 +209,52 @@ function memorySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
   })
 }
 
+function formatHistory(result: HistoryResult): string {
+  const lines: string[] = []
+  for (const summary of result.summaries) {
+    lines.push(
+      `Summary of ${summary.segmentId} (${new Date(summary.at).toISOString()}):`,
+      summary.summary,
+    )
+  }
+  for (const hit of result.hits) {
+    lines.push(
+      `Entries #${hit.firstEntry}-#${hit.lastEntry} (${new Date(hit.at).toISOString()}):`,
+      hit.text,
+    )
+  }
+  if (lines.length === 0) lines.push('No matching archived history.')
+  if (!result.complete && result.searchedBefore !== undefined) {
+    lines.push(`(older history not searched; pass before=${result.searchedBefore} to continue)`)
+  }
+  return lines.join('\n')
+}
+
+function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
+  return defineTool({
+    name: 'history_search',
+    description:
+      'Search the archived part of this conversation, older than what you can see, for the exact words used. Results are newest first.',
+    parameters: Type.Object({
+      query: Type.String({ minLength: 1, maxLength: 500 }),
+      before: Type.Optional(
+        Type.Integer({ minimum: 0, description: 'Only search history older than this time (ms)' }),
+      ),
+    }),
+    replay: 'safe',
+    execute: async ({ query, before }) => {
+      const result = await searchHistory(
+        memoryDb(deps.env.MEMORY_DB),
+        deps.env.ARCHIVE,
+        deps.agentId(),
+        query,
+        before === undefined ? {} : { before },
+      )
+      return { output: [{ type: 'text', text: formatHistory(result) }] }
+    },
+  })
+}
+
 function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
   return defineTool({
     name: 'remember',
@@ -271,7 +319,7 @@ export function createWorkingMemoryExtension(
 ): Extension {
   return defineExtension({
     name: 'kodama-memory',
-    tools: [memorySearchTool(deps), rememberTool(deps)],
+    tools: [memorySearchTool(deps), rememberTool(deps), historySearchTool(deps)],
     sections: [
       section('memory', async () => {
         const text = await memory.text()

@@ -22,7 +22,18 @@ import {
 import { createAgentModels } from './models/index.ts'
 import { toAgentSnapshot, toSubmissionStatus } from './projection.ts'
 import { RecoveryAlarm } from './recovery.ts'
+import { and, asc, eq, gt } from 'drizzle-orm'
+import { readArchivedText } from './memory/archive.ts'
+import {
+  needsPrune,
+  pruneLimits,
+  pruneOnce,
+  prunedThrough,
+  PRUNE_RETRY_MS,
+} from './memory/prune.ts'
+import type { PruneDeps, PruneOutcome } from './memory/prune.ts'
 import { extractionCheckpoint, memoryDb } from './memory/records.ts'
+import { archiveSegments } from './memory/schema.ts'
 import { entryText } from './memory/transcript.ts'
 import type { EntryText } from './memory/transcript.ts'
 import {
@@ -58,6 +69,10 @@ export interface EntryPage {
   end: boolean
 }
 
+/** Input is refused while the database is above the hard limit; retry after pruning. */
+export const STORAGE_MAINTENANCE_ERROR =
+  'storage_maintenance: the agent is archiving old history; retry later'
+
 /** Entry IDs cross RPC as plain numbers; Pi's are non-negative integers. */
 function isEntryId(value: number): value is EntryId {
   return Number.isSafeInteger(value) && value >= 0
@@ -82,7 +97,8 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #recovery: RecoveryAlarm
   readonly #local: Promise<LocalDb>
   readonly #memory: AlwaysLoadedMemory
-  readonly #harness: Promise<Harness>
+  #harness: Promise<Harness>
+  #pruning: Promise<PruneOutcome> | undefined
   /** A memory change arrived while busy; refresh at the next idle moment. */
   #memoryChanged = false
 
@@ -94,18 +110,97 @@ export class Agent extends DurableObject<AgentEnv> {
     this.#memory = new AlwaysLoadedMemory(this.workingMemoryDeps())
     this.#harness = ctx.blockConcurrencyWhile(async () => {
       await this.#local
-      const harness = await openHarness(ctx, this.harnessOptions())
-      try {
-        await harness.root(context)
-        await initializeAgentConfig(harness, this.defaultConfig())
-        await this.afterOpen(harness)
-        await this.#recovery.refresh(harness)
-        return harness
-      } catch (error) {
-        await harness.close(context)
-        throw error
-      }
+      return this.#open()
     })
+  }
+
+  async #open(): Promise<Harness> {
+    const harness = await openHarness(this.ctx, this.harnessOptions())
+    try {
+      await harness.root(context)
+      await initializeAgentConfig(harness, this.defaultConfig())
+      await this.afterOpen(harness)
+      await this.#recovery.refresh(harness)
+      return harness
+    } catch (error) {
+      await harness.close(context)
+      throw error
+    }
+  }
+
+  /**
+   * Run `check` against the open harness with every other event held back; if it passes, close the
+   * harness, run `mutate` in one storage transaction, and open the harness again.
+   */
+  async #exclusive(
+    check: (harness: Harness) => Promise<boolean>,
+    mutate: () => void,
+  ): Promise<boolean> {
+    const previous = this.#harness
+    let mutated = false
+    this.#harness = this.ctx.blockConcurrencyWhile(async () => {
+      const harness = await previous
+      if (!(await check(harness))) return harness
+      await harness.close(context)
+      // A failure here throws out of blockConcurrencyWhile, which resets the object.
+      this.ctx.storage.transactionSync(mutate)
+      mutated = true
+      return this.#open()
+    })
+    await this.#harness
+    return mutated
+  }
+
+  /** Whether pruning archives entries to R2 before deleting them. */
+  protected archivesEntries(): boolean {
+    return true
+  }
+
+  protected pruneDeps(): PruneDeps {
+    return {
+      storage: this.ctx.storage,
+      env: this.env,
+      agentId: () => this.agentId(),
+      local: () => this.#local,
+      harness: () => this.#harness,
+      exclusive: (check, mutate) => this.#exclusive(check, mutate),
+      archive: this.archivesEntries(),
+      memoryAgent: () => this.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME),
+    }
+  }
+
+  /**
+   * Archive and delete old entries until the database is under the threshold, or one run with
+   * `force`. A run whose delete checks fail is retried by the prune alarm.
+   */
+  async prune(request: { force?: boolean } = {}): Promise<PruneOutcome> {
+    if (this.#pruning !== undefined) return this.#pruning
+    const run = async (): Promise<PruneOutcome> => {
+      const deps = this.pruneDeps()
+      let outcome = await pruneOnce(deps, { force: request.force === true })
+      while (outcome === 'pruned' && request.force !== true) {
+        const next = await pruneOnce(deps)
+        if (next === 'nothing') break
+        outcome = next
+      }
+      await this.alarms.set(
+        'prune',
+        outcome === 'deferred' ? Date.now() + PRUNE_RETRY_MS : undefined,
+      )
+      return outcome
+    }
+    this.#pruning = run().finally(() => {
+      this.#pruning = undefined
+    })
+    return this.#pruning
+  }
+
+  /** Schedule pruning when it is due and not already scheduled; reads storage only. */
+  protected async schedulePruneIfNeeded(): Promise<void> {
+    if ((await this.alarms.get('prune')) !== undefined) return
+    if (await needsPrune(this.ctx.storage, await this.#local)) {
+      await this.alarms.set('prune', Date.now())
+    }
   }
 
   /** This agent's ID, the name its object was created with. */
@@ -151,6 +246,7 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Runs whenever Pi has no runnable task left. */
   protected async onIdle(): Promise<void> {
     await this.alarms.set('extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
+    await this.schedulePruneIfNeeded()
     if (!this.#memoryChanged) return
     this.#memoryChanged = false
     await this.#refreshMemory(() => this.#memory.refresh())
@@ -187,6 +283,11 @@ export class Agent extends DurableObject<AgentEnv> {
 
   async sendMessage(request: SendMessageRequest): Promise<number> {
     const message = parseMessage(request)
+    const limits = await pruneLimits(this.ctx.storage)
+    if (this.ctx.storage.sql.databaseSize > limits.hardBytes) {
+      await this.alarms.setNoLaterThan('prune', Date.now())
+      throw new Error(STORAGE_MAINTENANCE_ERROR)
+    }
     const harness = await this.#harness
     const config = await readAgentConfig(harness)
     if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
@@ -272,12 +373,17 @@ export class Agent extends DurableObject<AgentEnv> {
     return submission === undefined ? undefined : toSubmissionStatus(requestId, submission)
   }
 
-  /** Conversation text after entry `after`, oldest first, for the memory agent. */
+  /**
+   * Conversation text after entry `after`, oldest first, for the memory agent. Pruned entries are
+   * read back from their archived segment.
+   */
   async readEntries(request: { after: number; limit: number }): Promise<EntryPage> {
-    const harness = await this.#harness
     const limit = Math.min(Math.max(1, request.limit), 200)
     const first = request.after + 1
     if (!isEntryId(first)) throw new TypeError('after must be an entry ID')
+    const pruned = prunedThrough(await this.#local)
+    if (first <= pruned) return this.#readArchived(request.after, limit, pruned)
+    const harness = await this.#harness
     const page = await harness.commit(
       (tx) =>
         tx.scanEntries(
@@ -291,6 +397,22 @@ export class Agent extends DurableObject<AgentEnv> {
       through: page.items.at(-1)?.id ?? request.after,
       end: page.next === undefined,
     }
+  }
+
+  async #readArchived(after: number, limit: number, pruned: number): Promise<EntryPage> {
+    const segment = await memoryDb(this.env.MEMORY_DB)
+      .select()
+      .from(archiveSegments)
+      .where(and(eq(archiveSegments.agentId, this.agentId()), gt(archiveSegments.lastEntry, after)))
+      .orderBy(asc(archiveSegments.firstEntry))
+      .limit(1)
+      .get()
+    // Without an archive (the memory agent's own history), the pruned range has no text left.
+    if (segment === undefined || segment.firstEntry > pruned) {
+      return { entries: [], through: pruned, end: false }
+    }
+    const page = await readArchivedText(this.env.ARCHIVE, segment.r2Prefix, after, limit)
+    return { entries: page.entries, through: page.through ?? segment.lastEntry, end: false }
   }
 
   /** The memory agent changed this agent's memory; the copy is refreshed while idle. */
@@ -324,6 +446,7 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Handle a due alarm purpose; subclasses add their own. */
   protected async onAlarm(purpose: AlarmPurpose): Promise<void> {
     if (purpose === 'extract') await this.#extract()
+    if (purpose === 'prune') await this.prune()
   }
 
   override async alarm(): Promise<void> {

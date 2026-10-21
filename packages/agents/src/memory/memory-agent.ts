@@ -25,6 +25,7 @@ import type { JobOutcome, JobStatus, MemoryJob } from './jobs.ts'
 import { createMemoryAgentTools } from './memory-tools.ts'
 import type { RunningJob } from './memory-tools.ts'
 import { jobPrompt, MEMORY_SYSTEM_PROMPT } from './prompts.ts'
+import { needsPrune } from './prune.ts'
 import { memoryDb } from './records.ts'
 import { memoryLedger, memoryOps } from './schema.ts'
 
@@ -113,7 +114,14 @@ export class MemoryAgent extends Agent {
 
   protected override async onIdle(): Promise<void> {}
 
+  /** The memory agent's own history is job scratch work: pruning deletes it without an archive. */
+  protected override archivesEntries(): boolean {
+    return false
+  }
+
   protected override async onAlarm(purpose: AlarmPurpose): Promise<void> {
+    // Pruning closes the harness, so it runs between jobs, at the end of the drain.
+    if (purpose === 'prune') return this.#kick()
     if (purpose !== 'jobs') return super.onAlarm(purpose)
     if (this.#running !== undefined) await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
     this.#kick()
@@ -209,6 +217,7 @@ export class MemoryAgent extends Agent {
       await this.#run(row)
     }
     const local = await this.local()
+    if (await needsPrune(this.ctx.storage, local)) await this.prune()
     const delayed = local
       .select({ notBefore: memoryJobs.notBefore })
       .from(memoryJobs)

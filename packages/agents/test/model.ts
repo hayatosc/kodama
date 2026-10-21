@@ -11,7 +11,9 @@ function stream(events: readonly SseEvent[]): Response {
 
 const usage = { input_tokens: 5, output_tokens: 4, total_tokens: 9 }
 
-export function textResponse(text: string): Response {
+/** A response that reports `inputTokens` of context, which drives Pi's compaction thresholds. */
+export function textResponse(text: string, inputTokens = usage.input_tokens): Response {
+  const reported = { input_tokens: inputTokens, output_tokens: 4, total_tokens: inputTokens + 4 }
   const item = {
     type: 'message',
     id: 'msg_test',
@@ -26,7 +28,7 @@ export function textResponse(text: string): Response {
     { type: 'response.output_item.done', output_index: 0, item },
     {
       type: 'response.completed',
-      response: { id: 'resp_test', status: 'completed', output: [item], usage },
+      response: { id: 'resp_test', status: 'completed', output: [item], usage: reported },
     },
   ])
 }
@@ -78,6 +80,11 @@ export function requestBody(init: RequestInit | undefined): string {
 /** How many tool results the request already carries: the step of a scripted tool loop. */
 export function toolResults(body: string): number {
   return body.split('"function_call_output"').length - 1
+}
+
+/** Pi's compaction asks the model to summarize the conversation. */
+export function isSummaryRequest(body: string): boolean {
+  return body.includes('The messages above are a conversation to summarize')
 }
 
 /** Requests of the memory agent carry its system prompt. */

@@ -321,11 +321,15 @@ Prunable rows, where `P` is the `head` of the newest head marker in the root con
 - `entries` of the root conversation with `id < P`;
 - `tasks` with `status = 'terminal'`, with their task-scoped `documents` and
   `document_revisions`;
-- `submissions` with status `done` or `unanswered` older than 30 days;
 - the matching `record_ids` rows.
 
-Pruning runs when `ctx.storage.sql.databaseSize` is above the threshold (1 GB by default) or the
-prunable entries exceed a count. A run covers at most 16 MB of entries, so that building its files
+`submissions` are kept. Pi stores no time on them, and `submissionByRequest` uses them to answer a
+retried request with its first result; one row per input is small next to the entries.
+
+When the agent goes idle, it schedules the `prune` alarm if a run is unfinished, or if
+`ctx.storage.sql.databaseSize` is above the threshold (1 GB by default) and entries before `P`
+remain. The check reads storage only, so it also runs while the harness opens. An operator can
+lower the limits of one object with the `kodama:prune-limits` key. A run covers at most 16 MB of entries, so that building its files
 fits the object's memory and CPU limits; runs repeat until the size is below the threshold. Its
 state is a `prune_runs` table in the agent's SQLite, outside Pi's tables, with one unfinished run at
 a time:
@@ -358,10 +362,10 @@ On start and on the `prune` alarm, an unfinished run continues from its state.
    - the newest head marker's `head` is still `P` or later.
 
    If any check fails, keep the run `indexed` and set the `prune` alarm 10 minutes later.
-   Otherwise close the harness, delete the prunable rows, store `P` as the pruned boundary, and
-   record `deleted` in one `transactionSync`, then reopen the harness and refresh the alarms.
-   The deleted entries are those of the run's range; tasks and submissions follow the rules
-   above.
+   Otherwise close the harness, delete the prunable rows and record `deleted` in one
+   `transactionSync`, then reopen the harness and refresh the alarms. The deleted entries are
+   those of the run's range; the last `deleted` run's last entry is the pruned boundary. Requests
+   that arrive meanwhile wait for the reopened harness.
 
 Steps 1–3 run while the agent keeps working; only step 4 needs it to be idle.
 
@@ -369,6 +373,13 @@ Above the hard threshold (8 GB), `sendMessage` rejects new input with a retryabl
 `storage_maintenance` error until a run reaches `deleted`, so a busy agent drains and pruning gets
 its idle moment. Pruning needs only R2 and D1, so a stopped memory agent delays extraction and
 summaries, not reclaiming storage.
+
+`readEntries` reads a range below the pruned boundary from its archived segment, so an extraction
+that fell behind still sees every entry.
+
+The memory agent prunes its own session the same way, without an archive: its entries are the
+scratch work of finished jobs, and its records are already in D1. It checks between jobs, at the
+end of each drain, because closing the harness mid-job would fail the job.
 
 Pruning writes to Pi's internal tables. Pin the Pi Durable version, keep pruning in one module,
 and run the pruning tests on every Pi upgrade.
@@ -393,8 +404,9 @@ Each archived range has its search index in R2, next to its entries:
 
 1. List this agent's catalog rows newest first, starting before `before` if given.
 2. Read their `.summary.json` and `.index.json` objects in that order until 4 MB have been read.
-3. A chunk matches when it contains every query word; if none matches, retry with each word as a
-   prefix. Rank matches by the number of matched words, then recency.
+3. A chunk matches when it contains every query word: the merged words first, then the original
+   segments, then each merged word as a prefix, as in [Queries](#queries). A summary matches the
+   same way. Matches are returned newest first, at most five.
 4. Read the matched byte ranges from the `.jsonl` objects and return them with their entry IDs
    and times, plus the oldest time searched. The model passes that time as `before` to search
    further back.
@@ -517,7 +529,6 @@ UI server, which authenticates the reviewer.
 | pruning threshold                  | 1 GB                                     |
 | hard threshold (input rejected)    | 8 GB                                     |
 | pruning retry after a failed check | 10 minutes                               |
-| submission retention               | 30 days                                  |
 | archive chunk / tool result index  | 2,000 / 2,000 characters                 |
 | `history_search` index read        | 4 MB per call                            |
 | entries per pruning run            | at most 16 MB                            |
@@ -1099,14 +1110,15 @@ To check before the design is settled:
 
 - **Whether production `databaseSize` falls after pruning** is not verified. Locally it fell from
   20.5 MB to 5.1 MB.
-- **Whether pruning old `submissions` is safe** is not verified.
+- **`submissions` are never pruned.** One row per input stays for the life of the agent.
 - **Rows written per turn** were measured in workerd (`test/measurement.test.ts`, Pi Durable 1.2.0):
   about 111 rows for a one-second, 40-delta stream at 100 ms, and about 66 at 1 s. That is about
   five rows per progress commit plus about 66 per turn. Production numbers may differ.
 - **A known search miss:** 「プラクティス」 alone does not match 「ベストプラクティス」.
 - **The failure handling is checked against the Pi Durable 1.2.0 spec and SQLite, not yet run in
-  workerd.** The reset ordering, the background compaction check, and D1 `batch()` rollback need
-  the phase 2–4 failure tests.
+  workerd.** The background compaction check and resuming a stopped run are tested in workerd
+  (`test/prune.test.ts`); the reset ordering and D1 `batch()` rollback need the phase 4 failure
+  tests.
 - **A read during a skill update can see old and new files mixed** until the update finishes.
   Updates run only in consolidation and `apply_proposal`, and `SKILL.md` is written last, so this
   is accepted (Hermes has the same behavior).
