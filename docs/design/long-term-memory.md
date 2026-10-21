@@ -630,7 +630,8 @@ throwing from an injected hook and then reopen the object.
      version, `content_sha256` matches its files, and the write is `done`;
    - rolling back one ledger row restores the before files;
    - reading `SKILL.md` upserts `skill_usage`;
-   - `SkillsEnv` passes the read part of `registerEnvConformance()`.
+   - `SkillsEnv` resolves relative paths and `..` within `/skills`. `registerEnvConformance()`
+     has no read-only mode, so the tests check the read behavior directly.
 5. **Shared memory and shared skills.** `sharedSpaces`, scope precedence, shared records,
    promotion and override of skills, `listProposals`, `decideProposal`, `apply_proposal`.
    Tests:
@@ -649,6 +650,13 @@ throwing from an injected hook and then reopen the object.
    - a shared skill changes only through an applied proposal.
 6. **Evaluation.** Probe questions after compaction and pruning: recall, files touched,
    continuation, decisions, knowledge updates, temporal questions, abstention.
+   `test/evaluation.test.ts` runs them with a scripted model, after pruning and eviction: the
+   decision is in the always-loaded memory and the early turns in the summary, `history_search`
+   finds a word only the pruned entries hold, a superseded decision leaves the newest memory
+   section, an unknown topic finds nothing, a `before` bound older than the archive finds
+   nothing, and a retried request ID from the pruned range returns its first submission. With a
+   scripted model they check what reaches the context, not how well a model uses it; files
+   touched and continuation need a real model.
 
 ## Rationale
 
@@ -1146,6 +1154,9 @@ To check before the design is settled:
   workerd.** The background compaction check and resuming a stopped run are tested in workerd
   (`test/prune.test.ts`); the reset ordering and D1 `batch()` rollback need the phase 4 failure
   tests.
+- **An earlier always-loaded memory stays in the conversation.** Pi appends a changed section as
+  a message, so the model sees the old version followed by the new one until compaction removes
+  it. The newest version is last and marked as an update.
 - **A read during a skill update can see old and new files mixed** until the update finishes.
   Updates run only in consolidation and `apply_proposal`, and `SKILL.md` is written last, so this
   is accepted (Hermes has the same behavior).

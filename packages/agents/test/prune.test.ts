@@ -1,7 +1,6 @@
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_MAINTENANCE_ERROR } from '../src/agent.ts'
 import { searchHistory } from '../src/memory/archive.ts'
@@ -9,110 +8,24 @@ import { PRUNE_LIMITS_KEY, prunedThrough } from '../src/memory/prune.ts'
 import { memoryDb } from '../src/memory/records.ts'
 import { archiveSegments } from '../src/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../src/memory/working.ts'
-import { createAgentModels } from '../src/models/index.ts'
 import { memoryJobs, pruneRuns } from '../src/storage/local-schema.ts'
 import { openLocalDb } from '../src/storage/local.ts'
-import { piEntries } from '../src/storage/pi-tables.ts'
 import {
-  isMemoryAgentRequest,
-  isSummaryRequest,
-  requestBody,
-  textResponse,
-  toolCallResponse,
-  toolResults,
-} from './model.ts'
+  BACKGROUND_USAGE,
+  COMPACT_AFTER_TURN_7,
+  compactedAgent,
+  FILLER,
+  headOf,
+  mockModel,
+  say,
+  storedEntryIds,
+} from './conversation.ts'
+import { textResponse, toolCallResponse, toolResults } from './model.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 const db = memoryDb(env.MEMORY_DB)
-const contextWindow =
-  createAgentModels(env).getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
-    ?.contextWindow ?? 0
-// Pi's defaults: block to compact above window - 16384, start in the background 32768 below that.
-const BLOCKING_USAGE = contextWindow
-const BACKGROUND_USAGE = contextWindow - 16_384 - 16_000
-// Each turn's text is about 4k tokens, so a summary keeps the last five turns of 20k tokens.
-const FILLER = ' filler'.repeat(2_000)
-
 afterEach(() => vi.restoreAllMocks())
-
-async function waitForAnswer(agentId: string, requestId: string) {
-  await expect
-    .poll(
-      async () => {
-        using result = await exports.default.submission(agentId, requestId)
-        return result?.submission.status
-      },
-      { timeout: 10_000 },
-    )
-    .toBe('done')
-}
-
-/**
- * Scripted model: answers that report `usage(n)` for the n-th answer request, summaries that wait
- * for `gate()`, and declined memory jobs.
- */
-function mockModel(options: {
-  usage: (n: number) => number
-  gate?: () => Promise<void> | undefined
-  memory?: (body: string) => Response
-}) {
-  const bodies: string[] = []
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
-    const body = requestBody(init)
-    if (isMemoryAgentRequest(body)) {
-      if (options.memory !== undefined) return options.memory(body)
-      return toolResults(body) === 0
-        ? toolCallResponse({ name: 'memory_decline', arguments: { reason: 'test' } })
-        : textResponse('Declined.')
-    }
-    if (isSummaryRequest(body)) {
-      await options.gate?.()
-      return textResponse('Summary: the user set a codename and talked at length.')
-    }
-    bodies.push(body)
-    return textResponse('OK', options.usage(bodies.length - 1))
-  })
-  return bodies
-}
-
-async function say(agentId: string, requestId: string, content: string) {
-  await exports.default.sendMessage(agentId, { requestId, content })
-  await waitForAnswer(agentId, requestId)
-}
-
-/** Answer 7 reports a full context, so Pi compacts before answer 8. */
-const COMPACT_AFTER_TURN_7 = (n: number) => (n === 7 ? BLOCKING_USAGE : 5)
-
-/** Seven long turns, then one that compacts: entries before the summary's head can be pruned. */
-async function compactedAgent(agentId: string, codename: string) {
-  await say(agentId, 't0', `The codename is ${codename}.${FILLER}`)
-  for (let turn = 1; turn < 7; turn++) await say(agentId, `t${turn}`, `Turn ${turn}.${FILLER}`)
-  await say(agentId, 'big', `Turn 7.${FILLER}`)
-  await say(agentId, 'compacts', 'Turn 8.')
-}
-
-function headOf(agentId: string): Promise<number | undefined> {
-  return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) => {
-    const row = drizzle(state.storage)
-      .select({ head: piEntries.head })
-      .from(piEntries)
-      .orderBy(piEntries.id)
-      .all()
-      .findLast((entry) => entry.head !== null)
-    return row?.head ?? undefined
-  })
-}
-
-function storedEntryIds(agentId: string): Promise<number[]> {
-  return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) =>
-    drizzle(state.storage)
-      .select({ id: piEntries.id })
-      .from(piEntries)
-      .all()
-      .map((row) => row.id),
-  )
-}
 
 describe('pruning', () => {
   it('archives the entries before the newest head, deletes them, and the conversation goes on', async () => {
