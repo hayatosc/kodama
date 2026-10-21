@@ -44,7 +44,7 @@ export function jobPrompt(job: MemoryJob): string {
         `Job: consolidate scope ${job.scope} for ${job.day}.`,
         'Call list_records, then merge duplicates by superseding them, invalidate records that newer ones contradict, and keep the instructions and facts short enough for the always-loaded budget.',
         'For an agent scope, also call list_skills. When the records show a procedure that worked at least twice, write it as a skill with skill_write: SKILL.md with name and description frontmatter and the steps, and the trajectories and failure lessons as evidence. Update a skill the records improve on, and archive one they show is wrong.',
-        'When a record or skill is true for the whole team, or several agents keep the same one, propose it to a shared space with shared_propose; a reviewer decides. For a shared scope, change nothing directly: propose merges and replacements instead.',
+        'When a record or skill is true for the whole team, or several agents keep the same one, propose it to a shared space with shared_propose, citing the records or skills of each agent. For a shared scope, change nothing directly: propose merges and replacements that cite the records of that scope.',
       ].join('\n')
     case 'apply_proposal':
       return `Job: apply_proposal ${job.proposalId}. This job runs in code.`

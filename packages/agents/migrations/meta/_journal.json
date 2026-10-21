@@ -22,6 +22,13 @@
       "when": 1792548138078,
       "tag": "0002_skill_write_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792570739325,
+      "tag": "0003_automatic_proposals",
+      "breakpoints": true
     }
   ]
 }

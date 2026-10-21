@@ -246,9 +246,13 @@ export const skillUsage = sqliteTable(
   ],
 )
 
-export const PROPOSAL_STATUSES = ['pending', 'accepted', 'applied', 'rejected', 'conflict'] as const
+export const PROPOSAL_STATUSES = ['accepted', 'applied', 'rejected', 'conflict'] as const
 
-/** `accepted` means accepted and not yet applied; the memory agent applies every accepted row. */
+/**
+ * A change to a shared scope. Code checks it when it is written, with no person in the loop:
+ * `accepted` passed the checks and is not yet applied, so the memory agent applies every accepted
+ * row; `rejected` failed them, with the reason.
+ */
 export const sharedProposals = sqliteTable(
   'shared_proposals',
   {
@@ -262,11 +266,11 @@ export const sharedProposals = sqliteTable(
     /** Concrete operations applied by code: record contents, or skill files already in R2. */
     payloadJson: text('payload_json').notNull(),
     sourceIdsJson: text('source_ids_json').notNull(),
-    status: text('status', { enum: PROPOSAL_STATUSES }).notNull().default('pending'),
+    status: text('status', { enum: PROPOSAL_STATUSES }).notNull(),
     runId: text('run_id').notNull(),
     proposedAt: integer('proposed_at').notNull(),
-    decidedAt: integer('decided_at'),
-    decidedBy: text('decided_by'),
+    /** The rule set that decided, such as `checks:1`. */
+    decidedBy: text('decided_by').notNull(),
     reason: text('reason'),
     appliedAt: integer('applied_at'),
   },
@@ -275,9 +279,8 @@ export const sharedProposals = sqliteTable(
     check('shared_proposals_target', sql`${t.target} IN ('record', 'skill')`),
     check(
       'shared_proposals_status',
-      sql`${t.status} IN ('pending', 'accepted', 'applied', 'rejected', 'conflict')`,
+      sql`${t.status} IN ('accepted', 'applied', 'rejected', 'conflict')`,
     ),
-    check('shared_proposals_decided', sql`(${t.status} = 'pending') = (${t.decidedAt} IS NULL)`),
     check(
       'shared_proposals_applied',
       sql`(${t.status} = 'applied') = (${t.appliedAt} IS NOT NULL)`,

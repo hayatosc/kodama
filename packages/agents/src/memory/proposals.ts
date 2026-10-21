@@ -1,12 +1,12 @@
 /**
- * Shared memory through reviewed proposals (docs/design/long-term-memory.md, Review, Shared
- * memory). The memory agent proposes, a reviewer decides through AgentService, and the memory
- * agent applies exactly what was reviewed, in code.
+ * Shared memory through proposals (docs/design/long-term-memory.md, Proposals, Shared memory).
+ * The memory agent proposes, code checks the proposal at once with no person in the loop, and the
+ * memory agent applies an accepted proposal exactly as written, in code.
  */
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import * as v from 'valibot'
-import type { ProposalPayload, ProposalSummary } from '../protocol.ts'
 import type { JobOutcome } from './jobs.ts'
+import { looksLikeInjection } from './redact.ts'
 import { applyOperation } from './records.ts'
 import type { MemoryDb, OperationContext, Scope } from './records.ts'
 import { memoryLedger, memoryRecords, sharedProposals, skills, skillUsage } from './schema.ts'
@@ -16,8 +16,12 @@ import { blobKey, isSkillName, setSkillStatus, skillDir, splitKey, writeSkill } 
 export const SHARED_SOURCE_AGENT = 'memory'
 export const SPACE_PATTERN = /^[a-z0-9-]{1,64}$/
 
+/** Agents whose own records or skills must back a proposal that brings something into a space. */
+export const MIN_SOURCE_AGENTS = 2
+/** Names the rules that decided, so a later change to them is visible in old rows. */
+const CHECKS = 'checks:1'
+
 export type Proposal = typeof sharedProposals.$inferSelect
-export type ProposalDecision = 'accept' | 'reject'
 
 const KIND = v.picklist(['fact', 'instruction', 'event', 'task'])
 const recordPayloadSchema = v.object({
@@ -32,14 +36,12 @@ const recordPayloadSchema = v.object({
 const skillPayloadSchema = v.object({
   type: v.literal('skill'),
   name: v.pipe(v.string(), v.check(isSkillName, 'Invalid skill name')),
-  /** Files already stored as blobs, so what is applied is what was reviewed. */
+  /** Files already stored as blobs, so what is applied is what was checked. */
   files: v.array(v.object({ path: v.string(), sha256: v.string() })),
   remove: v.array(v.string()),
 })
-export const proposalPayloadSchema = v.variant('type', [
-  recordPayloadSchema,
-  skillPayloadSchema,
-]) satisfies v.GenericSchema<unknown, ProposalPayload>
+export const proposalPayloadSchema = v.variant('type', [recordPayloadSchema, skillPayloadSchema])
+export type ProposalPayload = v.InferOutput<typeof proposalPayloadSchema>
 
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
@@ -59,8 +61,56 @@ export interface ProposalInput {
 }
 
 /**
- * Store a pending proposal; the same operation stores it once. The target and its revision are
- * read now, so a later change to the target turns the proposal into a conflict.
+ * Why a proposal may not change the shared scope, or undefined when it may. Bringing something
+ * into a space needs records or skills of at least `MIN_SOURCE_AGENTS` agents; reorganizing a
+ * space needs sources that are all active records of that space.
+ */
+async function rejection(
+  db: MemoryDb,
+  scope: Scope,
+  payload: ProposalPayload,
+  sourceIds: readonly string[],
+): Promise<string | undefined> {
+  if (payload.type === 'skill') {
+    const agents = new Set<string>()
+    for (const source of sourceIds) {
+      if (!source.startsWith('agent:')) continue
+      const [sourceScope, name] = splitKey(source)
+      const skill = await db
+        .select({ status: skills.status })
+        .from(skills)
+        .where(and(eq(skills.scope, sourceScope), eq(skills.name, name)))
+        .get()
+      if (skill?.status === 'active' || skill?.status === 'stale') agents.add(sourceScope)
+    }
+    return agents.size >= MIN_SOURCE_AGENTS
+      ? undefined
+      : `a shared skill needs the same procedure as a skill of ${MIN_SOURCE_AGENTS} agents`
+  }
+  if (looksLikeInjection(payload.content)) return 'the content reads as instructions to obey'
+  const sources =
+    sourceIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(memoryRecords)
+          .where(and(inArray(memoryRecords.id, [...sourceIds]), eq(memoryRecords.status, 'active')))
+  if (sources.length !== sourceIds.length) return 'every source must be an active record'
+  const agents = new Set(sources.filter((r) => r.scope.startsWith('agent:')).map((r) => r.scope))
+  const reorganizes = sources.length > 0 && sources.every((record) => record.scope === scope)
+  if (agents.size < MIN_SOURCE_AGENTS && !reorganizes) {
+    return `a shared record needs records of ${MIN_SOURCE_AGENTS} agents, or only records of ${scope}`
+  }
+  if (payload.required === true && agents.size < MIN_SOURCE_AGENTS) {
+    const inherited = sources.every((record) => record.required)
+    if (!inherited) return `a required record needs records of ${MIN_SOURCE_AGENTS} agents`
+  }
+  return undefined
+}
+
+/**
+ * Store a proposal, accepted or rejected by the checks; the same operation stores it once. The
+ * target and its revision are read now, so a later change to the target makes it a conflict.
  */
 export async function propose(
   db: MemoryDb,
@@ -93,6 +143,8 @@ export async function propose(
     baseRevision = target?.revision ?? null
   }
   const id = await sha256(`proposal:${ctx.opId}`)
+  const reason = await rejection(db, scope, payload, input.sourceIds)
+  const status = reason === undefined ? 'accepted' : 'rejected'
   await db.batch([
     db
       .insert(sharedProposals)
@@ -104,8 +156,11 @@ export async function propose(
         baseRevision,
         payloadJson: JSON.stringify(payload),
         sourceIdsJson: JSON.stringify(input.sourceIds),
+        status,
         runId: ctx.runId,
         proposedAt: ctx.now,
+        decidedBy: CHECKS,
+        reason: reason ?? null,
       })
       .onConflictDoNothing(),
     db.insert(memoryLedger).values({
@@ -113,68 +168,15 @@ export async function propose(
       runId: ctx.runId,
       opId: ctx.opId,
       actor: ctx.actor,
-      action: 'propose',
+      action: status === 'accepted' ? 'propose' : 'propose_rejected',
       target: 'proposal',
       targetId: id,
-      detailJson: JSON.stringify({ space: input.space, targetKey }),
+      detailJson: JSON.stringify({ space: input.space, targetKey, reason }),
     }),
   ])
   const stored = await db.select().from(sharedProposals).where(eq(sharedProposals.id, id)).get()
   if (stored === undefined) throw new Error(`Proposal ${id} was not stored`)
   return stored
-}
-
-/** Proposals of a space with a status, newest first. */
-export function listProposals(
-  db: MemoryDb,
-  space: string,
-  status: Proposal['status'] = 'pending',
-  limit = 50,
-): Promise<Proposal[]> {
-  return db
-    .select()
-    .from(sharedProposals)
-    .where(and(eq(sharedProposals.space, space), eq(sharedProposals.status, status)))
-    .orderBy(desc(sharedProposals.proposedAt))
-    .limit(limit)
-}
-
-/**
- * Accept or reject a pending proposal with one guarded update. A second decision changes nothing;
- * either way the current row is returned.
- */
-export async function decideProposal(
-  db: MemoryDb,
-  decision: {
-    id: string
-    decision: ProposalDecision
-    reason: string
-    decidedBy: string
-    now: number
-  },
-): Promise<Proposal | undefined> {
-  const status = decision.decision === 'accept' ? 'accepted' : 'rejected'
-  await db.batch([
-    db
-      .update(sharedProposals)
-      .set({
-        status,
-        decidedAt: decision.now,
-        decidedBy: decision.decidedBy,
-        reason: decision.reason,
-      })
-      .where(and(eq(sharedProposals.id, decision.id), eq(sharedProposals.status, 'pending'))),
-    db.insert(memoryLedger).values({
-      at: decision.now,
-      runId: `decide:${decision.id}`,
-      actor: decision.decidedBy,
-      action: status,
-      target: 'proposal',
-      targetId: decision.id,
-      detailJson: JSON.stringify({ reason: decision.reason }),
-    }),
-  ])
-  return db.select().from(sharedProposals).where(eq(sharedProposals.id, decision.id)).get()
 }
 
 /** Accepted proposals not yet applied, oldest first: the durable pending work. */
@@ -183,7 +185,7 @@ export function acceptedProposals(db: MemoryDb, limit = 50): Promise<Proposal[]>
     .select()
     .from(sharedProposals)
     .where(eq(sharedProposals.status, 'accepted'))
-    .orderBy(sharedProposals.decidedAt)
+    .orderBy(sharedProposals.proposedAt)
     .limit(limit)
 }
 
@@ -408,34 +410,4 @@ export async function skillFilesAsBlobs(
     files.push({ path: object.key.slice(dir.length), sha256: hash })
   }
   return files
-}
-
-/** A proposal as the reviewer sees it, with the text of a skill proposal's files. */
-export async function proposalSummary(
-  bucket: R2Bucket,
-  proposal: Proposal,
-): Promise<ProposalSummary> {
-  const payload = v.parse(proposalPayloadSchema, JSON.parse(proposal.payloadJson))
-  const summary: ProposalSummary = {
-    id: proposal.id,
-    space: proposal.space,
-    target: proposal.target,
-    targetKey: proposal.targetKey,
-    baseRevision: proposal.baseRevision,
-    payload,
-    sourceIds: v.parse(v.array(v.string()), JSON.parse(proposal.sourceIdsJson)),
-    status: proposal.status,
-    proposedAt: proposal.proposedAt,
-    decidedAt: proposal.decidedAt,
-    decidedBy: proposal.decidedBy,
-    reason: proposal.reason,
-    appliedAt: proposal.appliedAt,
-  }
-  if (payload.type !== 'skill') return summary
-  const skillFiles: { path: string; content: string }[] = []
-  for (const file of payload.files) {
-    const blob = await bucket.get(blobKey(file.sha256))
-    skillFiles.push({ path: file.path, content: (await blob?.text()) ?? '' })
-  }
-  return { ...summary, skillFiles }
 }

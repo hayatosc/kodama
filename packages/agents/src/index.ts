@@ -1,26 +1,14 @@
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import type { AgentEnv } from './env.ts'
-import { memoryDb } from './memory/records.ts'
-import { decideProposal, listProposals, proposalSummary } from './memory/proposals.ts'
 import type {
   AgentSnapshotResponse,
-  ProposalDecisionRequest,
-  ProposalStatus,
-  ProposalSummary,
   AgentConfig,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
 import { MEMORY_AGENT_NAME } from './memory/working.ts'
-import {
-  parseAgentId,
-  parseInput,
-  ProposalDecisionSchema,
-  ProposalIdSchema,
-  ProposalStatusSchema,
-  SpaceSchema,
-} from './validation.ts'
+import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent.ts'
 export { MemoryAgent } from './memory/memory-agent.ts'
@@ -69,40 +57,6 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   async snapshot(agentId: string): Promise<AgentSnapshotResponse> {
     using snapshot = await this.#agent(agentId).snapshot()
     return { agentId, snapshot }
-  }
-
-  /** Proposals to a shared space; the UI server authenticates and authorizes the reviewer. */
-  async listProposals(
-    space: string,
-    status: ProposalStatus = 'pending',
-  ): Promise<ProposalSummary[]> {
-    const rows = await listProposals(
-      memoryDb(this.env.MEMORY_DB),
-      parseInput(SpaceSchema, space),
-      parseInput(ProposalStatusSchema, status),
-    )
-    return Promise.all(rows.map((row) => proposalSummary(this.env.ARCHIVE, row)))
-  }
-
-  /**
-   * Accept or reject a pending proposal. A second decision changes nothing and returns the current
-   * state. An accepted proposal is applied by the memory agent.
-   */
-  async decideProposal(id: string, request: ProposalDecisionRequest): Promise<ProposalSummary> {
-    const decision = parseInput(ProposalDecisionSchema, request)
-    const proposal = await decideProposal(memoryDb(this.env.MEMORY_DB), {
-      id: parseInput(ProposalIdSchema, id),
-      ...decision,
-      now: Date.now(),
-    })
-    if (proposal === undefined) throw new TypeError(`No proposal ${id}`)
-    if (proposal.status === 'accepted') {
-      await this.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).enqueue({
-        kind: 'apply_proposal',
-        proposalId: proposal.id,
-      })
-    }
-    return proposalSummary(this.env.ARCHIVE, proposal)
   }
 
   async submission(agentId: string, requestId: string): Promise<SubmissionResponse | undefined> {

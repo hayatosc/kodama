@@ -1,5 +1,5 @@
 import * as v from 'valibot'
-import type { ProposalDecisionRequest, SendMessageRequest } from './protocol.ts'
+import type { SendMessageRequest } from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -48,30 +48,3 @@ export function parseRequestId(value: unknown): string {
 export function parseMessage(value: unknown): SendMessageRequest {
   return parseInput(SendMessageRequestSchema, value)
 }
-
-const SPACE_MESSAGE = 'space must contain 1–64 lowercase letters, digits, or hyphens'
-export const SpaceSchema = v.pipe(
-  v.string(SPACE_MESSAGE),
-  v.regex(/^[a-z0-9-]{1,64}$/, SPACE_MESSAGE),
-)
-export const ProposalIdSchema = v.pipe(
-  v.string('Expected a proposal ID'),
-  v.regex(/^[0-9a-f]{64}$/, 'Expected a proposal ID'),
-)
-export const ProposalStatusSchema = v.picklist(
-  ['pending', 'accepted', 'applied', 'rejected', 'conflict'],
-  'Invalid proposal status',
-)
-
-export const ProposalDecisionSchema = v.strictObject(
-  {
-    decision: v.picklist(['accept', 'reject'], 'decision must be accept or reject'),
-    reason: v.pipe(v.string(), v.maxLength(2_000, 'reason has at most 2000 characters')),
-    decidedBy: v.pipe(
-      v.string(),
-      v.minLength(1, 'decidedBy names the reviewer'),
-      v.maxLength(200, 'decidedBy has at most 200 characters'),
-    ),
-  },
-  'Expected a decision with decision, reason, and decidedBy',
-) satisfies v.GenericSchema<unknown, ProposalDecisionRequest>

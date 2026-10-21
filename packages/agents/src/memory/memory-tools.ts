@@ -21,6 +21,7 @@ import type {
 import { looksLikeInjection, redactSecrets } from './redact.ts'
 import { archiveSegments, skills as skillsTable } from './schema.ts'
 import { propose, skillFilesAsBlobs } from './proposals.ts'
+import type { Proposal } from './proposals.ts'
 import { setSkillStatus, skillDir, writeSkill } from './skills.ts'
 
 export interface RunningJob {
@@ -71,6 +72,12 @@ export function formatRecords(records: readonly MemoryRecord[]): string {
         ` entries<=${record.sourceEntryTo ?? '-'}: ${record.content}`,
     )
     .join('\n')
+}
+
+function proposalOutcome(proposal: Proposal): string {
+  return proposal.status === 'rejected'
+    ? `rejected: ${proposal.reason ?? 'the checks failed'}`
+    : `${proposal.status} ${proposal.id}`
 }
 
 function describe(result: OperationResult & { replayed: boolean }): string {
@@ -177,7 +184,7 @@ function writingTool<P extends TSchema>(
       const op = definition.operation(args, running.job, now)
       const { job } = running
       if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
-        throw new Error('Shared records change only through reviewed proposals; use shared_propose')
+        throw new Error('Shared records change only through proposals; use shared_propose')
       }
       await definition.prepare?.(args, running.job)
       const result = await applyOperation(
@@ -543,7 +550,7 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
   const sharedPropose = defineTool({
     name: 'shared_propose',
     description:
-      'Propose a change to a shared space for review: a record (new, or replacing a shared record by id) or an agent skill of the job scope to share. Cite the records or skills it rests on.',
+      'Propose a change to a shared space: a record (new, or replacing a shared record by id) or an agent skill of the job scope to share. Code accepts it when the cited sources are records or skills of at least two agents, or only records of that space; an accepted proposal is applied after this job.',
     parameters: Type.Object({
       space: Type.String({ pattern: '^[a-z0-9-]{1,64}$' }),
       record: Type.Optional(
@@ -599,7 +606,7 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
           },
           sourceIds: args.sourceIds,
         })
-        return text(`proposed ${proposal.id} (pending review)`)
+        return text(proposalOutcome(proposal))
       }
       const name = args.skill ?? ''
       if (!scope.startsWith('agent:') || (await skillRow(scope, name)) === undefined) {
@@ -614,7 +621,7 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
           ...args.sourceIds.filter((id) => id !== `${scope}/${name}`),
         ],
       })
-      return text(`proposed ${proposal.id} (pending review)`)
+      return text(proposalOutcome(proposal))
     },
   })
 

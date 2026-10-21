@@ -228,11 +228,12 @@ export class MemoryAgent extends Agent {
   /** Run jobs one at a time until none is due, then wake for the next delayed one. */
   async #drain(): Promise<void> {
     await this.harness()
-    // An accepted proposal is durable pending work; a lost enqueue only delays it.
-    for (const proposal of await acceptedProposals(memoryDb(this.env.MEMORY_DB))) {
-      await this.#store({ kind: 'apply_proposal', proposalId: proposal.id })
-    }
     for (;;) {
+      // An accepted proposal is durable pending work: queued between jobs, so one the running
+      // job wrote is applied next.
+      for (const proposal of await acceptedProposals(memoryDb(this.env.MEMORY_DB))) {
+        await this.#store({ kind: 'apply_proposal', proposalId: proposal.id })
+      }
       const row = await this.#next(Date.now())
       if (row === undefined) break
       await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)

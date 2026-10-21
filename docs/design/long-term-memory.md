@@ -35,7 +35,6 @@ MemoryAgent DO ("memory")
   |-- AGENTS memoryJobSettled ----> Agent DO             job outcome; a hint, not the record
   `-- AGENTS memoryChanged -------> Agent DO             refresh hint; revisions are the record
 
-AgentService.decideProposal ----> D1 MEMORY_DB         decision, then MEMORY_AGENT.enqueue
 scheduled handler --------------> MemoryAgent DO       consolidate (daily)
 ```
 
@@ -46,10 +45,10 @@ while pruning, the archive catalog of their own entries.
 
 ### Scopes
 
-| Scope                                          | Contents                                       | Writer                     |
-| ---------------------------------------------- | ---------------------------------------------- | -------------------------- |
-| `agent:<agentId>`                              | the agent's notes, conventions, events, skills | memory agent               |
-| `shared:<space>` (for example `shared:global`) | team conventions, shared facts, shared skills  | memory agent, after review |
+| Scope                                          | Contents                                       | Writer                                  |
+| ---------------------------------------------- | ---------------------------------------------- | --------------------------------------- |
+| `agent:<agentId>`                              | the agent's notes, conventions, events, skills | memory agent                            |
+| `shared:<space>` (for example `shared:global`) | team conventions, shared facts, shared skills  | memory agent, through checked proposals |
 
 There is no per-person scope. `sharedSpaces` (a new `AgentConfig` field, default `["global"]`,
 validated like `tools`) lists the shared spaces an agent reads.
@@ -136,7 +135,8 @@ so extracting an old range never undoes a newer `remember`.
 
 Entry IDs of different agents cannot be compared. A candidate never supersedes another agent's
 record or a shared record directly: it becomes a shared proposal with `base_revision`, and a
-contradiction the memory agent cannot settle stays as `conflict` for review.
+contradiction the memory agent cannot settle stays as `conflict` in the ledger, and it may propose
+again against the current revision.
 
 ### Search text
 
@@ -170,8 +170,8 @@ function; consolidation re-segments rows with an older version.
 - `class MemoryAgent extends Agent`, exported as its own Durable Object class, one instance
   named `memory`. It inherits `Agent` as it is, including `subscribe`, `snapshot`, and
   `submission`, so a UI can later watch its jobs through an authenticated `AgentService` method.
-- Not part of `AgentService` for now. Jobs come only from working agents, pruning,
-  `decideProposal`, and the `scheduled` handler.
+- Not part of `AgentService` for now. Jobs come only from working agents, pruning, its own
+  accepted proposals, and the `scheduled` handler.
 - `sendMessage`, `send`, and `sendTo` throw, because jobs enter only through `enqueue`; input
   that bypasses the queue would break one job at a time. `cancel` stops the running job, which the
   runner retries like a failure.
@@ -482,15 +482,15 @@ in `memory_ledger`.
   stores the skill `active`. There is no replay; a skill that does not help goes stale unused. The
   job also has `list_skills`, `read_skill`, and `skill_archive` (archive or restore).
 - **Update an agent skill.** Overwritten from new evidence of the same agent, after a check.
-- **Promote.** When agent skills of two or more agents describe the same procedure, or an
-  operator asks, the memory agent uploads the merged skill and writes one `shared_proposals` row
+- **Promote.** When agent skills of two or more agents describe the same procedure, the memory
+  agent uploads the merged skill and writes one `shared_proposals` row
   (target `skill`) that lists the sources, preferring a space every source agent reads. When it is
   applied, the memory agent writes `shared:<space>/<name>` and moves `skill_usage` rows. For each
   source agent it then resolves the name with that agent's `sharedSpaces`: only if the result is
   the new shared skill does it archive the source with `absorbed_into`. Otherwise it keeps the
   agent skill and records why in the ledger.
-- **Update a shared skill.** Only through a proposal with evidence from the agents that use it,
-  accepted by review and applied.
+- **Update a shared skill.** Only through a proposal backed by agent skills of two or more agents,
+  such as their overrides of it, accepted by the checks and applied.
 - **Override.** When a shared skill keeps failing for one agent while a different procedure
   succeeds, the memory agent writes an agent skill with the same name and `based_on` set to the
   shared skill and its content hash. It shadows the shared skill for that agent only. When
@@ -502,46 +502,52 @@ in `memory_ledger`.
   the last use or the last content write (`updated_at`); a status change other than a restore
   keeps `updated_at`.
 
-### Review
+### Proposals
 
-`AgentService` gains `listProposals(space)` and `decideProposal(id, decision, reason)` for the
-UI server, which authenticates the reviewer.
+No person approves or reviews a change. Code checks each proposal when the memory agent writes it,
+and the memory agent applies the accepted ones on its own.
 
 - A proposal stores its `target_key`, the `base_revision` it was written against, and a payload
-  of concrete operations: record contents, or skill files already uploaded as blobs. What is applied
-  is exactly what was reviewed.
-- `decideProposal` moves the row from `pending` to `accepted` or `rejected` with one guarded
-  update (`WHERE id = ? AND status = 'pending'`); a second decision changes nothing and returns
-  the current status. It then enqueues `apply_proposal` with the proposal ID as job ID.
+  of concrete operations: record contents, or skill files already uploaded as blobs. What is
+  applied is exactly what was checked.
+- The checks decide at once, with `decided_by` naming the rule set (`checks:1`):
+  - a record or skill that comes into a space needs active records or skills of at least two
+    agents among its sources, as independent evidence that it is not one agent's quirk or one
+    poisoned conversation;
+  - reorganizing a space (merging or replacing its records) needs sources that are all active
+    records of that space;
+  - `required` needs records of two agents, or sources that are already required;
+  - record text must not read as instructions to obey; secrets are redacted before the proposal.
+    A proposal that fails is stored `rejected` with the reason, and the tool tells the memory agent
+    why. A proposal that passes is stored `accepted`.
 - `accepted` means accepted and not yet applied, so the row itself is the durable pending work.
-  The memory agent also applies `accepted` rows at start, on its alarm, and during consolidation,
-  so a lost enqueue only delays the application.
+  Between jobs the memory agent queues `apply_proposal` for every accepted row, so a proposal
+  written by the running job is applied right after it, and a stop only delays the application.
 - `apply_proposal` runs in code, with the proposal ID as `op_id`. An `applied` row returns at
   once. If the target's revision differs from `base_revision`, the row becomes `conflict` with a
   reason, and the memory agent may write a new proposal against the current revision. Otherwise
   one `batch()` applies the payload and sets `applied`, `applied_at`, the ledger row,
   `scope_revisions`, and the `memory_ops` row.
+- Every proposal, decision, and application is in the ledger, and a skill change can be rolled
+  back from it.
 
 ## Shared memory
 
 - The memory agent creates a `shared_proposals` row from agent-scope records that more than one
-  agent relies on. A reviewer decides it through `decideProposal` (see [Review](#review)).
+  agent relies on, and code accepts or rejects it at once (see [Proposals](#proposals)).
 - Agents read the shared spaces listed in their `sharedSpaces`: at most eight unique names of
   lowercase letters, digits, and hyphens, stored in the agent's storage under
   `kodama:shared-spaces` beside the configuration Pi keeps. `setConfig` refreshes the
   always-loaded memory and the skills list when it stores them.
 - The memory agent proposes with `shared_propose` during a `consolidate` job: a record, new or
   replacing a shared record, or an agent skill of the job's scope, whose files it stores as blobs
-  so the reviewer reads exactly what will be applied (`listProposals` returns their text). A
-  `consolidate` job of a shared scope changes nothing directly; it can only propose.
-- `listProposals(space, status = 'pending')` and `decideProposal(id, { decision, reason,
-  decidedBy })` are `AgentService` methods; `decidedBy` names the reviewer the UI server
-  authenticated.
+  so what is applied is what was checked. A `consolidate` job of a shared scope changes nothing
+  directly; it can only propose.
 - An agent record overrides a shared record with `memory_write`'s `overrides`. Consolidation
   invalidates an agent record that overrides a `required` shared record.
 - Applied proposals become new records; shared records are never rewritten in place.
-- Content from untrusted sources is stored as an `event` with its source and is never pinned or
-  promoted to the always-loaded memory without review.
+- Content from untrusted sources is stored as an `event` with its source; one agent's
+  conversation alone never reaches a shared space.
 - Secrets are redacted before any write.
 
 ## Configuration
@@ -633,7 +639,7 @@ throwing from an injected hook and then reopen the object.
    - `SkillsEnv` resolves relative paths and `..` within `/skills`. `registerEnvConformance()`
      has no read-only mode, so the tests check the read behavior directly.
 5. **Shared memory and shared skills.** `sharedSpaces`, scope precedence, shared records,
-   promotion and override of skills, `listProposals`, `decideProposal`, `apply_proposal`.
+   promotion and override of skills, proposal checks, `apply_proposal`.
    Tests:
    - an agent sees only the shared spaces in its `sharedSpaces`;
    - an agent record that overrides a shared record replaces it for that agent only;
@@ -643,7 +649,9 @@ throwing from an injected hook and then reopen the object.
      resolves to it;
    - promoting skills of agents in different shared spaces leaves each agent with the procedure
      it chose before;
-   - a stop after accepting and before enqueueing still applies the proposal, exactly once;
+   - a record or skill of only one agent, a `required` record without two agents, and text that
+     reads as instructions are rejected;
+   - an accepted proposal is applied after the job that wrote it, exactly once;
    - a proposal whose base revision is outdated becomes `conflict` and does not undo the newer
      change;
    - a rejected proposal changes nothing;
@@ -1018,8 +1026,8 @@ archived.
 - Skills are scoped `agent:<agentId>` or `shared:<space>`; `sharedSpaces` sets the shared spaces an
   agent reads.
 - An agent skill shadows a shared skill with the same name.
-- A skill starts as an agent skill and is promoted to a shared skill through review when two or
-  more agents have the same procedure.
+- A skill starts as an agent skill and is promoted to a shared skill through a checked proposal
+  when two or more agents have the same procedure.
 - A shared skill changes only through an accepted proposal.
 - Skills are overwritten in place. An update first records its per-file before and after hashes,
   so a stop is finished on restart, and the ledger keeps the before files for rollback.
@@ -1037,7 +1045,7 @@ archived.
   that "external dirs are not a write-protection boundary" and recommends filesystem permissions.
   In kodama, the memory agent's `skill_write` accepts only agent scopes, and shared skills are
   written only by `apply_proposal`.
-- Promotion goes through review for the same reasons as shared memory (decision 13). Implanted
+- Promotion goes through the same proposal checks as shared memory (decision 13). Implanted
   "successful experiences" persist (MemoryGraft, 2512.16962), which makes shared skills especially
   risky. Collaborative Memory (2505.18279) also uses a write policy to place fragments in private or
   shared tiers, with immutable provenance.
@@ -1055,7 +1063,8 @@ archived.
   shared skill (kodama constraint). Agents may read different shared spaces, or an earlier space
   may hold a skill with the same name; two agents succeeding with a procedure is a reason to
   propose a shared skill, not a reason to delete their copies.
-- Shared skills are kept longer because they passed review and serve several agents. Hermes's
+- Shared skills are kept longer because two or more agents backed them and they serve several
+  agents. Hermes's
   curator by default curates only agent-created skills, because bundled skills disappearing silently
   looks like a broken install. Kodama curates shared skills too, with twice the window, and archived
   skills can be restored (kodama constraint).
@@ -1075,32 +1084,47 @@ archived.
 - **Agent skills only.** Each agent would relearn the same procedures, and improvements would not
   be shared.
 
-### 13. Shared memory is written through review, with provenance
+### 13. Shared memory is written through checked proposals, with provenance
 
-**Decision.** Shared scopes are written only when a proposal from the memory agent is accepted by
-review and then applied against the revision it was written for. Applied proposals become new
-records; shared records are not rewritten in place.
-Content from untrusted sources is stored as an `event` with its source and never pinned without
-review. Secrets are redacted before any write.
+**Decision.** Shared scopes are written only when a proposal from the memory agent passes checks
+in code and is then applied against the revision it was written for. No person approves or
+reviews a change. Bringing a record or skill into a space needs active records or skills of at
+least two agents as its sources; reorganizing a space needs sources that are all its own records.
+Applied proposals become new records; shared records are not rewritten in place. Every proposal,
+decision, and application is in the ledger. Secrets are redacted and text that reads as
+instructions is rejected before any write.
 
 **Reasons.**
 
+- Kodama's agents run unattended for months, and a person in the loop would leave proposals
+  waiting and shared memory stale. Approval by people is not part of the design (kodama
+  constraint).
 - Any user can inject memory (MINJA, 2503.03704).
 - Prompt-injection defenses do not cover memory poisoning (MPBench, 2606.04329).
 - Multi-agent memory consistency is the most pressing open challenge and needs structured memory
   access control (2603.10062).
 - Collaborative Memory (2505.18279) splits memory into private and shared tiers, builds each
-  agent's view with read and write policies, and keeps immutable provenance.
-- OpenClaw: a report from an untrusted source is not stored as durable memory until a trusted
-  reviewer confirms it.
+  agent's view with read and write policies, and keeps immutable provenance. The checks are such a
+  write policy, applied in code.
+- OpenClaw does not store a report from an untrusted source as durable memory until a trusted
+  reviewer confirms it. Kodama has no reviewer, so it asks for confirmation from a second agent
+  instead: one poisoned conversation, or one agent's quirk, cannot reach every agent on its own.
+  This is the same evidence rule as skill promotion (decision 12).
 - Hermes scans memory entries for injection and exfiltration patterns before accepting them.
 - Cloudflare Agent Memory shows memory profiles shared across agents and people, so sharing itself
   is an ordinary shape.
 - A single writer does not stop an outdated change: two proposals written against the same
   revision, applied one after the other, would let the older one undo the newer. Checking
-  `base_revision` at application turns that into a `conflict` for review (kodama constraint).
+  `base_revision` at application turns that into a `conflict` (kodama constraint).
 - Separating `accepted` from `applied` makes the accepted row itself the pending work, so a stop
   between the decision and the job does not lose the application (kodama constraint).
+
+**Rejected.**
+
+- **Approval by a person** (`listProposals` and `decideProposal` on `AgentService`). Proposals
+  would wait for someone indefinitely, and the agents are meant to run on their own.
+- **Letting the memory agent write shared scopes directly.** One agent's conversation, poisoned
+  or not, would reach every agent with no second source.
 
 ### 14. Writes, jobs, and pruning survive retries and stops
 
