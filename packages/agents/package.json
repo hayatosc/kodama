@@ -17,7 +17,8 @@
     "cf:types": "cf workers types",
     "typecheck": "cf workers types && tsc --noEmit",
     "test": "node --experimental-strip-types --test cli/*.test.ts && vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:generate:local": "drizzle-kit generate --config drizzle.local.config.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.2.0",

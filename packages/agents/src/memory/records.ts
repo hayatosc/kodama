@@ -9,7 +9,13 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import * as v from 'valibot'
 import * as schema from './schema.ts'
-import { memoryLedger, memoryOps, memoryRecords, scopeRevisions } from './schema.ts'
+import {
+  extractionCheckpoints,
+  memoryLedger,
+  memoryOps,
+  memoryRecords,
+  scopeRevisions,
+} from './schema.ts'
 import type { Scope } from './schema.ts'
 import { SEARCH_VERSION, searchQueries, storedSearchText } from './search-text.ts'
 
@@ -21,6 +27,16 @@ export type RecordOrigin = MemoryRecord['origin']
 
 export function memoryDb(d1: D1Database): MemoryDb {
   return drizzle(d1, { schema })
+}
+
+/** The extraction checkpoint of an agent: the last entry extraction has covered, or 0. */
+export async function extractionCheckpoint(db: MemoryDb, agentId: string): Promise<number> {
+  const row = await db
+    .select({ lastEntryId: extractionCheckpoints.lastEntryId })
+    .from(extractionCheckpoints)
+    .where(eq(extractionCheckpoints.agentId, agentId))
+    .get()
+  return row?.lastEntryId ?? 0
 }
 
 /** The FTS5 table from the custom migration; drizzle-kit does not manage it. */
@@ -53,6 +69,8 @@ export type Operation =
   | { type: 'invalidate'; id: string; revision: number; reason: string }
   /** Keep a declined candidate in the ledger only. */
   | { type: 'decline'; candidate: string; reason: string }
+  /** Record that extraction has covered an agent's entries through `lastEntryId`. */
+  | { type: 'checkpoint'; agentId: string; lastEntryId: number }
 
 /** `stale`: the candidate is older than the record it would replace, so it was declined. */
 export type OperationResult =
@@ -257,7 +275,19 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       if (old.sourceAgentId !== op.record.sourceAgentId) {
         return conflict(db, context, op.oldId, 'other_agent')
       }
-      if (isStale(old, op.record)) {
+      // Consolidation reorganizes existing records instead of bringing newer evidence.
+      const reorganizes = op.record.origin === 'consolidation'
+      const record: NewRecord =
+        reorganizes && op.record.sourceEntries === undefined && old.sourceEntryTo !== null
+          ? {
+              ...op.record,
+              sourceEntries: {
+                from: old.sourceEntryFrom ?? old.sourceEntryTo,
+                to: old.sourceEntryTo,
+              },
+            }
+          : op.record
+      if (!reorganizes && isStale(old, record)) {
         const result: OperationResult = { status: 'stale' }
         return {
           result,
@@ -267,7 +297,7 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
           ],
         }
       }
-      const id = await recordId(op.record)
+      const id = await recordId(record)
       const result: OperationResult = { status: 'applied', recordId: id }
       const statements: Statements = [
         guardedStatusUpdate(db, context, op.oldId, op.oldRevision, {
@@ -275,11 +305,11 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
           supersededBy: id,
         }),
         insertOp(db, context, op.type, result, true),
-        insertRecord(db, context, id, op.record),
+        insertRecord(db, context, id, record),
         ledger(db, context, 'supersede', id, { replaces: op.oldId }),
       ]
-      if (affectsAlwaysLoaded(op.record.kind) || affectsAlwaysLoaded(old.kind)) {
-        statements.push(bumpScope(db, context, op.record.scope))
+      if (affectsAlwaysLoaded(record.kind) || affectsAlwaysLoaded(old.kind)) {
+        statements.push(bumpScope(db, context, record.scope))
       }
       return { result, statements }
     }
@@ -296,6 +326,41 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       ]
       if (affectsAlwaysLoaded(old.kind)) statements.push(bumpScope(db, context, old.scope))
       return { result, statements }
+    }
+    case 'checkpoint': {
+      const current = await db
+        .select()
+        .from(extractionCheckpoints)
+        .where(eq(extractionCheckpoints.agentId, op.agentId))
+        .get()
+      const result: OperationResult = { status: 'applied', recordId: op.agentId }
+      if (current !== undefined && current.lastEntryId >= op.lastEntryId) {
+        return { result, statements: [insertOp(db, context, op.type, result, false)] }
+      }
+      const advance =
+        current === undefined
+          ? db.insert(extractionCheckpoints).values({
+              agentId: op.agentId,
+              lastEntryId: op.lastEntryId,
+              updatedAt: context.now,
+            })
+          : db
+              .update(extractionCheckpoints)
+              .set({
+                lastEntryId: op.lastEntryId,
+                revision: sql`${extractionCheckpoints.revision} + 1`,
+                updatedAt: context.now,
+              })
+              .where(
+                and(
+                  eq(extractionCheckpoints.agentId, op.agentId),
+                  eq(extractionCheckpoints.revision, current.revision),
+                ),
+              )
+      return {
+        result,
+        statements: [advance, insertOp(db, context, op.type, result, current !== undefined)],
+      }
     }
     case 'decline': {
       const result: OperationResult = { status: 'declined' }
@@ -344,6 +409,8 @@ export interface SearchOptions {
   now: number
   /** Defaults to 10. */
   limit?: number
+  /** Count the returned records as used; the memory agent's own lookups do not. Default true. */
+  countUse?: boolean
 }
 
 const EVENT_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000
@@ -361,7 +428,7 @@ function score(record: MemoryRecord, rank: number, now: number): number {
  */
 export async function searchMemory(
   db: MemoryDb,
-  { query, scopes, now, limit = 10 }: SearchOptions,
+  { query, scopes, now, limit = 10, countUse = true }: SearchOptions,
 ): Promise<MemoryRecord[]> {
   if (scopes.length === 0) return []
   const rank = sql<number>`bm25(${memoryFts})`
@@ -385,6 +452,7 @@ export async function searchMemory(
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
       .map(({ record }) => record)
+    if (!countUse) return ranked
     await db
       .update(memoryRecords)
       .set({ useCount: sql`${memoryRecords.useCount} + 1`, lastUsedAt: now })

@@ -1,19 +1,23 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, TaskId } from '@earendil-works/pi-durable'
+import type { AlarmSchedule } from './alarms.ts'
 
 const RECOVERY_DELAY_MS = 60_000
 
 /**
- * Keeps a Durable Object alarm armed while Pi has runnable tasks, so work resumes after eviction.
+ * Keeps the `recovery` alarm armed while Pi has runnable tasks, so work resumes after eviction.
  * Alarm changes and operations that depend on them run one at a time.
  */
 export class RecoveryAlarm {
-  readonly #storage: DurableObjectStorage
+  readonly #alarms: AlarmSchedule
+  readonly #onIdle: () => Promise<void>
   readonly #watching = new Set<TaskId>()
   #queue: Promise<void> = Promise.resolve()
 
-  constructor(storage: DurableObjectStorage) {
-    this.#storage = storage
+  /** `onIdle` runs whenever a refresh finds no runnable task. */
+  constructor(alarms: AlarmSchedule, onIdle: () => Promise<void> = () => Promise.resolve()) {
+    this.#alarms = alarms
+    this.#onIdle = onIdle
   }
 
   /** Run after every earlier alarm update settles, whether it succeeded or failed. */
@@ -28,7 +32,7 @@ export class RecoveryAlarm {
 
   /** Persist a wakeup; call inside `serialize` before admitting work that the scheduler will run. */
   arm(): Promise<void> {
-    return this.#storage.setAlarm(Date.now() + RECOVERY_DELAY_MS)
+    return this.#alarms.set('recovery', Date.now() + RECOVERY_DELAY_MS)
   }
 
   refresh(harness: Harness): Promise<void> {
@@ -36,7 +40,8 @@ export class RecoveryAlarm {
       const { tasks } = await harness.inspect(BACKGROUND_CONTEXT)
       const runnable = tasks.filter((task) => task.state.kind !== 'blocked')
       if (runnable.length === 0) {
-        await this.#storage.deleteAlarm()
+        await this.#alarms.set('recovery', undefined)
+        await this.#onIdle()
         return
       }
       await this.arm()

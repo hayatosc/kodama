@@ -22,7 +22,10 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
         },
         // The test runner renames the Worker; bind its local class rather than the production name.
-        durableObjects: { AGENTS: { className: 'Agent', useSQLite: true } },
+        durableObjects: {
+          AGENTS: { className: 'Agent', useSQLite: true },
+          MEMORY_AGENT: { className: 'MemoryAgent', useSQLite: true },
+        },
       },
     }),
   ],

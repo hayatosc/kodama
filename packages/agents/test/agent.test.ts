@@ -131,9 +131,14 @@ describe('agent RPC', () => {
       expect.objectContaining({ role: 'assistant', text: 'Hello from Kodama' }),
     ])
     const stub = env.AGENTS.getByName(agentId)
+    // Recovery stops once the answer is done; the extraction alarm stays for the idle agent.
     await expect
-      .poll(() => runInDurableObject(stub, (_instance, state) => state.storage.getAlarm()))
-      .toBeNull()
+      .poll(() =>
+        runInDurableObject(stub, (_instance, state) =>
+          state.storage.get<number>('kodama:alarm:recovery'),
+        ),
+      )
+      .toBeUndefined()
     accepted[Symbol.dispose]()
     before[Symbol.dispose]()
     await evictDurableObject(stub)
@@ -352,8 +357,10 @@ describe('agent RPC', () => {
     await waitForAnswer(agentId, 'disabled')
     const nextBody = vi.mocked(globalThis.fetch).mock.calls[1]?.[1]?.body
     if (typeof nextBody !== 'string') throw new Error('Missing second model request body')
-    const payload: unknown = JSON.parse(nextBody)
-    expect(payload).not.toHaveProperty('tools')
+    // Deselecting every configurable tool leaves only the long-term memory tools.
+    expect(nextBody).not.toContain('current_time')
+    expect(nextBody).toContain('memory_search')
+    expect(nextBody).toContain('remember')
     expect(
       (await exports.default.snapshot(agentId)).snapshot.messages.filter((m) => m.role === 'user'),
     ).toHaveLength(2)

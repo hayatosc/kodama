@@ -9,7 +9,8 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 - `src/recovery.ts` and `src/projection.ts`: recovery alarm scheduling and Pi-to-RPC result mapping.
 - `src/validation.ts`: valibot schemas for untrusted RPC input; failures throw `TypeError`.
 - `src/configuration/`, `src/models/`, `src/prompts/`, and `src/tools/`: configuration, providers, prompts, and registered tools.
-- `src/memory/`: long-term memory in D1 through Drizzle; `schema.ts` is the schema, `migrations/` the generated D1 migrations plus the hand-written FTS5 migration.
+- `src/memory/`: long-term memory in D1 through Drizzle; `schema.ts` is the schema, `migrations/` the generated D1 migrations plus the hand-written FTS5 migration. `memory-agent.ts` is the memory agent, `working.ts` what working agents get.
+- `src/storage/`: kodama's tables in each Durable Object's own SQLite (`local-schema.ts`, migrations in `migrations-local/`), and `src/alarms.ts` the per-purpose alarm schedule.
 - `src/protocol.ts`: transport types; consumers should use type-only imports.
 - `packages/agents/test/agent.test.ts`: Workers integration tests.
 - `packages/agents/cloudflare.config.ts`: Worker bindings, secrets, and SQLite configuration.
@@ -28,7 +29,7 @@ Use Node.js >=22.19 and the pinned pnpm 12.14.0 through `ni`/`nr` wrappers.
 - `nr test`: run workspace tests.
 - `nr format`: format the repository; review resulting changes.
 - From `packages/agents`, `nr build` builds without deploying, and `nr cf:types` regenerates runtime types.
-- From `packages/agents`, `nr db:generate` writes a D1 migration after `src/memory/schema.ts` changes; a test fails when the two differ.
+- From `packages/agents`, `nr db:generate` writes a D1 migration after `src/memory/schema.ts` changes, and `nr db:generate:local` a local migration after `src/storage/local-schema.ts` changes (add it to `src/storage/local.ts`); tests fail when they differ.
 
 ## Coding Style & Naming Conventions
 

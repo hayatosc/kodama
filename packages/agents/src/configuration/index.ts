@@ -7,7 +7,7 @@ import type { Models } from '@earendil-works/pi-ai/models'
 import type { AgentEnv } from '../env.ts'
 import type { AgentConfig } from '../protocol.ts'
 import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default.ts'
-import { isRegisteredTool, resolveTools } from '../tools/index.ts'
+import { agentTools, isRegisteredTool, resolveTools } from '../tools/index.ts'
 
 export type DefaultModelEnv = Pick<AgentEnv, 'DEFAULT_MODEL_PROVIDER' | 'DEFAULT_MODEL_ID'>
 
@@ -67,13 +67,29 @@ export function agentConfigSchema(models: Models) {
   ) satisfies v.GenericSchema<unknown, AgentConfig>
 }
 
+/**
+ * Stored as the registered tools that are not selected, so tools of other extensions, such as
+ * long-term memory, stay enabled.
+ */
+function toolChange(selected: readonly string[]): AgentChange['tools'] {
+  resolveTools(selected)
+  return { remove: agentTools.filter((tool) => !selected.includes(tool.name)) }
+}
+
 export function agentChange(config: AgentConfig): AgentChange {
   return {
     model: config.model,
     instructions: config.systemPrompt,
     thinkingLevel: config.thinkingLevel,
-    tools: resolveTools(config.tools),
+    tools: toolChange(config.tools),
   }
+}
+
+/** Selected registered tools, in registry order, from either stored form. */
+function selectedTools(stored: string[] | { remove: string[] }): string[] {
+  const names = agentTools.map((tool) => tool.name)
+  if (Array.isArray(stored)) return names.filter((name) => stored.includes(name))
+  return names.filter((name) => !stored.remove.includes(name))
 }
 
 /** Upgrade the original fixed-prompt agents without resetting their history or stored model. */
@@ -86,23 +102,22 @@ export async function initializeAgentConfig(
     if (state.instructions === undefined) {
       await configure(tx, ROOT_CONVERSATION_ID, { instructions: defaults.systemPrompt })
     }
+    // Agents stored before long-term memory list their tools; keep memory tools enabled.
+    if (Array.isArray(state.tools)) {
+      await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(selectedTools(state.tools)) })
+    }
   }, BACKGROUND_CONTEXT)
 }
 
 export async function readAgentConfig(harness: Harness): Promise<AgentConfig> {
   const state = await harness.snapshot(AgentDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-  if (
-    !state?.model ||
-    state.instructions === undefined ||
-    !state.thinkingLevel ||
-    !Array.isArray(state.tools)
-  ) {
+  if (!state?.model || state.instructions === undefined || !state.thinkingLevel || !state.tools) {
     throw new Error('Agent configuration is incomplete')
   }
   return {
     model: { ...state.model },
     systemPrompt: state.instructions,
     thinkingLevel: state.thinkingLevel,
-    tools: [...state.tools],
+    tools: selectedTools(state.tools),
   }
 }

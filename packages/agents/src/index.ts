@@ -10,6 +10,7 @@ import type {
 import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent.ts'
+export { MemoryAgent } from './memory/memory-agent.ts'
 
 /** Service-binding RPC entrypoint for the UI server and other trusted Workers. */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {

@@ -1,5 +1,5 @@
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
-import type { HarnessOptions } from '@earendil-works/pi-durable'
+import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
 import { agentChange, defaultAgentConfig } from './configuration/index.ts'
 import type { DefaultModelEnv } from './configuration/index.ts'
 import { createAgentModels } from './models/index.ts'
@@ -27,23 +27,35 @@ const RETRY_POLICY = {
   maxAgentDelayMs: 30_000,
 }
 
-/** Compose registered capabilities; persisted per-agent choices select what is enabled. */
-export function createAgentOptions(env: DefaultModelEnv & ModelProviderEnv): HarnessOptions {
+/** Settings shared by working agents and the memory agent. */
+export function harnessSettings(extensions: readonly Extension[]): HarnessOptions['settings'] {
+  return {
+    extensions: [...extensions],
+    // Disable cache retention timers so idle agents can be evicted, including in workerd tests.
+    documentRetentionMs: 0,
+    contextRetentionMs: 0,
+    stream: { timeoutMs: MODEL_REQUEST_TIMEOUT_MS },
+    retry: RETRY_POLICY,
+    progress: { partialIntervalMs: PROGRESS_INTERVAL_MS, outputIntervalMs: PROGRESS_INTERVAL_MS },
+  }
+}
+
+/**
+ * Compose registered capabilities; persisted per-agent choices select what is enabled. Extensions
+ * in `always` stay enabled whatever tools an agent selects.
+ */
+export function createAgentOptions(
+  env: DefaultModelEnv & ModelProviderEnv,
+  always: readonly Extension[] = [],
+): HarnessOptions {
   const extension = defineExtension({ name: 'kodama', tools: agentTools })
   const registry = createRegistry()
   registry.install(extension)
+  for (const extra of always) registry.install(extra)
   return {
     models: createAgentModels(env),
     registry,
-    // Disable cache retention timers so idle agents can be evicted, including in workerd tests.
-    settings: {
-      extensions: [extension],
-      documentRetentionMs: 0,
-      contextRetentionMs: 0,
-      stream: { timeoutMs: MODEL_REQUEST_TIMEOUT_MS },
-      retry: RETRY_POLICY,
-      progress: { partialIntervalMs: PROGRESS_INTERVAL_MS, outputIntervalMs: PROGRESS_INTERVAL_MS },
-    },
+    settings: harnessSettings([extension, ...always]),
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
         ? configure(tx, conversation.id, agentChange(defaultAgentConfig(env)))
