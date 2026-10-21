@@ -4,5 +4,5 @@ import { defineConfig } from 'drizzle-kit'
 export default defineConfig({
   dialect: 'sqlite',
   schema: './src/storage/local-schema.ts',
-  out: './migrations-local',
+  out: './drizzle/durable-object',
 })

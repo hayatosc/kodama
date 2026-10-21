@@ -1,6 +1,6 @@
 /**
  * D1 schema for long-term memory (docs/design/long-term-memory.md). `drizzle-kit generate` turns it
- * into the migrations in ../../migrations. Times are Unix epoch milliseconds. Writes use plain
+ * into the migrations in ../../drizzle/d1. Times are Unix epoch milliseconds. Writes use plain
  * inserts, never `INSERT OR IGNORE`: a constraint violation must fail the statement so that the
  * whole `batch()` rolls back. Allowed values are the typed columns and the code that writes them
  * (records.ts, skills.ts); the constraints here are keys and relations between columns.

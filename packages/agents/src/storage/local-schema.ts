@@ -1,6 +1,6 @@
 /**
  * Tables kodama keeps in an agent's own Durable Object SQLite, next to Pi Durable's tables.
- * `pnpm db:generate:local` writes the migrations in ../../migrations-local, which local.ts applies
+ * `pnpm db:generate:local` writes the migrations in ../../drizzle/durable-object, which local.ts applies
  * when the object starts. Times are Unix epoch milliseconds.
  */
 import { lte } from 'drizzle-orm'

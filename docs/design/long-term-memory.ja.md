@@ -75,7 +75,8 @@ scheduled ハンドラ -------------> MemoryAgent DO       consolidate（1日1�
 ### D1 のスキーマ
 
 スキーマは Drizzle で [schema.ts](../../packages/agents/src/memory/schema.ts) に定義する。
-`pnpm db:generate` が D1 のマイグレーションを `packages/agents/migrations` に書き、`cf d1 migrations` で適用する。
+`pnpm db:generate` が D1 のマイグレーションを `packages/agents/drizzle/d1` に書き、`cf d1 migrations apply --dir drizzle/d1` で適用する。
+各 Durable Object の中の kodama のテーブルのマイグレーションは `drizzle/durable-object` に書く。`drizzle/` の下はすべて drizzle-kit の出力であり、手で編集しない。
 SQL は手で書かない。問い合わせは Drizzle のクエリビルダーで書き、マイグレーションは `drizzle-kit generate` だけで作る。
 drizzle-kit 0.31 は CHECK 制約の値を埋め込まないので、許される値は型付きの列と、書き込むコードで守る。制約は、キーと列どうしの関係だけにする。
 

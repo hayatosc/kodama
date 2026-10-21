@@ -3,14 +3,14 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'
 import { defineConfig } from 'vitest/config'
 
-const migrations = await readD1Migrations(`${import.meta.dirname}/migrations`)
+const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/d1`)
 
 const journalSchema = v.object({ entries: v.array(v.object({ idx: v.number() })) })
 const snapshotSchema = v.object({
   tables: v.record(v.string(), v.object({ columns: v.record(v.string(), v.unknown()) })),
 })
 
-/** Columns per table in the newest drizzle-kit snapshot of a migrations folder. */
+/** Columns per table in the newest drizzle-kit snapshot of a drizzle-kit output folder. */
 function migratedColumns(folder: string): Record<string, string[]> {
   const meta = `${import.meta.dirname}/${folder}/meta`
   const journal = v.parse(journalSchema, JSON.parse(readFileSync(`${meta}/_journal.json`, 'utf8')))
@@ -39,8 +39,8 @@ export default defineConfig({
           GEMINI_API_KEY: '',
           XAI_API_KEY: 'xai-test-key',
           TEST_MIGRATIONS: migrations,
-          TEST_MIGRATED_COLUMNS: migratedColumns('migrations'),
-          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('migrations-local'),
+          TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/d1'),
+          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object'),
         },
         // The test runner renames the Worker; bind its local class rather than the production name.
         durableObjects: {
