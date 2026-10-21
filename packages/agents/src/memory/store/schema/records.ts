@@ -1,5 +1,5 @@
 /**
- * D1 schema for long-term memory (docs/design/long-term-memory.md), one file per part.
+ * D1 schema for long-term memory (docs/memory.md, D1 schema), one file per part.
  * `drizzle-kit generate` turns the files in this folder into the migrations in ../../../../drizzle/d1.
  * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a
  * constraint violation must fail the statement so that the whole `batch()` rolls back. Allowed

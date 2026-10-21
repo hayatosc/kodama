@@ -1,5 +1,5 @@
 /**
- * Checks applied to text before it becomes memory (docs/design/long-term-memory.md, Remember and
+ * Checks applied to text before it becomes memory (docs/memory.md, Remember and
  * Shared memory): secrets are replaced, and text that tries to instruct the memory system is
  * rejected.
  */

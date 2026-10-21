@@ -1,6 +1,6 @@
 /**
  * Japanese-aware search words for the `memory_terms` index and the archive index. The Worker
- * segments text with Intl.Segmenter (docs/design/long-term-memory.md, Search text).
+ * segments text with Intl.Segmenter (docs/memory.md, Search text).
  */
 
 /** Stored with every indexed row; rows of an older version are segmented again. */

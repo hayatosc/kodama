@@ -1,4 +1,4 @@
-/** Which skills an agent sees, and how often it uses them (docs/design/long-term-memory.md, Listing). */
+/** Which skills an agent sees, and how often it uses them (docs/memory.md, Listing and loading). */
 import { and, eq, inArray } from 'drizzle-orm'
 import type { MemoryDb } from '../store/db.ts'
 import { skills, skillUsage } from '../store/schema/skills.ts'

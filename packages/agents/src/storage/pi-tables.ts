@@ -1,5 +1,5 @@
 /**
- * Pi Durable 1.2.0's own SQLite tables, for pruning only (docs/design/long-term-memory.md,
+ * Pi Durable 1.2.0's own SQLite tables, for pruning only (docs/memory.md,
  * Pruning). Pi creates and migrates them; drizzle-kit never sees this file. Re-check these columns
  * and the pruning tests whenever Pi Durable is upgraded.
  */

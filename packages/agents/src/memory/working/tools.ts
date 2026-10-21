@@ -1,4 +1,4 @@
-/** The memory tools every working agent gets (docs/design/long-term-memory.md, Working agents). */
+/** The memory tools every working agent gets (docs/memory.md, Working agents). */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'

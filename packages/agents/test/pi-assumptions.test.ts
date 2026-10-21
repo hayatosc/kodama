@@ -1,6 +1,6 @@
 /**
  * Behavior of Pi Durable 1.2.0 and D1 that the long-term memory design relies on
- * (docs/design/long-term-memory.md, decision 14). Run these again on every Pi upgrade.
+ * (docs/memory.md, Pi Durable assumptions). Run these again on every Pi upgrade.
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'

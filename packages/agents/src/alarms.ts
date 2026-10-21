@@ -6,7 +6,7 @@ const PURPOSES: readonly AlarmPurpose[] = ['recovery', 'extract', 'prune', 'jobs
 
 /**
  * Keeps one due time per purpose in the object's storage and the platform alarm at the earliest
- * (docs/design/long-term-memory.md, Alarms). Changes run one at a time.
+ * (docs/memory.md, Alarms). Changes run one at a time.
  */
 export class AlarmSchedule {
   readonly #storage: DurableObjectStorage

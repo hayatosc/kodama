@@ -1,6 +1,6 @@
 /**
  * Memory records in D1: write operations and applying them at most once
- * (docs/design/long-term-memory.md, Applying a write, Freshness).
+ * (docs/memory.md, Applying a write, Freshness).
  */
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'

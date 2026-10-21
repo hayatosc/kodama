@@ -1,6 +1,6 @@
 /**
  * Writing skills: overwriting a directory in place as one operation that a stop can finish
- * (docs/design/long-term-memory.md, Storage).
+ * (docs/memory.md, Storage).
  */
 import { and, eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'

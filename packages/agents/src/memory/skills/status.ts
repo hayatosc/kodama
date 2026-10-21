@@ -1,4 +1,4 @@
-/** Skill status changes and rollback, each one operation (docs/design/long-term-memory.md, Lifecycle). */
+/** Skill status changes and rollback, each one operation (docs/memory.md, Lifecycle). */
 import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'

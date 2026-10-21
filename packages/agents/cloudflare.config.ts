@@ -11,7 +11,7 @@ const agentWorker = defineWorker({
     Agent: exports.durableObject({ storage: 'sqlite' }),
     MemoryAgent: exports.durableObject({ storage: 'sqlite' }),
   },
-  // Daily memory consolidation (src/memory/consolidation.ts).
+  // Daily memory consolidation (src/memory/memory-agent/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,
   observability: { enabled: true },

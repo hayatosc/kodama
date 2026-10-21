@@ -25,6 +25,9 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 
 The abbreviated `src/` paths above are relative to `packages/agents/`.
 
+`docs/agents.md` explains the runtime and `docs/memory.md` long-term memory. File comments cite
+their sections by name, so keep the headings and the code in step when either changes.
+
 ## Build, Test, and Development Commands
 
 Use Node.js >=22.19 and the pinned pnpm 12.14.0 through `ni`/`nr` wrappers.

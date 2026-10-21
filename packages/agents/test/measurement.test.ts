@@ -1,6 +1,6 @@
 /**
  * Storage written by one streamed turn, the largest cost driver of a long-running agent
- * (docs/design/long-term-memory.md, phase 1). Budgets are measured values with headroom.
+ * (docs/memory.md, Known limits). Budgets are measured values with headroom.
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'

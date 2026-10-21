@@ -1,6 +1,6 @@
 /**
  * A read-only execution environment over the skills an agent sees, for Pi's `read` tool
- * (docs/design/long-term-memory.md, Listing and loading). Paths are `/skills/<scope>/<name>/...`;
+ * (docs/memory.md, Listing and loading). Paths are `/skills/<scope>/<name>/...`;
  * anything else, and every write or command, fails.
  */
 import type { Context } from '@earendil-works/chord'

@@ -1,4 +1,4 @@
-/** Curating unused skills and deleting unreferenced blobs (docs/design/long-term-memory.md, Lifecycle). */
+/** Curating unused skills and deleting unreferenced blobs (docs/memory.md, Lifecycle). */
 import { and, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'

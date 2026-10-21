@@ -1,4 +1,4 @@
-/** The memory agent's job queue in its own SQLite (docs/design/long-term-memory.md, Jobs). */
+/** The memory agent's job queue in its own SQLite (docs/memory.md, Jobs). */
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
 import { memoryJobs } from '../../storage/local-schema.ts'
 import type { LocalDb } from '../../storage/local.ts'

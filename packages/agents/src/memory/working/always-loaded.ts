@@ -1,4 +1,4 @@
-/** The always-loaded memory of a working agent (docs/design/long-term-memory.md, Always-loaded memory). */
+/** The always-loaded memory of a working agent (docs/memory.md, Always-loaded memory). */
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import { alwaysLoaded } from '../../storage/local-schema.ts'

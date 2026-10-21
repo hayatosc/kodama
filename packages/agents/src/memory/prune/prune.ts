@@ -1,6 +1,6 @@
 /**
  * Pruning: archive old Pi entries to R2 and delete them from the Durable Object, as a resumable
- * state machine (docs/design/long-term-memory.md, Pruning).
+ * state machine (docs/memory.md, Pruning).
  */
 import type { Harness } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'

@@ -1,5 +1,5 @@
 /**
- * Shared memory through proposals (docs/design/long-term-memory.md, Proposals, Shared memory).
+ * Shared memory through proposals (docs/memory.md, Proposals, Shared memory).
  * The memory agent proposes, and code checks the proposal at once with no person in the loop.
  */
 import { and, eq, inArray } from 'drizzle-orm'

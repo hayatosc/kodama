@@ -1,5 +1,5 @@
 /**
- * Probes after compaction and pruning (docs/design/long-term-memory.md, Phases, Evaluation). The
+ * Probes after compaction and pruning (docs/memory.md, Evaluation). The
  * model is scripted, so these check that what an agent needs reaches its context, not how well a
  * model uses it.
  */

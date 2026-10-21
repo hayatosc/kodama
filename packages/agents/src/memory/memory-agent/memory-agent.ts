@@ -1,5 +1,5 @@
 /**
- * The memory agent: the only writer of long-term memory (docs/design/long-term-memory.md, Memory
+ * The memory agent: the only writer of long-term memory (docs/memory.md, Memory
  * agent, Jobs). It inherits `Agent`, so its work can be watched like any agent's, but takes input
  * only through its job queue. This class runs the queue; the parts live next to it.
  */

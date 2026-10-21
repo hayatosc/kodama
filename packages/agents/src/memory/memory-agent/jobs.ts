@@ -1,4 +1,4 @@
-/** Jobs of the memory agent (docs/design/long-term-memory.md, Jobs). */
+/** Jobs of the memory agent (docs/memory.md, Jobs). */
 import * as v from 'valibot'
 import { AgentIdSchema } from '../../validation.ts'
 import type { Scope } from '../store/schema/records.ts'

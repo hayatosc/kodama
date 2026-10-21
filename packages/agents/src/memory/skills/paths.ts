@@ -1,4 +1,4 @@
-/** Skill names, R2 paths, and `SKILL.md` frontmatter (docs/design/long-term-memory.md, Skills). */
+/** Skill names, R2 paths, and `SKILL.md` frontmatter (docs/memory.md, Skills). */
 import type { skills } from '../store/schema/skills.ts'
 import type { Scope } from '../store/schema/records.ts'
 import { isScope } from '../store/scopes.ts'

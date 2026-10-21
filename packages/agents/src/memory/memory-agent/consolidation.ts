@@ -1,6 +1,6 @@
 /**
  * The code part of the daily consolidation: retention, re-segmenting, and size records
- * (docs/design/long-term-memory.md, Consolidate). The model part runs as `consolidate` jobs.
+ * (docs/memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
 import { curateSkills, forgetSkillBlobs } from '../skills/curation.ts'

@@ -1,4 +1,4 @@
-/** How large an agent's database may grow before it prunes (docs/design/long-term-memory.md, Pruning). */
+/** How large an agent's database may grow before it prunes (docs/memory.md, Pruning). */
 import * as v from 'valibot'
 
 const GIB = 1024 * 1024 * 1024

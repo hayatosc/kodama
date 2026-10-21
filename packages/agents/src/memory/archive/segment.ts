@@ -1,6 +1,6 @@
 /**
  * Archived ranges of entries in R2: building and exporting a segment, its search index, and its
- * summary (docs/design/long-term-memory.md, Pruning, Archive index).
+ * summary (docs/memory.md, Pruning, Archive index).
  */
 import type { EntryRecord } from '@earendil-works/pi-durable'
 import { SEARCH_VERSION, storedSearchText } from '../store/search-text.ts'
