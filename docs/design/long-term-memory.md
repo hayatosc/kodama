@@ -685,12 +685,12 @@ account per month.
 
 One agent streaming model output 8 hours a day for 30 days, beyond the allowances:
 
-| Cost source                                                                                                              | Estimate                   | Lever                            |
-| ------------------------------------------------------------------------------------------------------------------------ | -------------------------- | -------------------------------- |
-| Pi progress commits while streaming: at most one commit per 100 ms (`progress.partialIntervalMs`), at least one row each | ≥ 8.6 million rows, ≥ $8.6 | raise the interval               |
-| Duration while waiting on the model                                                                                      | 108,000 GB-s, $1.35        | unavoidable while the model runs |
-| An open `subscribe()` stream all day (no hibernation)                                                                    | 324,000 GB-s, $4.05        | close streams nobody watches     |
-| 1 GB of transcript kept in the object                                                                                    | $0.20 per month            | archive to R2 ($0.015)           |
+| Cost source                                                                                                                        | Estimate                                             | Lever                            |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------- |
+| Pi progress commits while streaming: at most one commit per 100 ms (`progress.partialIntervalMs`), about five rows each (measured) | about 43 million rows, about $43 (about $4.3 at 1 s) | raise the interval               |
+| Duration while waiting on the model                                                                                                | 108,000 GB-s, $1.35                                  | unavoidable while the model runs |
+| An open `subscribe()` stream all day (no hibernation)                                                                              | 324,000 GB-s, $4.05                                  | close streams nobody watches     |
+| 1 GB of transcript kept in the object                                                                                              | $0.20 per month                                      | archive to R2 ($0.015)           |
 
 **Rejected.**
 
@@ -1097,8 +1097,9 @@ To check before the design is settled:
 - **Whether production `databaseSize` falls after pruning** is not verified. Locally it fell from
   20.5 MB to 5.1 MB.
 - **Whether pruning old `submissions` is safe** is not verified.
-- **Rows written per progress commit** are not measured (phase 1). The cost estimate of decision 1
-  assumes one row, a lower bound.
+- **Rows written per turn** were measured in workerd (`test/measurement.test.ts`, Pi Durable 1.2.0):
+  about 111 rows for a one-second, 40-delta stream at 100 ms, and about 66 at 1 s. That is about
+  five rows per progress commit plus about 66 per turn. Production numbers may differ.
 - **A known search miss:** 「プラクティス」 alone does not match 「ベストプラクティス」.
 - **The failure handling is checked against the Pi Durable 1.2.0 spec and SQLite, not yet run in
   workerd.** The reset ordering, the background compaction check, and D1 `batch()` rollback need

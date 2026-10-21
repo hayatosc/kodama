@@ -10,6 +10,12 @@ import { agentTools } from './tools/index.ts'
 const MODEL_REQUEST_TIMEOUT_MS = 300_000
 
 /**
+ * Pi commits partial answers and tool output at most this often. Each commit writes rows, which
+ * are the largest storage cost while streaming; test/measurement.test.ts records rows per turn.
+ */
+export const PROGRESS_INTERVAL_MS = 100
+
+/**
  * Like opencode, transient provider failures (rate limits, 5xx, timeouts, dropped connections) are retried
  * without an attempt limit, backing off from 2s to at most 30s. Non-retryable errors such as invalid
  * credentials or exhausted quota still settle the submission as unanswered at once.
@@ -36,6 +42,7 @@ export function createAgentOptions(env: DefaultModelEnv & ModelProviderEnv): Har
       contextRetentionMs: 0,
       stream: { timeoutMs: MODEL_REQUEST_TIMEOUT_MS },
       retry: RETRY_POLICY,
+      progress: { partialIntervalMs: PROGRESS_INTERVAL_MS, outputIntervalMs: PROGRESS_INTERVAL_MS },
     },
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
