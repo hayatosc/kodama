@@ -10,7 +10,7 @@ import type {
 import { MEMORY_AGENT_NAME } from './memory/working.ts'
 import { parseAgentId } from './validation.ts'
 
-export { Agent } from './agent.ts'
+export { Agent } from './agent/agent.ts'
 export { MemoryAgent } from './memory/memory-agent.ts'
 
 /** Service-binding RPC entrypoint for the UI server and other trusted Workers. */

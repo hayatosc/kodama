@@ -13,7 +13,7 @@ import {
 import type { Harness, HarnessOptions, Submission } from '@earendil-works/pi-durable'
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
 import * as v from 'valibot'
-import { Agent } from '../agent.ts'
+import { Agent } from '../agent/agent.ts'
 import type { AlarmPurpose } from '../alarms.ts'
 import type { AgentEnv } from '../env.ts'
 import { harnessSettings } from '../harness.ts'
