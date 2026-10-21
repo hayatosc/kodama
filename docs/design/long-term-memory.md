@@ -283,6 +283,13 @@ ledger rows, and skill blobs referenced by no retained ledger row or pending ski
 than one day. Record the database size (`meta.size_after`) and the record count per
 scope in the ledger.
 
+The cron trigger (`17 3 * * *`, UTC) calls `MemoryAgent.consolidate()`. In code it deletes
+settled jobs older than 30 days and ledger rows older than 90 days, re-segments rows with an old
+`search_version`, enqueues one `consolidate` job per scope changed in the last day (at most 200
+scopes), and logs the sizes. The job reads the scope's active records with `list_records` (at
+most 200, by kind and then most used) and changes them with `memory_supersede` and
+`memory_invalidate`.
+
 ## Always-loaded memory
 
 A Pi prompt section renders two capped blocks from the always-loaded query: the agent's memory

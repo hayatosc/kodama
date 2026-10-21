@@ -7,6 +7,7 @@ import type {
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
+import { MEMORY_AGENT_NAME } from './memory/working.ts'
 import { parseAgentId } from './validation.ts'
 
 export { Agent } from './agent.ts'
@@ -16,6 +17,11 @@ export { MemoryAgent } from './memory/memory-agent.ts'
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   override async fetch(_request: Request): Promise<Response> {
     return new Response('Use a Cloudflare RPC service binding.', { status: 404 })
+  }
+
+  /** The daily cron trigger: the memory agent consolidates what changed in the last day. */
+  override async scheduled(controller: ScheduledController): Promise<void> {
+    await this.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
 
   /** Every method resolves the agent through here so IDs are validated at the RPC boundary. */

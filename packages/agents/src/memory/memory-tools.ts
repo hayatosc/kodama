@@ -6,6 +6,7 @@ import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-dura
 import { eq } from 'drizzle-orm'
 import type { AgentEnv } from '../env.ts'
 import { readArchivedText, writeSummary } from './archive.ts'
+import { consolidationRecords } from './consolidation.ts'
 import type { MemoryJob } from './jobs.ts'
 import { applyOperation, memoryDb, searchMemory } from './records.ts'
 import type {
@@ -358,7 +359,31 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
     },
   })
 
+  const listRecords = defineTool({
+    name: 'list_records',
+    description:
+      'List the active records of the scope of a consolidate job, by kind and then most used first.',
+    parameters: Type.Object({}),
+    replay: 'safe',
+    execute: async () => {
+      const running = await deps.runningJob()
+      if (running?.job.kind !== 'consolidate')
+        throw new Error('list_records needs a consolidate job')
+      const records = await consolidationRecords(db(), running.job.scope)
+      const lines = records.map(
+        (record) =>
+          `- id=${record.id} revision=${record.revision} kind=${record.kind}` +
+          ` importance=${record.importance} used=${record.useCount}` +
+          ` observed=${new Date(record.observedAt).toISOString().slice(0, 10)}` +
+          `${record.pinned ? ' pinned' : ''}${record.required ? ' required' : ''}` +
+          `${record.overrides === null ? '' : ` overrides=${record.overrides}`}: ${record.content}`,
+      )
+      return text(lines.length === 0 ? 'No active records.' : lines.join('\n'))
+    },
+  })
+
   return [
+    listRecords,
     search,
     write,
     supersede,

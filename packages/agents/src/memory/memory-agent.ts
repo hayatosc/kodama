@@ -25,6 +25,15 @@ import type { JobOutcome, JobStatus, MemoryJob } from './jobs.ts'
 import { createMemoryAgentTools } from './memory-tools.ts'
 import type { RunningJob } from './memory-tools.ts'
 import { jobPrompt, MEMORY_SYSTEM_PROMPT } from './prompts.ts'
+import {
+  changedScopes,
+  consolidationDay,
+  forgetOldLedger,
+  LEDGER_RETENTION_MS,
+  recordSizes,
+  resegmentRecords,
+  SETTLED_JOB_RETENTION_MS,
+} from './consolidation.ts'
 import { needsPrune } from './prune.ts'
 import { memoryDb } from './records.ts'
 import { memoryLedger, memoryOps } from './schema.ts'
@@ -331,6 +340,24 @@ export class MemoryAgent extends Agent {
   /** Jobs that run in code; shared-memory proposals add theirs. */
   protected runCodeJob(_jobId: string, job: MemoryJob): Promise<JobOutcome | 'retry'> {
     return Promise.reject(new Error(`No code runner for ${job.kind}`))
+  }
+
+  /**
+   * The daily consolidation: retention and re-segmenting in code, then one `consolidate` job per
+   * scope changed in the last day. Called by the scheduled handler.
+   */
+  async consolidate(now: number): Promise<{ scopes: number }> {
+    const db = memoryDb(this.env.MEMORY_DB)
+    const runId = `consolidate:${consolidationDay(now)}`
+    await this.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
+    await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
+    await resegmentRecords(db)
+    const scopes = await changedScopes(db, now - 24 * 60 * 60 * 1000)
+    for (const scope of scopes) {
+      await this.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })
+    }
+    await recordSizes(db, this.env.MEMORY_DB, runId, now)
+    return { scopes: scopes.length }
   }
 
   /** Settled jobs older than `before`, removed in small batches. */

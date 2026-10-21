@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AlarmSchedule } from '../src/alarms.ts'
 import { applyOperation, extractionCheckpoint, memoryDb } from '../src/memory/records.ts'
 import { looksLikeInjection, redactSecrets } from '../src/memory/redact.ts'
-import { memoryRecords } from '../src/memory/schema.ts'
+import { memoryLedger, memoryRecords } from '../src/memory/schema.ts'
 import { AlwaysLoadedMemory, MEMORY_AGENT_NAME } from '../src/memory/working.ts'
 import { alwaysLoaded } from '../src/storage/local-schema.ts'
 import { openLocalDb } from '../src/storage/local.ts'
@@ -203,6 +203,74 @@ describe('extraction', () => {
     await expect
       .poll(() => extractionCheckpoint(db, agentId), { timeout: 10_000 })
       .toBeGreaterThan(0)
+  })
+})
+
+describe('consolidation', () => {
+  it('merges duplicates of a changed scope and drops ledger rows past the rollback window', async () => {
+    const agentId = crypto.randomUUID()
+    const now = Date.now()
+    for (const content of ['The CI runs on Linux', 'CI runs on Linux machines']) {
+      await applyOperation(
+        db,
+        { opId: crypto.randomUUID(), jobId: 'seed', runId: 'seed', actor: 'test', now },
+        {
+          type: 'write',
+          record: {
+            scope: `agent:${agentId}`,
+            kind: 'fact',
+            content,
+            origin: 'agent_judgment',
+            sourceAgentId: agentId,
+            sourceEntries: { from: 1, to: 1 },
+            observedAt: now,
+          },
+        },
+      )
+    }
+    await db.insert(memoryLedger).values({
+      at: 0,
+      runId: 'ancient',
+      actor: 'test',
+      action: 'write',
+      target: 'record',
+      targetId: agentId,
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = requestBody(init)
+      const step = toolResults(body)
+      if (!body.includes(`Job: consolidate scope agent:${agentId}`)) {
+        return step === 0
+          ? toolCallResponse({ name: 'memory_decline', arguments: { reason: 'test' } })
+          : textResponse('Declined.')
+      }
+      if (step === 0) return toolCallResponse({ name: 'list_records', arguments: {} })
+      if (step === 1) {
+        const duplicate = /id=(\S+) revision=(\d+) kind=fact[^\n]*: CI runs on Linux machines/.exec(
+          body.replaceAll('\\n', '\n'),
+        )
+        return toolCallResponse({
+          name: 'memory_invalidate',
+          arguments: {
+            id: duplicate?.[1] ?? '',
+            revision: Number(duplicate?.[2]),
+            reason: 'duplicate',
+          },
+        })
+      }
+      return textResponse('Consolidated.')
+    })
+
+    const result = await memoryAgent().consolidate(now)
+
+    expect(result.scopes).toBeGreaterThanOrEqual(1)
+    await expect
+      .poll(() => activeContents(agentId), { timeout: 10_000 })
+      .toEqual(['The CI runs on Linux'])
+    const ancient = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, 'ancient'))
+    expect(ancient).toEqual([])
+    const meta = await db.select().from(memoryLedger).where(eq(memoryLedger.action, 'meta'))
+    expect(meta.length).toBeGreaterThan(0)
   })
 })
 

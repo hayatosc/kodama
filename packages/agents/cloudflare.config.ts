@@ -1,4 +1,4 @@
-import { bindings, defineConfig, defineWorker, exports } from 'cf/config'
+import { bindings, defineConfig, defineWorker, exports, triggers } from 'cf/config'
 import * as entrypoint from './src/index.ts' with { type: 'cf-worker' }
 import * as cliEntrypoint from './cli/worker.ts' with { type: 'cf-worker' }
 import { createLocalToken } from './cli/token.ts'
@@ -11,6 +11,8 @@ const agentWorker = defineWorker({
     Agent: exports.durableObject({ storage: 'sqlite' }),
     MemoryAgent: exports.durableObject({ storage: 'sqlite' }),
   },
+  // Daily memory consolidation (src/memory/consolidation.ts).
+  triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,
   observability: { enabled: true },
 })
