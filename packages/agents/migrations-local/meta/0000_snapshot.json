@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c4671e20-4cea-447d-b07f-5534fd2490ba",
+  "id": "84f996a6-2aa8-450f-b101-92c691141ab6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "kodama_always_loaded": {
@@ -27,6 +27,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "skills_json": {
+          "name": "skills_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         },
         "checked_at": {
           "name": "checked_at",
@@ -135,16 +143,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "kodama_memory_jobs_status": {
-          "name": "kodama_memory_jobs_status",
-          "value": "\"kodama_memory_jobs\".\"status\" IN ('queued', 'running', 'settled')"
-        },
-        "kodama_memory_jobs_settled": {
-          "name": "kodama_memory_jobs_settled",
-          "value": "(\"kodama_memory_jobs\".\"status\" = 'settled') = (\"kodama_memory_jobs\".\"outcome\" IS NOT NULL)"
-        }
-      }
+      "checkConstraints": {}
     },
     "kodama_prune_runs": {
       "name": "kodama_prune_runs",
@@ -245,10 +244,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "kodama_prune_runs_state": {
-          "name": "kodama_prune_runs_state",
-          "value": "\"kodama_prune_runs\".\"state\" IN ('prepared', 'exported', 'indexed', 'deleted')"
-        },
         "kodama_prune_runs_range": {
           "name": "kodama_prune_runs_range",
           "value": "\"kodama_prune_runs\".\"first_entry\" <= \"kodama_prune_runs\".\"last_entry\""

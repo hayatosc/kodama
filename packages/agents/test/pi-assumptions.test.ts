@@ -8,8 +8,11 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import type { HarnessOptions } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
+import { inArray } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../src/harness.ts'
+import { memoryDb } from '../src/memory/records.ts'
+import { memoryOps } from '../src/memory/schema.ts'
 import { createAgentModels } from '../src/models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -143,16 +146,18 @@ it('runs input submitted after an idle reset without the earlier context', async
 })
 
 it('rolls back every statement of a D1 batch when one statement fails', async () => {
-  const table = `t_${crypto.randomUUID().replaceAll('-', '')}`
-  await env.MEMORY_DB.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY)`)
-  const insert = env.MEMORY_DB.prepare(`INSERT INTO ${table} (id) VALUES (?)`)
+  const db = memoryDb(env.MEMORY_DB)
+  const [a, b] = [crypto.randomUUID(), crypto.randomUUID()]
+  const op = (opId: string) =>
+    db
+      .insert(memoryOps)
+      .values({ opId, jobId: 'batch', op: 'test', resultJson: '{}', appliedAt: 0 })
 
-  await expect(
-    env.MEMORY_DB.batch([insert.bind('a'), insert.bind('b'), insert.bind('a')]),
-  ).rejects.toThrow(/UNIQUE/)
+  await expect(db.batch([op(a), op(b), op(a)])).rejects.toThrow()
 
-  const count = await env.MEMORY_DB.prepare(`SELECT count(*) AS n FROM ${table}`).first<{
-    n: number
-  }>()
-  expect(count?.n).toBe(0)
+  const stored = await db
+    .select()
+    .from(memoryOps)
+    .where(inArray(memoryOps.opId, [a, b]))
+  expect(stored).toEqual([])
 })

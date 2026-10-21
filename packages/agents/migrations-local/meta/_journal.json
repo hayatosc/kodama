@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792545025883,
+      "when": 1792573732167,
       "tag": "0000_local_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1792548139209,
-      "tag": "0001_visible_skills",
       "breakpoints": true
     }
   ]

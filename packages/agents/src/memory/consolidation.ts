@@ -3,10 +3,10 @@
  * (docs/design/long-term-memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { applyOperation } from './records.ts'
+import { applyOperation, termStatements } from './records.ts'
 import type { MemoryDb, MemoryRecord, Scope } from './records.ts'
-import { memoryLedger, memoryRecords } from './schema.ts'
-import { SEARCH_VERSION, storedSearchText } from './search-text.ts'
+import { memoryLedger, memoryRecords, memoryTerms, revisionClaims } from './schema.ts'
+import { SEARCH_VERSION } from './search-text.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const LEDGER_RETENTION_MS = 90 * DAY_MS
@@ -43,21 +43,34 @@ export function consolidationRecords(db: MemoryDb, scope: Scope): Promise<Memory
     .limit(CONSOLIDATION_RECORD_LIMIT)
 }
 
-/** Rebuild the search text of rows made by an older search-text function. */
+/** Rows rebuilt per batch: each takes a few statements, and a batch should stay small. */
+const RESEGMENT_ROWS = 50
+
+/** Rebuild the search terms of records indexed by an older search-text function. */
 export async function resegmentRecords(db: MemoryDb): Promise<number> {
   const rows = await db
     .select({ id: memoryRecords.id, content: memoryRecords.content })
     .from(memoryRecords)
     .where(lt(memoryRecords.searchVersion, SEARCH_VERSION))
-    .limit(BATCH_ROWS)
-  const [first, ...rest] = rows.map((row) =>
+    .limit(RESEGMENT_ROWS)
+  const [first, ...rest] = rows.flatMap((row) => [
+    db.delete(memoryTerms).where(eq(memoryTerms.recordId, row.id)),
+    ...termStatements(db, row.id, row.content),
     db
       .update(memoryRecords)
-      .set({ searchText: storedSearchText(row.content), searchVersion: SEARCH_VERSION })
+      .set({ searchVersion: SEARCH_VERSION })
       .where(eq(memoryRecords.id, row.id)),
-  )
+  ])
   if (first !== undefined) await db.batch([first, ...rest])
   return rows.length
+}
+
+/**
+ * Delete revision claims older than the rollback window: a writer that read a revision that long
+ * ago has long since finished.
+ */
+export async function forgetOldClaims(db: MemoryDb, before: number): Promise<void> {
+  await db.delete(revisionClaims).where(lt(revisionClaims.claimedAt, before))
 }
 
 /** Delete ledger rows older than the rollback window, one batch at a time. */
@@ -78,13 +91,9 @@ export async function forgetOldLedger(db: MemoryDb, before: number): Promise<num
 }
 
 /** Log the database size and the active records per scope, to watch growth against D1's limit. */
-export async function recordSizes(
-  db: MemoryDb,
-  d1: D1Database,
-  runId: string,
-  now: number,
-): Promise<void> {
-  const probe = await d1.prepare('SELECT 1').run()
+export async function recordSizes(db: MemoryDb, runId: string, now: number): Promise<void> {
+  // Every D1 result reports the database size after the statement.
+  const probe = await db.select({ id: memoryLedger.seq }).from(memoryLedger).limit(1).run()
   const counts = await db
     .select({ scope: memoryRecords.scope, records: count() })
     .from(memoryRecords)

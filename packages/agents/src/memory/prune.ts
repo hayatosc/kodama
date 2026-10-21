@@ -18,7 +18,6 @@ import {
   max,
   ne,
   notInArray,
-  sql,
 } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import * as v from 'valibot'
@@ -162,6 +161,48 @@ async function enqueueQuietly(deps: PruneDeps, job: unknown): Promise<void> {
   }
 }
 
+const MEASURE_PAGE = 200
+
+/**
+ * The entries after `after` and before `head` whose records fit `runBytes` (at least one), read a
+ * page at a time so only about one run's records are in memory.
+ */
+function measureRange(
+  storage: DurableObjectStorage,
+  after: number,
+  head: number,
+  runBytes: number,
+): { first: number; last: number } | undefined {
+  const pi = drizzle(storage)
+  const encoder = new TextEncoder()
+  let first: number | undefined
+  let last = after
+  let bytes = 0
+  for (;;) {
+    const page = pi
+      .select({ id: piEntries.id, record: piEntries.record })
+      .from(piEntries)
+      .where(
+        and(
+          eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
+          gt(piEntries.id, last),
+          lt(piEntries.id, head),
+        ),
+      )
+      .orderBy(asc(piEntries.id))
+      .limit(MEASURE_PAGE)
+      .all()
+    for (const row of page) {
+      const size = encoder.encode(row.record).byteLength
+      if (first !== undefined && bytes + size > runBytes) return { first, last }
+      first ??= row.id
+      bytes += size
+      last = row.id
+    }
+    if (page.length < MEASURE_PAGE) return first === undefined ? undefined : { first, last }
+  }
+}
+
 /** Fix the next range: entries after the last pruned one, before the newest head, within runBytes. */
 async function prepare(
   deps: PruneDeps,
@@ -173,34 +214,14 @@ async function prepare(
   if (marker === undefined) return undefined
   const head = marker.head
   const after = prunedThrough(local)
-  const pi = drizzle(deps.storage)
-  const candidates = pi
-    .select({ id: piEntries.id, bytes: sql<number>`length(${piEntries.record})` })
-    .from(piEntries)
-    .where(
-      and(
-        eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-        gt(piEntries.id, after),
-        lt(piEntries.id, head),
-      ),
-    )
-    .orderBy(asc(piEntries.id))
-    .limit(100_000)
-    .all()
-  const first = candidates[0]
-  if (first === undefined) return undefined
-  let last = first.id
-  let bytes = 0
-  for (const candidate of candidates) {
-    if (bytes > 0 && bytes + candidate.bytes > limits.runBytes) break
-    bytes += candidate.bytes
-    last = candidate.id
-  }
+  const range = measureRange(deps.storage, after, head, limits.runBytes)
+  if (range === undefined) return undefined
+  const { first, last } = range
   const now = deps.now?.() ?? Date.now()
   const run = local
     .insert(pruneRuns)
     .values({
-      firstEntry: first.id,
+      firstEntry: first,
       lastEntry: last,
       head,
       state: 'prepared',

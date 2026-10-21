@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792541946816,
+      "when": 1792573730869,
       "tag": "0000_long_term_memory",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1792541947529,
-      "tag": "0001_memory_fts",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792548138078,
-      "tag": "0002_skill_write_rows",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1792570739325,
-      "tag": "0003_automatic_proposals",
       "breakpoints": true
     }
   ]

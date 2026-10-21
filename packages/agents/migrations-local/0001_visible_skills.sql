@@ -1,1 +1,0 @@
-ALTER TABLE `kodama_always_loaded` ADD `skills_json` text DEFAULT '[]' NOT NULL;

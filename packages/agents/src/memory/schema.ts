@@ -1,10 +1,11 @@
 /**
  * D1 schema for long-term memory (docs/design/long-term-memory.md). `drizzle-kit generate` turns it
- * into the migrations in ../../migrations; the FTS5 table and its triggers are a custom migration.
- * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a
- * constraint violation must fail the statement so that the whole `batch()` rolls back.
+ * into the migrations in ../../migrations. Times are Unix epoch milliseconds. Writes use plain
+ * inserts, never `INSERT OR IGNORE`: a constraint violation must fail the statement so that the
+ * whole `batch()` rolls back. Allowed values are the typed columns and the code that writes them
+ * (records.ts, skills.ts); the constraints here are keys and relations between columns.
  */
-import { sql } from 'drizzle-orm'
+import { isNotNull, lte } from 'drizzle-orm'
 import {
   check,
   foreignKey,
@@ -35,8 +36,7 @@ export const memoryRecords = sqliteTable(
     scope: text('scope').$type<Scope>().notNull(),
     kind: text('kind', { enum: RECORD_KINDS }).notNull(),
     content: text('content').notNull(),
-    /** Normalized words of `content`; see search-text.ts. */
-    searchText: text('search_text').notNull(),
+    /** Version of the search-text function that built the record's `memory_terms`. */
     searchVersion: integer('search_version').notNull(),
     status: text('status', { enum: RECORD_STATUSES }).notNull().default('active'),
     supersededBy: text('superseded_by'),
@@ -64,30 +64,7 @@ export const memoryRecords = sqliteTable(
   (t) => [
     index('memory_records_by_scope').on(t.scope, t.status, t.kind, t.importance),
     index('memory_records_by_source').on(t.sourceAgentId, t.sourceEntryFrom),
-    index('memory_records_by_override')
-      .on(t.overrides)
-      .where(sql`${t.overrides} IS NOT NULL`),
-    check('memory_records_scope', sql`${t.scope} GLOB 'agent:*' OR ${t.scope} GLOB 'shared:*'`),
-    check('memory_records_kind', sql`${t.kind} IN ('fact', 'event', 'instruction', 'task')`),
-    check('memory_records_content', sql`length(${t.content}) BETWEEN 1 AND 2000`),
-    check(
-      'memory_records_status',
-      sql`${t.status} IN ('active', 'superseded', 'invalid', 'archived')`,
-    ),
-    check(
-      'memory_records_origin',
-      sql`${t.origin} IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'proposal')`,
-    ),
-    check('memory_records_importance', sql`${t.importance} BETWEEN 0 AND 1`),
-    check(
-      'memory_records_superseded',
-      sql`(${t.status} = 'superseded') = (${t.supersededBy} IS NOT NULL)`,
-    ),
-    check('memory_records_overrides', sql`${t.overrides} IS NULL OR ${t.scope} GLOB 'agent:*'`),
-    check(
-      'memory_records_required',
-      sql`${t.required} = 0 OR (${t.scope} GLOB 'shared:*' AND ${t.kind} IN ('fact', 'instruction'))`,
-    ),
+    index('memory_records_by_override').on(t.overrides).where(isNotNull(t.overrides)),
   ],
 )
 
@@ -102,17 +79,53 @@ export const memoryOps = sqliteTable(
     jobId: text('job_id').notNull(),
     op: text('op').notNull(),
     resultJson: text('result_json').notNull(),
-    /**
-     * `changes()` of the guarded update right before this insert, or 1 when there is none. A
-     * guarded update that matched no row fails the check, so the whole batch rolls back.
-     */
-    guard: integer('guard').notNull(),
     appliedAt: integer('applied_at').notNull(),
   },
-  (t) => [index('memory_ops_by_job').on(t.jobId), check('memory_ops_guard', sql`${t.guard} = 1`)],
+  (t) => [index('memory_ops_by_job').on(t.jobId)],
 )
 
-/** Advanced with any change to a scope's active instructions, facts, or skills. */
+/**
+ * Normalized words of each record (search-text.ts), the search index. Written in the batch that
+ * writes the record, and rebuilt when the search-text function changes.
+ */
+export const memoryTerms = sqliteTable(
+  'memory_terms',
+  {
+    term: text('term').notNull(),
+    recordId: text('record_id')
+      .notNull()
+      .references(() => memoryRecords.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.term, t.recordId] }),
+    index('memory_terms_by_record').on(t.recordId),
+  ],
+)
+
+/**
+ * The revision each change moves a record, checkpoint, or skill to. A change updates its target
+ * only at the revision it read and claims the next one in the same batch, so a second writer from
+ * the same revision fails on this primary key and its whole batch rolls back.
+ */
+export const revisionClaims = sqliteTable(
+  'revision_claims',
+  {
+    target: text('target', { enum: ['record', 'checkpoint', 'skill'] }).notNull(),
+    targetId: text('target_id').notNull(),
+    revision: integer('revision').notNull(),
+    opId: text('op_id').notNull(),
+    claimedAt: integer('claimed_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.target, t.targetId, t.revision] }),
+    index('revision_claims_by_time').on(t.claimedAt),
+  ],
+)
+
+/**
+ * Set to a new random value with any change to a scope's active instructions, facts, or skills;
+ * readers compare it for equality only, so concurrent changes never need to read it first.
+ */
 export const scopeRevisions = sqliteTable('scope_revisions', {
   scope: text('scope').$type<Scope>().primaryKey(),
   revision: integer('revision').notNull(),
@@ -154,7 +167,7 @@ export const archiveSegments = sqliteTable(
   (t) => [
     unique('archive_segments_start').on(t.agentId, t.firstEntry),
     index('archive_segments_by_time').on(t.agentId, t.lastAt),
-    check('archive_segments_range', sql`${t.firstEntry} <= ${t.lastEntry}`),
+    check('archive_segments_range', lte(t.firstEntry, t.lastEntry)),
   ],
 )
 
@@ -185,17 +198,6 @@ export const skills = sqliteTable(
     primaryKey({ columns: [t.scope, t.name] }),
     index('skills_by_status').on(t.scope, t.status),
     index('skills_by_name').on(t.name, t.status),
-    check('skills_scope', sql`${t.scope} GLOB 'agent:*' OR ${t.scope} GLOB 'shared:*'`),
-    check(
-      'skills_name',
-      sql`${t.name} NOT GLOB '*[^a-z0-9-]*' AND length(${t.name}) BETWEEN 1 AND 64`,
-    ),
-    check('skills_description', sql`length(${t.description}) BETWEEN 1 AND 1024`),
-    check('skills_status', sql`${t.status} IN ('proposed', 'active', 'stale', 'archived')`),
-    check(
-      'skills_absorbed',
-      sql`${t.absorbedInto} IS NULL OR (${t.scope} GLOB 'agent:*' AND ${t.status} = 'archived')`,
-    ),
   ],
 )
 
@@ -220,10 +222,7 @@ export const skillWrites = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [
-    index('skill_writes_pending').on(t.status, t.createdAt),
-    check('skill_writes_status', sql`${t.status} IN ('pending', 'done')`),
-  ],
+  (t) => [index('skill_writes_pending').on(t.status, t.createdAt)],
 )
 
 /** Uses per agent, so shared skills can be curated by who still uses them. */
@@ -274,18 +273,7 @@ export const sharedProposals = sqliteTable(
     reason: text('reason'),
     appliedAt: integer('applied_at'),
   },
-  (t) => [
-    index('shared_proposals_by_status').on(t.status, t.space, t.proposedAt),
-    check('shared_proposals_target', sql`${t.target} IN ('record', 'skill')`),
-    check(
-      'shared_proposals_status',
-      sql`${t.status} IN ('accepted', 'applied', 'rejected', 'conflict')`,
-    ),
-    check(
-      'shared_proposals_applied',
-      sql`(${t.status} = 'applied') = (${t.appliedAt} IS NOT NULL)`,
-    ),
-  ],
+  (t) => [index('shared_proposals_by_status').on(t.status, t.space, t.proposedAt)],
 )
 
 export const memoryLedger = sqliteTable(
@@ -302,8 +290,5 @@ export const memoryLedger = sqliteTable(
     /** For a skill change: `[{ path, before_sha256, after_sha256 }]`, whose blobs stay in R2. */
     detailJson: text('detail_json'),
   },
-  (t) => [
-    index('memory_ledger_by_target').on(t.target, t.targetId, t.seq),
-    check('memory_ledger_target', sql`${t.target} IN ('record', 'skill', 'proposal')`),
-  ],
+  (t) => [index('memory_ledger_by_target').on(t.target, t.targetId, t.seq)],
 )

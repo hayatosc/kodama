@@ -3,7 +3,7 @@
  * `pnpm db:generate:local` writes the migrations in ../../migrations-local, which local.ts applies
  * when the object starts. Times are Unix epoch milliseconds.
  */
-import { sql } from 'drizzle-orm'
+import { lte } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const JOB_STATUSES = ['queued', 'running', 'settled'] as const
@@ -27,14 +27,7 @@ export const memoryJobs = sqliteTable(
     createdAt: integer('created_at').notNull(),
     settledAt: integer('settled_at'),
   },
-  (t) => [
-    index('kodama_memory_jobs_next').on(t.status, t.priority, t.createdAt),
-    check('kodama_memory_jobs_status', sql`${t.status} IN ('queued', 'running', 'settled')`),
-    check(
-      'kodama_memory_jobs_settled',
-      sql`(${t.status} = 'settled') = (${t.outcome} IS NOT NULL)`,
-    ),
-  ],
+  (t) => [index('kodama_memory_jobs_next').on(t.status, t.priority, t.createdAt)],
 )
 
 /** `remember` calls per user entry, so one turn can save at most a few memories. */
@@ -75,10 +68,6 @@ export const pruneRuns = sqliteTable(
   },
   (t) => [
     index('kodama_prune_runs_by_state').on(t.state),
-    check(
-      'kodama_prune_runs_state',
-      sql`${t.state} IN ('prepared', 'exported', 'indexed', 'deleted')`,
-    ),
-    check('kodama_prune_runs_range', sql`${t.firstEntry} <= ${t.lastEntry}`),
+    check('kodama_prune_runs_range', lte(t.firstEntry, t.lastEntry)),
   ],
 )

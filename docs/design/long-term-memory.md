@@ -76,22 +76,26 @@ Hard deletion is an operator action.
 
 The schema is defined with Drizzle in
 [schema.ts](../../packages/agents/src/memory/schema.ts). `pnpm db:generate` writes the D1
-migrations to `packages/agents/migrations`, applied with `cf d1 migrations`. The FTS5 table and
-its triggers, which Drizzle cannot describe, are the hand-written migration `0001_memory_fts.sql`.
+migrations to `packages/agents/migrations`, applied with `cf d1 migrations`. No SQL is written by
+hand: queries use Drizzle's query builder, and migrations come only from `drizzle-kit generate`.
+drizzle-kit 0.31 does not inline the values of check constraints, so allowed values are enforced
+by the typed columns and the code that writes them; the constraints are keys and relations between
+columns.
 
-| Table                    | Rows                                                         |
-| ------------------------ | ------------------------------------------------------------ |
-| `memory_records`         | one memory record                                            |
-| `memory_fts`             | FTS5 index over `memory_records.search_text` (triggers)      |
-| `memory_ops`             | one applied write operation and its result                   |
-| `scope_revisions`        | revision of each scope's always-loaded records and skills    |
-| `extraction_checkpoints` | last extracted entry per agent                               |
-| `archive_segments`       | catalog entry of one archived range in R2                    |
-| `skills`                 | skill index: name, description, status, content hash         |
-| `skill_writes`           | a skill update recorded before its files are overwritten     |
-| `skill_usage`            | skill uses per agent                                         |
-| `shared_proposals`       | proposals for shared memory, their decisions and application |
-| `memory_ledger`          | append-only log of every change, including declined items    |
+| Table                    | Rows                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `memory_records`         | one memory record                                                                 |
+| `memory_terms`           | one normalized word of one record: the search index                               |
+| `memory_ops`             | one applied write operation and its result                                        |
+| `revision_claims`        | the revision one change moved a record, checkpoint, or skill to                   |
+| `scope_revisions`        | a new random value with each change to a scope's always-loaded records and skills |
+| `extraction_checkpoints` | last extracted entry per agent                                                    |
+| `archive_segments`       | catalog entry of one archived range in R2                                         |
+| `skills`                 | skill index: name, description, status, content hash                              |
+| `skill_writes`           | a skill update recorded before its files are overwritten                          |
+| `skill_usage`            | skill uses per agent                                                              |
+| `shared_proposals`       | proposals for shared memory, their decisions and application                      |
+| `memory_ledger`          | append-only log of every change, including declined items                         |
 
 ### Applying a write
 
@@ -103,14 +107,16 @@ SHA-256 of the job ID and Pi's tool call ID, so running a recorded tool call aga
 2. Read the targets and check the operation's expectations, for example that the record to
    supersede is `active` at the revision the operation names. If not, return `conflict` without
    writing; the candidate is logged and evaluated again later.
-3. Send one `batch()`: guarded updates (`WHERE id = ? AND status = 'active' AND revision = ?`),
-   plain `INSERT` of new records, the ledger row, the `scope_revisions` increment, and the
-   `memory_ops` row.
+3. Send one `batch()`: the `memory_ops` row, guarded updates (`WHERE id = ? AND status =
+   'active' AND revision = ?`) that set the next revision, a `revision_claims` row for each
+   next revision, plain `INSERT` of new records and their `memory_terms`, the ledger row, and a
+   new `scope_revisions` value.
 
 Writes never use `INSERT OR IGNORE`. A duplicate record ID or a replayed `op_id` fails a
-statement, and `batch()` rolls the whole operation back. The `memory_ops` row is inserted right
-after the guarded update with `guard = changes()`, and `guard` must be 1, so an update that matched
-no row also rolls the batch back. The memory agent runs one job at a time (see [Jobs](#jobs)), so the read in step 2 stays valid until step 3;
+statement, and `batch()` rolls the whole operation back. Every change of a revision claims the
+next one in `revision_claims`, whose primary key is the target and the revision: a second writer
+that read the same revision fails on that key, so its update, which matched no row, rolls back
+with the rest of its batch. Step 2 already rejects a revision the target has not reached. The memory agent runs one job at a time (see [Jobs](#jobs)), so the read in step 2 stays valid until step 3;
 the constraints are the backstop. Working agents update only `use_count` and `last_used_at`,
 which do not change `revision`.
 
@@ -140,9 +146,8 @@ again against the current revision.
 
 ### Search text
 
-`search_text` holds normalized words joined by spaces, and FTS5 indexes it with
-`unicode61 remove_diacritics 2`. One shared function produces it for records, archive indexes, and
-queries:
+`memory_terms` holds each distinct normalized word of a record, written in the batch that writes
+the record. One shared function produces the words for records, archive indexes, and queries:
 
 1. NFKC-normalize and lowercase.
 2. Segment with `new Intl.Segmenter('ja', { granularity: 'word' })`; keep `isWordLike`
@@ -151,18 +156,20 @@ queries:
 4. Merge adjacent katakana segments into one word.
 5. For stored text only: append the original segments that differ from the merged words.
 
-A query quotes each merged word and joins them with spaces (FTS5 `AND`). If nothing matches,
-retry with the original segments, then with each merged word as a prefix (`"word"*`). `search_version` stores the version of this
-function; consolidation re-segments rows with an older version.
+A record matches a query when it has every merged word. If nothing matches, retry with the
+original segments, then with each merged word as a prefix (the range of terms from the word up to
+the word followed by U+10FFFF, so the primary key serves it). `search_version` stores the version
+of this function; consolidation rebuilds the terms of records with an older version.
 
 ### Queries
 
 - Always-loaded memory: active `instruction` and `fact` records of the agent's scope and its
   shared spaces, resolved by the precedence above, ordered by `pinned`, `importance`,
   `last_used_at`, and cut to a character budget in code.
-- `memory_search`: `memory_fts MATCH ?` joined to active records in the allowed scopes, ordered
-  by `bm25()`, then reranked by recency and importance. Increment `use_count` and set
-  `last_used_at` on the returned rows in one statement.
+- `memory_search`: for each word, the active records of the allowed scopes that have it, joined
+  from `memory_terms`; the records that have every word are ranked by importance, use, and for
+  events recency. The returned rows get `use_count` one higher and `last_used_at` in one batch; a
+  use counted twice at the same moment may be lost.
 - `history_search`: see [Archive index](#archive-index).
 
 ## Memory agent
@@ -945,17 +952,20 @@ and when `scope_revisions` shows a newer revision before a turn.
   written in the same batch as the change lets each agent notice the change itself, without the
   memory agent waking every agent (kodama constraint).
 
-### 9. Search starts with D1 FTS5 and Intl.Segmenter
+### 9. Search starts with a word index in D1 and Intl.Segmenter
 
-**Decision.** Text segmented with `Intl.Segmenter` is indexed by FTS5 (`unicode61 remove_diacritics
-2`), ranked by BM25, and reranked by recency and importance. The raw text of archived entries is
+**Decision.** Text segmented with `Intl.Segmenter` is indexed word by word in `memory_terms`, a
+Drizzle table, and matches are ranked by importance, use, and recency. The raw text of archived entries is
 indexed with the same words in per-range index files in R2, read newest first within a budget.
 Vector search is not in the first version.
 
 **Reasons.**
 
 - Hermes's `session_search` is SQLite FTS5. OpenClaw's built-in search starts from SQLite BM25 and
-  adds vectors only when an embedding provider is configured.
+  adds vectors only when an embedding provider is configured. Kodama keeps their word matching
+  but not FTS5: FTS5 needs a virtual table and triggers that Drizzle cannot describe, and kodama
+  writes no SQL by hand. The word table loses BM25's ranking by term frequency, which matters little
+  for records of one or two sentences (kodama constraint).
 - The survey 2603.07670 recommends starting simple and instrumenting.
 - Japanese full-text search on D1 with FTS5 and `Intl.Segmenter` has been built before (coji on
   Zenn).
@@ -975,6 +985,8 @@ Vector search is not in the first version.
   larger. `unicode61` alone treats a Japanese sentence without spaces as one token.
 - **Vectors and RRF from the start** (Cloudflare Agent Memory, OpenClaw hybrid search). Start with
   full-text search, measure what it misses, then decide whether to add vectors.
+- **FTS5 with a hand-written migration and triggers** (an earlier version of this
+  implementation). It ranks by BM25, but its SQL lives outside Drizzle.
 - **The archive index as FTS5 in D1** (the previous version of this plan). One global ranking over
   all archived text, but the index would soon dominate the shared D1 database.
 

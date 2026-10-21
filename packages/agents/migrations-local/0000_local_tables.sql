@@ -2,6 +2,7 @@ CREATE TABLE `kodama_always_loaded` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`text` text NOT NULL,
 	`revisions_json` text NOT NULL,
+	`skills_json` text DEFAULT '[]' NOT NULL,
 	`checked_at` integer NOT NULL
 );
 --> statement-breakpoint
@@ -16,9 +17,7 @@ CREATE TABLE `kodama_memory_jobs` (
 	`not_before` integer NOT NULL,
 	`submission_id` integer,
 	`created_at` integer NOT NULL,
-	`settled_at` integer,
-	CONSTRAINT "kodama_memory_jobs_status" CHECK("kodama_memory_jobs"."status" IN ('queued', 'running', 'settled')),
-	CONSTRAINT "kodama_memory_jobs_settled" CHECK(("kodama_memory_jobs"."status" = 'settled') = ("kodama_memory_jobs"."outcome" IS NOT NULL))
+	`settled_at` integer
 );
 --> statement-breakpoint
 CREATE INDEX `kodama_memory_jobs_next` ON `kodama_memory_jobs` (`status`,`priority`,`created_at`);--> statement-breakpoint
@@ -35,7 +34,6 @@ CREATE TABLE `kodama_prune_runs` (
 	`last_at` integer,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	CONSTRAINT "kodama_prune_runs_state" CHECK("kodama_prune_runs"."state" IN ('prepared', 'exported', 'indexed', 'deleted')),
 	CONSTRAINT "kodama_prune_runs_range" CHECK("kodama_prune_runs"."first_entry" <= "kodama_prune_runs"."last_entry")
 );
 --> statement-breakpoint

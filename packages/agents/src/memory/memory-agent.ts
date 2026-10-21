@@ -11,7 +11,7 @@ import {
   ROOT_CONVERSATION_ID,
 } from '@earendil-works/pi-durable'
 import type { Harness, HarnessOptions, Submission } from '@earendil-works/pi-durable'
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, lte } from 'drizzle-orm'
 import * as v from 'valibot'
 import { Agent } from '../agent.ts'
 import type { AlarmPurpose } from '../alarms.ts'
@@ -28,6 +28,7 @@ import { jobPrompt, MEMORY_SYSTEM_PROMPT } from './prompts.ts'
 import {
   changedScopes,
   consolidationDay,
+  forgetOldClaims,
   forgetOldLedger,
   invalidateOverridesOfRequired,
   LEDGER_RETENTION_MS,
@@ -256,9 +257,10 @@ export class MemoryAgent extends Agent {
   async #run(row: JobRow): Promise<void> {
     const local = await this.local()
     if (row.status === 'queued') {
+      // The object's SQLite runs this synchronously, so the row read by #next is still current.
       local
         .update(memoryJobs)
-        .set({ status: 'running', attempts: sql`${memoryJobs.attempts} + 1`, submissionId: null })
+        .set({ status: 'running', attempts: row.attempts + 1, submissionId: null })
         .where(eq(memoryJobs.jobId, row.jobId))
         .run()
     }
@@ -379,6 +381,7 @@ export class MemoryAgent extends Agent {
     const runId = `consolidate:${consolidationDay(now)}`
     await this.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
     await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
+    await forgetOldClaims(db, now - LEDGER_RETENTION_MS)
     await resegmentRecords(db)
     await invalidateOverridesOfRequired(db, runId, now)
     await finishPendingSkillWrites(db, this.env.ARCHIVE, now)
@@ -388,7 +391,7 @@ export class MemoryAgent extends Agent {
     for (const scope of scopes) {
       await this.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })
     }
-    await recordSizes(db, this.env.MEMORY_DB, runId, now)
+    await recordSizes(db, runId, now)
     return { scopes: scopes.length }
   }
 

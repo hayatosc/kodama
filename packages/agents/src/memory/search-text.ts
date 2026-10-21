@@ -1,6 +1,6 @@
 /**
- * Japanese-aware search text for FTS5 with the `unicode61` tokenizer. The Worker segments text,
- * and FTS5 only splits on the spaces inserted here (docs/design/long-term-memory.md, Search text).
+ * Japanese-aware search words for the `memory_terms` index and the archive index. The Worker
+ * segments text with Intl.Segmenter (docs/design/long-term-memory.md, Search text).
  */
 
 /** Stored with every indexed row; rows of an older version are segmented again. */
@@ -46,18 +46,28 @@ export function storedSearchText(text: string): string {
   return [...merged, ...segments.filter((segment) => !mergedWords.has(segment))].join(' ')
 }
 
-function quote(word: string): string {
-  return `"${word.replaceAll('"', '""')}"`
+/** The distinct words a record is indexed under. */
+export function storedTerms(text: string): string[] {
+  return [...new Set(storedSearchText(text).split(' '))].filter((term) => term.length > 0)
+}
+
+export interface TermSet {
+  terms: string[]
+  /** Match terms that start with each word. */
+  prefix: boolean
 }
 
 /**
- * FTS5 MATCH expressions to try in order until one returns rows: merged words, the original
- * segments, then merged words as prefixes. Empty when the query has no word.
+ * Word sets to try in order until one matches: merged words, the original segments, then merged
+ * words as prefixes. A record matches a set when it has every word. Empty without a word.
  */
-export function searchQueries(query: string): string[] {
+export function searchTermSets(query: string): TermSet[] {
   const { segments, merged } = words(query)
   if (merged.length === 0) return []
-  const all = (list: string[], prefix: boolean) =>
-    list.map((word) => (prefix ? `${quote(word)}*` : quote(word))).join(' ')
-  return [...new Set([all(merged, false), all(segments, false), all(merged, true)])]
+  const sets: TermSet[] = [{ terms: [...new Set(merged)], prefix: false }]
+  const segmentTerms = [...new Set(segments)]
+  if (segmentTerms.join(' ') !== sets[0]?.terms.join(' '))
+    sets.push({ terms: segmentTerms, prefix: false })
+  sets.push({ terms: [...new Set(merged)], prefix: true })
+  return sets
 }

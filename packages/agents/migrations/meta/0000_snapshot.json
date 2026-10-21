@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6efccc32-f202-4ac8-ab9d-5cb690b46f7e",
+  "id": "0a8d4ef5-6a03-4772-a720-a71f1b8620f4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "archive_segments": {
@@ -239,12 +239,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_ledger_target": {
-          "name": "memory_ledger_target",
-          "value": "\"memory_ledger\".\"target\" IN ('record', 'skill', 'proposal')"
-        }
-      }
+      "checkConstraints": {}
     },
     "memory_ops": {
       "name": "memory_ops",
@@ -277,13 +272,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "guard": {
-          "name": "guard",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "applied_at": {
           "name": "applied_at",
           "type": "integer",
@@ -302,12 +290,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_ops_guard": {
-          "name": "memory_ops_guard",
-          "value": "\"memory_ops\".\"guard\" = 1"
-        }
-      }
+      "checkConstraints": {}
     },
     "memory_records": {
       "name": "memory_records",
@@ -335,13 +318,6 @@
         },
         "content": {
           "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "search_text": {
-          "name": "search_text",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -495,50 +471,114 @@
           "name": "memory_records_by_override",
           "columns": ["overrides"],
           "isUnique": false,
-          "where": "\"memory_records\".\"overrides\" IS NOT NULL"
+          "where": "\"memory_records\".\"overrides\" is not null"
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "memory_records_scope": {
-          "name": "memory_records_scope",
-          "value": "\"memory_records\".\"scope\" GLOB 'agent:*' OR \"memory_records\".\"scope\" GLOB 'shared:*'"
+      "checkConstraints": {}
+    },
+    "memory_terms": {
+      "name": "memory_terms",
+      "columns": {
+        "term": {
+          "name": "term",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
-        "memory_records_kind": {
-          "name": "memory_records_kind",
-          "value": "\"memory_records\".\"kind\" IN ('fact', 'event', 'instruction', 'task')"
-        },
-        "memory_records_content": {
-          "name": "memory_records_content",
-          "value": "length(\"memory_records\".\"content\") BETWEEN 1 AND 2000"
-        },
-        "memory_records_status": {
-          "name": "memory_records_status",
-          "value": "\"memory_records\".\"status\" IN ('active', 'superseded', 'invalid', 'archived')"
-        },
-        "memory_records_origin": {
-          "name": "memory_records_origin",
-          "value": "\"memory_records\".\"origin\" IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'proposal')"
-        },
-        "memory_records_importance": {
-          "name": "memory_records_importance",
-          "value": "\"memory_records\".\"importance\" BETWEEN 0 AND 1"
-        },
-        "memory_records_superseded": {
-          "name": "memory_records_superseded",
-          "value": "(\"memory_records\".\"status\" = 'superseded') = (\"memory_records\".\"superseded_by\" IS NOT NULL)"
-        },
-        "memory_records_overrides": {
-          "name": "memory_records_overrides",
-          "value": "\"memory_records\".\"overrides\" IS NULL OR \"memory_records\".\"scope\" GLOB 'agent:*'"
-        },
-        "memory_records_required": {
-          "name": "memory_records_required",
-          "value": "\"memory_records\".\"required\" = 0 OR (\"memory_records\".\"scope\" GLOB 'shared:*' AND \"memory_records\".\"kind\" IN ('fact', 'instruction'))"
+        "record_id": {
+          "name": "record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
-      }
+      },
+      "indexes": {
+        "memory_terms_by_record": {
+          "name": "memory_terms_by_record",
+          "columns": ["record_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "memory_terms_record_id_memory_records_id_fk": {
+          "name": "memory_terms_record_id_memory_records_id_fk",
+          "tableFrom": "memory_terms",
+          "tableTo": "memory_records",
+          "columnsFrom": ["record_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "memory_terms_term_record_id_pk": {
+          "columns": ["term", "record_id"],
+          "name": "memory_terms_term_record_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "revision_claims": {
+      "name": "revision_claims",
+      "columns": {
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "op_id": {
+          "name": "op_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "revision_claims_by_time": {
+          "name": "revision_claims_by_time",
+          "columns": ["claimed_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "revision_claims_target_target_id_revision_pk": {
+          "columns": ["target", "target_id", "revision"],
+          "name": "revision_claims_target_target_id_revision_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "scope_revisions": {
       "name": "scope_revisions",
@@ -628,8 +668,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
+          "autoincrement": false
         },
         "run_id": {
           "name": "run_id",
@@ -645,18 +684,11 @@
           "notNull": true,
           "autoincrement": false
         },
-        "decided_at": {
-          "name": "decided_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "decided_by": {
           "name": "decided_by",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "reason": {
@@ -684,24 +716,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "shared_proposals_target": {
-          "name": "shared_proposals_target",
-          "value": "\"shared_proposals\".\"target\" IN ('record', 'skill')"
-        },
-        "shared_proposals_status": {
-          "name": "shared_proposals_status",
-          "value": "\"shared_proposals\".\"status\" IN ('pending', 'accepted', 'applied', 'rejected', 'conflict')"
-        },
-        "shared_proposals_decided": {
-          "name": "shared_proposals_decided",
-          "value": "(\"shared_proposals\".\"status\" = 'pending') = (\"shared_proposals\".\"decided_at\" IS NULL)"
-        },
-        "shared_proposals_applied": {
-          "name": "shared_proposals_applied",
-          "value": "(\"shared_proposals\".\"status\" = 'applied') = (\"shared_proposals\".\"applied_at\" IS NOT NULL)"
-        }
-      }
+      "checkConstraints": {}
     },
     "skill_usage": {
       "name": "skill_usage",
@@ -808,6 +823,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "skill_json": {
+          "name": "skill_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -841,12 +863,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "skill_writes_status": {
-          "name": "skill_writes_status",
-          "value": "\"skill_writes\".\"status\" IN ('pending', 'done')"
-        }
-      }
+      "checkConstraints": {}
     },
     "skills": {
       "name": "skills",
@@ -965,28 +982,7 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "skills_scope": {
-          "name": "skills_scope",
-          "value": "\"skills\".\"scope\" GLOB 'agent:*' OR \"skills\".\"scope\" GLOB 'shared:*'"
-        },
-        "skills_name": {
-          "name": "skills_name",
-          "value": "\"skills\".\"name\" NOT GLOB '*[^a-z0-9-]*' AND length(\"skills\".\"name\") BETWEEN 1 AND 64"
-        },
-        "skills_description": {
-          "name": "skills_description",
-          "value": "length(\"skills\".\"description\") BETWEEN 1 AND 1024"
-        },
-        "skills_status": {
-          "name": "skills_status",
-          "value": "\"skills\".\"status\" IN ('proposed', 'active', 'stale', 'archived')"
-        },
-        "skills_absorbed": {
-          "name": "skills_absorbed",
-          "value": "\"skills\".\"absorbed_into\" IS NULL OR (\"skills\".\"scope\" GLOB 'agent:*' AND \"skills\".\"status\" = 'archived')"
-        }
-      }
+      "checkConstraints": {}
     }
   },
   "views": {},

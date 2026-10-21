@@ -2,11 +2,10 @@
  * Memory records in D1: applying write operations and searching
  * (docs/design/long-term-memory.md, Applying a write, Freshness, Queries).
  */
-import { and, eq, inArray, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, lte } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import { drizzle } from 'drizzle-orm/d1'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import * as v from 'valibot'
 import * as schema from './schema.ts'
 import {
@@ -15,10 +14,12 @@ import {
   memoryLedger,
   memoryOps,
   memoryRecords,
+  memoryTerms,
+  revisionClaims,
   scopeRevisions,
 } from './schema.ts'
 import type { Scope } from './schema.ts'
-import { SEARCH_VERSION, searchQueries, storedSearchText } from './search-text.ts'
+import { SEARCH_VERSION, searchTermSets, storedTerms } from './search-text.ts'
 
 export type { Scope } from './schema.ts'
 export type MemoryDb = DrizzleD1Database<typeof schema>
@@ -39,12 +40,6 @@ export async function extractionCheckpoint(db: MemoryDb, agentId: string): Promi
     .get()
   return row?.lastEntryId ?? 0
 }
-
-/** The FTS5 table from the custom migration; drizzle-kit does not manage it. */
-const memoryFts = sqliteTable('memory_fts', {
-  rowid: integer('rowid').notNull(),
-  searchText: text('search_text').notNull(),
-})
 
 export interface NewRecord {
   scope: Scope
@@ -142,13 +137,53 @@ function errorText(error: unknown): string {
   return parts.join('\n')
 }
 
-function insertRecord(db: MemoryDb, context: OperationContext, id: string, record: NewRecord) {
-  return db.insert(memoryRecords).values({
+/** Rules the typed columns cannot express; a record that breaks one is a bug in the caller. */
+function validateRecord(record: NewRecord): void {
+  if (record.content.length === 0 || record.content.length > 2_000) {
+    throw new TypeError('A record has 1–2000 characters')
+  }
+  const importance = record.importance ?? 0.5
+  if (importance < 0 || importance > 1) throw new TypeError('importance is between 0 and 1')
+  if (record.overrides !== undefined && !record.scope.startsWith('agent:')) {
+    throw new TypeError('Only an agent record overrides a shared record')
+  }
+  if (
+    record.required === true &&
+    !(
+      record.scope.startsWith('shared:') &&
+      (record.kind === 'fact' || record.kind === 'instruction')
+    )
+  ) {
+    throw new TypeError('Only a shared fact or instruction is required')
+  }
+}
+
+/** D1 binds at most 100 parameters per statement; a term row takes two. */
+const TERMS_PER_STATEMENT = 50
+
+/** Inserts of a record's search terms, in statements D1 accepts. */
+export function termStatements(db: MemoryDb, recordId: string, content: string): Statement[] {
+  const rows = storedTerms(content).map((term) => ({ term, recordId }))
+  const statements: Statement[] = []
+  for (let start = 0; start < rows.length; start += TERMS_PER_STATEMENT) {
+    statements.push(db.insert(memoryTerms).values(rows.slice(start, start + TERMS_PER_STATEMENT)))
+  }
+  return statements
+}
+
+/** The record row and its search terms. */
+function insertRecord(
+  db: MemoryDb,
+  context: OperationContext,
+  id: string,
+  record: NewRecord,
+): Statement[] {
+  validateRecord(record)
+  const row = db.insert(memoryRecords).values({
     id,
     scope: record.scope,
     kind: record.kind,
     content: record.content,
-    searchText: storedSearchText(record.content),
     searchVersion: SEARCH_VERSION,
     origin: record.origin,
     sourceAgentId: record.sourceAgentId,
@@ -162,24 +197,44 @@ function insertRecord(db: MemoryDb, context: OperationContext, id: string, recor
     createdAt: context.now,
     updatedAt: context.now,
   })
+  return [row, ...termStatements(db, id, record.content)]
 }
 
-/** `guarded`: insert right after a guarded update, whose `changes()` must be 1. */
 export function insertOp(
   db: MemoryDb,
   context: OperationContext,
   op: string,
   result: OperationResult,
-  guarded: boolean,
 ) {
   return db.insert(memoryOps).values({
     opId: context.opId,
     jobId: context.jobId,
     op,
     resultJson: JSON.stringify(result),
-    guard: guarded ? sql`changes()` : 1,
     appliedAt: context.now,
   })
+}
+
+/**
+ * Claim the revision a change moves its target to. With the update guarded by the revision it
+ * read, a second writer from that revision fails here and its whole batch rolls back.
+ */
+export function claimRevision(
+  db: MemoryDb,
+  context: OperationContext,
+  target: 'record' | 'checkpoint' | 'skill',
+  targetId: string,
+  revision: number,
+) {
+  return db
+    .insert(revisionClaims)
+    .values({ target, targetId, revision, opId: context.opId, claimedAt: context.now })
+}
+
+/** A new value each time; scope revisions are compared for equality only. */
+function newScopeRevision(): number {
+  const [high = 0, low = 0] = crypto.getRandomValues(new Uint32Array(2))
+  return high * 2 ** 20 + (low >>> 12)
 }
 
 function ledger(
@@ -202,33 +257,34 @@ function ledger(
 }
 
 export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
+  const revision = newScopeRevision()
   return db
     .insert(scopeRevisions)
-    .values({ scope, revision: 1, updatedAt: context.now })
-    .onConflictDoUpdate({
-      target: scopeRevisions.scope,
-      set: { revision: sql`${scopeRevisions.revision} + 1`, updatedAt: context.now },
-    })
+    .values({ scope, revision, updatedAt: context.now })
+    .onConflictDoUpdate({ target: scopeRevisions.scope, set: { revision, updatedAt: context.now } })
 }
 
-/** Move an active record at `revision` to `status`; the next statement must be its guarded op. */
+/** Move an active record at `revision` to `status`, claiming the next revision. */
 function guardedStatusUpdate(
   db: MemoryDb,
   context: OperationContext,
   id: string,
   revision: number,
   change: { status: 'superseded'; supersededBy: string } | { status: 'invalid' },
-) {
-  return db
-    .update(memoryRecords)
-    .set({ ...change, revision: sql`${memoryRecords.revision} + 1`, updatedAt: context.now })
-    .where(
-      and(
-        eq(memoryRecords.id, id),
-        eq(memoryRecords.status, 'active'),
-        eq(memoryRecords.revision, revision),
+): Statement[] {
+  return [
+    db
+      .update(memoryRecords)
+      .set({ ...change, revision: revision + 1, updatedAt: context.now })
+      .where(
+        and(
+          eq(memoryRecords.id, id),
+          eq(memoryRecords.status, 'active'),
+          eq(memoryRecords.revision, revision),
+        ),
       ),
-    )
+    claimRevision(db, context, 'record', id, revision + 1),
+  ]
 }
 
 function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
@@ -263,8 +319,8 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       const id = await recordId(op.record)
       const result: OperationResult = { status: 'applied', recordId: id }
       const statements: Statements = [
-        insertOp(db, context, op.type, result, false),
-        insertRecord(db, context, id, op.record),
+        insertOp(db, context, op.type, result),
+        ...insertRecord(db, context, id, op.record),
         ledger(db, context, 'write', id, { origin: op.record.origin }),
       ]
       if (affectsAlwaysLoaded(op.record.kind)) {
@@ -299,7 +355,7 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
         return {
           result,
           statements: [
-            insertOp(db, context, op.type, result, false),
+            insertOp(db, context, op.type, result),
             ledger(db, context, 'decline_stale', op.oldId, { content: op.record.content }),
           ],
         }
@@ -307,12 +363,12 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       const id = await recordId(record)
       const result: OperationResult = { status: 'applied', recordId: id }
       const statements: Statements = [
-        guardedStatusUpdate(db, context, op.oldId, op.oldRevision, {
+        insertOp(db, context, op.type, result),
+        ...guardedStatusUpdate(db, context, op.oldId, op.oldRevision, {
           status: 'superseded',
           supersededBy: id,
         }),
-        insertOp(db, context, op.type, result, true),
-        insertRecord(db, context, id, record),
+        ...insertRecord(db, context, id, record),
         ledger(db, context, 'supersede', id, { replaces: op.oldId }),
       ]
       if (affectsAlwaysLoaded(record.kind) || affectsAlwaysLoaded(old.kind)) {
@@ -327,8 +383,8 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       }
       const result: OperationResult = { status: 'applied', recordId: op.id }
       const statements: Statements = [
-        guardedStatusUpdate(db, context, op.id, op.revision, { status: 'invalid' }),
-        insertOp(db, context, op.type, result, true),
+        insertOp(db, context, op.type, result),
+        ...guardedStatusUpdate(db, context, op.id, op.revision, { status: 'invalid' }),
         ledger(db, context, 'invalidate', op.id, { reason: op.reason }),
       ]
       if (affectsAlwaysLoaded(old.kind)) statements.push(bumpScope(db, context, old.scope))
@@ -342,33 +398,38 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
         .get()
       const result: OperationResult = { status: 'applied', recordId: op.agentId }
       if (current !== undefined && current.lastEntryId >= op.lastEntryId) {
-        return { result, statements: [insertOp(db, context, op.type, result, false)] }
+        return { result, statements: [insertOp(db, context, op.type, result)] }
       }
-      const advance =
+      const advance: Statement[] =
         current === undefined
-          ? db.insert(extractionCheckpoints).values({
-              agentId: op.agentId,
-              lastEntryId: op.lastEntryId,
-              updatedAt: context.now,
-            })
-          : db
-              .update(extractionCheckpoints)
-              .set({
+          ? [
+              db.insert(extractionCheckpoints).values({
+                agentId: op.agentId,
                 lastEntryId: op.lastEntryId,
-                revision: sql`${extractionCheckpoints.revision} + 1`,
                 updatedAt: context.now,
-              })
-              .where(
-                and(
-                  eq(extractionCheckpoints.agentId, op.agentId),
-                  eq(extractionCheckpoints.revision, current.revision),
+              }),
+            ]
+          : [
+              db
+                .update(extractionCheckpoints)
+                .set({
+                  lastEntryId: op.lastEntryId,
+                  revision: current.revision + 1,
+                  updatedAt: context.now,
+                })
+                .where(
+                  and(
+                    eq(extractionCheckpoints.agentId, op.agentId),
+                    eq(extractionCheckpoints.revision, current.revision),
+                  ),
                 ),
-              )
+              claimRevision(db, context, 'checkpoint', op.agentId, current.revision + 1),
+            ]
       return {
         result,
         statements: [
-          advance,
-          insertOp(db, context, op.type, result, current !== undefined),
+          insertOp(db, context, op.type, result),
+          ...advance,
           db
             .update(archiveSegments)
             .set({ extracted: true })
@@ -392,11 +453,12 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       return {
         result,
         statements: [
+          insertOp(db, context, op.type, result),
+          // Segments are never removed while memory runs, so the row read above is still there.
           db
             .update(archiveSegments)
             .set({ hasSummary: true })
             .where(eq(archiveSegments.id, op.segmentId)),
-          insertOp(db, context, op.type, result, true),
         ],
       }
     }
@@ -405,7 +467,7 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       return {
         result,
         statements: [
-          insertOp(db, context, op.type, result, false),
+          insertOp(db, context, op.type, result),
           ledger(db, context, 'decline', '', { candidate: op.candidate, reason: op.reason }),
         ],
       }
@@ -453,54 +515,81 @@ export interface SearchOptions {
 
 const EVENT_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000
 
-/** Higher is better: BM25 relevance, importance, and for events, recency. */
-function score(record: MemoryRecord, rank: number, now: number): number {
+/** Higher is better: importance, use, and for events, recency. */
+function score(record: MemoryRecord, now: number): number {
   const age = Math.max(0, now - record.observedAt)
   const recency = record.kind === 'event' ? 0.5 ** (age / EVENT_HALF_LIFE_MS) : 1
-  return -rank * (0.5 + record.importance) * recency
+  return (0.5 + record.importance) * recency * (1 + Math.log1p(record.useCount) / 10)
+}
+
+/** Candidates per query word, enough for a scope of a few thousand records. */
+const CANDIDATES_PER_WORD = 500
+
+/** Active records of the scopes that have `term`, or a term starting with it. */
+async function recordsWithTerm(
+  db: MemoryDb,
+  term: string,
+  prefix: boolean,
+  scopes: readonly Scope[],
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: memoryTerms.recordId })
+    .from(memoryTerms)
+    .innerJoin(memoryRecords, eq(memoryRecords.id, memoryTerms.recordId))
+    .where(
+      and(
+        // A prefix is the range of terms from it up to the next possible string.
+        prefix
+          ? and(gte(memoryTerms.term, term), lt(memoryTerms.term, `${term}\u{10FFFF}`))
+          : eq(memoryTerms.term, term),
+        eq(memoryRecords.status, 'active'),
+        inArray(memoryRecords.scope, [...scopes]),
+      ),
+    )
+    .limit(CANDIDATES_PER_WORD)
+  return new Set(rows.map((row) => row.id))
 }
 
 /**
- * Full-text search over active records of the given scopes, ranked by BM25 and then by recency
- * and importance. Returned records count as used.
+ * Search active records of the given scopes for every word of the query: merged words, then the
+ * original segments, then merged words as prefixes. Ranked by importance, use, and for events
+ * recency. Returned records count as used.
  */
 export async function searchMemory(
   db: MemoryDb,
   { query, scopes, now, limit = 10, countUse = true }: SearchOptions,
 ): Promise<MemoryRecord[]> {
   if (scopes.length === 0) return []
-  const rank = sql<number>`bm25(${memoryFts})`
-  for (const match of searchQueries(query)) {
-    const rows = await db
-      .select({ record: memoryRecords, rank })
-      .from(memoryFts)
-      .innerJoin(memoryRecords, sql`${memoryRecords}.rowid = ${memoryFts.rowid}`)
-      .where(
-        and(
-          sql`${memoryFts} MATCH ${match}`,
-          eq(memoryRecords.status, 'active'),
-          inArray(memoryRecords.scope, [...scopes]),
-        ),
-      )
-      .orderBy(rank)
-      .limit(limit * 3)
-    if (rows.length === 0) continue
-    const ranked = rows
-      .map((row) => ({ record: row.record, score: score(row.record, row.rank, now) }))
-      .sort((a, b) => b.score - a.score)
+  for (const { terms, prefix } of searchTermSets(query)) {
+    let matches: Set<string> | undefined
+    for (const term of terms) {
+      const found = await recordsWithTerm(db, term, prefix, scopes)
+      matches = matches === undefined ? found : new Set([...matches].filter((id) => found.has(id)))
+      if (matches.size === 0) break
+    }
+    if (matches === undefined || matches.size === 0) continue
+    const records = await db
+      .select()
+      .from(memoryRecords)
+      .where(inArray(memoryRecords.id, [...matches].slice(0, CANDIDATES_PER_WORD)))
+    const ranked = records
+      .map((record) => ({ record, score: score(record, now) }))
+      .sort((a, b) => b.score - a.score || b.record.updatedAt - a.record.updatedAt)
       .slice(0, limit)
       .map(({ record }) => record)
-    if (!countUse) return ranked
-    await db
-      .update(memoryRecords)
-      .set({ useCount: sql`${memoryRecords.useCount} + 1`, lastUsedAt: now })
-      .where(
-        inArray(
-          memoryRecords.id,
-          ranked.map((record) => record.id),
-        ),
-      )
+    if (countUse) await countUses(db, ranked, now)
     return ranked
   }
   return []
+}
+
+/** One more use of each record; a use counted twice at the same moment may be lost, which is fine. */
+async function countUses(db: MemoryDb, records: readonly MemoryRecord[], now: number) {
+  const [first, ...rest] = records.map((record) =>
+    db
+      .update(memoryRecords)
+      .set({ useCount: record.useCount + 1, lastUsedAt: now })
+      .where(eq(memoryRecords.id, record.id)),
+  )
+  if (first !== undefined) await db.batch([first, ...rest])
 }

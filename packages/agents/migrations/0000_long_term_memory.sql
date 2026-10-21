@@ -33,8 +33,7 @@ CREATE TABLE `memory_ledger` (
 	`action` text NOT NULL,
 	`target` text NOT NULL,
 	`target_id` text NOT NULL,
-	`detail_json` text,
-	CONSTRAINT "memory_ledger_target" CHECK("memory_ledger"."target" IN ('record', 'skill', 'proposal'))
+	`detail_json` text
 );
 --> statement-breakpoint
 CREATE INDEX `memory_ledger_by_target` ON `memory_ledger` (`target`,`target_id`,`seq`);--> statement-breakpoint
@@ -43,9 +42,7 @@ CREATE TABLE `memory_ops` (
 	`job_id` text NOT NULL,
 	`op` text NOT NULL,
 	`result_json` text NOT NULL,
-	`guard` integer NOT NULL,
-	`applied_at` integer NOT NULL,
-	CONSTRAINT "memory_ops_guard" CHECK("memory_ops"."guard" = 1)
+	`applied_at` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `memory_ops_by_job` ON `memory_ops` (`job_id`);--> statement-breakpoint
@@ -54,7 +51,6 @@ CREATE TABLE `memory_records` (
 	`scope` text NOT NULL,
 	`kind` text NOT NULL,
 	`content` text NOT NULL,
-	`search_text` text NOT NULL,
 	`search_version` integer NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
 	`superseded_by` text,
@@ -72,21 +68,30 @@ CREATE TABLE `memory_records` (
 	`observed_at` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	`revision` integer DEFAULT 1 NOT NULL,
-	CONSTRAINT "memory_records_scope" CHECK("memory_records"."scope" GLOB 'agent:*' OR "memory_records"."scope" GLOB 'shared:*'),
-	CONSTRAINT "memory_records_kind" CHECK("memory_records"."kind" IN ('fact', 'event', 'instruction', 'task')),
-	CONSTRAINT "memory_records_content" CHECK(length("memory_records"."content") BETWEEN 1 AND 2000),
-	CONSTRAINT "memory_records_status" CHECK("memory_records"."status" IN ('active', 'superseded', 'invalid', 'archived')),
-	CONSTRAINT "memory_records_origin" CHECK("memory_records"."origin" IN ('user_request', 'agent_judgment', 'extraction', 'consolidation', 'proposal')),
-	CONSTRAINT "memory_records_importance" CHECK("memory_records"."importance" BETWEEN 0 AND 1),
-	CONSTRAINT "memory_records_superseded" CHECK(("memory_records"."status" = 'superseded') = ("memory_records"."superseded_by" IS NOT NULL)),
-	CONSTRAINT "memory_records_overrides" CHECK("memory_records"."overrides" IS NULL OR "memory_records"."scope" GLOB 'agent:*'),
-	CONSTRAINT "memory_records_required" CHECK("memory_records"."required" = 0 OR ("memory_records"."scope" GLOB 'shared:*' AND "memory_records"."kind" IN ('fact', 'instruction')))
+	`revision` integer DEFAULT 1 NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `memory_records_by_scope` ON `memory_records` (`scope`,`status`,`kind`,`importance`);--> statement-breakpoint
 CREATE INDEX `memory_records_by_source` ON `memory_records` (`source_agent_id`,`source_entry_from`);--> statement-breakpoint
-CREATE INDEX `memory_records_by_override` ON `memory_records` (`overrides`) WHERE "memory_records"."overrides" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `memory_records_by_override` ON `memory_records` (`overrides`) WHERE "memory_records"."overrides" is not null;--> statement-breakpoint
+CREATE TABLE `memory_terms` (
+	`term` text NOT NULL,
+	`record_id` text NOT NULL,
+	PRIMARY KEY(`term`, `record_id`),
+	FOREIGN KEY (`record_id`) REFERENCES `memory_records`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `memory_terms_by_record` ON `memory_terms` (`record_id`);--> statement-breakpoint
+CREATE TABLE `revision_claims` (
+	`target` text NOT NULL,
+	`target_id` text NOT NULL,
+	`revision` integer NOT NULL,
+	`op_id` text NOT NULL,
+	`claimed_at` integer NOT NULL,
+	PRIMARY KEY(`target`, `target_id`, `revision`)
+);
+--> statement-breakpoint
+CREATE INDEX `revision_claims_by_time` ON `revision_claims` (`claimed_at`);--> statement-breakpoint
 CREATE TABLE `scope_revisions` (
 	`scope` text PRIMARY KEY NOT NULL,
 	`revision` integer NOT NULL,
@@ -101,17 +106,12 @@ CREATE TABLE `shared_proposals` (
 	`base_revision` integer,
 	`payload_json` text NOT NULL,
 	`source_ids_json` text NOT NULL,
-	`status` text DEFAULT 'pending' NOT NULL,
+	`status` text NOT NULL,
 	`run_id` text NOT NULL,
 	`proposed_at` integer NOT NULL,
-	`decided_at` integer,
-	`decided_by` text,
+	`decided_by` text NOT NULL,
 	`reason` text,
-	`applied_at` integer,
-	CONSTRAINT "shared_proposals_target" CHECK("shared_proposals"."target" IN ('record', 'skill')),
-	CONSTRAINT "shared_proposals_status" CHECK("shared_proposals"."status" IN ('pending', 'accepted', 'applied', 'rejected', 'conflict')),
-	CONSTRAINT "shared_proposals_decided" CHECK(("shared_proposals"."status" = 'pending') = ("shared_proposals"."decided_at" IS NULL)),
-	CONSTRAINT "shared_proposals_applied" CHECK(("shared_proposals"."status" = 'applied') = ("shared_proposals"."applied_at" IS NOT NULL))
+	`applied_at` integer
 );
 --> statement-breakpoint
 CREATE INDEX `shared_proposals_by_status` ON `shared_proposals` (`status`,`space`,`proposed_at`);--> statement-breakpoint
@@ -132,10 +132,10 @@ CREATE TABLE `skill_writes` (
 	`name` text NOT NULL,
 	`base_revision` integer,
 	`files_json` text NOT NULL,
+	`skill_json` text NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL,
-	CONSTRAINT "skill_writes_status" CHECK("skill_writes"."status" IN ('pending', 'done'))
+	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `skill_writes_pending` ON `skill_writes` (`status`,`created_at`);--> statement-breakpoint
@@ -153,12 +153,7 @@ CREATE TABLE `skills` (
 	`pinned` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	PRIMARY KEY(`scope`, `name`),
-	CONSTRAINT "skills_scope" CHECK("skills"."scope" GLOB 'agent:*' OR "skills"."scope" GLOB 'shared:*'),
-	CONSTRAINT "skills_name" CHECK("skills"."name" NOT GLOB '*[^a-z0-9-]*' AND length("skills"."name") BETWEEN 1 AND 64),
-	CONSTRAINT "skills_description" CHECK(length("skills"."description") BETWEEN 1 AND 1024),
-	CONSTRAINT "skills_status" CHECK("skills"."status" IN ('proposed', 'active', 'stale', 'archived')),
-	CONSTRAINT "skills_absorbed" CHECK("skills"."absorbed_into" IS NULL OR ("skills"."scope" GLOB 'agent:*' AND "skills"."status" = 'archived'))
+	PRIMARY KEY(`scope`, `name`)
 );
 --> statement-breakpoint
 CREATE INDEX `skills_by_status` ON `skills` (`scope`,`status`);--> statement-breakpoint

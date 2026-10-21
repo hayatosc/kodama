@@ -6,7 +6,7 @@ import { Type } from '@earendil-works/pi-ai'
 import { defineExtension, defineTool, hook, section, ToolTask } from '@earendil-works/pi-durable'
 import { createReadTool } from '@earendil-works/pi-durable/tools'
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { AgentEnv } from '../env.ts'
 import { alwaysLoaded, rememberTurns } from '../storage/local-schema.ts'
@@ -93,7 +93,8 @@ export async function renderAlwaysLoaded(
     .orderBy(
       desc(memoryRecords.pinned),
       desc(memoryRecords.importance),
-      sql`${memoryRecords.lastUsedAt} DESC NULLS LAST`,
+      // SQLite orders NULL first ascending, so never-used records come last descending.
+      desc(memoryRecords.lastUsedAt),
     )
   const shared = records.filter((record) => record.scope !== own)
   const sharedById = new Map(shared.map((record) => [record.id, record]))
@@ -320,13 +321,12 @@ function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
       if ((turn?.count ?? 0) >= REMEMBER_LIMIT_PER_TURN) {
         throw new Error(`Not saved: at most ${REMEMBER_LIMIT_PER_TURN} memories per turn`)
       }
+      // Synchronous object SQLite: nothing runs between the read above and this write.
+      const count = (turn?.count ?? 0) + 1
       local
         .insert(rememberTurns)
-        .values({ entryId: userEntry, count: 1 })
-        .onConflictDoUpdate({
-          target: rememberTurns.entryId,
-          set: { count: sql`${rememberTurns.count} + 1` },
-        })
+        .values({ entryId: userEntry, count })
+        .onConflictDoUpdate({ target: rememberTurns.entryId, set: { count } })
         .run()
 
       const status = await deps.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).enqueue({

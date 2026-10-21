@@ -3,7 +3,7 @@
  * The memory agent proposes, code checks the proposal at once with no person in the loop, and the
  * memory agent applies an accepted proposal exactly as written, in code.
  */
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { JobOutcome } from './jobs.ts'
 import { looksLikeInjection } from './redact.ts'
@@ -324,18 +324,27 @@ async function absorbSources(
       .from(skillUsage)
       .where(and(eq(skillUsage.scope, sourceScope), eq(skillUsage.name, sourceName)))
     for (const use of usage) {
+      const shared = await db
+        .select()
+        .from(skillUsage)
+        .where(
+          and(
+            eq(skillUsage.scope, scope),
+            eq(skillUsage.name, name),
+            eq(skillUsage.agentId, use.agentId),
+          ),
+        )
+        .get()
+      const merged = {
+        useCount: (shared?.useCount ?? 0) + use.useCount,
+        lastUsedAt: Math.max(shared?.lastUsedAt ?? 0, use.lastUsedAt),
+      }
       await db
         .insert(skillUsage)
-        .values({
-          scope,
-          name,
-          agentId: use.agentId,
-          useCount: use.useCount,
-          lastUsedAt: use.lastUsedAt,
-        })
+        .values({ scope, name, agentId: use.agentId, ...merged })
         .onConflictDoUpdate({
           target: [skillUsage.scope, skillUsage.name, skillUsage.agentId],
-          set: { useCount: sql`${skillUsage.useCount} + ${use.useCount}` },
+          set: merged,
         })
     }
     // Resolve the name as the agent would once the source is gone: its own skill of that name

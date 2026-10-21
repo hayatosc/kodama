@@ -1,10 +1,11 @@
 import { env } from 'cloudflare:workers'
+import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { applyOperation, memoryDb, searchMemory } from '../src/memory/records.ts'
 import type { NewRecord, OperationContext, Scope } from '../src/memory/records.ts'
+import { memoryRecords, scopeRevisions } from '../src/memory/schema.ts'
 
-const d1 = env.MEMORY_DB
-const db = memoryDb(d1)
+const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)
 
 function agentScope(): { scope: Scope; agentId: string } {
@@ -29,18 +30,19 @@ function fact(scope: Scope, agentId: string, content: string, entryTo: number): 
 }
 
 async function activeContents(scope: Scope): Promise<string[]> {
-  const { results } = await d1
-    .prepare("SELECT content FROM memory_records WHERE scope = ? AND status = 'active'")
-    .bind(scope)
-    .all<{ content: string }>()
-  return results.map((row) => row.content)
+  const rows = await db
+    .select({ content: memoryRecords.content })
+    .from(memoryRecords)
+    .where(and(eq(memoryRecords.scope, scope), eq(memoryRecords.status, 'active')))
+  return rows.map((row) => row.content)
 }
 
 async function revision(id: string): Promise<number | undefined> {
-  const row = await d1
-    .prepare('SELECT revision FROM memory_records WHERE id = ?')
-    .bind(id)
-    .first<{ revision: number }>()
+  const row = await db
+    .select({ revision: memoryRecords.revision })
+    .from(memoryRecords)
+    .where(eq(memoryRecords.id, id))
+    .get()
   return row?.revision
 }
 
@@ -100,19 +102,21 @@ describe('applying operations', () => {
     const result = await applyOperation(
       db,
       context(crypto.randomUUID(), {
-        // Another writer changes the record between the read and the batch.
+        // Another writer supersedes the record between the read and the batch.
         beforeBatch: async () => {
-          await d1
-            .prepare('UPDATE memory_records SET revision = revision + 1 WHERE id = ?')
-            .bind(oldId)
-            .run()
+          await applyOperation(db, context(crypto.randomUUID()), {
+            type: 'supersede',
+            oldId,
+            oldRevision: 1,
+            record: fact(scope, agentId, 'uses yarn', 140),
+          })
         },
       }),
       { type: 'supersede', oldId, oldRevision: 1, record: fact(scope, agentId, 'uses pnpm', 150) },
     )
 
     expect(result).toEqual({ status: 'conflict', reason: 'changed_during_write', replayed: false })
-    expect(await activeContents(scope)).toEqual(['uses npm'])
+    expect(await activeContents(scope)).toEqual(['uses yarn'])
     expect(await revision(oldId)).toBe(2)
   })
 
@@ -158,14 +162,15 @@ describe('applying operations', () => {
     expect(again).toEqual({ status: 'conflict', reason: 'duplicate', replayed: false })
   })
 
-  it('advances the scope revision for facts but not for events', async () => {
+  it('changes the scope revision for facts but not for events', async () => {
     const { scope, agentId } = agentScope()
     const current = async () =>
       (
-        await d1
-          .prepare('SELECT revision FROM scope_revisions WHERE scope = ?')
-          .bind(scope)
-          .first<{ revision: number }>()
+        await db
+          .select({ revision: scopeRevisions.revision })
+          .from(scopeRevisions)
+          .where(eq(scopeRevisions.scope, scope))
+          .get()
       )?.revision
 
     await applyOperation(db, context(crypto.randomUUID()), {
@@ -174,7 +179,10 @@ describe('applying operations', () => {
     })
     expect(await current()).toBeUndefined()
     await written(scope, agentId, 'uses pnpm', 20)
-    expect(await current()).toBe(1)
+    const first = await current()
+    await written(scope, agentId, 'uses vitest', 30)
+    expect(first).toBeDefined()
+    expect(await current()).not.toBe(first)
   })
 })
 
@@ -219,11 +227,12 @@ describe('searching memory', () => {
     const found = await searchMemory(db, { query: 'pnpm', scopes: [mine.scope], now: NOW })
 
     expect(found.map((record) => record.id)).toEqual([id])
-    const used = await d1
-      .prepare('SELECT use_count, last_used_at FROM memory_records WHERE id = ?')
-      .bind(id)
-      .first<{ use_count: number; last_used_at: number }>()
-    expect(used).toEqual({ use_count: 1, last_used_at: NOW })
+    const used = await db
+      .select({ useCount: memoryRecords.useCount, lastUsedAt: memoryRecords.lastUsedAt })
+      .from(memoryRecords)
+      .where(eq(memoryRecords.id, id))
+      .get()
+    expect(used).toEqual({ useCount: 1, lastUsedAt: NOW })
   })
 
   it('returns nothing for a query without words', async () => {

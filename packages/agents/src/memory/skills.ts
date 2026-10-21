@@ -2,10 +2,11 @@
  * Skills: Agent Skills directories in R2, their rows in D1, writes that a stop can finish,
  * visibility, usage, and curation (docs/design/long-term-memory.md, Skills).
  */
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
 import type { MemoryDb, OperationContext, OperationResult, Scope } from './records.ts'
-import { appliedResult, bumpScope, insertOp } from './records.ts'
+import { appliedResult, bumpScope, claimRevision, insertOp } from './records.ts'
 import { memoryLedger, skillUsage, skills, skillWrites } from './schema.ts'
 import { readableScopes } from './working.ts'
 
@@ -25,6 +26,7 @@ const SUPPORT_DIRS = new Set(['references', 'assets', 'scripts'])
 export type Skill = typeof skills.$inferSelect
 export type SkillStatus = Skill['status']
 type SkillWriteRow = typeof skillWrites.$inferSelect
+type Statement = BatchItem<'sqlite'>
 
 export interface VisibleSkill {
   scope: Scope
@@ -280,34 +282,39 @@ async function finishSkillWrite(
     basedOn: meta.basedOn,
     updatedAt: now,
   }
-  const upsert =
+  const upsert: Statement[] =
     row.baseRevision === null
-      ? db.insert(skills).values({
-          scope: row.scope,
-          name: row.name,
-          r2Key: dir,
-          revision: 1,
-          createdAt: now,
-          ...fields,
-        })
-      : db
-          .update(skills)
-          .set({ ...fields, revision: row.baseRevision + 1 })
-          .where(
-            and(
-              eq(skills.scope, row.scope),
-              eq(skills.name, row.name),
-              eq(skills.revision, row.baseRevision),
+      ? [
+          db.insert(skills).values({
+            scope: row.scope,
+            name: row.name,
+            r2Key: dir,
+            revision: 1,
+            createdAt: now,
+            ...fields,
+          }),
+        ]
+      : [
+          db
+            .update(skills)
+            .set({ ...fields, revision: row.baseRevision + 1 })
+            .where(
+              and(
+                eq(skills.scope, row.scope),
+                eq(skills.name, row.name),
+                eq(skills.revision, row.baseRevision),
+              ),
             ),
-          )
+          claimRevision(db, ctx, 'skill', key, row.baseRevision + 1),
+        ]
   const done = db
     .update(skillWrites)
     .set({ status: 'done', updatedAt: now })
     .where(eq(skillWrites.opId, row.opId))
   try {
     await db.batch([
-      upsert,
-      insertOp(db, ctx, 'skill_write', result, row.baseRevision !== null),
+      insertOp(db, ctx, 'skill_write', result),
+      ...upsert,
       skillLedger(db, ctx, 'write', key, changes),
       bumpScope(db, ctx, row.scope),
       done,
@@ -384,9 +391,25 @@ export async function setSkillStatus(
   const earlier = await appliedResult(db, ctx.opId)
   if (earlier !== undefined) return { ...earlier, replayed: true }
   const key = `${target.scope}/${target.name}`
+  if (
+    target.absorbedInto !== undefined &&
+    !(target.status === 'archived' && target.scope.startsWith('agent:'))
+  ) {
+    throw new TypeError('Only an archived agent skill is absorbed into a shared one')
+  }
+  const current = await db
+    .select({ revision: skills.revision })
+    .from(skills)
+    .where(and(eq(skills.scope, target.scope), eq(skills.name, target.name)))
+    .get()
+  if (current?.revision !== target.revision) {
+    return { status: 'conflict', reason: 'target_changed', replayed: false }
+  }
   const result: OperationResult = { status: 'applied', recordId: key }
   try {
     await db.batch([
+      insertOp(db, ctx, 'skill_status', result),
+      claimRevision(db, ctx, 'skill', key, target.revision + 1),
       db
         .update(skills)
         .set({
@@ -403,7 +426,6 @@ export async function setSkillStatus(
             eq(skills.revision, target.revision),
           ),
         ),
-      insertOp(db, ctx, 'skill_status', result, true),
       skillLedger(db, ctx, target.status, key, { absorbedInto: target.absorbedInto ?? null }),
       bumpScope(db, ctx, target.scope),
     ])
@@ -515,13 +537,21 @@ export async function recordSkillUse(
   agentId: string,
   now: number,
 ): Promise<void> {
+  const key = and(
+    eq(skillUsage.scope, skill.scope),
+    eq(skillUsage.name, skill.name),
+    eq(skillUsage.agentId, agentId),
+  )
   try {
+    // Only this agent writes its row; a use counted twice at the same moment may be lost.
+    const current = await db.select().from(skillUsage).where(key).get()
+    const useCount = (current?.useCount ?? 0) + 1
     await db
       .insert(skillUsage)
-      .values({ scope: skill.scope, name: skill.name, agentId, useCount: 1, lastUsedAt: now })
+      .values({ scope: skill.scope, name: skill.name, agentId, useCount, lastUsedAt: now })
       .onConflictDoUpdate({
         target: [skillUsage.scope, skillUsage.name, skillUsage.agentId],
-        set: { useCount: sql`${skillUsage.useCount} + 1`, lastUsedAt: now },
+        set: { useCount, lastUsedAt: now },
       })
   } catch (error) {
     if (!/constraint/i.test(errorText(error))) throw error
