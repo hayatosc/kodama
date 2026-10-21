@@ -1,7 +1,10 @@
 /** Skill names, R2 paths, and `SKILL.md` frontmatter (docs/design/long-term-memory.md, Skills). */
-import type { skills } from '../store/schema.ts'
-import type { Scope } from '../store/schema.ts'
+import type { skills } from '../store/schema/skills.ts'
+import type { Scope } from '../store/schema/records.ts'
 import { isScope } from '../store/scopes.ts'
+
+export const MAX_SKILL_FILES = 32
+export const MAX_SKILL_FILE_BYTES = 256 * 1024
 
 const SKILL_NAME = /^[a-z0-9-]{1,64}$/
 const SEGMENT = /^(?!\.+$)[A-Za-z0-9._-]{1,100}$/

@@ -7,8 +7,10 @@ import * as v from 'valibot'
 import { looksLikeInjection } from '../redact.ts'
 import { blobKey, isSkillName, skillDir, splitKey } from '../skills/paths.ts'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryLedger, memoryRecords, sharedProposals, skills } from '../store/schema.ts'
-import type { Scope } from '../store/schema.ts'
+import { memoryLedger, memoryRecords } from '../store/schema/records.ts'
+import { sharedProposals } from '../store/schema/shared.ts'
+import { skills } from '../store/schema/skills.ts'
+import type { Scope } from '../store/schema/records.ts'
 import type { OperationContext } from '../store/statements.ts'
 
 /** Records written by applied proposals belong to no single agent. */

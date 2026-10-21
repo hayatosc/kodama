@@ -1,7 +1,7 @@
 /** Jobs of the memory agent (docs/design/long-term-memory.md, Jobs). */
 import * as v from 'valibot'
 import { AgentIdSchema } from '../../validation.ts'
-import type { Scope } from '../store/schema.ts'
+import type { Scope } from '../store/schema/records.ts'
 import { isScope } from '../store/scopes.ts'
 
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')

@@ -5,16 +5,13 @@ import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { memoryDb } from '../src/memory/store/db.ts'
 import type { OperationContext } from '../src/memory/store/statements.ts'
-import type { Scope } from '../src/memory/store/schema.ts'
-import { memoryLedger, skills, skillUsage, skillWrites } from '../src/memory/store/schema.ts'
+import type { Scope } from '../src/memory/store/schema/records.ts'
+import { memoryLedger } from '../src/memory/store/schema/records.ts'
+import { skills, skillUsage, skillWrites } from '../src/memory/store/schema/skills.ts'
 import { SkillsEnv } from '../src/memory/skills/env.ts'
 import { curateSkills } from '../src/memory/skills/curation.ts'
-import {
-  finishPendingSkillWrites,
-  rollbackSkill,
-  setSkillStatus,
-  writeSkill,
-} from '../src/memory/skills/write.ts'
+import { finishPendingSkillWrites, writeSkill } from '../src/memory/skills/write.ts'
+import { rollbackSkill, setSkillStatus } from '../src/memory/skills/status.ts'
 import { skillDir } from '../src/memory/skills/paths.ts'
 import { visibleSkills } from '../src/memory/skills/usage.ts'
 import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'

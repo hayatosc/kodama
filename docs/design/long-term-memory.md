@@ -75,7 +75,7 @@ Hard deletion is an operator action.
 ### D1 schema
 
 The schema is defined with Drizzle in
-[schema.ts](../../packages/agents/src/memory/store/schema.ts). `pnpm db:generate` writes the D1
+[store/schema/](../../packages/agents/src/memory/store/schema/). `pnpm db:generate` writes the D1
 migrations to `packages/agents/drizzle/d1`, applied with `cf d1 migrations apply --dir drizzle/d1`.
 The migrations of kodama's tables in each Durable Object go to `drizzle/durable-object`; everything
 under `drizzle/` is drizzle-kit output and is never edited by hand. No SQL is written by

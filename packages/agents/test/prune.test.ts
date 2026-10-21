@@ -1,12 +1,13 @@
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
-import { env, exports } from 'cloudflare:workers'
+import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_MAINTENANCE_ERROR } from '../src/agent/maintenance.ts'
 import { searchHistory } from '../src/memory/archive/history.ts'
-import { PRUNE_LIMITS_KEY, prunedThrough } from '../src/memory/archive/prune.ts'
+import { PRUNE_LIMITS_KEY } from '../src/memory/prune/limits.ts'
+import { prunedThrough } from '../src/memory/prune/runs.ts'
 import { memoryDb } from '../src/memory/store/db.ts'
-import { archiveSegments } from '../src/memory/store/schema.ts'
+import { archiveSegments } from '../src/memory/store/schema/archive.ts'
 import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'
 import { memoryJobs, pruneRuns } from '../src/storage/local-schema.ts'
 import { openLocalDb } from '../src/storage/local.ts'
@@ -207,22 +208,23 @@ describe('pruning', () => {
       state.storage.put(PRUNE_LIMITS_KEY, { hardBytes: 0 }),
     )
 
-    const error = await exports.default
-      .sendMessage(agentId, { requestId: 'refused', content: 'Hello' })
-      .then(
+    // Refuse and read the schedule in one request, before the alarm, due at once, can run.
+    const refusal = await runInDurableObject(stub, async (instance, state) => {
+      const error = await instance.sendMessage({ requestId: 'refused', content: 'Hello' }).then(
         () => undefined,
         (reason: unknown) => String(reason),
       )
+      return { error, scheduled: (await state.storage.get('kodama:alarm:prune')) !== undefined }
+    })
 
-    expect(error).toContain(STORAGE_MAINTENANCE_ERROR)
-    expect(
-      await runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune')),
-    ).toBeDefined()
-    // The alarm finds nothing to prune in an empty conversation and clears itself.
-    expect(await runDurableObjectAlarm(stub)).toBe(true)
-    expect(
-      await runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune')),
-    ).toBeUndefined()
+    expect(refusal.error).toContain(STORAGE_MAINTENANCE_ERROR)
+    expect(refusal.scheduled).toBe(true)
+    // The alarm finds nothing to prune in an empty conversation and clears itself, whether it
+    // already ran on its own or runs now.
+    await runDurableObjectAlarm(stub)
+    await expect
+      .poll(() => runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune')))
+      .toBeUndefined()
   })
 })
 

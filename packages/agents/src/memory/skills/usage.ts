@@ -1,8 +1,8 @@
 /** Which skills an agent sees, and how often it uses them (docs/design/long-term-memory.md, Listing). */
 import { and, eq, inArray } from 'drizzle-orm'
 import type { MemoryDb } from '../store/db.ts'
-import { skills, skillUsage } from '../store/schema.ts'
-import type { Scope } from '../store/schema.ts'
+import { skills, skillUsage } from '../store/schema/skills.ts'
+import type { Scope } from '../store/schema/records.ts'
 import { readableScopes } from '../store/scopes.ts'
 import { errorText } from '../store/statements.ts'
 import type { Skill, VisibleSkill } from './paths.ts'

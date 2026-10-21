@@ -12,7 +12,7 @@ import { inArray } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../src/harness.ts'
 import { memoryDb } from '../src/memory/store/db.ts'
-import { memoryOps } from '../src/memory/store/schema.ts'
+import { memoryOps } from '../src/memory/store/schema/records.ts'
 import { createAgentModels } from '../src/models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'

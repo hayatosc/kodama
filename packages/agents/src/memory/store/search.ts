@@ -1,8 +1,8 @@
 /** Searching memory records by their words (docs/design/long-term-memory.md, Queries). */
 import { and, eq, gte, inArray, lt } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord } from './db.ts'
-import { memoryRecords, memoryTerms } from './schema.ts'
-import type { Scope } from './schema.ts'
+import { memoryRecords, memoryTerms } from './schema/records.ts'
+import type { Scope } from './schema/records.ts'
 import { searchTermSets } from './search-text.ts'
 
 export interface SearchOptions {

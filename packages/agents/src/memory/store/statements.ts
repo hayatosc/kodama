@@ -3,8 +3,14 @@ import { eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
 import type { MemoryDb } from './db.ts'
-import { memoryOps, memoryTerms, revisionClaims, scopeRevisions } from './schema.ts'
-import type { Scope } from './schema.ts'
+import {
+  memoryLedger,
+  memoryOps,
+  memoryTerms,
+  revisionClaims,
+  scopeRevisions,
+} from './schema/records.ts'
+import type { Scope } from './schema/records.ts'
 import { storedTerms } from './search-text.ts'
 
 /** `stale`: the candidate is older than the record it would replace, so it was declined. */
@@ -114,4 +120,39 @@ export async function appliedResult(
   if (row === undefined) return undefined
   const parsed: unknown = JSON.parse(row.resultJson)
   return v.parse(operationResultSchema, parsed)
+}
+
+/** The result an operation will have and the statements of its batch. */
+export type Plan = { result: OperationResult; statements: Statements }
+
+export function recordLedger(
+  db: MemoryDb,
+  context: OperationContext,
+  action: string,
+  targetId: string,
+  detail: unknown,
+) {
+  return db.insert(memoryLedger).values({
+    at: context.now,
+    runId: context.runId,
+    opId: context.opId,
+    actor: context.actor,
+    action,
+    target: 'record',
+    targetId,
+    detailJson: JSON.stringify(detail),
+  })
+}
+
+/** A conflict changes nothing but is logged, so the candidate can be evaluated again later. */
+export function conflict(
+  db: MemoryDb,
+  context: OperationContext,
+  targetId: string,
+  reason: string,
+): Plan {
+  return {
+    result: { status: 'conflict', reason },
+    statements: [recordLedger(db, context, 'conflict', targetId, { reason })],
+  }
 }

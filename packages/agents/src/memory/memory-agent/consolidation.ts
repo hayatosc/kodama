@@ -3,12 +3,20 @@
  * (docs/design/long-term-memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { curateSkills, forgetSkillBlobs } from '../skills/curation.ts'
+import { finishPendingSkillWrites } from '../skills/write.ts'
 import { applyOperation } from '../store/records.ts'
 import { termStatements } from '../store/statements.ts'
 import type { MemoryDb, MemoryRecord } from '../store/db.ts'
-import type { Scope } from '../store/schema.ts'
-import { memoryLedger, memoryRecords, memoryTerms, revisionClaims } from '../store/schema.ts'
+import type { Scope } from '../store/schema/records.ts'
+import {
+  memoryLedger,
+  memoryRecords,
+  memoryTerms,
+  revisionClaims,
+} from '../store/schema/records.ts'
 import { SEARCH_VERSION } from '../store/search-text.ts'
+import type { MemoryJob } from './jobs.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const LEDGER_RETENTION_MS = 90 * DAY_MS
@@ -149,4 +157,36 @@ export async function invalidateOverridesOfRequired(
     )
   }
   return rows.length
+}
+
+export interface DailyConsolidationDeps {
+  db: MemoryDb
+  bucket: R2Bucket
+  /** Remove settled jobs older than the time given. */
+  forgetSettledJobs: (before: number) => Promise<number>
+  enqueue: (job: MemoryJob) => Promise<unknown>
+  now: number
+}
+
+/**
+ * The daily consolidation: retention, re-segmenting, overrides of required records, and skill
+ * curation in code, then one `consolidate` job per scope changed in the last day.
+ */
+export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ scopes: number }> {
+  const { db, bucket, now } = deps
+  const runId = `consolidate:${consolidationDay(now)}`
+  await deps.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
+  await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
+  await forgetOldClaims(db, now - LEDGER_RETENTION_MS)
+  await resegmentRecords(db)
+  await invalidateOverridesOfRequired(db, runId, now)
+  await finishPendingSkillWrites(db, bucket, now)
+  await curateSkills(db, runId, now)
+  await forgetSkillBlobs(db, bucket, now)
+  const scopes = await changedScopes(db, now - DAY_MS)
+  for (const scope of scopes) {
+    await deps.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })
+  }
+  await recordSizes(db, runId, now)
+  return { scopes: scopes.length }
 }

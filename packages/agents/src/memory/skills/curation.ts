@@ -2,10 +2,12 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryLedger, skills, skillUsage, skillWrites } from '../store/schema.ts'
+import { memoryLedger } from '../store/schema/records.ts'
+import { skills, skillUsage, skillWrites } from '../store/schema/skills.ts'
 import { blobKey } from './paths.ts'
 import type { SkillStatus } from './paths.ts'
-import { changesSchema, setSkillStatus } from './write.ts'
+import { changesSchema } from './blobs.ts'
+import { setSkillStatus } from './status.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /** Days without use before a skill becomes stale, then archived. */

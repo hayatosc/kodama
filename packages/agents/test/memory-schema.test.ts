@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
 import { memoryDb } from '../src/memory/store/db.ts'
-import * as schema from '../src/memory/store/schema.ts'
+import { schema } from '../src/memory/store/db.ts'
 import * as localSchema from '../src/storage/local-schema.ts'
 import { openLocalDb } from '../src/storage/local.ts'
 

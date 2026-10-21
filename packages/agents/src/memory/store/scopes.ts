@@ -1,5 +1,5 @@
 /** Memory scopes: an agent's own, and the shared spaces it reads (Scopes). */
-import type { Scope } from './schema.ts'
+import type { Scope } from './schema/records.ts'
 
 export function agentScope(agentId: string): Scope {
   return `agent:${agentId}`

@@ -1,6 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { configure, ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
 import type {
   Harness,
   HarnessOptions,
@@ -9,23 +8,16 @@ import type {
 } from '@earendil-works/pi-durable'
 import { AlarmSchedule } from '../alarms.ts'
 import type { AlarmPurpose } from '../alarms.ts'
-import {
-  agentChange,
-  agentConfigSchema,
-  defaultAgentConfig,
-  initializeAgentConfig,
-  readAgentConfig,
-} from '../configuration/index.ts'
-import { readSharedSpaces, writeSharedSpaces } from '../configuration/shared-spaces.ts'
+import { defaultAgentConfig, initializeAgentConfig } from '../configuration/index.ts'
+import { readSharedSpaces } from '../configuration/shared-spaces.ts'
 import type { AgentEnv } from '../env.ts'
 import { sendEvents, subscribeEvents } from '../events.ts'
 import { createAgentOptions } from '../harness.ts'
 import { memoryDb } from '../memory/store/db.ts'
-import type { PruneDeps, PruneOutcome } from '../memory/archive/prune.ts'
+import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import { MEMORY_AGENT_NAME } from '../memory/memory-agent/jobs.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
-import { toAgentSnapshot, toSubmissionStatus } from '../projection.ts'
 import type {
   AgentConfig,
   AgentSnapshot,
@@ -36,12 +28,15 @@ import type {
 import { RecoveryAlarm } from '../recovery.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
-import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
+import { parseAgentId, parseMessage, parseRequestId } from '../validation.ts'
 import { readEntries } from './entries.ts'
 import type { EntryPage } from './entries.ts'
+import { readConfig, replaceConfig } from './config.ts'
+import type { ConfigStore } from './config.ts'
 import { StorageMaintenance } from './maintenance.ts'
 import { AgentMemory, EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 import { AgentSession, isIdle } from './session.ts'
+import { snapshotOf, submissionOf } from './views.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -121,6 +116,14 @@ export class Agent extends DurableObject<AgentEnv> {
     return defaultAgentConfig(this.env)
   }
 
+  async #config(): Promise<ConfigStore> {
+    return {
+      harness: await this.#session.harness(),
+      storage: this.ctx.storage,
+      defaults: this.defaultConfig(),
+    }
+  }
+
   #sharedSpaces(): Promise<string[]> {
     return readSharedSpaces(this.ctx.storage, this.defaultConfig().sharedSpaces)
   }
@@ -189,12 +192,11 @@ export class Agent extends DurableObject<AgentEnv> {
   async sendMessage(request: SendMessageRequest): Promise<number> {
     const message = parseMessage(request)
     await this.#maintenance.refuseWhenFull()
-    const harness = await this.#session.harness()
-    const config = await readAgentConfig(harness, await this.#sharedSpaces())
+    const config = await readConfig(await this.#config())
     if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
       throw new Error(`Credentials are not configured for provider: ${config.model.provider}`)
     }
-    if (await isIdle(harness)) await this.#memory.refreshIfChanged()
+    if (await isIdle(await this.#session.harness())) await this.#memory.refreshIfChanged()
     const submission = await this.admit({
       type: 'input',
       requestId: message.requestId,
@@ -212,7 +214,7 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   async getConfig(): Promise<AgentConfig> {
-    return readAgentConfig(await this.#session.harness(), await this.#sharedSpaces())
+    return readConfig(await this.#config())
   }
 
   async subscribe(): Promise<ReadableStream<Uint8Array>> {
@@ -221,17 +223,9 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Replace configuration while idle; history and request receipts are retained. */
   async setConfig(value: AgentConfig): Promise<AgentConfig> {
-    const config = parseInput(agentConfigSchema(createAgentModels(this.env)), value)
-    const harness = await this.#session.harness()
+    const store = await this.#config()
     return this.#recovery.serialize(async () => {
-      const { tasks } = await harness.inspect(context)
-      if (tasks.length > 0)
-        throw new Error('Agent is busy; retry configuration after it becomes idle')
-      await harness.commit(
-        (tx) => configure(tx, ROOT_CONVERSATION_ID, agentChange(config)),
-        context,
-      )
-      await writeSharedSpaces(this.ctx.storage, config.sharedSpaces)
+      const config = await replaceConfig(store, createAgentModels(this.env), value)
       // The spaces decide what the always-loaded memory and the skills list hold.
       await this.#memory.refresh()
       return config
@@ -258,23 +252,12 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   async snapshot(): Promise<AgentSnapshot> {
-    const harness = await this.#session.harness()
-    const stream = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
-    try {
-      return toAgentSnapshot(stream.snapshot)
-    } finally {
-      await stream.stop()
-    }
+    return snapshotOf(await this.#session.harness())
   }
 
   async submission(requestId: string): Promise<SubmissionStatus | undefined> {
     parseRequestId(requestId)
-    const harness = await this.#session.harness()
-    const submission = await harness.commit(
-      (tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestId),
-      context,
-    )
-    return submission === undefined ? undefined : toSubmissionStatus(requestId, submission)
+    return submissionOf(await this.#session.harness(), requestId)
   }
 
   /** Conversation text after entry `after`, oldest first, for the memory agent. */

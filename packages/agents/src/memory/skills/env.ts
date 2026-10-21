@@ -4,72 +4,20 @@
  * anything else, and every write or command, fails.
  */
 import type { Context } from '@earendil-works/chord'
-import { err, ExecutionError, FileError, LineScanner, ok } from '@earendil-works/pi-durable/env'
+import { err, ExecutionError, FileError, ok } from '@earendil-works/pi-durable/env'
 import type {
   BinaryReader,
   DirReader,
   ExecutionEnv,
   FileInfo,
   FileWatcher,
-  LineScan,
   Result,
   ShellExecResult,
   TextLineReader,
 } from '@earendil-works/pi-durable/env'
+import { MemoryReader, normalize, notFound, notSupported, ROOT } from './env-files.ts'
 import type { VisibleSkill } from './paths.ts'
 import { skillDir } from './paths.ts'
-
-const ROOT = '/skills'
-
-function notSupported<T>(what: string): Promise<Result<T, FileError>> {
-  return Promise.resolve(err(new FileError('not_supported', `Skills are read-only: ${what}`)))
-}
-
-function notFound<T>(path: string): Result<T, FileError> {
-  return err(new FileError('not_found', `No such skill file: ${path}`, path))
-}
-
-/** Resolve `.` and `..` against `cwd`; never above the root. */
-function normalize(path: string, cwd: string): string {
-  const parts: string[] = []
-  for (const part of (path.startsWith('/') ? path : `${cwd}/${path}`).split('/')) {
-    if (part === '' || part === '.') continue
-    if (part === '..') parts.pop()
-    else parts.push(part)
-  }
-  return `/${parts.join('/')}`
-}
-
-class MemoryReader implements BinaryReader {
-  readonly #bytes: Uint8Array
-  readonly #info: FileInfo
-
-  constructor(bytes: Uint8Array, info: FileInfo) {
-    this.#bytes = bytes
-    this.#info = info
-  }
-
-  info(): Promise<Result<FileInfo, FileError>> {
-    return Promise.resolve(ok(this.#info))
-  }
-
-  read(offset: number, length: number): Promise<Result<Uint8Array, FileError>> {
-    return Promise.resolve(ok(this.#bytes.slice(offset, offset + length)))
-  }
-
-  scanLines(options: {
-    startLine: number
-    endLine?: number
-  }): Promise<Result<LineScan, FileError>> {
-    const scanner = new LineScanner(options.startLine, options.endLine)
-    scanner.push(this.#bytes)
-    return Promise.resolve(ok(scanner.finish()))
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-}
 
 export class SkillsEnv implements ExecutionEnv {
   readonly id = 'kodama-skills'

@@ -1,10 +1,10 @@
 /** `history_search` over an agent's archived segments (docs/design/long-term-memory.md, Archive index). */
 import { and, desc, eq, lt } from 'drizzle-orm'
 import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../store/schema.ts'
+import { archiveSegments } from '../store/schema/archive.ts'
 import { searchWords } from '../store/search-text.ts'
 import { entryText } from '../transcript.ts'
-import { indexSchema, readJson, readSegment, summarySchema } from './segment.ts'
+import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'
 import type { SegmentIndex } from './segment.ts'
 
 export const HISTORY_READ_BUDGET_BYTES = 4 * 1024 * 1024
