@@ -16,6 +16,8 @@ export const agentConfig = defineWorker({
   ...agentWorker,
   env: {
     AGENTS: bindings.durableObject({ worker: agentWorker, exportName: 'Agent' }),
+    MEMORY_DB: bindings.d1({ name: 'kodama-memory' }),
+    ARCHIVE: bindings.r2({ name: 'kodama-archive' }),
     DEFAULT_MODEL_PROVIDER: bindings.text('openai'),
     DEFAULT_MODEL_ID: bindings.text('gpt-6-luna'),
     OPENAI_API_KEY: bindings.secret(),
