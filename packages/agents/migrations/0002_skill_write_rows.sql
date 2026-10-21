@@ -1,0 +1,1 @@
+ALTER TABLE `skill_writes` ADD `skill_json` text NOT NULL;

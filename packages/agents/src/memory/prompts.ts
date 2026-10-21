@@ -43,6 +43,7 @@ export function jobPrompt(job: MemoryJob): string {
       return [
         `Job: consolidate scope ${job.scope} for ${job.day}.`,
         'Call list_records, then merge duplicates by superseding them, invalidate records that newer ones contradict, and keep the instructions and facts short enough for the always-loaded budget.',
+        'For an agent scope, also call list_skills. When the records show a procedure that worked at least twice, write it as a skill with skill_write: SKILL.md with name and description frontmatter and the steps, and the trajectories and failure lessons as evidence. Update a skill the records improve on, and archive one they show is wrong.',
       ].join('\n')
     case 'apply_proposal':
       return `Job: apply_proposal ${job.proposalId}. This job runs in code.`

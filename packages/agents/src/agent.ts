@@ -34,6 +34,7 @@ import {
 import type { PruneDeps, PruneOutcome } from './memory/prune.ts'
 import { extractionCheckpoint, memoryDb } from './memory/records.ts'
 import { archiveSegments } from './memory/schema.ts'
+import { SkillsEnv } from './memory/skills-env.ts'
 import { entryText } from './memory/transcript.ts'
 import type { EntryText } from './memory/transcript.ts'
 import {
@@ -229,9 +230,14 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Called while the object starts; subclasses supply their own registry and settings. */
   protected harnessOptions(): HarnessOptions {
-    return createAgentOptions(this.env, [
+    const options = createAgentOptions(this.env, [
       createWorkingMemoryExtension(this.workingMemoryDeps(), this.#memory),
     ])
+    // The only files a working agent sees are its skills, read-only.
+    return {
+      ...options,
+      env: async () => new SkillsEnv(this.env.ARCHIVE, await this.#memory.skills()),
+    }
   }
 
   protected defaultConfig(): AgentConfig {

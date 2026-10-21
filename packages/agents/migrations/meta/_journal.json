@@ -15,6 +15,13 @@
       "when": 1792541947529,
       "tag": "0001_memory_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792548138078,
+      "tag": "0002_skill_write_rows",
+      "breakpoints": true
     }
   ]
 }

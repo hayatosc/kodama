@@ -212,6 +212,8 @@ export const skillWrites = sqliteTable(
     baseRevision: integer('base_revision'),
     /** `[{ path, before_sha256, after_sha256 }]`; a null before adds a file, a null after removes it. */
     filesJson: text('files_json').notNull(),
+    /** The skills row to write and the operation's job: what finishing the write needs. */
+    skillJson: text('skill_json').notNull(),
     status: text('status', { enum: ['pending', 'done'] })
       .notNull()
       .default('pending'),

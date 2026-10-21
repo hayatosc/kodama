@@ -165,10 +165,10 @@ function insertRecord(db: MemoryDb, context: OperationContext, id: string, recor
 }
 
 /** `guarded`: insert right after a guarded update, whose `changes()` must be 1. */
-function insertOp(
+export function insertOp(
   db: MemoryDb,
   context: OperationContext,
-  op: Operation['type'],
+  op: string,
   result: OperationResult,
   guarded: boolean,
 ) {
@@ -201,7 +201,7 @@ function ledger(
   })
 }
 
-function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
+export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
   return db
     .insert(scopeRevisions)
     .values({ scope, revision: 1, updatedAt: context.now })
@@ -235,7 +235,10 @@ function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined>
   return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
 }
 
-async function appliedResult(db: MemoryDb, opId: string): Promise<OperationResult | undefined> {
+export async function appliedResult(
+  db: MemoryDb,
+  opId: string,
+): Promise<OperationResult | undefined> {
   const row = await db
     .select({ resultJson: memoryOps.resultJson })
     .from(memoryOps)

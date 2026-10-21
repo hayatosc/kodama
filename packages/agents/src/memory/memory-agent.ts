@@ -35,6 +35,7 @@ import {
   SETTLED_JOB_RETENTION_MS,
 } from './consolidation.ts'
 import { needsPrune } from './prune.ts'
+import { curateSkills, finishPendingSkillWrites, forgetSkillBlobs } from './skills.ts'
 import { memoryDb } from './records.ts'
 import { memoryLedger, memoryOps } from './schema.ts'
 
@@ -223,6 +224,8 @@ export class MemoryAgent extends Agent {
       const row = await this.#next(Date.now())
       if (row === undefined) break
       await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
+      // A skill write a stop left half done is finished before anything reads the skill again.
+      await finishPendingSkillWrites(memoryDb(this.env.MEMORY_DB), this.env.ARCHIVE, Date.now())
       await this.#run(row)
     }
     const local = await this.local()
@@ -352,6 +355,9 @@ export class MemoryAgent extends Agent {
     await this.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
     await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
     await resegmentRecords(db)
+    await finishPendingSkillWrites(db, this.env.ARCHIVE, now)
+    await curateSkills(db, runId, now)
+    await forgetSkillBlobs(db, this.env.ARCHIVE, now)
     const scopes = await changedScopes(db, now - 24 * 60 * 60 * 1000)
     for (const scope of scopes) {
       await this.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })

@@ -452,18 +452,21 @@ space in `sharedSpaces` wins. Each name appears once in the listing.
   each time, so a stop at any point ends in the new version.
 - A rollback is an operation that writes a ledger row's before blobs back in the same way.
 - `skill_usage` counts uses per skill and agent. Working agents upsert it.
+- Skill directories and blobs live in the `ARCHIVE` bucket. A skill has at most 32 files of at most
+  256 KB each, and paths are `SKILL.md` or below `references/`, `assets/`, or `scripts/`.
 
 ### Listing and loading
 
 - A `skills` extension adds a `skills` section with the visible active skills as name,
   description, and path `/skills/<scope>/<name>/SKILL.md`: agent skills first, then shared
-  skills by this agent's uses, then by all agents' uses, at most 50. The list is refreshed with
-  the always-loaded memory.
+  skills by this agent's uses, then by all agents' uses, at most 50. The list is stored and
+  refreshed with the always-loaded memory, and the same stored list decides what `SkillsEnv`
+  serves.
 - The model loads a skill with the `read` tool from `@earendil-works/pi-durable/tools`. The
   conversation's `env` is `SkillsEnv`, a read-only `ExecutionEnv` that resolves
   `/skills/<scope>/<name>/...` to the skill's R2 directory.
 - Paths of skills the agent cannot see return not found. Writes, `exec`, and `watch` return
-  `not_supported`. Relative paths resolve against the skill directory. Scripts can be read but not
+  `not_supported`. Relative paths resolve against `/skills`. Scripts can be read but not
   run.
 - An `afterTool` hook on `read` upserts `skill_usage` when the path ends in `SKILL.md`.
 
@@ -473,8 +476,11 @@ All changes are operations of the memory agent during `consolidate` or `apply_pr
 in `memory_ledger`.
 
 - **Create.** An agent skill, from a procedure that succeeded at least twice in that agent's
-  trajectories, with the trajectories and failure lessons as evidence. It is written as
-  `proposed`, and becomes `active` after a replay or check passes.
+  trajectories, with the trajectories and failure lessons as evidence. The memory agent writes it
+  with `skill_write` during the agent scope's `consolidate` job; the write checks the structure
+  (frontmatter `name` matching the skill and a 1–1024 character `description`, paths, sizes) and
+  stores the skill `active`. There is no replay; a skill that does not help goes stale unused. The
+  job also has `list_skills`, `read_skill`, and `skill_archive` (archive or restore).
 - **Update an agent skill.** Overwritten from new evidence of the same agent, after a check.
 - **Promote.** When agent skills of two or more agents describe the same procedure, or an
   operator asks, the memory agent uploads the merged skill and writes one `shared_proposals` row
@@ -492,7 +498,9 @@ in `memory_ledger`.
   shared skill.
 - **Curate.** An agent skill becomes `stale` after 14 days without use by its agent and
   `archived` after 30. A shared skill becomes `stale` after 30 days without use by any agent and
-  `archived` after 60. Pinned skills are exempt. Archived skills can be restored.
+  `archived` after 60. Pinned skills are exempt. Archived skills can be restored. Days count from
+  the last use or the last content write (`updated_at`); a status change other than a restore
+  keeps `updated_at`.
 
 ### Review
 

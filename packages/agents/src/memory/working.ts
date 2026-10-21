@@ -3,9 +3,11 @@
  * (docs/design/long-term-memory.md, Working agents, Always-loaded memory).
  */
 import { Type } from '@earendil-works/pi-ai'
-import { defineExtension, defineTool, section } from '@earendil-works/pi-durable'
+import { defineExtension, defineTool, hook, section, ToolTask } from '@earendil-works/pi-durable'
+import { createReadTool } from '@earendil-works/pi-durable/tools'
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import * as v from 'valibot'
 import type { AgentEnv } from '../env.ts'
 import { alwaysLoaded, rememberTurns } from '../storage/local-schema.ts'
 import type { LocalDb } from '../storage/local.ts'
@@ -15,6 +17,8 @@ import { memoryDb, searchMemory } from './records.ts'
 import type { MemoryRecord, Scope } from './records.ts'
 import { looksLikeInjection, redactSecrets } from './redact.ts'
 import { memoryRecords, scopeRevisions } from './schema.ts'
+import { isSkillName, recordSkillUse, skillPath, visibleSkills } from './skills.ts'
+import type { VisibleSkill } from './skills.ts'
 
 export const MEMORY_AGENT_NAME = 'memory'
 export const AGENT_MEMORY_BUDGET = 2_200
@@ -73,7 +77,7 @@ export async function renderAlwaysLoaded(
   db: ReturnType<typeof memoryDb>,
   agentId: string,
   sharedSpaces: readonly string[],
-): Promise<{ text: string; revisions: Revisions }> {
+): Promise<{ text: string; revisions: Revisions; skills: VisibleSkill[] }> {
   const own = agentScope(agentId)
   const scopes = readableScopes(agentId, sharedSpaces)
   const records = await db
@@ -109,18 +113,33 @@ export async function renderAlwaysLoaded(
     .from(scopeRevisions)
     .where(inArray(scopeRevisions.scope, scopes))
   const revisions = Object.fromEntries(revisionRows.map((row) => [row.scope, row.revision]))
-  if (agentRecords.length === 0 && sharedRecords.length === 0) return { text: '', revisions }
+  const skills = await visibleSkills(db, agentId, sharedSpaces)
+  if (agentRecords.length === 0 && sharedRecords.length === 0)
+    return { text: '', revisions, skills }
   const text = [
     'Long-term memory saved in earlier turns. Use memory_search for more, and remember to keep something new.',
     blockText('MEMORY', fit(agentRecords, AGENT_MEMORY_BUDGET), AGENT_MEMORY_BUDGET),
     blockText('SHARED', fit(sharedRecords, SHARED_MEMORY_BUDGET), SHARED_MEMORY_BUDGET),
   ].join('\n')
-  return { text, revisions }
+  return { text, revisions, skills }
 }
 
 function sameRevisions(a: Revisions, b: Revisions): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)])
   return [...keys].every((key) => a[key] === b[key])
+}
+
+const visibleSkillSchema = v.array(
+  v.object({
+    scope: v.custom<Scope>((value) => typeof value === 'string' && isScopeText(value)),
+    name: v.string(),
+    description: v.string(),
+  }),
+)
+
+function parseSkills(json: string): VisibleSkill[] {
+  const parsed = v.safeParse(visibleSkillSchema, JSON.parse(json))
+  return parsed.success ? parsed.output : []
 }
 
 function parseRevisions(json: string): Revisions {
@@ -150,14 +169,27 @@ export class AlwaysLoadedMemory {
     return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()?.text ?? ''
   }
 
+  /** The skills listed in the `skills` section, from the same stored copy. */
+  async skills(): Promise<VisibleSkill[]> {
+    const local = await this.#deps.local()
+    const row = local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
+    return row === undefined ? [] : parseSkills(row.skillsJson)
+  }
+
   /** Render again from D1 and store the copy. */
   async refresh(): Promise<void> {
-    const { text, revisions } = await renderAlwaysLoaded(
+    const { text, revisions, skills } = await renderAlwaysLoaded(
       memoryDb(this.#deps.env.MEMORY_DB),
       this.#deps.agentId(),
       await this.#deps.sharedSpaces(),
     )
-    const row = { id: 1, text, revisionsJson: JSON.stringify(revisions), checkedAt: this.#now() }
+    const row = {
+      id: 1,
+      text,
+      revisionsJson: JSON.stringify(revisions),
+      skillsJson: JSON.stringify(skills),
+      checkedAt: this.#now(),
+    }
     const local = await this.#deps.local()
     local
       .insert(alwaysLoaded)
@@ -312,6 +344,30 @@ function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
   })
 }
 
+function skillsText(skills: readonly VisibleSkill[]): string | undefined {
+  if (skills.length === 0) return undefined
+  return [
+    'Skills: procedures saved from earlier work. Before a task one of them covers, read its SKILL.md with the read tool and follow it; read its other files only when it says to.',
+    ...skills.map((skill) => `- ${skill.name}: ${skill.description} (${skillPath(skill)})`),
+  ].join('\n')
+}
+
+function isScopeText(value: string): value is Scope {
+  return /^(agent|shared):./.test(value)
+}
+
+/** The skill a `read` of a `SKILL.md` path loads, if any; relative paths start at `/skills`. */
+export function skillOfPath(path: string): { scope: Scope; name: string } | undefined {
+  const absolute = path.startsWith('/') ? path : `/skills/${path}`
+  const match = /^\/skills\/([^/]+)\/([^/]+)\/SKILL\.md$/.exec(absolute)
+  const scope = match?.[1]
+  const name = match?.[2]
+  if (scope === undefined || name === undefined || !isScopeText(scope) || !isSkillName(name)) {
+    return undefined
+  }
+  return { scope, name }
+}
+
 /** Tools and the always-loaded section every working agent gets, whatever its tool choice. */
 export function createWorkingMemoryExtension(
   deps: WorkingMemoryDeps,
@@ -319,11 +375,33 @@ export function createWorkingMemoryExtension(
 ): Extension {
   return defineExtension({
     name: 'kodama-memory',
-    tools: [memorySearchTool(deps), rememberTool(deps), historySearchTool(deps)],
+    tools: [memorySearchTool(deps), rememberTool(deps), historySearchTool(deps), createReadTool()],
     sections: [
       section('memory', async () => {
         const text = await memory.text()
         return text.length === 0 ? undefined : text
+      }),
+      section('skills', async () => skillsText(await memory.skills())),
+    ],
+    hooks: [
+      hook(ToolTask, {
+        afterTool: async (call, result) => {
+          const path: unknown = call.arguments['path']
+          const skill = typeof path === 'string' ? skillOfPath(path) : undefined
+          if (call.name !== 'read' || skill === undefined || result.isError === true)
+            return undefined
+          try {
+            await recordSkillUse(
+              memoryDb(deps.env.MEMORY_DB),
+              skill,
+              deps.agentId(),
+              deps.now?.() ?? Date.now(),
+            )
+          } catch (error) {
+            console.error('Skill use was not recorded', error)
+          }
+          return undefined
+        },
       }),
     ],
   })
