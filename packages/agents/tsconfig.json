@@ -15,8 +15,8 @@
   },
   "include": [
     "src/**/*.ts",
-    "test/**/*.ts",
     "cli/**/*.ts",
+    "drizzle/**/*.ts",
     "*.config.ts",
     ".cloudflare/types/**/*.d.ts"
   ]

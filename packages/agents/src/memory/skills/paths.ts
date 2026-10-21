@@ -1,6 +1,6 @@
 /** Skill names, R2 paths, and `SKILL.md` frontmatter (docs/memory.md, Skills). */
-import type { skills } from '../store/schema/skills.ts'
-import type { Scope } from '../store/schema/records.ts'
+import type { skills } from '../../../drizzle/d1/schema/skills.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
 import { isScope } from '../store/scopes.ts'
 
 export const MAX_SKILL_FILES = 32

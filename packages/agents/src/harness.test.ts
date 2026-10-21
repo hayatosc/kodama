@@ -8,7 +8,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createAgentOptions, PROGRESS_INTERVAL_MS } from '../src/harness.ts'
+import { createAgentOptions, PROGRESS_INTERVAL_MS } from './harness.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'
 

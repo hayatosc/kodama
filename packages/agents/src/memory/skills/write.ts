@@ -6,9 +6,9 @@ import { and, eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryLedger } from '../store/schema/records.ts'
-import { skills, skillWrites } from '../store/schema/skills.ts'
-import type { Scope } from '../store/schema/records.ts'
+import { memoryLedger } from '../../../drizzle/d1/schema/records.ts'
+import { skills, skillWrites } from '../../../drizzle/d1/schema/skills.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
 import {
   appliedResult,
   bumpScope,

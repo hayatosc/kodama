@@ -1,6 +1,6 @@
 /**
  * D1 schema for long-term memory (docs/memory.md, D1 schema), one file per part.
- * `drizzle-kit generate` turns the files in this folder into the migrations in ../../../../drizzle/d1.
+ * `pnpm db:generate` turns the files in this folder into the migrations in ../migrations.
  * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a
  * constraint violation must fail the statement so that the whole `batch()` rolls back. Allowed
  * values are the typed columns and the code that writes them; the constraints here are keys and

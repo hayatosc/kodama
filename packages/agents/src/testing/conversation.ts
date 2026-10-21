@@ -3,8 +3,8 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { vi } from 'vitest'
-import { createAgentModels } from '../../src/models/index.ts'
-import { piEntries } from '../../src/storage/pi-tables.ts'
+import { createAgentModels } from '../models/index.ts'
+import { piEntries } from '../storage/pi-tables.ts'
 import {
   isMemoryAgentRequest,
   isSummaryRequest,

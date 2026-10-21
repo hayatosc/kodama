@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { agentConfigSchema, defaultAgentConfig } from '../src/configuration/index.ts'
-import { createAgentModels } from '../src/models/index.ts'
-import { parseInput } from '../src/validation.ts'
+import { agentConfigSchema, defaultAgentConfig } from './index.ts'
+import { createAgentModels } from '../models/index.ts'
+import { parseInput } from '../validation.ts'
 
 const schema = agentConfigSchema(createAgentModels({}))
 const valid = defaultAgentConfig({

@@ -7,7 +7,7 @@ import {
   readEvents,
   useMockModel,
   waitForAnswer,
-} from './helpers/rpc.ts'
+} from './testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

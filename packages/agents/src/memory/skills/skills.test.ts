@@ -3,22 +3,22 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Scope } from '../src/memory/store/schema/records.ts'
-import { skills, skillUsage } from '../src/memory/store/schema/skills.ts'
-import { SkillsEnv } from '../src/memory/skills/env.ts'
-import { curateSkills } from '../src/memory/skills/curation.ts'
-import { setSkillStatus } from '../src/memory/skills/status.ts'
-import { visibleSkills } from '../src/memory/skills/usage.ts'
-import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
+import { skills, skillUsage } from '../../../drizzle/d1/schema/skills.ts'
+import { SkillsEnv } from './env.ts'
+import { curateSkills } from './curation.ts'
+import { setSkillStatus } from './status.ts'
+import { visibleSkills } from './usage.ts'
+import { MEMORY_AGENT_NAME } from '../memory-agent/jobs.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
   textResponse,
   toolCallResponse,
   toolResults,
-} from './helpers/model.ts'
-import { context, db } from './helpers/memory.ts'
-import { create, file, row, skillMd } from './helpers/skills.ts'
+} from '../../testing/model.ts'
+import { context, db } from '../../testing/memory.ts'
+import { create, file, row, skillMd } from '../../testing/skills.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

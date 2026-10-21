@@ -1,9 +1,9 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invalidateOverridesOfRequired } from '../src/memory/memory-agent/consolidation.ts'
-import type { Scope } from '../src/memory/store/schema/records.ts'
-import { db, record, renderedAlwaysLoaded, write } from './helpers/memory.ts'
+import { invalidateOverridesOfRequired } from '../memory-agent/consolidation.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
+import { db, record, renderedAlwaysLoaded, write } from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

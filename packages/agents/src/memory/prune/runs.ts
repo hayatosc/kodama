@@ -2,7 +2,7 @@
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { and, desc, eq, gt, isNotNull, lt, max, ne } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { pruneRuns } from '../../storage/local-schema.ts'
+import { pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import { piEntries } from '../../storage/pi-tables.ts'
 import { pruneLimits } from './limits.ts'

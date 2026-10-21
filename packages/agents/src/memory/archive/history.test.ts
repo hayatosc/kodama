@@ -1,11 +1,11 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { searchHistory } from '../src/memory/archive/history.ts'
-import { archiveSegments } from '../src/memory/store/schema/archive.ts'
-import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from './helpers/conversation.ts'
-import { textResponse, toolCallResponse, toolResults } from './helpers/model.ts'
-import { db } from './helpers/memory.ts'
+import { searchHistory } from './history.ts'
+import { archiveSegments } from '../../../drizzle/d1/schema/archive.ts'
+import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from '../../testing/conversation.ts'
+import { textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
+import { db } from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

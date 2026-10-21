@@ -11,7 +11,7 @@ and model-invoked delegation tools can be added on top of the RPC transport.
 packages/
   agents/                 @kodama/agents: RPC Worker and Durable Objects
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
-    drizzle/              drizzle-kit output: D1 and Durable Object migrations
+    drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint
     src/agent/            Agent Durable Object: state, RPC, and its parts
     src/harness.ts        Pi runtime composition
@@ -23,7 +23,7 @@ packages/
     src/memory/           Long-term memory, the memory agent, pruning, and skills
     src/storage/          Kodama's tables in each Durable Object's SQLite
     src/protocol.ts       Transport data types (safe to import as types in a UI)
-    test/                 workerd integration tests
+    src/testing/          Test helpers; tests sit next to their modules as *.test.ts
   ui/                     Planned: web UI and its server Worker
 ```
 

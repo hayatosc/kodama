@@ -2,8 +2,8 @@
 import { and, eq, lte } from 'drizzle-orm'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
-import { archiveSegments } from './schema/archive.ts'
-import { extractionCheckpoints } from './schema/records.ts'
+import { archiveSegments } from '../../../drizzle/d1/schema/archive.ts'
+import { extractionCheckpoints } from '../../../drizzle/d1/schema/records.ts'
 import { claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
 

@@ -2,15 +2,15 @@ import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STORAGE_MAINTENANCE_ERROR } from '../src/agent/maintenance.ts'
-import { searchHistory } from '../src/memory/archive/history.ts'
-import { PRUNE_LIMITS_KEY } from '../src/memory/prune/limits.ts'
-import { prunedThrough } from '../src/memory/prune/runs.ts'
-import { memoryDb } from '../src/memory/store/db.ts'
-import { archiveSegments } from '../src/memory/store/schema/archive.ts'
-import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'
-import { memoryJobs, pruneRuns } from '../src/storage/local-schema.ts'
-import { openLocalDb } from '../src/storage/local.ts'
+import { STORAGE_MAINTENANCE_ERROR } from '../../agent/maintenance.ts'
+import { searchHistory } from '../archive/history.ts'
+import { PRUNE_LIMITS_KEY } from './limits.ts'
+import { prunedThrough } from './runs.ts'
+import { memoryDb } from '../store/db.ts'
+import { archiveSegments } from '../../../drizzle/d1/schema/archive.ts'
+import { MEMORY_AGENT_NAME } from '../memory-agent/jobs.ts'
+import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
+import { openLocalDb } from '../../storage/local.ts'
 import {
   BACKGROUND_USAGE,
   COMPACT_AFTER_TURN_7,
@@ -20,7 +20,7 @@ import {
   mockModel,
   say,
   storedEntryIds,
-} from './helpers/conversation.ts'
+} from '../../testing/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

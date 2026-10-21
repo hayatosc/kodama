@@ -4,7 +4,7 @@ import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
 import { memoryDb } from '../src/memory/store/db.ts'
 import { schema } from '../src/memory/store/db.ts'
-import * as localSchema from '../src/storage/local-schema.ts'
+import * as localSchema from './durable-object/schema.ts'
 import { openLocalDb } from '../src/storage/local.ts'
 
 const tables = Object.values(schema).filter((value) => value instanceof SQLiteTable)
@@ -23,7 +23,7 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
   const migrated = Object.fromEntries(
     Object.entries(env.TEST_MIGRATED_COLUMNS).map(([name, columns]) => [name, [...columns].sort()]),
   )
-  // A mismatch means schema.ts changed without `pnpm db:generate`.
+  // A mismatch means drizzle/d1/schema/ changed without `pnpm db:generate`.
   expect(migrated).toEqual(declared)
 })
 
@@ -37,7 +37,8 @@ it('the newest local migration snapshot has the tables and columns of the Drizzl
       [...columns].sort(),
     ]),
   )
-  // A mismatch means local-schema.ts changed without `pnpm db:generate:local`.
+  // A mismatch means drizzle/durable-object/schema.ts changed without
+  // `pnpm db:generate:local`.
   expect(migrated).toEqual(declared)
 })
 

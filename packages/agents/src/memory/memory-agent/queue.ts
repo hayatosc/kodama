@@ -1,6 +1,6 @@
 /** The memory agent's job queue in its own SQLite (docs/memory.md, Jobs). */
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
-import { memoryJobs } from '../../storage/local-schema.ts'
+import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import { JOB_PRIORITY, jobId, parseMemoryJob } from './jobs.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from './jobs.ts'

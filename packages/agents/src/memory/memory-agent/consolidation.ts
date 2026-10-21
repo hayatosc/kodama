@@ -8,13 +8,13 @@ import { finishPendingSkillWrites } from '../skills/write.ts'
 import { applyOperation } from '../store/records.ts'
 import { termStatements } from '../store/statements.ts'
 import type { MemoryDb, MemoryRecord } from '../store/db.ts'
-import type { Scope } from '../store/schema/records.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
 import {
   memoryLedger,
   memoryRecords,
   memoryTerms,
   revisionClaims,
-} from '../store/schema/records.ts'
+} from '../../../drizzle/d1/schema/records.ts'
 import { SEARCH_VERSION } from '../store/search-text.ts'
 import type { MemoryJob } from './jobs.ts'
 

@@ -11,7 +11,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 300_000
 
 /**
  * Pi commits partial answers and tool output at most this often. Each commit writes rows, which
- * are the largest storage cost while streaming; test/measurement.test.ts records rows per turn.
+ * are the largest storage cost while streaming; harness.test.ts records rows per turn.
  */
 export const PROGRESS_INTERVAL_MS = 100
 

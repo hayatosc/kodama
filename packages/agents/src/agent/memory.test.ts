@@ -1,19 +1,19 @@
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { applyOperation } from '../src/memory/store/records.ts'
-import { extractionCheckpoint } from '../src/memory/store/db.ts'
-import { AlwaysLoadedMemory } from '../src/memory/working/always-loaded.ts'
-import { openLocalDb } from '../src/storage/local.ts'
+import { applyOperation } from '../memory/store/records.ts'
+import { extractionCheckpoint } from '../memory/store/db.ts'
+import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
+import { openLocalDb } from '../storage/local.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
   textResponse,
   toolCallResponse,
   toolResults,
-} from './helpers/model.ts'
-import { activeContents, db } from './helpers/memory.ts'
-import { waitForAnswer } from './helpers/rpc.ts'
+} from '../testing/model.ts'
+import { activeContents, db } from '../testing/memory.ts'
+import { waitForAnswer } from '../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

@@ -1,15 +1,15 @@
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite'
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator'
-import journal from '../../drizzle/durable-object/meta/_journal.json'
-import m0000 from '../../drizzle/durable-object/0000_local_tables.sql'
-import * as schema from './local-schema.ts'
+import journal from '../../drizzle/durable-object/migrations/meta/_journal.json'
+import m0000 from '../../drizzle/durable-object/migrations/0000_local_tables.sql'
+import * as schema from '../../drizzle/durable-object/schema.ts'
 
 export type LocalDb = DrizzleSqliteDODatabase<typeof schema>
 
 /**
- * Generated migrations of local-schema.ts, keyed as Drizzle's migrator expects. A migration that
- * the journal lists but this map lacks makes `openLocalDb` throw.
+ * Generated migrations of drizzle/durable-object/schema.ts, keyed as Drizzle's migrator expects.
+ * A migration that the journal lists but this map lacks makes `openLocalDb` throw.
  */
 export const localMigrations = { journal, migrations: { m0000 } }
 

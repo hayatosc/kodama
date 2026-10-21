@@ -2,10 +2,10 @@
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { expect } from 'vitest'
-import { skillDir } from '../../src/memory/skills/paths.ts'
-import { writeSkill } from '../../src/memory/skills/write.ts'
-import { skills } from '../../src/memory/store/schema/skills.ts'
-import type { Scope } from '../../src/memory/store/schema/records.ts'
+import { skillDir } from '../memory/skills/paths.ts'
+import { writeSkill } from '../memory/skills/write.ts'
+import { skills } from '../../drizzle/d1/schema/skills.ts'
+import type { Scope } from '../../drizzle/d1/schema/records.ts'
 import { context, db } from './memory.ts'
 
 export function skillMd(name: string, description: string, body: string): string {

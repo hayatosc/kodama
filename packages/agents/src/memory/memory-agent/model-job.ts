@@ -5,7 +5,7 @@ import type { Harness, Submission, SubmissionDraft } from '@earendil-works/pi-du
 import { eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { memoryOps } from '../store/schema/records.ts'
+import { memoryOps } from '../../../drizzle/d1/schema/records.ts'
 import type { JobOutcome, MemoryJob } from './jobs.ts'
 import { jobPrompt } from './prompts.ts'
 import type { JobQueue, JobRow } from './queue.ts'

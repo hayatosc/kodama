@@ -2,7 +2,7 @@
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
 import type { NewRecord, Operation } from './records.ts'
-import { memoryRecords } from './schema/records.ts'
+import { memoryRecords } from '../../../drizzle/d1/schema/records.ts'
 import { SEARCH_VERSION } from './search-text.ts'
 import {
   bumpScope,

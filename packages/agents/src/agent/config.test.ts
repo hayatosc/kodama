@@ -1,7 +1,7 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
-import { modelResponse, useMockModel, waitForAnswer } from './helpers/rpc.ts'
+import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

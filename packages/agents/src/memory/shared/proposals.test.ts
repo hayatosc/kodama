@@ -1,14 +1,14 @@
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { propose, skillFilesAsBlobs } from '../src/memory/shared/proposals.ts'
-import { applyOperation } from '../src/memory/store/records.ts'
-import type { Scope } from '../src/memory/store/schema/records.ts'
-import { memoryLedger, memoryRecords } from '../src/memory/store/schema/records.ts'
-import { skills } from '../src/memory/store/schema/skills.ts'
-import { writeSkill } from '../src/memory/skills/write.ts'
-import { MEMORY_AGENT_NAME } from '../src/memory/memory-agent/jobs.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from './helpers/model.ts'
+import { propose, skillFilesAsBlobs } from './proposals.ts'
+import { applyOperation } from '../store/records.ts'
+import type { Scope } from '../../../drizzle/d1/schema/records.ts'
+import { memoryLedger, memoryRecords } from '../../../drizzle/d1/schema/records.ts'
+import { skills } from '../../../drizzle/d1/schema/skills.ts'
+import { writeSkill } from '../skills/write.ts'
+import { MEMORY_AGENT_NAME } from '../memory-agent/jobs.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
 import {
   context,
   db,
@@ -16,7 +16,7 @@ import {
   renderedAlwaysLoaded,
   waitForProposal,
   write,
-} from './helpers/memory.ts'
+} from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

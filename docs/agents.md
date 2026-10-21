@@ -23,7 +23,9 @@ packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
   drizzle.config.ts         drizzle-kit config for the D1 schema
   drizzle.local.config.ts   drizzle-kit config for kodama's tables in each Durable Object
-  drizzle/                  drizzle-kit output only: d1/ and durable-object/ migrations
+  drizzle/
+    d1/                     D1 schema (schema/) and its generated migrations (migrations/)
+    durable-object/         schema of kodama's tables in each object, and their migrations
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
@@ -39,8 +41,8 @@ packages/agents/
     prompts/                default system prompt
     tools/                  tool implementations and their registry
     memory/                 long-term memory (see memory.md)
-    storage/                kodama's own tables in each object's SQLite, and Pi's tables
-  test/                     workerd integration tests and shared helpers
+    storage/                opening kodama's tables in each object's SQLite, and Pi's tables
+    testing/                test helpers and the Vitest setup; tests sit next to their modules
 ```
 
 ### The Agent Durable Object
@@ -83,7 +85,7 @@ memory agent share these settings:
 | document/context caches | retention 0, so idle agents can be evicted                              |
 | compaction              | Pi's built-in compaction with its defaults                              |
 
-Progress commits are the largest storage cost while streaming. `test/measurement.test.ts` records
+Progress commits are the largest storage cost while streaming. `src/harness.test.ts` records
 the rows one turn writes.
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
@@ -322,10 +324,10 @@ Each object's SQLite holds two sets of tables:
   [`src/storage/pi-tables.ts`](../packages/agents/src/storage/pi-tables.ts), which must be checked
   on every Pi upgrade.
 - **Kodama's tables**, prefixed `kodama_`, defined in
-  [`src/storage/local-schema.ts`](../packages/agents/src/storage/local-schema.ts): the memory
-  agent's job queue, the `remember` count per turn, the always-loaded memory copy, and pruning
-  runs. Their migrations are generated into `drizzle/durable-object` and applied by
-  `src/storage/local.ts` before the harness opens.
+  [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): the
+  memory agent's job queue, the `remember` count per turn, the always-loaded memory copy, and
+  pruning runs. Their migrations are generated into `drizzle/durable-object/migrations` and
+  applied by `src/storage/local.ts` before the harness opens.
 
 Small values such as alarm times, prune limits, and shared spaces use the object's key-value
 storage under `kodama:` keys.
@@ -344,15 +346,15 @@ nr dev:agents
 `nr dev:agents` runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
 Objects. It exposes RPC, not a browser page.
 
-| Command                                       | Effect                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------- |
-| `nr check`                                    | TypeScript, type-aware Oxlint, Oxfmt check, and tests               |
-| `nr test`                                     | workspace tests                                                     |
-| `nr format`                                   | format the repository                                               |
-| `nr build` (in `packages/agents`)             | `cf build` into `.cloudflare/output/v0/`, no deploy                 |
-| `nr cf:types` (in `packages/agents`)          | regenerate runtime types                                            |
-| `nr db:generate` (in `packages/agents`)       | write a D1 migration after `src/memory/store/schema/` changes       |
-| `nr db:generate:local` (in `packages/agents`) | write a local migration after `src/storage/local-schema.ts` changes |
+| Command                                       | Effect                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| `nr check`                                    | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
+| `nr test`                                     | workspace tests                                                          |
+| `nr format`                                   | format the repository                                                    |
+| `nr build` (in `packages/agents`)             | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
+| `nr cf:types` (in `packages/agents`)          | regenerate runtime types                                                 |
+| `nr db:generate` (in `packages/agents`)       | write a D1 migration after `drizzle/d1/schema/` changes                  |
+| `nr db:generate:local` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes |
 
 ### Local agent CLI
 
@@ -391,19 +393,30 @@ SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked,
 needed. `vitest.config.ts` applies the generated D1 migrations. It also passes the columns from the
 drizzle-kit snapshots, so a test fails when the schema and its migrations differ.
 
-| Path                                                | Contents                                                      |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| `test/helpers/model.ts`                             | mocked OpenAI Responses streams: text, tool calls, inspection |
-| `test/helpers/rpc.ts`                               | a scripted default model, `waitForAnswer`, and SSE readers    |
-| `test/helpers/conversation.ts`                      | a long conversation that compacts, for pruning tests          |
-| `test/helpers/memory.ts`                            | the memory database, records, and the memory agent            |
-| `test/helpers/skills.ts`                            | writing a skill and reading it back                           |
-| `test/agent-*.test.ts`                              | RPC, configuration, events, and recovery of working agents    |
-| `test/cli.test.ts`, `cli/stream.test.ts`            | the development adapter and the CLI's stream handling         |
-| `test/configuration.test.ts`, `test/models.test.ts` | configuration validation and providers                        |
+Tests sit next to the module they test, as `<module>.test.ts` in the same folder. Shared helpers
+and the Vitest setup are in `src/testing/`, which production code never imports.
 
-The memory tests are listed in [memory.md](memory.md#testing). Name new tests `*.test.ts` after
-the observable behavior they check, and run `nr check` before submitting.
+| Path                                        | Contents                                                      |
+| ------------------------------------------- | ------------------------------------------------------------- |
+| `src/testing/setup.ts`                      | applies the D1 migrations before the tests                    |
+| `src/testing/model.ts`                      | mocked OpenAI Responses streams: text, tool calls, inspection |
+| `src/testing/rpc.ts`                        | a scripted default model, `waitForAnswer`, and SSE readers    |
+| `src/testing/conversation.ts`               | a long conversation that compacts, for pruning tests          |
+| `src/testing/memory.ts`                     | the memory database, records, and the memory agent            |
+| `src/testing/skills.ts`                     | writing a skill and reading it back                           |
+| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
+| `src/agent/config.test.ts`                  | configuration over RPC and across eviction                    |
+| `src/events.test.ts`                        | `send` and `subscribe` streams                                |
+| `src/recovery.test.ts`                      | failures, cancellation, and recovery after eviction           |
+| `src/alarms.test.ts`                        | several alarm purposes in one alarm                           |
+| `src/harness.test.ts`                       | rows written per streamed turn stay under a recorded budget   |
+| `src/configuration/index.test.ts`           | the configuration schema                                      |
+| `src/models/index.test.ts`                  | provider credentials                                          |
+| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
+| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
+
+The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
+module it tests, describe the observable behavior it checks, and run `nr check` before submitting.
 
 ## Deployment
 
@@ -412,7 +425,7 @@ From `packages/agents`:
 1. Log in with `nr cf auth login`.
 2. Create the D1 database `kodama-memory` and the R2 bucket `kodama-archive` that
    `cloudflare.config.ts` binds.
-3. Apply the D1 migrations with `nr cf d1 migrations apply --dir drizzle/d1`.
+3. Apply the D1 migrations with `nr cf d1 migrations apply --dir drizzle/d1/migrations`.
 4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.

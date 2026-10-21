@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
-const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/d1`)
+const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/d1/migrations`)
 
 const journalSchema = v.object({ entries: v.array(v.object({ idx: v.number() })) })
 const snapshotSchema = v.object({
@@ -24,8 +24,10 @@ function migratedColumns(folder: string): Record<string, string[]> {
 
 export default defineConfig({
   test: {
-    include: ['test/**/*.test.ts'],
-    setupFiles: ['test/setup.ts'],
+    include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
+    // The CLI's own stream tests run in Node (`node --test`), not in workerd.
+    exclude: [...configDefaults.exclude, 'cli/stream.test.ts'],
+    setupFiles: ['src/testing/setup.ts'],
     fsModuleCache: false,
     testTimeout: 15_000,
   },
@@ -39,8 +41,8 @@ export default defineConfig({
           GEMINI_API_KEY: '',
           XAI_API_KEY: 'xai-test-key',
           TEST_MIGRATIONS: migrations,
-          TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/d1'),
-          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object'),
+          TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/d1/migrations'),
+          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
         },
         // The test runner renames the Worker; bind its local class rather than the production name.
         durableObjects: {

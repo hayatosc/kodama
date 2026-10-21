@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveProviderCredentials } from '../src/models/index.ts'
+import { resolveProviderCredentials } from './index.ts'
 
 describe('provider credentials', () => {
   it('loads individual keys and ignores unused providers', () => {

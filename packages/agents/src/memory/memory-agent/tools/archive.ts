@@ -7,7 +7,7 @@ import { readArchivedText } from '../../archive/reader.ts'
 import { writeSummary } from '../../archive/segment.ts'
 import { looksLikeInjection, redactSecrets } from '../../redact.ts'
 import type { MemoryDb } from '../../store/db.ts'
-import { archiveSegments } from '../../store/schema/archive.ts'
+import { archiveSegments } from '../../../../drizzle/d1/schema/archive.ts'
 import { text, toolDb, writingTool } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
 
