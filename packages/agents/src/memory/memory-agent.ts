@@ -29,11 +29,13 @@ import {
   changedScopes,
   consolidationDay,
   forgetOldLedger,
+  invalidateOverridesOfRequired,
   LEDGER_RETENTION_MS,
   recordSizes,
   resegmentRecords,
   SETTLED_JOB_RETENTION_MS,
 } from './consolidation.ts'
+import { acceptedProposals, applyProposal } from './proposals.ts'
 import { needsPrune } from './prune.ts'
 import { curateSkills, finishPendingSkillWrites, forgetSkillBlobs } from './skills.ts'
 import { memoryDb } from './records.ts'
@@ -116,6 +118,7 @@ export class MemoryAgent extends Agent {
       systemPrompt: MEMORY_SYSTEM_PROMPT,
       thinkingLevel: 'off',
       tools: [],
+      sharedSpaces: [],
     }
   }
 
@@ -151,7 +154,14 @@ export class MemoryAgent extends Agent {
 
   /** Queue a job; delivering the same job again returns its existing status. */
   async enqueue(value: unknown): Promise<JobStatus> {
-    const job = parseMemoryJob(value)
+    const status = await this.#store(parseMemoryJob(value))
+    await this.alarms.setNoLaterThan('jobs', Date.now() + HEARTBEAT_MS)
+    this.#kick()
+    return status
+  }
+
+  /** Queue a job once; the same job delivered again finds the first. */
+  async #store(job: MemoryJob): Promise<JobStatus> {
     const id = await jobId(job)
     const local = await this.local()
     local
@@ -166,8 +176,6 @@ export class MemoryAgent extends Agent {
       })
       .onConflictDoNothing({ target: memoryJobs.jobId })
       .run()
-    await this.alarms.setNoLaterThan('jobs', Date.now() + HEARTBEAT_MS)
-    this.#kick()
     const row = local.select().from(memoryJobs).where(eq(memoryJobs.jobId, id)).get()
     if (row === undefined) throw new Error('Job was not stored')
     return toStatus(row)
@@ -220,6 +228,10 @@ export class MemoryAgent extends Agent {
   /** Run jobs one at a time until none is due, then wake for the next delayed one. */
   async #drain(): Promise<void> {
     await this.harness()
+    // An accepted proposal is durable pending work; a lost enqueue only delays it.
+    for (const proposal of await acceptedProposals(memoryDb(this.env.MEMORY_DB))) {
+      await this.#store({ kind: 'apply_proposal', proposalId: proposal.id })
+    }
     for (;;) {
       const row = await this.#next(Date.now())
       if (row === undefined) break
@@ -340,9 +352,21 @@ export class MemoryAgent extends Agent {
     }
   }
 
-  /** Jobs that run in code; shared-memory proposals add theirs. */
+  /** Jobs that run in code, without the model. */
   protected runCodeJob(_jobId: string, job: MemoryJob): Promise<JobOutcome | 'retry'> {
-    return Promise.reject(new Error(`No code runner for ${job.kind}`))
+    if (job.kind !== 'apply_proposal') {
+      return Promise.reject(new Error(`No code runner for ${job.kind}`))
+    }
+    return applyProposal(
+      {
+        db: memoryDb(this.env.MEMORY_DB),
+        bucket: this.env.ARCHIVE,
+        sharedSpacesOf: async (agentId) =>
+          (await this.env.AGENTS.getByName(agentId).getConfig()).sharedSpaces,
+        now: Date.now(),
+      },
+      job.proposalId,
+    )
   }
 
   /**
@@ -355,6 +379,7 @@ export class MemoryAgent extends Agent {
     await this.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
     await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
     await resegmentRecords(db)
+    await invalidateOverridesOfRequired(db, runId, now)
     await finishPendingSkillWrites(db, this.env.ARCHIVE, now)
     await curateSkills(db, runId, now)
     await forgetSkillBlobs(db, this.env.ARCHIVE, now)

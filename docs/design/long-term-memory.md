@@ -526,7 +526,19 @@ UI server, which authenticates the reviewer.
 
 - The memory agent creates a `shared_proposals` row from agent-scope records that more than one
   agent relies on. A reviewer decides it through `decideProposal` (see [Review](#review)).
-- Agents read the shared spaces listed in their `sharedSpaces`.
+- Agents read the shared spaces listed in their `sharedSpaces`: at most eight unique names of
+  lowercase letters, digits, and hyphens, stored in the agent's storage under
+  `kodama:shared-spaces` beside the configuration Pi keeps. `setConfig` refreshes the
+  always-loaded memory and the skills list when it stores them.
+- The memory agent proposes with `shared_propose` during a `consolidate` job: a record, new or
+  replacing a shared record, or an agent skill of the job's scope, whose files it stores as blobs
+  so the reviewer reads exactly what will be applied (`listProposals` returns their text). A
+  `consolidate` job of a shared scope changes nothing directly; it can only propose.
+- `listProposals(space, status = 'pending')` and `decideProposal(id, { decision, reason,
+  decidedBy })` are `AgentService` methods; `decidedBy` names the reviewer the UI server
+  authenticated.
+- An agent record overrides a shared record with `memory_write`'s `overrides`. Consolidation
+  invalidates an agent record that overrides a `required` shared record.
 - Applied proposals become new records; shared records are never rewritten in place.
 - Content from untrusted sources is stored as an `event` with its source and is never pinned or
   promoted to the always-loaded memory without review.

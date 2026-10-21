@@ -20,6 +20,7 @@ import type {
 } from './records.ts'
 import { looksLikeInjection, redactSecrets } from './redact.ts'
 import { archiveSegments, skills as skillsTable } from './schema.ts'
+import { propose, skillFilesAsBlobs } from './proposals.ts'
 import { setSkillStatus, skillDir, writeSkill } from './skills.ts'
 
 export interface RunningJob {
@@ -42,6 +43,12 @@ const KIND = Type.Union([
 ])
 const CONTENT = Type.String({ minLength: 1, maxLength: 2_000 })
 const IMPORTANCE = Type.Optional(Type.Number({ minimum: 0, maximum: 1 }))
+const OVERRIDES = Type.Optional(
+  Type.String({
+    minLength: 1,
+    description: 'ID of a shared record this agent record replaces for the agent only',
+  }),
+)
 const ENTRY = Type.Optional(
   Type.Integer({ minimum: 0, description: 'Entry ID; extraction cites its entries' }),
 )
@@ -104,6 +111,7 @@ interface RecordArgs {
   importance?: number
   sourceEntryFrom?: number
   sourceEntryTo?: number
+  overrides?: string
 }
 
 /** Build the record from the job, so origin, scope, and evidence never come from the model. */
@@ -111,12 +119,16 @@ function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRecord {
   const content = redactSecrets(args.content.trim())
   if (looksLikeInjection(content)) throw new Error('The content looks like an instruction to obey')
   const scope = jobScope(job)
+  if (args.overrides !== undefined && !scope.startsWith('agent:')) {
+    throw new Error('Only an agent record can override a shared record')
+  }
   const base = {
     scope,
     kind: args.kind,
     content,
     sourceAgentId: sourceAgentOf(job, scope),
     importance: args.importance,
+    ...(args.overrides === undefined ? {} : { overrides: args.overrides }),
     observedAt: now,
   }
   switch (job.kind) {
@@ -163,6 +175,10 @@ function writingTool<P extends TSchema>(
       if (running === undefined) throw new Error('No memory job is running')
       const now = deps.now?.() ?? Date.now()
       const op = definition.operation(args, running.job, now)
+      const { job } = running
+      if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
+        throw new Error('Shared records change only through reviewed proposals; use shared_propose')
+      }
       await definition.prepare?.(args, running.job)
       const result = await applyOperation(
         memoryDb(deps.env.MEMORY_DB),
@@ -212,6 +228,7 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
     importance: IMPORTANCE,
     sourceEntryFrom: ENTRY,
     sourceEntryTo: ENTRY,
+    overrides: OVERRIDES,
   })
   const write = writingTool(deps, {
     name: 'memory_write',
@@ -523,7 +540,86 @@ export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[]
     },
   })
 
+  const sharedPropose = defineTool({
+    name: 'shared_propose',
+    description:
+      'Propose a change to a shared space for review: a record (new, or replacing a shared record by id) or an agent skill of the job scope to share. Cite the records or skills it rests on.',
+    parameters: Type.Object({
+      space: Type.String({ pattern: '^[a-z0-9-]{1,64}$' }),
+      record: Type.Optional(
+        Type.Object({
+          kind: KIND,
+          content: CONTENT,
+          importance: IMPORTANCE,
+          required: Type.Optional(
+            Type.Boolean({ description: 'A team rule agents cannot override' }),
+          ),
+          replaces: Type.Optional(
+            Type.String({ description: 'ID of the shared record it replaces' }),
+          ),
+        }),
+      ),
+      skill: Type.Optional(
+        Type.String({ pattern: '^[a-z0-9-]{1,64}$', description: 'Agent skill name' }),
+      ),
+      sourceIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+        minItems: 1,
+        maxItems: 20,
+      }),
+    }),
+    replay: 'safe',
+    execute: async (args, api: ToolExecutionApi) => {
+      const running = await deps.runningJob()
+      if (running?.job.kind !== 'consolidate')
+        throw new Error('shared_propose needs a consolidate job')
+      const { scope } = running.job
+      if ((args.record === undefined) === (args.skill === undefined)) {
+        throw new Error('Propose either a record or a skill')
+      }
+      const ctx = {
+        opId: await sha256(`${running.jobId}:${api.callId}`),
+        jobId: running.jobId,
+        runId: running.jobId,
+        actor: 'memory-agent',
+        now: deps.now?.() ?? Date.now(),
+      }
+      if (args.record !== undefined) {
+        const content = redactSecrets(args.record.content.trim())
+        if (looksLikeInjection(content))
+          throw new Error('The content looks like an instruction to obey')
+        const proposal = await propose(db(), ctx, {
+          space: args.space,
+          payload: {
+            type: 'record',
+            kind: args.record.kind,
+            content,
+            ...(args.record.importance === undefined ? {} : { importance: args.record.importance }),
+            ...(args.record.required === undefined ? {} : { required: args.record.required }),
+            ...(args.record.replaces === undefined ? {} : { replaces: args.record.replaces }),
+          },
+          sourceIds: args.sourceIds,
+        })
+        return text(`proposed ${proposal.id} (pending review)`)
+      }
+      const name = args.skill ?? ''
+      if (!scope.startsWith('agent:') || (await skillRow(scope, name)) === undefined) {
+        throw new Error(`No agent skill ${name} in ${scope}`)
+      }
+      const files = await skillFilesAsBlobs(deps.env.ARCHIVE, scope, name)
+      const proposal = await propose(db(), ctx, {
+        space: args.space,
+        payload: { type: 'skill', name, files, remove: [] },
+        sourceIds: [
+          `${scope}/${name}`,
+          ...args.sourceIds.filter((id) => id !== `${scope}/${name}`),
+        ],
+      })
+      return text(`proposed ${proposal.id} (pending review)`)
+    },
+  })
+
   return [
+    sharedPropose,
     listRecords,
     listSkills,
     readSkill,

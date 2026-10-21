@@ -3,6 +3,7 @@
  * (docs/design/long-term-memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { applyOperation } from './records.ts'
 import type { MemoryDb, MemoryRecord, Scope } from './records.ts'
 import { memoryLedger, memoryRecords } from './schema.ts'
 import { SEARCH_VERSION, storedSearchText } from './search-text.ts'
@@ -98,4 +99,43 @@ export async function recordSizes(
     targetId: '',
     detailJson: JSON.stringify({ sizeAfter: probe.meta.size_after, counts }),
   })
+}
+
+/**
+ * An agent record cannot override a required shared record: such a record is never loaded, so
+ * mark it invalid, with the ledger row the operation writes.
+ */
+export async function invalidateOverridesOfRequired(
+  db: MemoryDb,
+  runId: string,
+  now: number,
+): Promise<number> {
+  const required = db
+    .select({ id: memoryRecords.id })
+    .from(memoryRecords)
+    .where(and(eq(memoryRecords.required, true), eq(memoryRecords.status, 'active')))
+  const rows = await db
+    .select({ id: memoryRecords.id, revision: memoryRecords.revision })
+    .from(memoryRecords)
+    .where(and(eq(memoryRecords.status, 'active'), inArray(memoryRecords.overrides, required)))
+    .limit(BATCH_ROWS)
+  for (const row of rows) {
+    await applyOperation(
+      db,
+      {
+        opId: `required:${row.id}@${row.revision}`,
+        jobId: runId,
+        runId,
+        actor: 'consolidation',
+        now,
+      },
+      {
+        type: 'invalidate',
+        id: row.id,
+        revision: row.revision,
+        reason: 'overrides a required shared record',
+      },
+    )
+  }
+  return rows.length
 }

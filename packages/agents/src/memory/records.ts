@@ -281,8 +281,9 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       if (old.sourceAgentId !== op.record.sourceAgentId) {
         return conflict(db, context, op.oldId, 'other_agent')
       }
-      // Consolidation reorganizes existing records instead of bringing newer evidence.
-      const reorganizes = op.record.origin === 'consolidation'
+      // Consolidation reorganizes existing records, and a proposal was reviewed as written; neither
+      // brings newer evidence.
+      const reorganizes = op.record.origin === 'consolidation' || op.record.origin === 'proposal'
       const record: NewRecord =
         reorganizes && op.record.sourceEntries === undefined && old.sourceEntryTo !== null
           ? {

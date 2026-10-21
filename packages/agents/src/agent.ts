@@ -18,11 +18,13 @@ import {
   defaultAgentConfig,
   initializeAgentConfig,
   readAgentConfig,
+  sharedSpacesSchema,
 } from './configuration/index.ts'
 import { createAgentModels } from './models/index.ts'
 import { toAgentSnapshot, toSubmissionStatus } from './projection.ts'
 import { RecoveryAlarm } from './recovery.ts'
 import { and, asc, eq, gt } from 'drizzle-orm'
+import * as v from 'valibot'
 import { readArchivedText } from './memory/archive.ts'
 import {
   needsPrune,
@@ -59,8 +61,8 @@ const context = BACKGROUND_CONTEXT
 
 /** An agent idle this long gets its new entries extracted into long-term memory. */
 export const EXTRACT_IDLE_DELAY_MS = 10 * 60_000
-/** Shared spaces every agent reads until agents choose their own. */
-const DEFAULT_SHARED_SPACES: readonly string[] = ['global']
+/** Where an agent's `sharedSpaces` are stored, next to the configuration Pi keeps. */
+export const SHARED_SPACES_KEY = 'kodama:shared-spaces'
 
 /** A page of conversation text for the memory agent's extraction. */
 export interface EntryPage {
@@ -224,7 +226,7 @@ export class Agent extends DurableObject<AgentEnv> {
       env: this.env,
       agentId: () => this.agentId(),
       local: () => this.#local,
-      sharedSpaces: () => Promise.resolve(DEFAULT_SHARED_SPACES),
+      sharedSpaces: () => this.#sharedSpaces(),
     }
   }
 
@@ -238,6 +240,11 @@ export class Agent extends DurableObject<AgentEnv> {
       ...options,
       env: async () => new SkillsEnv(this.env.ARCHIVE, await this.#memory.skills()),
     }
+  }
+
+  async #sharedSpaces(): Promise<string[]> {
+    const stored = v.safeParse(sharedSpacesSchema, await this.ctx.storage.get(SHARED_SPACES_KEY))
+    return stored.success ? stored.output : this.defaultConfig().sharedSpaces
   }
 
   protected defaultConfig(): AgentConfig {
@@ -295,7 +302,7 @@ export class Agent extends DurableObject<AgentEnv> {
       throw new Error(STORAGE_MAINTENANCE_ERROR)
     }
     const harness = await this.#harness
-    const config = await readAgentConfig(harness)
+    const config = await readAgentConfig(harness, await this.#sharedSpaces())
     if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
       throw new Error(`Credentials are not configured for provider: ${config.model.provider}`)
     }
@@ -317,7 +324,7 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   async getConfig(): Promise<AgentConfig> {
-    return readAgentConfig(await this.#harness)
+    return readAgentConfig(await this.#harness, await this.#sharedSpaces())
   }
 
   async subscribe(): Promise<ReadableStream<Uint8Array>> {
@@ -336,6 +343,9 @@ export class Agent extends DurableObject<AgentEnv> {
         (tx) => configure(tx, ROOT_CONVERSATION_ID, agentChange(config)),
         context,
       )
+      await this.ctx.storage.put(SHARED_SPACES_KEY, config.sharedSpaces)
+      // The spaces decide what the always-loaded memory and the skills list hold.
+      await this.#refreshMemory(() => this.#memory.refresh())
       return config
     })
   }

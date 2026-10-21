@@ -28,8 +28,21 @@ export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     thinkingLevel: 'off',
     tools: [],
+    sharedSpaces: [...DEFAULT_SHARED_SPACES],
   }
 }
+
+export const DEFAULT_SHARED_SPACES: readonly string[] = ['global']
+const MAX_SHARED_SPACES = 8
+const spaceMessage =
+  'sharedSpaces must be unique names of 1–64 lowercase letters, digits, or hyphens'
+
+/** At most eight unique space names; stored next to the agent configuration. */
+export const sharedSpacesSchema = v.pipe(
+  v.array(v.pipe(v.string(spaceMessage), v.regex(/^[a-z0-9-]{1,64}$/, spaceMessage)), spaceMessage),
+  v.maxLength(MAX_SHARED_SPACES, `sharedSpaces has at most ${MAX_SHARED_SPACES} spaces`),
+  v.check((spaces) => new Set(spaces).size === spaces.length, spaceMessage),
+)
 
 /** Complete configuration accepted over RPC; unknown fields are rejected rather than ignored. */
 export function agentConfigSchema(models: Models) {
@@ -62,6 +75,7 @@ export function agentConfigSchema(models: Models) {
           (issue) => `Unknown tool: ${issue.input.find((name) => !isRegisteredTool(name))}`,
         ),
       ),
+      sharedSpaces: v.optional(sharedSpacesSchema, () => [...DEFAULT_SHARED_SPACES]),
     },
     modelMessage,
   ) satisfies v.GenericSchema<unknown, AgentConfig>
@@ -109,7 +123,11 @@ export async function initializeAgentConfig(
   }, BACKGROUND_CONTEXT)
 }
 
-export async function readAgentConfig(harness: Harness): Promise<AgentConfig> {
+/** The configuration Pi stores, with the shared spaces stored beside it. */
+export async function readAgentConfig(
+  harness: Harness,
+  sharedSpaces: readonly string[],
+): Promise<AgentConfig> {
   const state = await harness.snapshot(AgentDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
   if (!state?.model || state.instructions === undefined || !state.thinkingLevel || !state.tools) {
     throw new Error('Agent configuration is incomplete')
@@ -119,5 +137,6 @@ export async function readAgentConfig(harness: Harness): Promise<AgentConfig> {
     systemPrompt: state.instructions,
     thinkingLevel: state.thinkingLevel,
     tools: selectedTools(state.tools),
+    sharedSpaces: [...sharedSpaces],
   }
 }
