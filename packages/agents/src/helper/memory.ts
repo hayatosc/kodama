@@ -6,6 +6,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
+import { vi } from 'vitest'
 import { drizzle } from 'drizzle-orm/d1'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import { memoryDb, schema } from '../memory/store/db.ts'
@@ -29,6 +30,30 @@ export const parameterLimitedDb = drizzle(env.MEMORY_DB, {
     },
   },
 })
+/** Interleave one write after the next real record query has captured its rows. */
+export function afterNextMemoryRecordsRead(database: D1Database, write: () => Promise<void>): void {
+  const prepare = database.prepare.bind(database)
+  const prepareSpy = vi.spyOn(database, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query)
+    if (!query.startsWith('select ') || !query.includes('from "memory_records"')) return statement
+    prepareSpy.mockRestore()
+    const bind = statement.bind.bind(statement)
+    vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+      const bound = bind(...values)
+      const raw = bound.raw.bind(bound)
+      vi.spyOn(bound, 'raw').mockImplementation(
+        async <T = unknown[]>(options?: { columnNames?: false }) => {
+          const rows = await raw<T>(options)
+          await write()
+          return rows
+        },
+      )
+      return bound
+    })
+    return statement
+  })
+}
+
 /** The memory agent's stub. */
 export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
