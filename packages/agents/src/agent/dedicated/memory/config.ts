@@ -1,6 +1,6 @@
 /**
- * The memory agent's configuration: what makes an `Agent` object the memory agent. Its model,
- * instructions, and tools, and the message each job becomes.
+ * The memory agent's configuration, which `MemoryAgent` uses in place of a working agent's: its
+ * model, instructions, and tools, and the message each job becomes.
  *
  * @see docs/memory.md — Memory agent
  *

@@ -1,6 +1,9 @@
+import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MEMORY_AGENT_NAME } from '../../../memory/jobs.ts'
+import { Agent } from '../../agent.ts'
+import { MemoryAgent } from './agent.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
@@ -135,18 +138,20 @@ describe('remember', () => {
     })
   })
 
-  it('is an Agent object that public RPC cannot address, and working agents take no jobs', async () => {
-    const rejection = (promise: Promise<unknown>) =>
-      promise.then(
-        () => undefined,
-        (error: unknown) => String(error),
-      )
-    const status =
-      (await rejection(Promise.resolve(exports.default.snapshot(MEMORY_AGENT_NAME)))) ?? ''
+  it('is a MemoryAgent, an Agent in its own namespace that public RPC cannot address', async () => {
+    const status = await Promise.resolve(exports.default.snapshot(MEMORY_AGENT_NAME)).then(
+      () => '',
+      (error: unknown) => String(error),
+    )
     expect(status).toMatch(/agentId/)
-    const working = env.AGENTS.getByName(crypto.randomUUID())
-    expect(
-      await rejection(working.enqueue({ kind: 'extract', sourceAgentId: 'a', afterEntry: 0 })),
-    ).toMatch(/Only the memory agent/)
+    const kinds = (instance: unknown) => [
+      instance instanceof Agent,
+      instance instanceof MemoryAgent,
+    ]
+    expect(await runInDurableObject(memoryAgent(), kinds)).toEqual([true, true])
+    expect(await runInDurableObject(env.AGENTS.getByName(crypto.randomUUID()), kinds)).toEqual([
+      true,
+      false,
+    ])
   })
 })

@@ -65,7 +65,7 @@ describe('pruning', () => {
 
     // The memory agent got the archived range to summarize.
     const jobs = await runInDurableObject(
-      env.AGENTS.getByName(MEMORY_AGENT_NAME),
+      env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME),
       async (_i, state) => {
         const local = await openLocalDb(state.storage)
         return local.select({ kind: memoryJobs.kind }).from(memoryJobs).all()
@@ -193,7 +193,7 @@ describe('pruning', () => {
 describe('memory agent pruning', () => {
   it('deletes its finished jobs without an archive', async () => {
     mockModel({ usage: () => 5 })
-    const stub = env.AGENTS.getByName(MEMORY_AGENT_NAME)
+    const stub = env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME)
     await runInDurableObject(stub, (_i, state) =>
       state.storage.put(PRUNE_LIMITS_KEY, { thresholdBytes: 0 }),
     )

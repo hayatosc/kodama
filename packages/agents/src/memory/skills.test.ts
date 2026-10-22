@@ -128,7 +128,7 @@ describe('skill curation', () => {
       return textResponse('Wrote a skill.')
     })
 
-    const memoryAgent = env.AGENTS.getByName(MEMORY_AGENT_NAME)
+    const memoryAgent = env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME)
     const status = await memoryAgent.enqueue({ kind: 'consolidate', scope, day: '2026-10-21' })
 
     await expect

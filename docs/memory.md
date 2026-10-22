@@ -13,24 +13,24 @@ sections of this document by name.
 
 ## Components
 
-| Store                       | Binding     | Contents                                                                             |
-| --------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| Agent Durable Object        | `AGENTS`    | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
-| Memory agent Durable Object | `AGENTS`    | the memory agent: an `Agent` object named `kodama:memory`, with its job queue        |
-| D1 database                 | `MEMORY_DB` | memory records, applied operations, revisions, archive catalog, skills, ledger       |
-| R2 bucket                   | `ARCHIVE`   | archived entries, their search indexes, and their summaries (`archive/`)             |
+| Store                       | Binding        | Contents                                                                             |
+| --------------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| Agent Durable Object        | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
+| Memory agent Durable Object | `MEMORY_AGENT` | the memory agent: a `MemoryAgent` object named `kodama:memory`, with its job queue   |
+| D1 database                 | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skills, ledger       |
+| R2 bucket                   | `ARCHIVE`      | archived entries, their search indexes, and their summaries (`archive/`)             |
 
 ```text
 AgentService (public RPC entrypoint)
-  `-- AGENTS ---------------------> Agent DO (agentId)   rejects the memory agent's name
+  `-- AGENTS ---------------------> Agent DO (agentId)   never the memory agent
 
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, always-loaded query, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
-  `-- AGENTS enqueue -------------> memory agent         remember, extract, record_archive
+  `-- MEMORY_AGENT enqueue -------> memory agent         remember, extract, record_archive
 
-Agent DO "kodama:memory" (the memory agent)
+MemoryAgent DO "kodama:memory" (the memory agent)
   |-- reads and writes -----------> D1 MEMORY_DB
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and summaries
   |-- AGENTS readEntries ---------> Agent DO             paged entries for extraction
@@ -57,7 +57,7 @@ and, while pruning, the archive catalog of their own entries.
 | `jobs.ts`          | the memory agent's input contract: job kinds, their validation, and the object's name     |
 | `transcript.ts`    | the text of Pi entries that extraction and archives read, and paged entry reads           |
 
-The memory agent role itself is in `src/agent/dedicated/memory/` (see [Memory agent](#memory-agent)).
+The memory agent itself, the `MemoryAgent` class, is in `src/agent/dedicated/memory/` (see [Memory agent](#memory-agent)).
 
 The schemas live next to their migrations under
 [`packages/agents/drizzle/`](../packages/agents/drizzle/), one folder per database (see
@@ -234,26 +234,28 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
 
 ## Memory agent
 
-The memory agent is an ordinary `Agent` object of the `AGENTS` namespace, named `kodama:memory`
-(`MEMORY_AGENT_NAME` in `jobs.ts`). There is no separate Durable Object class or binding. When an
-`Agent` object starts under that name, it takes the memory agent role
-([`src/agent/dedicated/memory/`](../packages/agents/src/agent/dedicated/memory/)):
-its own harness and configuration, and a job queue instead of chat input. That folder holds only
-what the role adds to an agent:
+The memory agent is `MemoryAgent`, a subclass of `Agent`
+([`src/agent/dedicated/memory/agent.ts`](../packages/agents/src/agent/dedicated/memory/agent.ts)).
+It is its own Durable Object class, bound as `MEMORY_AGENT`, and its one object is named
+`kodama:memory` (`MEMORY_AGENT_NAME` in `jobs.ts`). It overrides `Agent`'s hooks to get its own
+harness and configuration, and a job queue instead of chat input. Its folder holds only what the
+role adds to an agent:
 
 | File        | Contents                                                                    |
 | ----------- | --------------------------------------------------------------------------- |
+| `agent.ts`  | the `MemoryAgent` class: the overridden hooks and the job methods           |
 | `config.ts` | its model, configuration, harness options, tool set, and prompts            |
 | `queue.ts`  | the job queue in the object's own SQLite                                    |
 | `runner.ts` | enqueueing, the drain that runs one job at a time, retries, and consolidate |
 
 Its tools and daily consolidation are memory parts (`src/memory/tools/`, `src/memory/consolidation.ts`).
 
-- It has every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
+- It inherits every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
   `getConfig`, so its work can be watched like any agent's.
-- The `:` in its name is not allowed in a public agent ID, so `AgentService` and `sendTo` reject
-  it. Jobs come only from working agents, pruning, and the `scheduled` handler, through
-  `enqueue`, `jobStatus`, and `consolidate`; a working agent rejects those calls.
+- `AgentService` and `sendTo` reach only the `AGENTS` namespace, so public RPC cannot reach it.
+  Jobs come only from working agents, pruning, and the `scheduled` handler, through `enqueue`,
+  `jobStatus`, and `consolidate`, which only `MemoryAgent` has. The `:` in its name is not allowed
+  in a public agent ID, so no working agent shares the ID its rows carry.
 - `sendMessage`, `send`, `sendTo`, and `setConfig` throw, because input that bypassed the queue
   would break "one job at a time". `cancel` stops the running job, which the runner retries like a
   failure.

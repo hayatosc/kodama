@@ -7,6 +7,7 @@ import AgentService from '../src/index.ts'
 import { handleCli } from './handler.ts'
 
 export { Agent } from '../src/agent/agent.ts'
+export { MemoryAgent } from '../src/agent/dedicated/memory/agent.ts'
 
 /** The agent service, answering the CLI's HTTP requests. */
 export default class CliService extends AgentService {

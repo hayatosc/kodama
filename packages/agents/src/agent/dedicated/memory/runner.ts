@@ -1,7 +1,7 @@
 /**
  * How the memory agent takes its input: one job at a time from its queue.
  *
- * The `Agent` object keeps one drain running and starts it again when a job is queued or its
+ * The `MemoryAgent` object keeps one drain running and starts it again when a job is queued or its
  * alarm fires. Each job is one Pi input in a fresh context.
  *
  * @see docs/memory.md — Jobs
@@ -45,7 +45,7 @@ export const HEARTBEAT_MS = 60_000
  */
 export const JOB_RETRY_DELAYS_MS: readonly number[] = [60_000, 10 * 60_000, 60 * 60_000]
 
-/** What the job functions need from the `Agent` object they run in. */
+/** What the job functions need from the `MemoryAgent` object they run in. */
 export interface MemoryAgentContext {
   env: AgentEnv
   storage: DurableObjectStorage

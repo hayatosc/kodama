@@ -14,6 +14,7 @@ const agentWorker = defineWorker({
   compatibilityDate: '2026-10-01',
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
+    MemoryAgent: exports.durableObject({ storage: 'sqlite' }),
   },
   // Daily memory consolidation (src/memory/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
@@ -28,6 +29,10 @@ export const agentConfig = defineWorker({
     AGENTS: bindings.durableObject<typeof agentWorker, 'Agent'>({
       worker: agentWorker,
       exportName: 'Agent',
+    }),
+    MEMORY_AGENT: bindings.durableObject<typeof agentWorker, 'MemoryAgent'>({
+      worker: agentWorker,
+      exportName: 'MemoryAgent',
     }),
     MEMORY_DB: bindings.d1({ name: 'kodama-memory' }),
     ARCHIVE: bindings.r2({ name: 'kodama-archive' }),

@@ -104,9 +104,10 @@ export function parseMemoryJob(value: unknown): MemoryJob {
 }
 
 /**
- * The name of the one memory agent, an `Agent` object like any other.
+ * The name of the one memory agent in the `MEMORY_AGENT` namespace, and the agent ID its records
+ * and archive rows carry.
  *
  * @remarks
- * The `:` makes it an invalid public agent ID, so `AgentService` and `sendTo` cannot address it.
+ * The `:` makes it an invalid public agent ID, so no working agent can take the same ID.
  */
 export const MEMORY_AGENT_NAME = 'kodama:memory'
