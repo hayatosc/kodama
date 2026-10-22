@@ -61,6 +61,13 @@ export async function renderAlwaysLoaded(
 ): Promise<{ text: string; revisions: Revisions; skills: VisibleSkill[] }> {
   const own = agentScope(agentId)
   const scopes = readableScopes(agentId, sharedSpaces)
+  // Capture revisions first: a write during rendering must remain visible to the next check,
+  // rather than tagging old content with a newer revision and keeping it indefinitely.
+  const revisionRows = await db
+    .select()
+    .from(scopeRevisions)
+    .where(inArray(scopeRevisions.scope, scopes))
+  const revisions = Object.fromEntries(revisionRows.map((row) => [row.scope, row.revision]))
   const records = await db
     .select()
     .from(memoryRecords)
@@ -90,11 +97,6 @@ export async function renderAlwaysLoaded(
     .filter((record) => record.required || !overridden.has(record.id))
     .sort((a, b) => spaceOrder(a) - spaceOrder(b))
 
-  const revisionRows = await db
-    .select()
-    .from(scopeRevisions)
-    .where(inArray(scopeRevisions.scope, scopes))
-  const revisions = Object.fromEntries(revisionRows.map((row) => [row.scope, row.revision]))
   const skills = await visibleSkills(db, agentId)
   if (agentRecords.length === 0 && sharedRecords.length === 0)
     return { text: '', revisions, skills }
