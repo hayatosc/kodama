@@ -1,3 +1,8 @@
+/**
+ * Vitest configuration: tests run in workerd with the migrations and their snapshots as bindings.
+ *
+ * @module
+ */
 import { readFileSync } from 'node:fs'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'

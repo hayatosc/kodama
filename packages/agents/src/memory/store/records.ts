@@ -1,6 +1,9 @@
 /**
- * Memory records in D1: write operations and applying them at most once
- * (docs/memory.md, Applying a write, Freshness).
+ * Write operations on memory records, and applying each at most once.
+ *
+ * @see docs/memory.md — Applying a write, Freshness
+ *
+ * @module
  */
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
@@ -9,6 +12,7 @@ import type { Scope } from '../../../drizzle/d1/schema.ts'
 import { appliedResult, errorText } from './statements.ts'
 import type { OperationContext, OperationResult, Plan } from './statements.ts'
 
+/** A record to write. The code that builds it from a job sets the scope, origin, and evidence. */
 export interface NewRecord {
   scope: Scope
   kind: RecordKind
@@ -26,6 +30,7 @@ export interface NewRecord {
   observedAt: number
 }
 
+/** A change the memory agent makes, applied as one operation. */
 export type Operation =
   | { type: 'write'; record: NewRecord }
   /** Replace an active record of the same scope, named by ID at the revision the writer read. */
@@ -56,8 +61,11 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
 }
 
 /**
- * Apply one operation at most once. A repeat with the same `opId` returns the first result and
- * changes nothing; a broken precondition returns `conflict` and changes nothing.
+ * Apply one operation at most once.
+ *
+ * @returns The operation's result, with `replayed` when an earlier attempt with the same `opId`
+ * already applied it. A broken precondition returns `conflict` and changes nothing.
+ * @throws {@link TypeError} When the record breaks a rule the columns cannot express.
  */
 export function applyOperation(
   db: MemoryDb,
@@ -69,7 +77,11 @@ export function applyOperation(
 
 /**
  * Apply the batch `makePlan` builds at most once per `opId`, for changes other modules plan, such
- * as skills. The plan reads its targets; the batch rolls back if one changed meanwhile.
+ * as skills.
+ *
+ * @remarks
+ * The plan reads its targets; if one changed before the batch, a revision claim fails, the batch
+ * rolls back, and the result is `conflict`.
  */
 export async function applyPlan(
   db: MemoryDb,

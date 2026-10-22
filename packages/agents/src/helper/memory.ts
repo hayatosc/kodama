@@ -1,4 +1,8 @@
-/** Helpers of the long-term memory tests: the memory database, records, and the memory agent. */
+/**
+ * Helpers of the long-term memory tests: the memory database, records, and the memory agent.
+ *
+ * @module
+ */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
@@ -12,7 +16,9 @@ import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-
 import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../storage/local.ts'
 
+/** The memory database of the tests. */
 export const db = memoryDb(env.MEMORY_DB)
+/** The memory agent's stub. */
 export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
 /** A fresh operation, as if from its own job. */
@@ -31,10 +37,12 @@ export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): P
   return result.recordId
 }
 
+/** A record by ID, in any status. */
 export function record(id: string) {
   return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
 }
 
+/** The contents of an agent's active records. */
 export async function activeContents(agentId: string): Promise<string[]> {
   const rows = await db
     .select({ content: memoryRecords.content })

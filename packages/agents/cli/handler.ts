@@ -1,3 +1,8 @@
+/**
+ * The HTTP adapter the local agent CLI talks to; development only, behind a bearer token.
+ *
+ * @module
+ */
 import type AgentService from '../src/index.ts'
 import { parseAgentId, parseMessage } from '../src/validation.ts'
 

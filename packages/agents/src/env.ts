@@ -1,5 +1,17 @@
+/**
+ * The Worker's bindings as a type, inferred from `cloudflare.config.ts`.
+ *
+ * @module
+ */
 import type { InferEnv } from 'cf/config'
 import type { agentConfig } from '../cloudflare.config.ts'
 
 // Keep RPC types independent of the consuming UI Worker's global Env declaration.
+/**
+ * Bindings, variables, and secrets of the agents Worker.
+ *
+ * @remarks
+ * Inferred from the Worker config rather than the global `Env`, so RPC types stay independent of a
+ * consuming UI Worker's own `Env` declaration.
+ */
 export type AgentEnv = InferEnv<typeof agentConfig>

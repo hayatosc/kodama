@@ -1,4 +1,10 @@
-/** The extension that gives a working agent its memory and skills, whatever its tool choice. */
+/**
+ * The extension that gives a working agent its memory and skills, whatever its tool choice.
+ *
+ * @see docs/memory.md — Working agents
+ *
+ * @module
+ */
 import { defineExtension, section } from '@earendil-works/pi-durable'
 import type { Extension } from '@earendil-works/pi-durable'
 import type { VisibleSkill } from '../skills.ts'

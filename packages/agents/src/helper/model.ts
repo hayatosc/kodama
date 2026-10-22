@@ -1,4 +1,8 @@
-/** Mock OpenAI Responses streams for workerd tests. */
+/**
+ * Mock OpenAI Responses streams for workerd tests.
+ *
+ * @module
+ */
 
 type SseEvent = { type: string; [field: string]: unknown }
 
@@ -33,6 +37,7 @@ export function textResponse(text: string, inputTokens = usage.input_tokens): Re
   ])
 }
 
+/** A tool call a scripted model makes. */
 export interface ToolCall {
   name: string
   arguments: Record<string, unknown>
@@ -73,6 +78,7 @@ export function toolCallResponse(call: ToolCall): Response {
   ])
 }
 
+/** The JSON body of a mocked `fetch` request, or empty. */
 export function requestBody(init: RequestInit | undefined): string {
   return typeof init?.body === 'string' ? init.body : ''
 }

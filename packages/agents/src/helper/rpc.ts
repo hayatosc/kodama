@@ -1,7 +1,12 @@
-/** Helpers of the agent RPC tests: a scripted default model and SSE readers. */
+/**
+ * Helpers of the agent RPC tests: a scripted default model and SSE readers.
+ *
+ * @module
+ */
 import { exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 
+/** The SSE text of a model answer of `text`. */
 export function modelResponseText(text = 'Hello from Kodama'): string {
   const item = {
     type: 'message',
@@ -28,10 +33,12 @@ export function modelResponseText(text = 'Hello from Kodama'): string {
   return events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
 }
 
+/** A model answer of `text`. */
 export function modelResponse(text = 'Hello from Kodama'): Response {
   return new Response(modelResponseText(text), { headers: { 'Content-Type': 'text/event-stream' } })
 }
 
+/** Wait until the submission of `requestId` is done. */
 export async function waitForAnswer(agentId: string, requestId: string) {
   await expect
     .poll(
@@ -52,6 +59,7 @@ export function useMockModel(): void {
   afterEach(() => vi.restoreAllMocks())
 }
 
+/** Read SSE events from a stream one at a time. */
 export function readEvents(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -81,6 +89,7 @@ export function readEvents(stream: ReadableStream<Uint8Array>) {
   }
 }
 
+/** Decode a whole SSE text into its events. */
 export function decodeEvents(text: string): { type: string; data: unknown }[] {
   return text
     .trim()

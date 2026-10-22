@@ -1,4 +1,10 @@
-/** `history_search` over an agent's archived segments (docs/memory.md, Archive index). */
+/**
+ * `history_search` over an agent's archived segments.
+ *
+ * @see docs/memory.md — Archive index
+ *
+ * @module
+ */
 import { and, desc, eq, lt } from 'drizzle-orm'
 import type { MemoryDb } from '../store/db.ts'
 import { archiveSegments } from '../../../drizzle/d1/schema.ts'
@@ -7,6 +13,7 @@ import { entryText } from '../transcript.ts'
 import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'
 import type { SegmentIndex } from './segment.ts'
 
+/** Bytes of index and summary objects one search reads, at most. */
 export const HISTORY_READ_BUDGET_BYTES = 4 * 1024 * 1024
 const HIT_TEXT_LIMIT = 4_000
 
@@ -37,6 +44,7 @@ function summaryMatches(words: readonly string[], query: string): boolean {
   )
 }
 
+/** A matching chunk of archived text. */
 export interface HistoryHit {
   firstEntry: number
   lastEntry: number
@@ -44,6 +52,7 @@ export interface HistoryHit {
   text: string
 }
 
+/** What one search found, and how far back it looked. */
 export interface HistoryResult {
   hits: HistoryHit[]
   summaries: { segmentId: string; at: number; summary: string }[]
@@ -53,7 +62,12 @@ export interface HistoryResult {
   complete: boolean
 }
 
-/** Search an agent's archived entries newest first, reading at most the byte budget of indexes. */
+/**
+ * Search an agent's archived entries, newest first, within the read budget.
+ *
+ * @returns The matches, and the oldest time searched, which the caller passes as `before` to search
+ * further back.
+ */
 export async function searchHistory(
   db: MemoryDb,
   bucket: R2Bucket,

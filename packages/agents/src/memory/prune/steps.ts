@@ -1,4 +1,11 @@
-/** The steps of a pruning run before the delete: prepare, export to R2, and catalog in D1. */
+/**
+ * The steps of a pruning run before the delete: prepare the range, export it to R2, and catalog it
+ * in D1.
+ *
+ * @see docs/memory.md — Pruning
+ *
+ * @module
+ */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { and, asc, eq, gt, lt } from 'drizzle-orm'
@@ -66,7 +73,12 @@ function measureRange(
   }
 }
 
-/** Fix the next range: entries after the last pruned one, before the newest head, within runBytes. */
+/**
+ * Fix the next range: entries after the last pruned one and before the newest head, within the
+ * run's byte budget.
+ *
+ * @returns The `prepared` run, or undefined when nothing is prunable.
+ */
 export async function prepare(
   deps: PruneDeps,
   local: LocalDb,
@@ -106,6 +118,7 @@ export async function prepare(
   return run
 }
 
+/** Write the run's segment to R2, verify it, and record `exported`. */
 export async function exportRun(
   deps: PruneDeps,
   local: LocalDb,
@@ -147,6 +160,11 @@ export async function exportRun(
   )
 }
 
+/**
+ * Insert the segment's catalog row, read it back, record `indexed`, and queue its summary job.
+ *
+ * @throws When the catalog row cannot be read back.
+ */
 export async function catalog(
   deps: PruneDeps,
   local: LocalDb,

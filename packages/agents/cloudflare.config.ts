@@ -1,3 +1,8 @@
+/**
+ * Worker bindings, secrets, and the Durable Object's SQLite storage.
+ *
+ * @module
+ */
 import { bindings, defineConfig, defineWorker, exports, triggers } from 'cf/config'
 import * as entrypoint from './src/index.ts' with { type: 'cf-worker' }
 import * as cliEntrypoint from './cli/worker.ts' with { type: 'cf-worker' }
@@ -10,12 +15,13 @@ const agentWorker = defineWorker({
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
   },
-  // Daily memory consolidation (src/memory/memory-agent/consolidation.ts).
+  // Daily memory consolidation (src/memory/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,
   observability: { enabled: true },
 })
 
+/** The agent Worker with its bindings and secrets. */
 export const agentConfig = defineWorker({
   ...agentWorker,
   env: {

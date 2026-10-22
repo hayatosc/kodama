@@ -1,12 +1,16 @@
 /**
- * Tables kodama keeps in an agent's own Durable Object SQLite, next to Pi Durable's tables.
- * `pnpm db:generate:local` writes the migrations in ./migrations, which src/storage/local.ts
- * applies when the object starts. Times are Unix epoch milliseconds.
+ * Tables kodama keeps in each agent's own Durable Object SQLite, next to Pi Durable's tables.
+ * `pnpm db:generate:local` writes the migrations in ./migrations, which src/storage/local.ts applies
+ * when the object starts. Times are Unix epoch milliseconds.
+ *
+ * @module
  */
 import { lte } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
+/** Where a memory agent job is in the queue. */
 export const JOB_STATUSES = ['queued', 'running', 'settled'] as const
+/** How a settled memory agent job ended. */
 export const JOB_OUTCOMES = ['persisted', 'declined', 'conflict', 'failed'] as const
 
 /** The memory agent's job queue; at most one job is `running`. */
@@ -46,6 +50,7 @@ export const alwaysLoaded = sqliteTable('kodama_always_loaded', {
   checkedAt: integer('checked_at').notNull(),
 })
 
+/** The steps of a pruning run, in order; a stopped run resumes from its state. */
 export const PRUNE_STATES = ['prepared', 'exported', 'indexed', 'deleted'] as const
 
 /** One pruning run per archived range; at most one is unfinished. */

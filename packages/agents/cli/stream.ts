@@ -1,3 +1,8 @@
+/**
+ * Prints an agent's SSE stream as text, or as JSON events.
+ *
+ * @module
+ */
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

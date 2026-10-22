@@ -1,7 +1,12 @@
-/** What a working agent's memory needs from the agent object. */
+/**
+ * What a working agent's memory needs from the agent object.
+ *
+ * @module
+ */
 import type { AgentEnv } from '../../env.ts'
 import type { LocalDb } from '../../storage/local.ts'
 
+/** What a working agent's memory needs from the agent object. */
 export interface WorkingMemoryDeps {
   env: Pick<AgentEnv, 'MEMORY_DB' | 'AGENTS' | 'ARCHIVE'>
   agentId: () => string

@@ -1,3 +1,11 @@
+/**
+ * SSE byte streams over RPC: an agent's events for `subscribe()`, and one request's run for
+ * `send()`.
+ *
+ * @see docs/agents.md — Events
+ *
+ * @module
+ */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
 import type {
@@ -77,12 +85,31 @@ function eventStream(
   })
 }
 
+/**
+ * An SSE stream of the agent's events, starting with a snapshot.
+ *
+ * @remarks
+ * Canceling the stream releases its observer without canceling generation. Pi replaces an
+ * overflowing backlog with a new snapshot, so readers must handle a snapshot at any point.
+ */
 export async function subscribeEvents(harness: Harness): Promise<ReadableStream<Uint8Array>> {
   const watch = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
   return eventStream(watch, { events: [watch.snapshot] }, async (event) => ({ events: [event] }))
 }
 
-/** Attach before admission so even a fast generation cannot outrun its observer. */
+/**
+ * Admit one request and stream its run until its submission settles.
+ *
+ * The stream starts with `accepted` and a snapshot, carries the events of the run that handles
+ * the submission, and closes after the terminal `submission` event.
+ *
+ * @param admit - Admits the message and returns its submission ID.
+ * @throws When `admit` throws; no stream is returned.
+ *
+ * @remarks
+ * The observer attaches before admission, so even a fast generation cannot outrun it. A retried
+ * request that already settled gets `accepted`, a fresh snapshot, and its receipt.
+ */
 export async function sendEvents(
   harness: Harness,
   requestId: string,

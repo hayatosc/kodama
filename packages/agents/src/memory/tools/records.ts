@@ -1,9 +1,13 @@
-/** Tools that search and change memory records. */
+/**
+ * Tools that search and change memory records, and `shared_write` for shared spaces.
+ *
+ * @module
+ */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
-import type { ToolRegistration } from '@earendil-works/pi-durable'
-import type { MemoryDb } from '../../store/db.ts'
-import { searchMemory } from '../../store/search.ts'
+import type { ToolRegistration, ToolExecutionApi } from '@earendil-works/pi-durable'
+import type { MemoryDb } from '../store/db.ts'
+import { searchMemory } from '../store/search.ts'
 import { consolidationRecords } from '../consolidation.ts'
 import {
   CONTENT,
@@ -17,9 +21,13 @@ import {
   text,
   toolDb,
   writingTool,
+  describe,
 } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
+import { sha256Hex } from '../../lib/hash.ts'
+import { MIN_SOURCE_AGENTS, writeShared } from '../shared.ts'
 
+/** The record tools every job gets: search, write, supersede, invalidate, decline, and list. */
 export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
   const db = (): MemoryDb => toolDb(deps)
   const search = defineTool({
@@ -122,7 +130,53 @@ export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
     },
   })
 
-  /** The agent scope a consolidate job may change skills in. */
-
   return [search, write, supersede, invalidate, decline, listRecords]
+}
+
+/**
+ * `shared_write`, which writes a shared record only when its sources pass the checks of
+ * {@link writeShared}.
+ */
+export function sharedTools(deps: MemoryToolDeps): ToolRegistration[] {
+  return [
+    defineTool({
+      name: 'shared_write',
+      description: `Write a record to a shared space, new or replacing a shared record by id. Code applies it only when the cited sources are active records of at least ${MIN_SOURCE_AGENTS} agents, or only records of that space.`,
+      parameters: Type.Object({
+        space: Type.String({ pattern: '^[a-z0-9-]{1,64}$' }),
+        kind: KIND,
+        content: CONTENT,
+        importance: IMPORTANCE,
+        required: Type.Optional(
+          Type.Boolean({ description: 'A team rule agents cannot override' }),
+        ),
+        replaces: Type.Optional(
+          Type.String({ description: 'ID of the shared record it replaces' }),
+        ),
+        sourceIds: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+          minItems: 1,
+          maxItems: 20,
+        }),
+      }),
+      replay: 'safe',
+      execute: async (args, api: ToolExecutionApi) => {
+        const running = await deps.runningJob()
+        if (running?.job.kind !== 'consolidate') {
+          throw new Error('shared_write needs a consolidate job')
+        }
+        const result = await writeShared(
+          toolDb(deps),
+          {
+            opId: await sha256Hex(`${running.jobId}:${api.callId}`),
+            jobId: running.jobId,
+            runId: running.jobId,
+            actor: 'memory-agent',
+            now: deps.now?.() ?? Date.now(),
+          },
+          args,
+        )
+        return text(result.status === 'rejected' ? `rejected: ${result.reason}` : describe(result))
+      },
+    }),
+  ]
 }

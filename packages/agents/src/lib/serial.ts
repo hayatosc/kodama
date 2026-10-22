@@ -1,4 +1,8 @@
-/** Ordering helpers for the work one object runs in memory. */
+/**
+ * Ordering helpers for the work one object runs in memory.
+ *
+ * @module
+ */
 
 /** Run each operation after the previous one settles, whether it succeeded or failed. */
 export function serialQueue(): <T>(operation: () => Promise<T>) => Promise<T> {

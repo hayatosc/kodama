@@ -1,6 +1,10 @@
 /**
  * Japanese-aware search words for the `memory_terms` index and the archive index. The Worker
- * segments text with Intl.Segmenter (docs/memory.md, Search text).
+ * segments text with `Intl.Segmenter`.
+ *
+ * @see docs/memory.md — Search text
+ *
+ * @module
  */
 
 /** Stored with every indexed row; rows of an older version are segmented again. */
@@ -11,6 +15,10 @@ const KATAKANA_WORD = /^[\p{Script=Katakana}ー]+$/u
 /** サーバー and サーバ are the same word: drop a long-vowel mark after katakana. */
 const LONG_VOWEL_AFTER_KATAKANA = /([ァ-ヴ])ー+/g
 
+/**
+ * The words of a text: `segments` as the segmenter split them, and `merged` with adjacent katakana
+ * segments joined into one word.
+ */
 export type Words = { segments: string[]; merged: string[] }
 
 /** Word-like segments, normalized; and the same with adjacent katakana segments merged. */
@@ -51,6 +59,7 @@ export function storedTerms(text: string): string[] {
   return [...new Set(storedSearchText(text).split(' '))].filter((term) => term.length > 0)
 }
 
+/** One word set a search tries; a record matches when it has every term. */
 export interface TermSet {
   terms: string[]
   /** Match terms that start with each word. */

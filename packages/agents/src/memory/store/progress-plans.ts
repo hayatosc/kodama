@@ -1,4 +1,9 @@
-/** Plans of operations that record progress: checkpoints, archive summaries, and declines. */
+/**
+ * Plans of the operations that record progress: extraction checkpoints, archive summaries, and
+ * declined candidates.
+ *
+ * @module
+ */
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
@@ -6,6 +11,7 @@ import { archiveSegments, extractionCheckpoints } from '../../../drizzle/d1/sche
 import { claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
 
+/** Plan advancing an agent's extraction checkpoint; a checkpoint already past it stays. */
 export async function planCheckpoint(
   db: MemoryDb,
   context: OperationContext,
@@ -51,6 +57,7 @@ export async function planCheckpoint(
   }
 }
 
+/** Plan marking that a segment's summary is in R2. */
 export async function planArchiveSummary(
   db: MemoryDb,
   context: OperationContext,
@@ -76,6 +83,7 @@ export async function planArchiveSummary(
   }
 }
 
+/** Plan logging a declined candidate in the ledger only. */
 export async function planDecline(
   db: MemoryDb,
   context: OperationContext,

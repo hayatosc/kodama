@@ -1,11 +1,22 @@
-/** The memory agent's job queue in its own SQLite (docs/memory.md, Jobs). */
+/**
+ * The memory agent's job queue, in its own SQLite.
+ *
+ * @remarks
+ * At most one job is `running`. The object's SQLite runs each call synchronously, so a row read
+ * here is still current when the next call writes it.
+ *
+ * @see docs/memory.md — Jobs
+ *
+ * @module
+ */
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
-import type { LocalDb } from '../../storage/local.ts'
-import { JOB_PRIORITY, jobId, parseMemoryJob } from '../jobs.ts'
-import type { JobOutcome, JobStatus, MemoryJob } from '../jobs.ts'
-import type { RunningJob } from './tools/common.ts'
+import { memoryJobs } from '../../../../drizzle/durable-object/schema.ts'
+import type { LocalDb } from '../../../storage/local.ts'
+import { JOB_PRIORITY, jobId, parseMemoryJob } from '../../../memory/jobs.ts'
+import type { JobOutcome, JobStatus, MemoryJob } from '../../../memory/jobs.ts'
+import type { RunningJob } from '../../../memory/tools/common.ts'
 
+/** One queued, running, or settled job. */
 export type JobRow = typeof memoryJobs.$inferSelect
 
 function toStatus(row: JobRow): JobStatus {
@@ -19,19 +30,18 @@ function toStatus(row: JobRow): JobStatus {
   }
 }
 
-/** Settled jobs removed per call. */
+/** Settled jobs removed per call, to keep each step small. */
 const FORGET_BATCH = 500
-
-/*
- * At most one job is `running`. The object's SQLite runs each call synchronously, so a row read
- * here is still current when the next call writes it.
- */
 
 function jobRow(local: LocalDb, id: string): JobRow | undefined {
   return local.select().from(memoryJobs).where(eq(memoryJobs.jobId, id)).get()
 }
 
-/** Queue a job once; the same job delivered again finds the first. */
+/**
+ * Queue a job once.
+ *
+ * @returns The job's status; the same job delivered again finds the first.
+ */
 export async function storeJob(local: LocalDb, job: MemoryJob): Promise<JobStatus> {
   const id = await jobId(job)
   local
@@ -51,6 +61,7 @@ export async function storeJob(local: LocalDb, job: MemoryJob): Promise<JobStatu
   return toStatus(row)
 }
 
+/** A job's status, if the job is known. */
 export function jobStatus(local: LocalDb, id: string): JobStatus | undefined {
   const row = jobRow(local, id)
   return row === undefined ? undefined : toStatus(row)
@@ -64,7 +75,7 @@ export function runningJob(local: LocalDb): RunningJob | undefined {
     : { jobId: row.jobId, job: parseMemoryJob(JSON.parse(row.payloadJson)) }
 }
 
-/** The running job to resume, else the next queued job that is due. */
+/** The running job to resume, else the queued job due first by priority, then age. */
 export function nextJob(local: LocalDb, now: number): JobRow | undefined {
   const running = local.select().from(memoryJobs).where(eq(memoryJobs.status, 'running')).get()
   if (running !== undefined) return running
@@ -77,7 +88,11 @@ export function nextJob(local: LocalDb, now: number): JobRow | undefined {
     .get()
 }
 
-/** Mark a queued job running as its next attempt; a running job is resumed as it is. */
+/**
+ * Mark a queued job running as its next attempt; a running job is resumed as it is.
+ *
+ * @returns The current row and its parsed job, or undefined if the job is gone.
+ */
 export function startJob(local: LocalDb, row: JobRow): { row: JobRow; job: MemoryJob } | undefined {
   if (row.status === 'queued') {
     local
@@ -92,6 +107,7 @@ export function startJob(local: LocalDb, row: JobRow): { row: JobRow; job: Memor
     : { row: current, job: parseMemoryJob(JSON.parse(current.payloadJson)) }
 }
 
+/** Remember the Pi submission an attempt made, so a resumed attempt waits for it. */
 export function recordSubmission(local: LocalDb, id: string, submissionId: number): void {
   local.update(memoryJobs).set({ submissionId }).where(eq(memoryJobs.jobId, id)).run()
 }
@@ -105,6 +121,7 @@ export function retryJob(local: LocalDb, id: string, at: number): void {
     .run()
 }
 
+/** Mark a job settled with its outcome. */
 export function settleJob(local: LocalDb, id: string, outcome: JobOutcome): void {
   local
     .update(memoryJobs)
@@ -113,7 +130,7 @@ export function settleJob(local: LocalDb, id: string, outcome: JobOutcome): void
     .run()
 }
 
-/** When the earliest delayed job is due, if any is queued. */
+/** When the earliest delayed job is due, or undefined when none is queued. */
 export function nextDueAt(local: LocalDb): number | undefined {
   return local
     .select({ notBefore: memoryJobs.notBefore })
@@ -124,7 +141,11 @@ export function nextDueAt(local: LocalDb): number | undefined {
     .get()?.notBefore
 }
 
-/** Settled jobs older than `before`, removed in small batches. */
+/**
+ * Remove settled jobs older than `before`, a batch at a time.
+ *
+ * @returns How many were removed; call again while it is nonzero.
+ */
 export function forgetSettledJobs(local: LocalDb, before: number): number {
   const old = local
     .select({ jobId: memoryJobs.jobId })

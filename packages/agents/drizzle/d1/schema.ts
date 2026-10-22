@@ -1,10 +1,15 @@
 /**
- * The D1 schema of long-term memory (docs/memory.md, D1 schema): one file for the one database.
- * `pnpm db:generate` turns this file into the migrations in ./migrations.
- * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a
- * constraint violation must fail the statement so that the whole `batch()` rolls back. Allowed
- * values are the typed columns and the code that writes them; the constraints here are keys and
- * relations between columns.
+ * The D1 schema of long-term memory: one file for the one database. `pnpm db:generate` turns this
+ * file into the migrations in ./migrations.
+ *
+ * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a constraint
+ * violation must fail the statement so that the whole `batch()` rolls back. Allowed values are the
+ * typed columns and the code that writes them; the constraints here are keys and relations between
+ * columns.
+ *
+ * @see docs/memory.md — D1 schema
+ *
+ * @module
  */
 import { isNotNull, lte } from 'drizzle-orm'
 import {
@@ -20,9 +25,13 @@ import {
 
 // Records, their search terms, operations, revisions, checkpoints, and the ledger.
 
+/** Whose a record is: one agent's (`agent:<id>`) or a shared space's (`shared:<space>`). */
 export type Scope = `agent:${string}` | `shared:${string}`
+/** What a record holds; only facts and instructions are always loaded. */
 export const RECORD_KINDS = ['fact', 'event', 'instruction', 'task'] as const
+/** Only `active` records are searched and loaded; the others are kept for the ledger. */
 export const RECORD_STATUSES = ['active', 'superseded', 'invalid', 'archived'] as const
+/** How a record came to be written. */
 export const RECORD_ORIGINS = [
   'user_request',
   'agent_judgment',
@@ -31,6 +40,10 @@ export const RECORD_ORIGINS = [
   'shared',
 ] as const
 
+/**
+ * Memory records. A change updates a record only at the `revision` it read; superseding writes a new
+ * record and points the old one at it.
+ */
 export const memoryRecords = sqliteTable(
   'memory_records',
   {
@@ -142,6 +155,7 @@ export const extractionCheckpoints = sqliteTable('extraction_checkpoints', {
   updatedAt: integer('updated_at').notNull(),
 })
 
+/** Every change to a record or skill, in order: who made it, in which run, and why. */
 export const memoryLedger = sqliteTable(
   'memory_ledger',
   {
@@ -192,6 +206,7 @@ export const archiveSegments = sqliteTable(
 
 // Skills.
 
+/** Only `active` skills are listed; `archived` ones can be restored. */
 export const SKILL_STATUSES = ['active', 'archived'] as const
 
 /**

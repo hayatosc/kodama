@@ -1,24 +1,30 @@
 /**
- * The code part of the daily consolidation: retention, re-segmenting, and size records
- * (docs/memory.md, Consolidate). The model part runs as `consolidate` jobs.
+ * The code part of the daily consolidation: retention, re-segmenting, overrides of required
+ * records, skill curation, and size records. The model part runs as `consolidate` jobs.
+ *
+ * @see docs/memory.md — Consolidate
+ *
+ * @module
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { curateSkills } from '../skills.ts'
-import { applyOperation } from '../store/records.ts'
-import { termStatements } from '../store/statements.ts'
-import type { MemoryDb, MemoryRecord } from '../store/db.ts'
+import { curateSkills } from './skills.ts'
+import { applyOperation } from './store/records.ts'
+import { termStatements } from './store/statements.ts'
+import type { MemoryDb, MemoryRecord } from './store/db.ts'
 import {
   memoryLedger,
   memoryRecords,
   memoryTerms,
   revisionClaims,
-} from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
-import { SEARCH_VERSION } from '../../lib/search-text.ts'
-import type { MemoryJob } from '../jobs.ts'
+} from '../../drizzle/d1/schema.ts'
+import type { Scope } from '../../drizzle/d1/schema.ts'
+import { SEARCH_VERSION } from '../lib/search-text.ts'
+import type { MemoryJob } from './jobs.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/** How long ledger rows and revision claims are kept. */
 export const LEDGER_RETENTION_MS = 90 * DAY_MS
+/** How long settled jobs are kept in the memory agent's queue. */
 export const SETTLED_JOB_RETENTION_MS = 30 * DAY_MS
 /** Records one `consolidate` job reads. */
 export const CONSOLIDATION_RECORD_LIMIT = 200
@@ -82,7 +88,11 @@ export async function forgetOldClaims(db: MemoryDb, before: number): Promise<voi
   await db.delete(revisionClaims).where(lt(revisionClaims.claimedAt, before))
 }
 
-/** Delete ledger rows older than the rollback window, one batch at a time. */
+/**
+ * Delete ledger rows older than `before`, a batch at a time.
+ *
+ * @returns How many were deleted in this call.
+ */
 export async function forgetOldLedger(db: MemoryDb, before: number): Promise<number> {
   const rows = await db
     .select({ seq: memoryLedger.seq })
@@ -120,8 +130,13 @@ export async function recordSizes(db: MemoryDb, runId: string, now: number): Pro
 }
 
 /**
- * An agent record cannot override a required shared record: such a record is never loaded, so
- * mark it invalid, with the ledger row the operation writes.
+ * Mark invalid each agent record that overrides a required shared record.
+ *
+ * @remarks
+ * Such a record is never loaded, because a required record wins. Each change is an operation with
+ * its ledger row.
+ *
+ * @returns How many were marked in this call, at most 500.
  */
 export async function invalidateOverridesOfRequired(
   db: MemoryDb,
@@ -158,6 +173,7 @@ export async function invalidateOverridesOfRequired(
   return rows.length
 }
 
+/** What the daily consolidation needs from the memory agent. */
 export interface DailyConsolidationDeps {
   db: MemoryDb
   /** Remove settled jobs older than the time given. */
@@ -167,8 +183,10 @@ export interface DailyConsolidationDeps {
 }
 
 /**
- * The daily consolidation: retention, re-segmenting, overrides of required records, and skill
- * curation in code, then one `consolidate` job per scope changed in the last day.
+ * The daily consolidation: maintenance in code, then one `consolidate` job per scope changed in
+ * the last day.
+ *
+ * @returns How many scopes got a job, at most 200.
  */
 export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ scopes: number }> {
   const { db, now } = deps

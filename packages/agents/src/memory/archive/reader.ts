@@ -1,4 +1,10 @@
-/** Reading archived segments back from R2: entries, byte ranges, and index files (Archive index). */
+/**
+ * Reading archived segments back from R2: entries, byte ranges, and index files.
+ *
+ * @see docs/memory.md — Archive index
+ *
+ * @module
+ */
 import * as v from 'valibot'
 import { entryText } from '../transcript.ts'
 import type { EntryText } from '../transcript.ts'
@@ -6,6 +12,7 @@ import { isEntryRecord } from './segment.ts'
 import type { Chunk } from './segment.ts'
 import type { EntryRecord } from '@earendil-works/pi-durable'
 
+/** One archived entry: its ID and the record JSON as Pi stored it. */
 export interface ArchivedEntry {
   id: number
   entry: EntryRecord | undefined
@@ -23,7 +30,11 @@ function parseLines(text: string): ArchivedEntry[] {
     })
 }
 
-/** Entries of a segment, optionally only a byte range of its `.jsonl` object. */
+/**
+ * A segment's entries, or only those in a byte range of its `.jsonl` object.
+ *
+ * @throws When the segment's entries are missing from R2.
+ */
 export async function readSegment(
   bucket: R2Bucket,
   prefix: string,
@@ -39,6 +50,7 @@ export async function readSegment(
   return parseLines(await object.text())
 }
 
+/** The shape of a segment's `.index.json`. */
 export const indexSchema = v.object({
   format: v.number(),
   searchVersion: v.number(),
@@ -53,8 +65,14 @@ export const indexSchema = v.object({
   ),
   words: v.record(v.string(), v.array(v.number())),
 })
+/** The shape of a segment's `.summary.json`. */
 export const summarySchema = v.object({ summary: v.string(), words: v.array(v.string()) })
 
+/**
+ * Read and validate a JSON object, with its size.
+ *
+ * @returns Undefined when the object is missing or does not match `schema`.
+ */
 export async function readJson<T>(
   bucket: R2Bucket,
   key: string,
@@ -68,9 +86,12 @@ export async function readJson<T>(
 }
 
 /**
- * Text entries of a segment after entry `after`, read through the index so only the byte ranges of
- * about `limit` entries are fetched. `through` is the last entry returned, or undefined once the
- * segment has no text left after `after`.
+ * Text entries of a segment after entry `after`, read through its index so only the byte ranges
+ * of about `limit` entries are fetched.
+ *
+ * @returns The entries, and `through`: the last entry returned, or undefined once the segment has
+ * no text left after `after`.
+ * @throws When the segment's index or entries are missing.
  */
 export async function readArchivedText(
   bucket: R2Bucket,

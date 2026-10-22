@@ -1,7 +1,11 @@
 /**
- * Writing shared memory (docs/memory.md, Shared memory). The memory agent writes a shared record
- * only when code finds it backed by the records of at least two agents, so one agent's quirk or one
- * poisoned conversation cannot reach every agent. No person approves a change.
+ * Writing shared memory. The memory agent writes a shared record only when code finds it backed
+ * by the records of at least two agents, so one agent's quirk or one poisoned conversation cannot
+ * reach every agent. No person approves a change.
+ *
+ * @see docs/memory.md — Shared memory
+ *
+ * @module
  */
 import { and, eq, inArray } from 'drizzle-orm'
 import type { Scope } from '../../drizzle/d1/schema.ts'
@@ -12,18 +16,24 @@ import type { NewRecord } from './store/records.ts'
 import { insertOp, recordLedger } from './store/statements.ts'
 import type { OperationContext, OperationResult } from './store/statements.ts'
 
-/** Shared records belong to no single agent. */
+/** The source agent of shared records, which belong to no single agent. */
 export const SHARED_SOURCE_AGENT = 'memory'
 /** Agents whose own active records must back a record brought into a space. */
 export const MIN_SOURCE_AGENTS = 2
 
 const SPACE_PATTERN = /^[a-z0-9-]{1,64}$/
 
+/**
+ * The scope of a shared space.
+ *
+ * @throws {@link TypeError} When `space` is not 1–64 lowercase letters, digits, or hyphens.
+ */
 export function sharedScope(space: string): Scope {
   if (!SPACE_PATTERN.test(space)) throw new TypeError(`Invalid shared space: ${space}`)
   return `shared:${space}`
 }
 
+/** A record to write to a shared space. */
 export interface SharedWrite {
   space: string
   kind: RecordKind
@@ -68,8 +78,11 @@ async function rejection(
 }
 
 /**
- * Check a shared write and apply it as one operation. A rejected write changes nothing but the
- * ledger, and the result says why.
+ * Check a shared write and apply it as one operation.
+ *
+ * @returns `rejected` with the reason when a check fails; the write then changes nothing but the
+ * ledger.
+ * @throws {@link TypeError} When the space name is invalid.
  */
 export async function writeShared(
   db: MemoryDb,

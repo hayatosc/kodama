@@ -35,6 +35,7 @@ packages/agents/
     validation.ts           valibot schemas for untrusted RPC input
     lib/                    generic helpers that import nothing else from src/
     agent/                  the Agent Durable Object, its runtime, and its parts
+      dedicated/memory/     the memory agent role: its configuration, job queue, and runner
     configuration/          per-agent configuration: validation and persistence
     models/                 Pi provider catalog and Worker secret resolution
     tools/                  tool implementations and their registry
@@ -51,23 +52,23 @@ private fields: the open harness, the tasks the recovery alarm watches, the prun
 progress, a pending memory refresh, and the memory agent's running drain. Everything else is a
 plain function that takes what it needs, in these files:
 
-| File             | Responsibility                                                                |
-| ---------------- | ----------------------------------------------------------------------------- |
-| `session.ts`     | opening the Pi harness, and the exclusive section that closes and reopens it  |
-| `config.ts`      | reading and replacing the agent configuration                                 |
-| `views.ts`       | `snapshot()` and `submission()` results, mapped from Pi state                 |
-| `entries.ts`     | paged conversation entries, live or from the R2 archive, for the memory agent |
-| `memory.ts`      | the agent's use of long-term memory: extension, skills, refresh, extraction   |
-| `maintenance.ts` | pruning, its scheduling, and refusing input above the hard storage limit      |
-| `harness.ts`     | Pi runtime composition shared by all agents                                   |
-| `events.ts`      | SSE streams for `send()` and `subscribe()`                                    |
-| `alarms.ts`      | one alarm per object, shared by several purposes                              |
-| `recovery.ts`    | the recovery alarm                                                            |
+| File         | Responsibility                                                                    |
+| ------------ | --------------------------------------------------------------------------------- |
+| `harness.ts` | Pi runtime composition, opening the harness, and the section that reopens it      |
+| `views.ts`   | `snapshot()` and `submission()` results, mapped from Pi state                     |
+| `memory.ts`  | the agent's use of long-term memory: refresh, extraction, pruning, the hard limit |
+| `events.ts`  | SSE streams for `send()` and `subscribe()`                                        |
+| `alarms.ts`  | one alarm per object, shared by several purposes, and the recovery alarm          |
+
+Reading and replacing the configuration is in `src/configuration/`, and the paged entries the memory
+agent reads are in `src/memory/transcript.ts`.
 
 The memory agent is one of these objects too, under the reserved name `kodama:memory`. An object
-with that name takes the memory agent role from `src/memory/memory-agent/`: its own harness and
-configuration, a job queue instead of chat input, and pruning without an archive (see
-[memory.md](memory.md#memory-agent)). Every other object is a working agent.
+with that name takes the memory agent role from `src/agent/dedicated/memory/`, which holds only
+what that role adds to an agent: its configuration and prompts (`config.ts`), its job queue
+(`queue.ts`), and the runner that drains it (`runner.ts`). It has a job queue instead of chat input,
+and pruning without an archive (see [memory.md](memory.md#memory-agent)). The tools it uses and
+daily consolidation are memory parts in `src/memory/`. Every other object is a working agent.
 
 On every open, the agent prepares the harness before any request sees it:
 
@@ -90,9 +91,9 @@ imports say where it sits.
 | settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                           |
 | storage      | `drizzle/`, `src/storage/`                           | lib                                      |
 | memory store | `src/memory/store/`                                  | lib, storage                             |
-| memory       | the rest of `src/memory/`, except `memory-agent/`    | lib, contracts, storage, memory store    |
-| agent        | `src/agent/`, except `agent.ts`                      | all of the above                         |
-| memory agent | `src/memory/memory-agent/`                           | all of the above, including agent        |
+| memory       | the rest of `src/memory/`                            | lib, contracts, storage, memory store    |
+| agent        | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                         |
+| memory agent | `src/agent/dedicated/memory/`                        | all of the above, including agent        |
 | Agent class  | `src/agent/agent.ts`                                 | all of the above, including memory agent |
 | entrypoint   | `src/index.ts`                                       | lib, contracts, memory, Agent class      |
 
@@ -100,11 +101,11 @@ Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
   words (`search-text.ts`), and the two ordering helpers the `Agent` class uses (`serial.ts`).
-- The memory parts (archive, skills, prune, shared, working) do not know the `Agent` class or the
+- The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
 - The `Agent` class composes the working agent and the memory agent role, so `agent.ts` is the one
-  file above `src/memory/memory-agent/`, which in turn uses the agent runtime (harness, alarms).
+  file above `src/agent/dedicated/memory/`, which in turn uses the agent runtime (harness, alarms).
 - Tests may import anything, including the helpers in `src/helper/`. Production code never
   imports `src/helper/`.
 
@@ -338,7 +339,7 @@ synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
 | `prune`    | archive and delete old entries when storage is over its threshold |
 | `jobs`     | the memory agent's job runner                                     |
 
-[`recovery.ts`](../packages/agents/src/agent/recovery.ts) keeps the `recovery` purpose set while Pi has
+The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between
 admission and Pi's scheduler. Admissions and recovery refreshes run in one serial queue
 (`src/lib/serial.ts`), so a refresh never clears an alarm that an admission just armed.
@@ -439,11 +440,9 @@ migrations before the tests.
 | `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
 | `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
 | `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
-| `src/agent/config.test.ts`                  | configuration over RPC and across eviction                    |
 | `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
-| `src/agent/recovery.test.ts`                | failures, cancellation, and recovery after eviction           |
-| `src/agent/alarms.test.ts`                  | several alarm purposes in one alarm                           |
-| `src/configuration/index.test.ts`           | the configuration schema                                      |
+| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery          |
+| `src/configuration/index.test.ts`           | the schema, and configuration over RPC and across eviction    |
 | `src/models/index.test.ts`                  | provider credentials                                          |
 | `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
 | `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |

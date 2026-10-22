@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { memoryRecords } from '../../drizzle/d1/schema.ts'
 import type { Scope } from '../../drizzle/d1/schema.ts'
-import { invalidateOverridesOfRequired } from './memory-agent/consolidation.ts'
+import { invalidateOverridesOfRequired } from './consolidation.ts'
 import { writeShared } from './shared.ts'
 import { context, db, record, renderedAlwaysLoaded, write } from '../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.

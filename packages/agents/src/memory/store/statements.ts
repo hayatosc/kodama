@@ -1,4 +1,8 @@
-/** Statements and results that every write operation on the memory database shares. */
+/**
+ * Statements and results that every write operation on the memory database shares.
+ *
+ * @module
+ */
 import { eq } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
@@ -13,13 +17,17 @@ import {
 import type { Scope } from '../../../drizzle/d1/schema.ts'
 import { storedTerms } from '../../lib/search-text.ts'
 
-/** `stale`: the candidate is older than the record it would replace, so it was declined. */
+/**
+ * The result of an operation: `stale` means the candidate rests on older entries than the record it
+ * would replace, so it was declined.
+ */
 export type OperationResult =
   | { status: 'applied'; recordId: string }
   | { status: 'declined' }
   | { status: 'stale' }
   | { status: 'conflict'; reason: string }
 
+/** Who applies an operation, and when. */
 export interface OperationContext {
   /** Same for every attempt of one change, for example derived from the job and tool call IDs. */
   opId: string
@@ -38,7 +46,9 @@ const operationResultSchema = v.variant('status', [
   v.object({ status: v.literal('conflict'), reason: v.string() }),
 ])
 
+/** One statement of a D1 batch. */
 export type Statement = BatchItem<'sqlite'>
+/** The statements of one batch; a batch has at least one. */
 export type Statements = [Statement, ...Statement[]]
 
 /** Messages of an error and its causes; Drizzle wraps the D1 error in `cause`. */
@@ -53,7 +63,12 @@ export function errorText(error: unknown): string {
 /** D1 binds at most 100 parameters per statement; a term row takes two. */
 const TERMS_PER_STATEMENT = 50
 
-/** Inserts of a record's search terms, in statements D1 accepts. */
+/**
+ * Inserts of a record's search terms.
+ *
+ * @remarks
+ * D1 binds at most 100 parameters per statement, so the rows are split across statements.
+ */
 export function termStatements(db: MemoryDb, recordId: string, content: string): Statement[] {
   const rows = storedTerms(content).map((term) => ({ term, recordId }))
   const statements: Statement[] = []
@@ -63,6 +78,7 @@ export function termStatements(db: MemoryDb, recordId: string, content: string):
   return statements
 }
 
+/** The `memory_ops` row that records an operation and its result, so a repeat finds it. */
 export function insertOp(
   db: MemoryDb,
   context: OperationContext,
@@ -79,8 +95,11 @@ export function insertOp(
 }
 
 /**
- * Claim the revision a change moves its target to. With the update guarded by the revision it
- * read, a second writer from that revision fails here and its whole batch rolls back.
+ * Claim the revision a change moves its target to.
+ *
+ * @remarks
+ * With the update guarded by the revision it read, a second writer from that revision fails on
+ * this claim's primary key, and its whole batch rolls back.
  */
 export function claimRevision(
   db: MemoryDb,
@@ -100,6 +119,7 @@ function newScopeRevision(): number {
   return high * 2 ** 20 + (low >>> 12)
 }
 
+/** Give a scope a new revision, so agents reading it refresh their always-loaded copy. */
 export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
   const revision = newScopeRevision()
   return db
@@ -108,6 +128,7 @@ export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope)
     .onConflictDoUpdate({ target: scopeRevisions.scope, set: { revision, updatedAt: context.now } })
 }
 
+/** The stored result of an operation that was already applied, if any. */
 export async function appliedResult(
   db: MemoryDb,
   opId: string,
@@ -122,9 +143,10 @@ export async function appliedResult(
   return v.parse(operationResultSchema, parsed)
 }
 
-/** The result an operation will have and the statements of its batch. */
+/** The result an operation will have, and the statements of its batch. */
 export type Plan = { result: OperationResult; statements: Statements }
 
+/** A ledger row for an operation. */
 export function recordLedger(
   db: MemoryDb,
   context: OperationContext,
@@ -145,7 +167,10 @@ export function recordLedger(
   })
 }
 
-/** A conflict changes nothing but is logged, so the candidate can be evaluated again later. */
+/**
+ * A plan that changes nothing but logs the conflict, so the candidate can be evaluated again
+ * later.
+ */
 export function conflict(
   db: MemoryDb,
   context: OperationContext,

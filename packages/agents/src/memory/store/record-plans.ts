@@ -1,4 +1,10 @@
-/** Plans of operations that write, supersede, or invalidate memory records (Applying a write). */
+/**
+ * Plans of the operations that write, supersede, or invalidate memory records.
+ *
+ * @see docs/memory.md — Applying a write
+ *
+ * @module
+ */
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
 import type { NewRecord, Operation } from './records.ts'
@@ -21,7 +27,12 @@ import type {
 } from './statements.ts'
 import { sha256Hex } from '../../lib/hash.ts'
 
-/** Same content from the same source gets the same ID, so a second insert fails. */
+/**
+ * A record's ID: a hash of its scope, kind, content, source agent, and first source entry.
+ *
+ * @remarks
+ * The same content from the same source gets the same ID, so a second insert fails.
+ */
 export function recordId(record: NewRecord): Promise<string> {
   return sha256Hex(
     JSON.stringify([
@@ -122,6 +133,11 @@ function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined>
   return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
 }
 
+/**
+ * Plan a new record.
+ *
+ * @throws {@link TypeError} When the record breaks a rule the columns cannot express.
+ */
 export async function planWrite(
   db: MemoryDb,
   context: OperationContext,
@@ -140,6 +156,12 @@ export async function planWrite(
   return { result, statements }
 }
 
+/**
+ * Plan replacing an active record, named by ID at the revision the writer read.
+ *
+ * @returns A `conflict` plan when the record changed or is of another scope or agent, and a
+ * `stale` plan when the candidate rests on older entries than the record.
+ */
 export async function planSupersede(
   db: MemoryDb,
   context: OperationContext,
@@ -193,6 +215,7 @@ export async function planSupersede(
   return { result, statements }
 }
 
+/** Plan marking an active record as no longer true, at the revision the writer read. */
 export async function planInvalidate(
   db: MemoryDb,
   context: OperationContext,

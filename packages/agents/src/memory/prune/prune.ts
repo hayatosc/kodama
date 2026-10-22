@@ -1,6 +1,10 @@
 /**
  * Pruning: archive old Pi entries to R2 and delete them from the Durable Object, as a resumable
- * state machine (docs/memory.md, Pruning).
+ * state machine.
+ *
+ * @see docs/memory.md — Pruning
+ *
+ * @module
  */
 import type { Harness } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'
@@ -9,8 +13,13 @@ import { deleteRows, safeToDelete } from './delete.ts'
 import { pruneLimits, unfinishedRun } from './runs.ts'
 import { catalog, exportRun, prepare } from './steps.ts'
 
+/**
+ * What one run did: nothing was due, the delete checks failed and it waits for a retry, or its
+ * rows were deleted.
+ */
 export type PruneOutcome = 'nothing' | 'deferred' | 'pruned'
 
+/** What pruning needs from the agent object. */
 export interface PruneDeps {
   storage: DurableObjectStorage
   env: Pick<AgentEnv, 'MEMORY_DB' | 'ARCHIVE' | 'AGENTS'>
@@ -31,8 +40,10 @@ export interface PruneDeps {
 }
 
 /**
- * Take the unfinished run, or prepare a new one, one state further each step until its rows are
- * deleted. `deferred` means the delete checks failed; retry after PRUNE_RETRY_MS.
+ * Take the unfinished run, or prepare a new one, and move it one state at a time until its rows
+ * are deleted.
+ *
+ * @returns `deferred` when the delete checks failed; the caller retries after `PRUNE_RETRY_MS`.
  */
 export async function pruneOnce(
   deps: PruneDeps,

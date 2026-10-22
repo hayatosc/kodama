@@ -1,23 +1,29 @@
-/** What the memory agent's tools share: the running job, schemas, and the writing wrapper. */
+/**
+ * What the memory agent's tools share: the running job, argument schemas, and the writing wrapper.
+ *
+ * @module
+ */
 import { Type } from '@earendil-works/pi-ai'
 import type { Static, TSchema } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
-import type { AgentEnv } from '../../../env.ts'
-import { memoryDb } from '../../store/db.ts'
-import type { MemoryDb, MemoryRecord, RecordKind } from '../../store/db.ts'
-import { applyOperation } from '../../store/records.ts'
-import type { NewRecord, Operation } from '../../store/records.ts'
-import type { Scope } from '../../../../drizzle/d1/schema.ts'
-import type { OperationResult } from '../../store/statements.ts'
-import type { MemoryJob } from '../../jobs.ts'
-import { sha256Hex } from '../../../lib/hash.ts'
+import type { AgentEnv } from '../../env.ts'
+import { memoryDb } from '../store/db.ts'
+import type { MemoryDb, MemoryRecord, RecordKind } from '../store/db.ts'
+import { applyOperation } from '../store/records.ts'
+import type { NewRecord, Operation } from '../store/records.ts'
+import type { Scope } from '../../../drizzle/d1/schema.ts'
+import type { OperationResult } from '../store/statements.ts'
+import type { MemoryJob } from '../jobs.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 
+/** The job the memory agent is running, and its ID. */
 export interface RunningJob {
   jobId: string
   job: MemoryJob
 }
 
+/** What the memory agent's tools need from the agent object. */
 export interface MemoryToolDeps {
   env: AgentEnv
   /** The job being run; tools refuse to write outside a job. */
@@ -25,28 +31,35 @@ export interface MemoryToolDeps {
   now?: () => number
 }
 
+/** The kind of a record. */
 export const KIND = Type.Union([
   Type.Literal('fact'),
   Type.Literal('instruction'),
   Type.Literal('event'),
   Type.Literal('task'),
 ])
+/** The text of a record, 1–2,000 characters. */
 export const CONTENT = Type.String({ minLength: 1, maxLength: 2_000 })
+/** How much a record matters, from 0 to 1. */
 export const IMPORTANCE = Type.Optional(Type.Number({ minimum: 0, maximum: 1 }))
+/** The shared record an agent record replaces for that agent. */
 export const OVERRIDES = Type.Optional(
   Type.String({
     minLength: 1,
     description: 'ID of a shared record this agent record replaces for the agent only',
   }),
 )
+/** An entry ID an extract job cites as evidence. */
 export const ENTRY = Type.Optional(
   Type.Integer({ minimum: 0, description: 'Entry ID; extraction cites its entries' }),
 )
 
+/** A tool result of one text block. */
 export function text(value: string) {
   return { output: [{ type: 'text' as const, text: value }] }
 }
 
+/** Records as lines the model can cite by `id` and `revision`. */
 export function formatRecords(records: readonly MemoryRecord[]): string {
   if (records.length === 0) return 'No matching records.'
   return records
@@ -58,6 +71,7 @@ export function formatRecords(records: readonly MemoryRecord[]): string {
     .join('\n')
 }
 
+/** An operation result as one line for the model, telling it what to do on a conflict. */
 export function describe(result: OperationResult & { replayed: boolean }): string {
   switch (result.status) {
     case 'applied':
@@ -83,11 +97,15 @@ export function jobScope(job: MemoryJob): Scope {
   }
 }
 
+/**
+ * The agent a job's records come from: its source agent, or the agent of the scope it consolidates.
+ */
 export function sourceAgentOf(job: MemoryJob, scope: Scope): string {
   if ('sourceAgentId' in job) return job.sourceAgentId
   return scope.slice(scope.indexOf(':') + 1)
 }
 
+/** What the model chooses about a record; everything else comes from the job. */
 export interface RecordArgs {
   kind: RecordKind
   content: string
@@ -97,7 +115,12 @@ export interface RecordArgs {
   overrides?: string
 }
 
-/** Build the record from the job, so origin, scope, and evidence never come from the model. */
+/**
+ * Build the record from the job, so origin, scope, and evidence never come from the model.
+ *
+ * @throws {@link Error} When a shared record would override, or an extract job's record does not cite
+ * entries after its checkpoint. The tool call fails and the model sees why.
+ */
 export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRecord {
   const content = args.content.trim()
   const scope = jobScope(job)
@@ -135,6 +158,14 @@ export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRec
   }
 }
 
+/**
+ * A tool that applies one operation for the running job. The operation ID comes from the job and the
+ * tool call, so a replayed call applies once.
+ *
+ * @param definition - The tool, with `operation` building the operation from its arguments.
+ * @throws {@link Error} When no job is running, or the call would change a shared record without
+ * `shared_write`.
+ */
 export function writingTool<P extends TSchema>(
   deps: MemoryToolDeps,
   definition: {

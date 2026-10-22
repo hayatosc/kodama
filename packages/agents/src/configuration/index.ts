@@ -1,4 +1,11 @@
-/** Per-agent configuration: defaults, validation, and where each part is stored. */
+/**
+ * Per-agent configuration: defaults, validation, and where each part is stored. Pi keeps the model,
+ * prompt, thinking level, and tools; the shared spaces sit beside them in Durable Object storage.
+ *
+ * @see docs/agents.md — Configuration
+ *
+ * @module
+ */
 import * as v from 'valibot'
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
@@ -8,7 +15,9 @@ import type { Models } from '@earendil-works/pi-ai/models'
 import type { AgentEnv } from '../env.ts'
 import type { AgentConfig } from '../protocol.ts'
 import { agentTools, isRegisteredTool, resolveTools } from '../tools/index.ts'
+import { parseInput } from '../validation.ts'
 
+/** The variables that name the default model. */
 export type DefaultModelEnv = Pick<AgentEnv, 'DEFAULT_MODEL_PROVIDER' | 'DEFAULT_MODEL_ID'>
 
 const THINKING_LEVELS = [
@@ -22,6 +31,7 @@ const THINKING_LEVELS = [
 ] as const satisfies readonly ModelThinkingLevel[]
 const SYSTEM_PROMPT_MAX_LENGTH = 64_000
 
+/** The configuration of a new agent: the default model and prompt, no tools, the `global` space. */
 export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
   return {
     model: { provider: env.DEFAULT_MODEL_PROVIDER, modelId: env.DEFAULT_MODEL_ID },
@@ -32,6 +42,7 @@ export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
   }
 }
 
+/** The shared spaces an agent reads unless configured otherwise. */
 export const DEFAULT_SHARED_SPACES: readonly string[] = ['global']
 const MAX_SHARED_SPACES = 8
 const spaceMessage =
@@ -90,6 +101,11 @@ function toolChange(selected: readonly string[]): AgentChange['tools'] {
   return { remove: agentTools.filter((tool) => !selected.includes(tool.name)) }
 }
 
+/**
+ * The change that stores `config` in Pi.
+ *
+ * @throws {@link TypeError} When a tool is not registered.
+ */
 export function agentChange(config: AgentConfig): AgentChange {
   return {
     model: config.model,
@@ -123,7 +139,11 @@ export async function initializeAgentConfig(
   }, BACKGROUND_CONTEXT)
 }
 
-/** The configuration Pi stores, with the shared spaces stored beside it. */
+/**
+ * The configuration Pi stores, with the shared spaces stored beside it.
+ *
+ * @throws {@link Error} When Pi has no model, prompt, or thinking level yet.
+ */
 export async function readAgentConfig(
   harness: Harness,
   sharedSpaces: readonly string[],
@@ -142,8 +162,10 @@ export async function readAgentConfig(
   }
 }
 
+/** The Durable Object storage key of an agent's shared spaces. */
 export const SHARED_SPACES_KEY = 'kodama:shared-spaces'
 
+/** The stored shared spaces, or `defaults` when none are stored or they are invalid. */
 export async function readSharedSpaces(
   storage: DurableObjectStorage,
   defaults: readonly string[],
@@ -152,6 +174,7 @@ export async function readSharedSpaces(
   return stored.success ? stored.output : [...defaults]
 }
 
+/** Store the shared spaces an agent reads. */
 export function writeSharedSpaces(
   storage: DurableObjectStorage,
   spaces: readonly string[],
@@ -159,4 +182,44 @@ export function writeSharedSpaces(
   return storage.put(SHARED_SPACES_KEY, [...spaces])
 }
 
+/** The prompt of an agent nobody configured. */
 export const DEFAULT_SYSTEM_PROMPT = 'You are Kodama, a helpful and concise assistant.'
+
+const context = BACKGROUND_CONTEXT
+
+/** Where an agent's configuration lives, and the defaults for what is missing. */
+export interface ConfigStore {
+  harness: Harness
+  storage: DurableObjectStorage
+  defaults: AgentConfig
+}
+
+/** The agent's whole configuration. */
+export async function readConfig(store: ConfigStore): Promise<AgentConfig> {
+  const spaces = await readSharedSpaces(store.storage, store.defaults.sharedSpaces)
+  return readAgentConfig(store.harness, spaces)
+}
+
+/**
+ * Validate and store a complete configuration while no task runs; history and request receipts are
+ * kept.
+ *
+ * @returns The stored configuration.
+ * @throws {@link TypeError} When `value` is not a valid configuration.
+ * @throws {@link Error} When a task is running.
+ */
+export async function replaceConfig(
+  store: ConfigStore,
+  models: Models,
+  value: AgentConfig,
+): Promise<AgentConfig> {
+  const config = parseInput(agentConfigSchema(models), value)
+  const { tasks } = await store.harness.inspect(context)
+  if (tasks.length > 0) throw new Error('Agent is busy; retry configuration after it becomes idle')
+  await store.harness.commit(
+    (tx) => configure(tx, ROOT_CONVERSATION_ID, agentChange(config)),
+    context,
+  )
+  await writeSharedSpaces(store.storage, config.sharedSpaces)
+  return config
+}

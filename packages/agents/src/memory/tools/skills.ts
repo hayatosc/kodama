@@ -1,8 +1,12 @@
-/** Tools of a consolidate job of an agent scope that list, read, write, and archive its skills. */
+/**
+ * Tools of a consolidate job of an agent scope that list, read, write, and archive its skills.
+ *
+ * @module
+ */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
-import { sha256Hex } from '../../../lib/hash.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 import {
   listSkills,
   MAX_SKILL_BODY,
@@ -10,13 +14,14 @@ import {
   readSkill,
   setSkillStatus,
   writeSkill,
-} from '../../skills.ts'
-import type { OperationContext } from '../../store/statements.ts'
+} from '../skills.ts'
+import type { OperationContext } from '../store/statements.ts'
 import { describe, text, toolDb } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
 
 const NAME = Type.String({ pattern: '^[a-z0-9-]{1,64}$' })
 
+/** The skill tools; each refuses to run outside a consolidate job of an agent scope. */
 export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
   /** The agent whose skills the running job may change, and the operation of one tool call. */
   const skillJob = async (

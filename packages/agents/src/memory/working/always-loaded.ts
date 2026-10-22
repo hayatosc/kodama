@@ -1,4 +1,11 @@
-/** The always-loaded memory of a working agent (docs/memory.md, Always-loaded memory). */
+/**
+ * The always-loaded memory of a working agent: the records and skills put into its prompt, cached in
+ * the object's SQLite and refreshed when a scope revision changes.
+ *
+ * @see docs/memory.md — Always-loaded memory
+ *
+ * @module
+ */
 import * as v from 'valibot'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
@@ -10,8 +17,11 @@ import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
+/** Characters of the agent's own records in the prompt. */
 export const AGENT_MEMORY_BUDGET = 2_200
+/** Characters of shared records in the prompt. */
 export const SHARED_MEMORY_BUDGET = 1_000
+/** How often a working agent checks D1 for changed scope revisions. */
 export const REVISION_CHECK_INTERVAL_MS = 60_000
 
 type Revisions = Record<string, number>
@@ -157,7 +167,7 @@ export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<vo
 
 /**
  * Render again when a scope revision changed since the copy was built. Checks D1 at most once
- * per `REVISION_CHECK_INTERVAL_MS`, so a lost change notice delays an update, not loses it.
+ * per {@link REVISION_CHECK_INTERVAL_MS}, so a lost change notice delays an update, not loses it.
  */
 export async function refreshAlwaysLoadedIfChanged(memory: WorkingMemoryDeps): Promise<void> {
   const local = await memory.local()

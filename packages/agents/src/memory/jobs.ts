@@ -1,4 +1,12 @@
-/** Jobs of the memory agent (docs/memory.md, Jobs). */
+/**
+ * The memory agent's input contract: its name, the job kinds it takes, and their validation.
+ *
+ * Memory code addresses the memory agent through this module, so it never imports the agent itself.
+ *
+ * @see docs/memory.md — Jobs
+ *
+ * @module
+ */
 import * as v from 'valibot'
 import { AgentIdSchema } from '../validation.ts'
 import type { Scope } from '../../drizzle/d1/schema.ts'
@@ -8,6 +16,7 @@ import { sha256Hex } from '../lib/hash.ts'
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')
 const EntryIdSchema = v.pipe(v.number(), v.integer(), v.minValue(0))
 
+/** Every job the memory agent takes: `remember`, `extract`, `record_archive`, and `consolidate`. */
 export const MemoryJobSchema = v.variant('kind', [
   v.object({
     kind: v.literal('remember'),
@@ -35,10 +44,17 @@ export const MemoryJobSchema = v.variant('kind', [
   }),
 ])
 
+/** A validated memory job. */
 export type MemoryJob = v.InferOutput<typeof MemoryJobSchema>
+/** The kind of a memory job. */
 export type JobKind = MemoryJob['kind']
+/**
+ * How a settled job ended: it wrote something (`persisted`), wrote nothing (`declined`), met a
+ * changed target (`conflict`), or failed every attempt (`failed`).
+ */
 export type JobOutcome = 'persisted' | 'declined' | 'conflict' | 'failed'
 
+/** A job's place in the memory agent's queue. */
 export interface JobStatus {
   jobId: string
   kind: JobKind
@@ -47,7 +63,7 @@ export interface JobStatus {
   attempts: number
 }
 
-/** Lower runs first. */
+/** Queue priority per kind; lower runs first. */
 export const JOB_PRIORITY: Record<JobKind, number> = {
   remember: 0,
   record_archive: 1,
@@ -55,7 +71,12 @@ export const JOB_PRIORITY: Record<JobKind, number> = {
   consolidate: 3,
 }
 
-/** The same job delivered twice gets the same ID, so the second delivery finds the first. */
+/**
+ * The job's ID, a hash of the fields that identify it.
+ *
+ * @remarks
+ * The same job delivered twice gets the same ID, so the second delivery finds the first.
+ */
 export function jobId(job: MemoryJob): Promise<string> {
   switch (job.kind) {
     case 'remember':
@@ -71,6 +92,11 @@ export function jobId(job: MemoryJob): Promise<string> {
   }
 }
 
+/**
+ * Parse an untrusted job.
+ *
+ * @throws {@link TypeError} With the first issue's message, when `value` is not a valid job.
+ */
 export function parseMemoryJob(value: unknown): MemoryJob {
   const result = v.safeParse(MemoryJobSchema, value, { abortEarly: true })
   if (result.success) return result.output
@@ -78,7 +104,9 @@ export function parseMemoryJob(value: unknown): MemoryJob {
 }
 
 /**
- * The name of the one memory agent, an `Agent` object like any other. The `:` makes it an invalid
- * public agent ID, so `AgentService` and `sendTo` cannot address it.
+ * The name of the one memory agent, an `Agent` object like any other.
+ *
+ * @remarks
+ * The `:` makes it an invalid public agent ID, so `AgentService` and `sendTo` cannot address it.
  */
 export const MEMORY_AGENT_NAME = 'kodama:memory'

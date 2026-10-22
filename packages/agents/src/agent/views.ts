@@ -1,4 +1,8 @@
-/** Read-only views of an agent's session for RPC: Pi state mapped to snapshots and submission statuses. */
+/**
+ * Read-only views of an agent's session for RPC: Pi's state mapped to snapshots and submission statuses.
+ *
+ * @module
+ */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
 import type { Harness, AgentEventStream, SubmissionRecord } from '@earendil-works/pi-durable'
@@ -6,6 +10,7 @@ import type { AgentSnapshot, SubmissionStatus, AgentMessage } from '../protocol.
 
 const context = BACKGROUND_CONTEXT
 
+/** The agent's committed messages and whether it is busy. */
 export async function snapshotOf(harness: Harness): Promise<AgentSnapshot> {
   const stream = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
   try {
@@ -15,6 +20,7 @@ export async function snapshotOf(harness: Harness): Promise<AgentSnapshot> {
   }
 }
 
+/** The status of the root conversation's submission with this request ID, if there is one. */
 export async function submissionOf(
   harness: Harness,
   requestId: string,
@@ -49,6 +55,7 @@ export function toAgentSnapshot(snapshot: PiSnapshot): AgentSnapshot {
   return { messages, busy: snapshot.run !== undefined || snapshot.inbox.length > 0 }
 }
 
+/** Map Pi's submission record to the RPC status, with a non-string detail JSON-encoded. */
 export function toSubmissionStatus(
   requestId: string,
   submission: SubmissionRecord,

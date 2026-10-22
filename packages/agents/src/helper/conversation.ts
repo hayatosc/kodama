@@ -1,4 +1,8 @@
-/** A long conversation that compacts, for the pruning and evaluation tests. */
+/**
+ * A long conversation that compacts, for the pruning tests.
+ *
+ * @module
+ */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
@@ -18,10 +22,11 @@ import { waitForAnswer } from './rpc.ts'
 const contextWindow =
   createAgentModels(env).getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
     ?.contextWindow ?? 0
-// Pi's defaults: block to compact above window - 16384, start in the background 32768 below that.
+/** Reported usage at which Pi compacts before the next answer (its default: the context window). */
 export const BLOCKING_USAGE = contextWindow
+/** Reported usage at which Pi starts compacting in the background (its default). */
 export const BACKGROUND_USAGE = contextWindow - 16_384 - 16_000
-// Each turn's text is about 4k tokens, so a summary keeps the last five turns of 20k tokens.
+/** About 4k tokens of text, so a summary keeps the last five turns of 20k tokens. */
 export const FILLER = ' filler'.repeat(2_000)
 
 /**
@@ -55,6 +60,7 @@ export function mockModel(options: {
   return bodies
 }
 
+/** Send a message and wait until it is answered. */
 export async function say(agentId: string, requestId: string, content: string) {
   await exports.default.sendMessage(agentId, { requestId, content })
   await waitForAnswer(agentId, requestId)
@@ -71,6 +77,7 @@ export async function compactedAgent(agentId: string, codename: string) {
   await say(agentId, 'compacts', 'Turn 8.')
 }
 
+/** The `head` of the newest head marker in the agent's entries, if any. */
 export function headOf(agentId: string): Promise<number | undefined> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) => {
     const row = drizzle(state.storage)
@@ -83,6 +90,7 @@ export function headOf(agentId: string): Promise<number | undefined> {
   })
 }
 
+/** The IDs of the entries the agent still stores. */
 export function storedEntryIds(agentId: string): Promise<number[]> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) =>
     drizzle(state.storage)

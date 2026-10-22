@@ -1,4 +1,10 @@
-/** Pruning limits, the runs in the object's SQLite, and whether one is due (Pruning). */
+/**
+ * Pruning limits, the runs recorded in the object's SQLite, and whether a run is due.
+ *
+ * @see docs/memory.md — Pruning
+ *
+ * @module
+ */
 import * as v from 'valibot'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { and, desc, eq, gt, isNotNull, lt, max, ne } from 'drizzle-orm'
@@ -7,6 +13,7 @@ import { pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import { piEntries } from '../../storage/pi-tables.ts'
 
+/** A pruning run and its state. */
 export type Run = typeof pruneRuns.$inferSelect
 
 /** The last entry pruned so far, or 0. */
@@ -19,6 +26,7 @@ export function prunedThrough(local: LocalDb): number {
   return row?.last ?? 0
 }
 
+/** The run not yet `deleted`, if any; there is at most one. */
 export function unfinishedRun(local: LocalDb): Run | undefined {
   return local
     .select()
@@ -41,8 +49,11 @@ function latestHead(storage: DurableObjectStorage): number | undefined {
 }
 
 /**
- * A run is unfinished, or the database is over the threshold and entries before the newest head
- * remain. Reads storage only, so it is safe while the harness opens.
+ * Whether a run is unfinished, or the database is over the threshold and entries before the newest
+ * head remain.
+ *
+ * @remarks
+ * Reads storage only, so it is safe while the harness opens.
  */
 export async function needsPrune(storage: DurableObjectStorage, local: LocalDb): Promise<boolean> {
   if (unfinishedRun(local) !== undefined) return true
@@ -65,6 +76,7 @@ export async function needsPrune(storage: DurableObjectStorage, local: LocalDb):
   return candidate !== undefined
 }
 
+/** Record a run's next state, with what the step confirmed. */
 export function setState(
   local: LocalDb,
   run: Run,
@@ -82,6 +94,7 @@ export function setState(
 const GIB = 1024 * 1024 * 1024
 const MIB = 1024 * 1024
 
+/** How large an agent's database may grow. */
 export interface PruneLimits {
   /** Prune once the database is larger than this. */
   thresholdBytes: number
@@ -91,13 +104,14 @@ export interface PruneLimits {
   runBytes: number
 }
 
+/** Prune above 1 GiB, refuse input above 8 GiB, and archive at most 16 MiB per run. */
 export const DEFAULT_PRUNE_LIMITS: PruneLimits = {
   thresholdBytes: GIB,
   hardBytes: 8 * GIB,
   runBytes: 16 * MIB,
 }
 
-/** An operator can lower the limits of one object by storing this key. */
+/** Storage key with which an operator can lower the limits of one object. */
 export const PRUNE_LIMITS_KEY = 'kodama:prune-limits'
 const limitsSchema = v.partial(
   v.object({
@@ -107,9 +121,10 @@ const limitsSchema = v.partial(
   }),
 )
 
-/** Retry a delete whose checks failed after this long. */
+/** How long after failed delete checks the `prune` alarm tries again. */
 export const PRUNE_RETRY_MS = 10 * 60_000
 
+/** The object's limits: the defaults, lowered by its stored override if it has one. */
 export async function pruneLimits(storage: DurableObjectStorage): Promise<PruneLimits> {
   const stored = v.safeParse(limitsSchema, await storage.get(PRUNE_LIMITS_KEY))
   return { ...DEFAULT_PRUNE_LIMITS, ...(stored.success ? stored.output : {}) }

@@ -1,7 +1,18 @@
+/**
+ * Transport types of the agents RPC. Consumers should import them with `import type`.
+ *
+ * @see docs/agents.md — RPC contract
+ *
+ * @module
+ */
 import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
+/**
+ * An event of an `AgentService.send` stream: Pi's events, preceded by `accepted` once the
+ * message is admitted.
+ */
 export type AgentSendEvent =
   | AgentEvent
   | { type: 'accepted'; requestId: string; submissionId: number }
@@ -27,36 +38,44 @@ export interface SendMessageRequest {
   whenBusy?: 'followUp' | 'steer'
 }
 
+/** The acknowledgement that a message was durably admitted. */
 export interface SendMessageResponse {
   agentId: string
   requestId: string
   submissionId: number
 }
 
+/** A snapshot of one agent, with its ID. */
 export interface AgentSnapshotResponse {
   agentId: string
   snapshot: AgentSnapshot
 }
 
+/** The status of one submission, with the agent's ID. */
 export interface SubmissionResponse {
   agentId: string
   submission: SubmissionStatus
 }
 
+/** One committed user or assistant message of the root conversation. */
 export interface AgentMessage {
   entryId: number
   role: 'user' | 'assistant'
   text: string
 }
 
+/** Committed messages of the root conversation, and whether the agent is busy. */
 export interface AgentSnapshot {
   messages: AgentMessage[]
   busy: boolean
 }
 
 /**
- * `unanswered` carries Pi's reason, such as `model_error`, and its detail as text, such as the provider
- * error message. Non-string details are JSON-encoded.
+ * The status of one submission.
+ *
+ * @remarks
+ * `unanswered` carries Pi's reason, such as `model_error`, and its detail as text, such as the
+ * provider's error message. Non-string details are JSON-encoded.
  */
 export type SubmissionStatus = { id: number; requestId: string } & (
   | { status: Exclude<SubmissionRecord['status'], 'unanswered'> }

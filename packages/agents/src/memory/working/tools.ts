@@ -1,4 +1,10 @@
-/** The memory tools every working agent gets (docs/memory.md, Working agents). */
+/**
+ * The memory tools every working agent gets.
+ *
+ * @see docs/memory.md — Working agents
+ *
+ * @module
+ */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
@@ -12,8 +18,10 @@ import { memoryDb, readableScopes } from '../store/db.ts'
 import { searchMemory } from '../store/search.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
+/** `remember` calls a working agent may make in one turn. */
 export const REMEMBER_LIMIT_PER_TURN = 3
 
+/** `memory_search`: searches the agent's records and its shared spaces. */
 export function memorySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
   return defineTool({
     name: 'memory_search',
@@ -57,6 +65,7 @@ function formatHistory(result: HistoryResult): string {
   return lines.join('\n')
 }
 
+/** `history_search`: searches the agent's archived conversation. */
 export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
   return defineTool({
     name: 'history_search',
@@ -82,6 +91,10 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
   })
 }
 
+/**
+ * `remember`: queues a memory agent job to save what the user asked to keep. The memory agent
+ * decides what to write; the tool only records the request.
+ */
 export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
   return defineTool({
     name: 'remember',
@@ -135,6 +148,7 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
   })
 }
 
+/** `skill_read`: returns the body of one of the agent's active skills and counts the use. */
 export function skillReadTool(deps: WorkingMemoryDeps): ToolRegistration {
   return defineTool({
     name: 'skill_read',

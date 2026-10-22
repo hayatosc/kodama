@@ -1,3 +1,10 @@
+/**
+ * The `Agent` Durable Object: the only class in the codebase, because a Durable Object must be one.
+ *
+ * @see docs/agents.md — The Agent Durable Object
+ *
+ * @module
+ */
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type {
@@ -7,34 +14,31 @@ import type {
   SubmissionDraft,
   TaskId,
 } from '@earendil-works/pi-durable'
-import { setAlarm, takeDueAlarms } from './alarms.ts'
+import { setAlarm, takeDueAlarms, armRecovery, refreshRecovery } from './alarms.ts'
 import type { AlarmPurpose } from './alarms.ts'
 import {
   defaultAgentConfig,
   initializeAgentConfig,
   readSharedSpaces,
+  readConfig,
+  replaceConfig,
 } from '../configuration/index.ts'
 import type { AgentEnv } from '../env.ts'
 import { coalescingRunner, serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './events.ts'
-import { createAgentOptions } from './harness.ts'
+import { createAgentOptions, exclusiveSection, isIdle, openHarness } from './harness.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { JobStatus } from '../memory/jobs.ts'
-import {
-  consolidate,
-  drainJobs,
-  enqueueJob,
-  HEARTBEAT_MS,
-} from '../memory/memory-agent/memory-agent.ts'
-import type { MemoryAgentContext } from '../memory/memory-agent/memory-agent.ts'
+import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS } from './dedicated/memory/runner.ts'
+import type { MemoryAgentContext } from './dedicated/memory/runner.ts'
 import {
   followMemoryModel,
   memoryAgentConfig,
   memoryHarnessOptions,
-} from '../memory/memory-agent/harness.ts'
-import { jobStatus, runningJob } from '../memory/memory-agent/queue.ts'
+} from './dedicated/memory/config.ts'
+import { jobStatus, runningJob } from './dedicated/memory/queue.ts'
 import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
@@ -45,31 +49,40 @@ import type {
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
-import { armRecovery, refreshRecovery } from './recovery.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
 import { parseAgentId, parseMessage, parseRequestId } from '../validation.ts'
-import { readEntries } from './entries.ts'
-import type { EntryPage } from './entries.ts'
-import { readConfig, replaceConfig } from './config.ts'
-import type { ConfigStore } from './config.ts'
-import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from './maintenance.ts'
-import { EXTRACT_IDLE_DELAY_MS, extractNewEntries, refreshMemory } from './memory.ts'
-import { exclusiveSection, isIdle, openHarness } from './session.ts'
+import { readEntries } from '../memory/transcript.ts'
+import type { EntryPage } from '../memory/transcript.ts'
+import type { ConfigStore } from '../configuration/index.ts'
+import {
+  pruneUntilUnder,
+  refuseWhenFull,
+  schedulePruneIfNeeded,
+  EXTRACT_IDLE_DELAY_MS,
+  extractNewEntries,
+  refreshMemory,
+} from './memory.ts'
 import { snapshotOf, submissionOf } from './views.ts'
 
 const context = BACKGROUND_CONTEXT
 
 /**
- * One named object owns one agent and its durable Pi session. This class serves RPC and holds the
- * object's in-memory state; the work is done by functions in this folder and in `src/memory/`.
+ * One named object owns one agent and its durable Pi session.
+ *
+ * @remarks
+ * The class serves RPC and holds the object's in-memory state in private fields; the work is done
+ * by plain functions in `src/agent/` and `src/memory/`.
  *
  * The memory agent is one of these objects too, under the reserved name `MEMORY_AGENT_NAME`. It
- * uses the memory agent's harness and configuration, and runs a job queue instead of taking chat
- * input. The name is not a valid public agent ID, so `AgentService` cannot reach it.
+ * uses the dedicated memory agent configuration in `dedicated/memory/` and runs a job queue
+ * instead of taking chat input. The name is not a valid public agent ID, so `AgentService`
+ * cannot reach it.
  */
 export class Agent extends DurableObject<AgentEnv> {
+  /** Whether this object runs as the memory agent, decided by its name. */
   readonly #isMemoryAgent: boolean
+  /** Kodama's own tables in this object's SQLite, opened before the harness. */
   readonly #local: Promise<LocalDb>
   /** The open harness; replaced when pruning closes and reopens it. */
   #harness: Promise<Harness>
@@ -79,7 +92,7 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #watching = new Set<TaskId>()
   /** The pruning pass in progress; concurrent calls share it. */
   #pruning: Promise<PruneOutcome> | undefined
-  /** A memory change arrived while busy; refresh at the next idle moment. */
+  /** A memory change arrived while the agent was busy; refresh at the next idle moment. */
   #memoryChanged = false
   /** The memory agent's job drain, one at a time. */
   readonly #jobs = coalescingRunner(
@@ -87,6 +100,7 @@ export class Agent extends DurableObject<AgentEnv> {
     'Memory job runner failed',
   )
 
+  /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
     this.#isMemoryAgent = ctx.id.name === MEMORY_AGENT_NAME
@@ -98,6 +112,10 @@ export class Agent extends DurableObject<AgentEnv> {
     })
   }
 
+  /**
+   * Open and prepare the harness: the root conversation, the configuration, the memory copy or
+   * the job drain, and the recovery alarm.
+   */
   #open(): Promise<Harness> {
     return openHarness(this.ctx, this.#harnessOptions(), async (harness) => {
       await harness.root(context)
@@ -120,17 +138,27 @@ export class Agent extends DurableObject<AgentEnv> {
     return name
   }
 
-  /** Reject chat input and configuration on the memory agent, whose input is its job queue. */
+  /**
+   * Reject chat input and configuration on the memory agent, whose input is its job queue.
+   *
+   * @throws When this object is the memory agent.
+   */
   #workingOnly(action: string): void {
     if (this.#isMemoryAgent) {
       throw new Error(`The memory agent does not ${action}; it takes jobs through enqueue`)
     }
   }
 
+  /**
+   * Reject job calls on a working agent.
+   *
+   * @throws When this object is not the memory agent.
+   */
   #memoryAgentOnly(): void {
     if (!this.#isMemoryAgent) throw new Error('Only the memory agent takes jobs')
   }
 
+  /** What the working agent's memory functions need from this object. */
   #workingMemory(): WorkingMemoryDeps {
     return {
       env: this.env,
@@ -140,6 +168,7 @@ export class Agent extends DurableObject<AgentEnv> {
     }
   }
 
+  /** What the memory agent's job functions need from this object. */
   #memoryAgentContext(): MemoryAgentContext {
     return {
       env: this.env,
@@ -159,10 +188,12 @@ export class Agent extends DurableObject<AgentEnv> {
     return createAgentOptions(this.env, [createWorkingMemoryExtension(this.#workingMemory())])
   }
 
+  /** The configuration a new agent starts with. */
   #defaultConfig(): AgentConfig {
     return this.#isMemoryAgent ? memoryAgentConfig(this.env) : defaultAgentConfig(this.env)
   }
 
+  /** The stored configuration's location and defaults. */
   async #config(): Promise<ConfigStore> {
     return {
       harness: await this.#harness,
@@ -171,10 +202,12 @@ export class Agent extends DurableObject<AgentEnv> {
     }
   }
 
+  /** The shared spaces this agent reads, earliest first. */
   #sharedSpaces(): Promise<string[]> {
     return readSharedSpaces(this.ctx.storage, this.#defaultConfig().sharedSpaces)
   }
 
+  /** What pruning needs from this object. */
   #pruneDeps(): PruneDeps {
     return {
       storage: this.ctx.storage,
@@ -219,6 +252,7 @@ export class Agent extends DurableObject<AgentEnv> {
     await refreshMemory(this.#workingMemory())
   }
 
+  /** Handle one due alarm purpose. */
   async #onAlarm(purpose: AlarmPurpose): Promise<void> {
     if (this.#isMemoryAgent) {
       // While a job runs, keep waking so the job resumes after an eviction.
@@ -236,6 +270,13 @@ export class Agent extends DurableObject<AgentEnv> {
     if (purpose === 'prune') await this.prune()
   }
 
+  /**
+   * The platform alarm: take the due purposes, refresh recovery, and handle each purpose.
+   *
+   * @remarks
+   * Due purposes are taken first, because the recovery refresh reschedules extraction when it finds
+   * the agent idle.
+   */
   override async alarm(): Promise<void> {
     // Take due purposes first: the recovery refresh reschedules extraction when it finds the agent idle.
     const due = await takeDueAlarms(this.ctx.storage, Date.now())
@@ -244,8 +285,11 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /**
-   * Durably admit input. The recovery alarm is persisted first, which also covers the window
-   * between admission and Pi's scheduler.
+   * Durably admit input to the root conversation.
+   *
+   * @remarks
+   * The recovery alarm is persisted first, in the serial queue, which also covers the window between
+   * admission and Pi's scheduler.
    */
   async #admit(draft: SubmissionDraft): Promise<Submission> {
     const harness = await this.#harness
@@ -258,6 +302,14 @@ export class Agent extends DurableObject<AgentEnv> {
     return submission
   }
 
+  /**
+   * Durably admit a message from a user or another agent, without waiting for the answer.
+   *
+   * @returns The submission ID.
+   * @throws {@link TypeError} When the message is invalid.
+   * @throws When this object is the memory agent, the database is above the hard storage limit, or
+   * the selected provider has no credentials.
+   */
   async sendMessage(request: SendMessageRequest): Promise<number> {
     this.#workingOnly('take chat input')
     const message = parseMessage(request)
@@ -278,20 +330,32 @@ export class Agent extends DurableObject<AgentEnv> {
     return submission.id
   }
 
+  /**
+   * Admit a message and stream its run as SSE until its submission settles.
+   *
+   * @throws {@link TypeError} When the message is invalid; nothing is admitted.
+   */
   async send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     const message = parseMessage(request)
     return sendEvents(await this.#harness, message.requestId, () => this.sendMessage(message))
   }
 
+  /** The stored configuration. */
   async getConfig(): Promise<AgentConfig> {
     return readConfig(await this.#config())
   }
 
+  /** An SSE stream of this agent's events, starting with a snapshot. */
   async subscribe(): Promise<ReadableStream<Uint8Array>> {
     return subscribeEvents(await this.#harness)
   }
 
-  /** Replace configuration while idle; history and request receipts are retained. */
+  /**
+   * Replace the configuration while idle; history and request receipts are kept.
+   *
+   * @throws {@link TypeError} When the configuration is invalid.
+   * @throws When this object is the memory agent, or work is pending.
+   */
   async setConfig(value: AgentConfig): Promise<AgentConfig> {
     this.#workingOnly('change its configuration')
     const store = await this.#config()
@@ -304,8 +368,11 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /**
-   * Stop the current run, including a retry wait, and withdraw queued input. Affected submissions settle
-   * as unanswered; history and configuration are kept. Resolves once the agent is idle.
+   * Stop the current run, including a retry wait, and withdraw queued input.
+   *
+   * @remarks
+   * Affected submissions settle as `unanswered`; history and configuration are kept. Resolves once
+   * the agent is idle.
    */
   async cancel(): Promise<void> {
     const harness = await this.#harness
@@ -314,7 +381,12 @@ export class Agent extends DurableObject<AgentEnv> {
     await this.#refreshRecovery(harness)
   }
 
-  /** Deliver to another agent through DO RPC; acceptance does not wait for its model response. */
+  /**
+   * Deliver a message to another agent; acceptance does not wait for its model response.
+   *
+   * @throws {@link TypeError} When the target ID or the message is invalid.
+   * @throws When this object is the memory agent.
+   */
   async sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
     this.#workingOnly('message other agents')
     parseAgentId(agentId)
@@ -323,16 +395,27 @@ export class Agent extends DurableObject<AgentEnv> {
     return { agentId, requestId: message.requestId, submissionId }
   }
 
+  /** Committed user and assistant messages, and whether the agent is busy. */
   async snapshot(): Promise<AgentSnapshot> {
     return snapshotOf(await this.#harness)
   }
 
+  /**
+   * The status of the submission with this request ID, if there is one.
+   *
+   * @throws {@link TypeError} When `requestId` is invalid.
+   */
   async submission(requestId: string): Promise<SubmissionStatus | undefined> {
     parseRequestId(requestId)
     return submissionOf(await this.#harness, requestId)
   }
 
-  /** Conversation text after entry `after`, oldest first, for the memory agent. */
+  /**
+   * Conversation text after entry `after`, oldest first, for the memory agent's extraction.
+   *
+   * @remarks
+   * Entries already pruned are read from their archived segment in R2.
+   */
   readEntries(request: { after: number; limit: number }): Promise<EntryPage> {
     return readEntries(
       {
@@ -346,15 +429,17 @@ export class Agent extends DurableObject<AgentEnv> {
     )
   }
 
-  /** The memory agent changed this agent's memory; the copy is refreshed while idle. */
+  /**
+   * The memory agent changed this agent's memory: refresh the copy now if idle, else when next idle.
+   */
   async memoryChanged(): Promise<void> {
     if (await isIdle(await this.#harness)) await refreshMemory(this.#workingMemory())
     else this.#memoryChanged = true
   }
 
   /**
-   * Archive and delete old entries until the database is under the threshold, or one run with
-   * `force`. A run whose delete checks fail is retried by the prune alarm.
+   * Archive and delete old entries until the database is under the threshold, or run once with
+   * `force`. Concurrent calls share the running pass.
    */
   prune(request: { force?: boolean } = {}): Promise<PruneOutcome> {
     this.#pruning ??= pruneUntilUnder(this.#pruneDeps(), request.force === true).finally(() => {
@@ -363,7 +448,13 @@ export class Agent extends DurableObject<AgentEnv> {
     return this.#pruning
   }
 
-  /** Queue a memory job on the memory agent; the same job delivered again returns its status. */
+  /**
+   * Queue a memory job on the memory agent.
+   *
+   * @returns The job's status; delivering the same job again returns the existing one.
+   * @throws {@link TypeError} When `job` is not a valid memory job.
+   * @throws When this object is not the memory agent.
+   */
   async enqueue(job: unknown): Promise<JobStatus> {
     this.#memoryAgentOnly()
     const status = await enqueueJob(this.#memoryAgentContext(), job)
@@ -371,12 +462,22 @@ export class Agent extends DurableObject<AgentEnv> {
     return status
   }
 
+  /**
+   * A memory job's status, if the job is known.
+   *
+   * @throws When this object is not the memory agent.
+   */
   async jobStatus(jobId: string): Promise<JobStatus | undefined> {
     this.#memoryAgentOnly()
     return jobStatus(await this.#local, jobId)
   }
 
-  /** The memory agent's daily consolidation, called by the scheduled handler. */
+  /**
+   * The memory agent's daily consolidation, called by the scheduled handler.
+   *
+   * @returns How many scopes got a `consolidate` job.
+   * @throws When this object is not the memory agent.
+   */
   async consolidate(now: number): Promise<{ scopes: number }> {
     this.#memoryAgentOnly()
     return consolidate(this.#memoryAgentContext(), now, (job) => this.enqueue(job))

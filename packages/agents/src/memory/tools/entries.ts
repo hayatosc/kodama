@@ -1,15 +1,20 @@
-/** Tools that read an agent's entries: an extract job's pages and checkpoint, and a record_archive job's segment and summary. */
+/**
+ * Tools that read an agent's entries: an extract job's pages and checkpoint, and a record_archive job's segment and summary.
+ *
+ * @module
+ */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { text, writingTool, toolDb } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
 import { eq } from 'drizzle-orm'
-import { readArchivedText } from '../../archive/reader.ts'
-import { writeSummary } from '../../archive/segment.ts'
-import type { MemoryDb } from '../../store/db.ts'
-import { archiveSegments } from '../../../../drizzle/d1/schema.ts'
+import { readArchivedText } from '../archive/reader.ts'
+import { writeSummary } from '../archive/segment.ts'
+import type { MemoryDb } from '../store/db.ts'
+import { archiveSegments } from '../../../drizzle/d1/schema.ts'
 
+/** The tools of an extract job: `read_entries` and `finish_extraction`. */
 export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
   const readEntries = defineTool({
     name: 'read_entries',
@@ -51,6 +56,7 @@ export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
   return [readEntries, finishExtraction]
 }
 
+/** The tools of a record_archive job: reading the archived segment and writing its summary. */
 export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
   const db = (): MemoryDb => toolDb(deps)
   const archivedSegment = async () => {

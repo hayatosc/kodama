@@ -1,3 +1,10 @@
+/**
+ * The local agent CLI: `nr agent send|snapshot|cancel`.
+ *
+ * @see docs/agents.md — Local agent CLI
+ *
+ * @module
+ */
 import { randomUUID } from 'node:crypto'
 import { parseArgs } from 'node:util'
 import { parseAgentId, parseMessage } from '../src/validation.ts'

@@ -1,15 +1,21 @@
 /**
  * Archived ranges of entries in R2: building and exporting a segment, its search index, and its
- * summary (docs/memory.md, Pruning, Archive index).
+ * summary.
+ *
+ * @see docs/memory.md — Pruning, Archive index
+ *
+ * @module
  */
 import type { EntryRecord } from '@earendil-works/pi-durable'
 import { SEARCH_VERSION, storedSearchText } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
 import { sha256Hex } from '../../lib/hash.ts'
 
+/** Version of the archive's object format, recorded in each manifest. */
 export const ARCHIVE_FORMAT = 1
 /** Pi Durable version whose entry records the archive holds. */
 export const PI_DURABLE_VERSION = '1.2.0'
+/** Characters of text per index chunk, about. */
 export const CHUNK_CHARS = 2_000
 
 /** A Pi `entries` row: its ID and the record JSON exactly as stored. */
@@ -18,6 +24,7 @@ export interface EntryRow {
   record: string
 }
 
+/** A chunk of a segment's text: its entries and its byte range in the `.jsonl` object. */
 export interface Chunk {
   first: number
   last: number
@@ -27,6 +34,7 @@ export interface Chunk {
   at: number
 }
 
+/** A segment's search index: its chunks, and the chunks each word occurs in. */
 export interface SegmentIndex {
   format: number
   searchVersion: number
@@ -35,6 +43,7 @@ export interface SegmentIndex {
   words: Record<string, number[]>
 }
 
+/** What a segment holds, to verify it and to know the Pi version that wrote it. */
 export interface SegmentManifest {
   format: number
   agentId: string
@@ -48,16 +57,19 @@ export interface SegmentManifest {
   piDurable: string
 }
 
+/** The three objects of a segment, ready to write. */
 export interface SegmentFiles {
   jsonl: string
   manifest: SegmentManifest
   index: SegmentIndex
 }
 
+/** A segment's ID: `<agentId>/<first>-<last>`. */
 export function segmentId(agentId: string, first: number, last: number): string {
   return `${agentId}/${first}-${last}`
 }
 
+/** A segment's R2 key prefix: `archive/<agentId>/<first>-<last>`. */
 export function segmentPrefix(agentId: string, first: number, last: number): string {
   return `archive/${segmentId(agentId, first, last)}`
 }
@@ -66,7 +78,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Narrow a parsed record to the fields entryText reads. */
+/** Narrow a parsed record to the fields `entryText` reads. */
 export function isEntryRecord(value: unknown): value is EntryRecord {
   return isRecord(value) && typeof value['kind'] === 'string'
 }
@@ -85,7 +97,11 @@ function entryTime(entry: EntryRecord | undefined): number | undefined {
   return undefined
 }
 
-/** The `.jsonl`, manifest, and search index of one range of entries, built in code. */
+/**
+ * The `.jsonl`, manifest, and search index of one range of entries, built in code.
+ *
+ * @throws When `rows` is empty.
+ */
 export async function buildSegment(
   agentId: string,
   rows: readonly EntryRow[],
@@ -162,7 +178,11 @@ export async function buildSegment(
   }
 }
 
-/** Write the segment's objects and read them back; throws unless all three are intact. */
+/**
+ * Write a segment's objects and read them back.
+ *
+ * @throws When an object is missing or differs after the write.
+ */
 export async function exportSegment(
   bucket: R2Bucket,
   prefix: string,
@@ -179,7 +199,7 @@ export async function exportSegment(
   }
 }
 
-/** The summary of a segment, written by the memory agent's `record_archive` job. */
+/** Store a segment's summary and its search words, written by a `record_archive` job. */
 export async function writeSummary(
   bucket: R2Bucket,
   prefix: string,

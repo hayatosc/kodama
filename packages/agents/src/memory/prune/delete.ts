@@ -1,4 +1,10 @@
-/** The last step of a pruning run: deleting Pi's rows once nothing can still read them. */
+/**
+ * The last step of a pruning run: deleting Pi's rows once nothing can still read them.
+ *
+ * @see docs/memory.md — Pruning
+ *
+ * @module
+ */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
@@ -18,7 +24,13 @@ import type { Run } from './runs.ts'
 
 const context = BACKGROUND_CONTEXT
 
-/** Delete the run's entries, terminal tasks with their documents, and their ID records. */
+/**
+ * Delete the run's entries, terminal tasks with their documents, and their ID records, and record
+ * `deleted`.
+ *
+ * @remarks
+ * Call it inside one storage transaction, with the harness closed.
+ */
 export function deleteRows(
   storage: DurableObjectStorage,
   local: LocalDb,
@@ -76,7 +88,10 @@ export function deleteRows(
   setState(local, run, { state: 'deleted' }, now)
 }
 
-/** Nothing may still read the run's entries: no live task, no queued input, one conversation. */
+/**
+ * Whether nothing can still read the run's entries: no live task, background compaction included,
+ * no queued input, only the root conversation, and a head at or past the run.
+ */
 export async function safeToDelete(
   storage: DurableObjectStorage,
   harness: Harness,

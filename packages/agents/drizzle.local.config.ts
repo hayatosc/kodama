@@ -1,3 +1,8 @@
+/**
+ * drizzle-kit configuration of kodama's tables in each Durable Object's SQLite.
+ *
+ * @module
+ */
 import { defineConfig } from 'drizzle-kit'
 
 /** Generates the migrations of kodama's tables in each Durable Object's own SQLite. */

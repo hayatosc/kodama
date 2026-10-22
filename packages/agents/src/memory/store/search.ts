@@ -1,10 +1,17 @@
-/** Searching memory records by their words (docs/memory.md, Queries). */
+/**
+ * Searching memory records by their words.
+ *
+ * @see docs/memory.md — Search text, Queries
+ *
+ * @module
+ */
 import { and, eq, gte, inArray, lt } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord } from './db.ts'
 import { memoryRecords, memoryTerms } from '../../../drizzle/d1/schema.ts'
 import type { Scope } from '../../../drizzle/d1/schema.ts'
 import { searchTermSets } from '../../lib/search-text.ts'
 
+/** What to search, and where. */
 export interface SearchOptions {
   query: string
   scopes: readonly Scope[]
@@ -53,9 +60,11 @@ async function recordsWithTerm(
 }
 
 /**
- * Search active records of the given scopes for every word of the query: merged words, then the
- * original segments, then merged words as prefixes. Ranked by importance, use, and for events
- * recency. Returned records count as used.
+ * Search the active records of the given scopes for every word of the query.
+ *
+ * @remarks
+ * Tries the merged words, then the original segments, then each merged word as a prefix. Ranks by
+ * importance and use, and events also by recency. Returned records count as used.
  */
 export async function searchMemory(
   db: MemoryDb,

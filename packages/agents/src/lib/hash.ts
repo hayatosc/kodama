@@ -1,4 +1,8 @@
-/** Content hashes, as lowercase hex. */
+/**
+ * Content hashes, as lowercase hex.
+ *
+ * @module
+ */
 
 /** SHA-256 of bytes, or of a string's UTF-8 encoding. */
 export async function sha256Hex(data: Uint8Array | string): Promise<string> {
