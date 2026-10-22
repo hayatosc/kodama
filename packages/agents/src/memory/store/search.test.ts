@@ -83,6 +83,8 @@ describe('working-agent search precedence', () => {
     const rawOptions = { ...options, forAgent: undefined, countUse: false }
     const raw = await searchMemory(db, rawOptions)
     expect(raw.map((row) => row.content)).toEqual(['Pushing to main is fine'])
+    const required = await searchMemory(parameterLimitedDb, { ...options, query: 'main' })
+    expect(required.map((row) => row.content)).toEqual(['Never push to main'])
   })
 
   it('resolves overrides outside query matches without suppressing another agent’s view', async () => {
@@ -95,7 +97,7 @@ describe('working-agent search precedence', () => {
       content: 'Reply in English',
       sourceAgentId: 'memory',
     })
-    await write({
+    const override = await write({
       scope: `agent:${agentId}`,
       kind: 'instruction',
       content: 'Reply in Japanese',
@@ -115,6 +117,9 @@ describe('working-agent search precedence', () => {
     expect(theirs.map((row) => row.content)).toEqual(['Reply in English'])
     const mine = await searchMemory(parameterLimitedDb, { ...options, query: 'Reply' })
     expect(mine.map((row) => row.content)).toEqual(['Reply in Japanese'])
+    await db.update(memoryRecords).set({ status: 'invalid' }).where(eq(memoryRecords.id, override))
+    const restored = await searchMemory(parameterLimitedDb, options)
+    expect(restored.map((row) => row.content)).toEqual(['Reply in English'])
   })
 
   it('does not let unreadable or inactive required targets suppress personal memory', async () => {
@@ -168,6 +173,7 @@ describe('search parameter limits', () => {
         scopes: [`agent:${agentId}`],
         now: NOW,
         limit: 3,
+        forAgent: agentId,
       })
 
       expect(found.map((record) => record.content)).toEqual(expected)

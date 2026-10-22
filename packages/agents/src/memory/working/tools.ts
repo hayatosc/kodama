@@ -33,6 +33,7 @@ export function memorySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
       const records = await searchMemory(memoryDb(deps.env.MEMORY_DB), {
         query,
         scopes: readableScopes(deps.agentId(), await deps.sharedSpaces()),
+        forAgent: deps.agentId(),
         now: deps.now?.() ?? Date.now(),
       })
       const lines =
