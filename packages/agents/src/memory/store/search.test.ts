@@ -6,7 +6,8 @@
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { memoryRecords, memoryTerms } from '../../../drizzle/d1/schema.ts'
-import { db, parameterLimitedDb } from '../../helper/memory.ts'
+import { db, parameterLimitedDb, record, write } from '../../helper/memory.ts'
+import { readableScopes } from './db.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import { searchMemory } from './search.ts'
 
@@ -39,6 +40,117 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
     if (first !== undefined) await db.batch([first, ...rest])
   }
 }
+
+describe('working-agent search precedence', () => {
+  it('excludes prohibited overrides before ranking, limiting, and counting use', async () => {
+    const agentId = crypto.randomUUID()
+    const space = crypto.randomUUID()
+    const target = await write({
+      scope: `shared:${space}`,
+      kind: 'instruction',
+      content: 'Never push to main',
+      sourceAgentId: 'memory',
+      required: true,
+    })
+    const prohibited = await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: 'Pushing to main is fine',
+      sourceAgentId: agentId,
+      overrides: target,
+      importance: 1,
+    })
+    const allowed = await write({
+      scope: `agent:${agentId}`,
+      kind: 'fact',
+      content: 'Pushing to a feature branch is permitted',
+      sourceAgentId: agentId,
+      importance: 0,
+    })
+    const options = {
+      query: 'Pushing',
+      scopes: readableScopes(agentId, [space]),
+      now: NOW,
+      limit: 1,
+      forAgent: agentId,
+    }
+    const found = await searchMemory(parameterLimitedDb, options)
+    expect(found.map((row) => row.content)).toEqual(['Pushing to a feature branch is permitted'])
+    expect((await record(prohibited))?.useCount).toBe(0)
+    expect((await record(allowed))?.useCount).toBe(1)
+    expect((await record(target))?.useCount).toBe(0)
+
+    const rawOptions = { ...options, forAgent: undefined, countUse: false }
+    const raw = await searchMemory(db, rawOptions)
+    expect(raw.map((row) => row.content)).toEqual(['Pushing to main is fine'])
+  })
+
+  it('resolves overrides outside query matches without suppressing another agent’s view', async () => {
+    const agentId = crypto.randomUUID()
+    const other = crypto.randomUUID()
+    const space = crypto.randomUUID()
+    const target = await write({
+      scope: `shared:${space}`,
+      kind: 'instruction',
+      content: 'Reply in English',
+      sourceAgentId: 'memory',
+    })
+    await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: 'Reply in Japanese',
+      sourceAgentId: agentId,
+      overrides: target,
+    })
+    const options = {
+      query: 'English',
+      scopes: readableScopes(agentId, [space]),
+      now: NOW,
+      forAgent: agentId,
+    }
+    expect(await searchMemory(parameterLimitedDb, options)).toEqual([])
+    expect((await record(target))?.useCount).toBe(0)
+    const theirOptions = { ...options, scopes: readableScopes(other, [space]), forAgent: other }
+    const theirs = await searchMemory(parameterLimitedDb, theirOptions)
+    expect(theirs.map((row) => row.content)).toEqual(['Reply in English'])
+    const mine = await searchMemory(parameterLimitedDb, { ...options, query: 'Reply' })
+    expect(mine.map((row) => row.content)).toEqual(['Reply in Japanese'])
+  })
+
+  it('does not let unreadable or inactive required targets suppress personal memory', async () => {
+    const agentId = crypto.randomUUID()
+    const space = crypto.randomUUID()
+    const target = await write({
+      scope: `shared:${space}`,
+      kind: 'instruction',
+      content: 'Never push to main',
+      sourceAgentId: 'memory',
+      required: true,
+    })
+    await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: 'Pushing to main is fine',
+      sourceAgentId: agentId,
+      overrides: target,
+    })
+    const options = {
+      query: 'Pushing',
+      scopes: readableScopes(agentId, []),
+      now: NOW,
+      forAgent: agentId,
+    }
+    expect((await searchMemory(parameterLimitedDb, options)).map((row) => row.content)).toEqual([
+      'Pushing to main is fine',
+    ])
+    await db.update(memoryRecords).set({ status: 'invalid' }).where(eq(memoryRecords.id, target))
+    const visible = await searchMemory(parameterLimitedDb, {
+      ...options,
+      scopes: readableScopes(agentId, [space]),
+    })
+    expect(visible.map((row) => row.content)).toEqual(['Pushing to main is fine'])
+  })
+})
 
 describe('search parameter limits', () => {
   it.each([
