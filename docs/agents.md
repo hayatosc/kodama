@@ -372,7 +372,9 @@ admission and Pi's scheduler. Admissions and recovery refreshes run in one seria
 
 On wake, the object reopens Pi's storage, reconstructs pending tasks, and resumes the scheduler.
 When no task is left, recovery clears only its own time and runs the idle work: scheduling
-extraction and pruning, and any pending memory refresh.
+extraction and pruning, and any pending memory refresh. Reopening an idle object preserves an
+already scheduled extraction deadline, including one that is due. Admission clears the previous
+idle deadline; when the new work finishes, extraction gets a fresh ten-minute delay.
 
 Model calls can be repeated after an interruption. Request IDs prevent duplicate durable inputs,
 not duplicate provider billing.

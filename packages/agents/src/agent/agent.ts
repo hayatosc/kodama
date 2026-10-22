@@ -14,7 +14,13 @@ import type {
   SubmissionDraft,
   TaskId,
 } from '@earendil-works/pi-durable'
-import { setAlarm, takeDueAlarms, armRecovery, refreshRecovery } from './alarms.ts'
+import {
+  setAlarm,
+  setAlarmNoLaterThan,
+  takeDueAlarms,
+  armRecovery,
+  refreshRecovery,
+} from './alarms.ts'
 import type { AlarmPurpose } from './alarms.ts'
 import {
   defaultAgentConfig,
@@ -146,7 +152,8 @@ export class Agent extends DurableObject<AgentEnv> {
    * change that arrived while busy.
    */
   protected async onIdle(): Promise<void> {
-    await setAlarm(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
+    // Reopening an idle object must not postpone the deadline that woke it.
+    await setAlarmNoLaterThan(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
     await schedulePruneIfNeeded(this.ctx.storage, await this.#local)
     if (!this.#memoryChanged) return
     this.#memoryChanged = false
@@ -257,6 +264,8 @@ export class Agent extends DurableObject<AgentEnv> {
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
       await armRecovery(this.ctx.storage)
+      // New activity ends the previous idle period; its completion starts a fresh delay.
+      await setAlarm(this.ctx.storage, 'extract', undefined)
       return conversation.submit(draft, context)
     })
     await this.#refreshRecovery(harness)
