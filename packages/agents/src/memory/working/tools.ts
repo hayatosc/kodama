@@ -59,8 +59,10 @@ function formatHistory(result: HistoryResult): string {
     )
   }
   if (lines.length === 0) lines.push('No matching archived history.')
-  if (!result.complete && result.searchedBefore !== undefined) {
-    lines.push(`(older history not searched; pass before=${result.searchedBefore} to continue)`)
+  if (result.nextCursor !== undefined) {
+    lines.push(
+      `(older history not searched; pass cursor=${result.nextCursor} with the same query to continue)`,
+    )
   }
   return lines.join('\n')
 }
@@ -76,15 +78,23 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
       before: Type.Optional(
         Type.Integer({ minimum: 0, description: 'Only search history older than this time (ms)' }),
       ),
+      cursor: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 500,
+          description:
+            'Continuation from the previous search with the same query; preserves its time bound',
+        }),
+      ),
     }),
     replay: 'safe',
-    execute: async ({ query, before }) => {
+    execute: async ({ query, before, cursor }) => {
       const result = await searchHistory(
         memoryDb(deps.env.MEMORY_DB),
         deps.env.ARCHIVE,
         deps.agentId(),
         query,
-        before === undefined ? {} : { before },
+        { before, cursor },
       )
       return { output: [{ type: 'text', text: formatHistory(result) }] }
     },

@@ -578,17 +578,25 @@ Each archived range has its search index in R2, next to its entries
 The objects and the row are deleted only together, by an operator. Consolidation never expires
 them.
 
-`history_search(query, before?)`:
+`history_search(query, before?, cursor?)`:
 
-1. List this agent's catalog rows newest first, starting before `before` if given.
+1. List this agent's catalog rows newest first, with entry IDs breaking equal-time ties. A numeric
+   `before` is an exclusive timestamp bound on chunks; overlapping segments remain eligible.
+   Summaries are included only when their whole segment precedes the bound.
 2. Read their `.summary.json` and `.index.json` objects in that order, until 4 MiB have been read.
 3. Match the query against the chunks. A chunk matches when it contains every query word, tried
    in the same order as in [Search text](#search-text): the merged words, then the original
    segments, then each merged word as a prefix. A summary matches the same way. At most five
    matches are returned, newest first.
 4. Read the matched byte ranges from the `.jsonl` objects and return them with their entry IDs and
-   times. Also return the oldest time searched, which the model passes as `before` to search
-   further back.
+   times. When a result, read, or catalog-page limit stops the search, return an opaque `cursor`
+   for the next unvisited segment or chunk. Pass it with the same query to continue; it preserves
+   the original `before` bound. A resumed segment does not repeat its summary. Entry IDs keep
+   continuation lossless even when several chunks or segments have the same timestamp.
+
+The internal result's `searchedBefore` remains the oldest visited time for display, not a
+continuation token. `nextCursor` is absent and `complete` is true only after all eligible catalog
+rows and matching chunks have been visited.
 
 ## Skills
 
@@ -857,7 +865,7 @@ turns it into a `conflict` instead of being undone.
   The archive keeps raw entries as they were.
 - 「プラクティス」 alone does not match 「ベストプラクティス」.
 - `history_search` has no ranking across all ranges, and finding something old can take several
-  calls with `before`.
+  calls with a continuation `cursor`.
 - D1 is one database for all agents. Consolidation records its size, but when to split it is not
   decided.
 - The 30-day skill window, the two agents needed for a shared record, and the 50-skill limit are

@@ -114,6 +114,59 @@ describe('archive pagination', () => {
     expect(next).toMatchObject({ hits: [], complete: true })
   })
 
+  it('continues past a full catalog page even when every segment has the same time', async () => {
+    const agentId = crypto.randomUUID()
+    for (let entry = 1; entry <= 101; entry++) {
+      await db.insert(archiveSegments).values({
+        id: segmentId(agentId, entry, entry),
+        agentId,
+        firstEntry: entry,
+        lastEntry: entry,
+        entryCount: 1,
+        r2Prefix: segmentPrefix(agentId, entry, entry),
+        sha256: 'missing-index',
+        bytes: 0,
+        firstAt: 1_000,
+        lastAt: 1_000,
+        createdAt: 1_000,
+      })
+    }
+    const first = await searchHistory(db, env.ARCHIVE, agentId, 'absent')
+    expect(first).toMatchObject({ hits: [], complete: false, nextCursor: expect.any(String) })
+    const next = await searchHistory(db, env.ARCHIVE, agentId, 'absent', {
+      cursor: first.nextCursor,
+    })
+    expect(next).toMatchObject({ hits: [], complete: true, nextCursor: undefined })
+  })
+
+  it('rejects malformed cursors and changes to their time bound', async () => {
+    const agentId = crypto.randomUUID()
+    for (const cursor of ['not-a-cursor', btoa('{}'), btoa('{"lastAt":1,"lastEntry":-1}')]) {
+      await expect(searchHistory(db, env.ARCHIVE, agentId, 'needle', { cursor })).rejects.toThrow(
+        'Invalid history search cursor',
+      )
+    }
+    await archiveChunks(agentId, 1, [1_000, 2_000])
+    const first = await searchHistory(db, env.ARCHIVE, agentId, 'needle', {
+      before: 3_000,
+      limit: 1,
+    })
+    await expect(
+      searchHistory(db, env.ARCHIVE, agentId, 'needle', {
+        cursor: first.nextCursor,
+        before: 2_000,
+      }),
+    ).rejects.toThrow('keeps its original before bound')
+  })
+
+  it('marks a page complete when its last allowed hit exhausts the archive', async () => {
+    const agentId = crypto.randomUUID()
+    await archiveChunks(agentId, 1, [1_000, 2_000])
+    const found = await searchHistory(db, env.ARCHIVE, agentId, 'needle', { limit: 2 })
+    expect(found.hits.map((hit) => hit.firstEntry)).toEqual([2, 1])
+    expect(found).toMatchObject({ complete: true, nextCursor: undefined })
+  })
+
   it('offers and accepts an opaque continuation through the working agent tool', async () => {
     const agentId = crypto.randomUUID()
     await archiveChunks(agentId, 1, [1_000, 2_000, 3_000, 4_000, 5_000, 6_000])
