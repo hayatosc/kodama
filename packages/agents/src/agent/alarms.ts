@@ -1,80 +1,68 @@
+/**
+ * One due time per purpose in the object's storage, with the platform alarm at the earliest
+ * (docs/memory.md, Alarms). Times are read and written with the synchronous storage API, so two
+ * updates never interleave, and each one sets the alarm from the state it just wrote.
+ */
+
 /** Why an object wants to be woken. One Durable Object alarm serves all of them. */
 export type AlarmPurpose = 'recovery' | 'extract' | 'prune' | 'jobs'
 
 const KEY_PREFIX = 'kodama:alarm:'
 const PURPOSES: readonly AlarmPurpose[] = ['recovery', 'extract', 'prune', 'jobs']
 
-/**
- * Keeps one due time per purpose in the object's storage and the platform alarm at the earliest
- * (docs/memory.md, Alarms). Changes run one at a time.
- */
-export class AlarmSchedule {
-  readonly #storage: DurableObjectStorage
-  #queue: Promise<void> = Promise.resolve()
-
-  constructor(storage: DurableObjectStorage) {
-    this.#storage = storage
+function dueTimes(storage: DurableObjectStorage): Map<AlarmPurpose, number> {
+  const due = new Map<AlarmPurpose, number>()
+  for (const purpose of PURPOSES) {
+    const at = storage.kv.get<number>(KEY_PREFIX + purpose)
+    if (at !== undefined) due.set(purpose, at)
   }
+  return due
+}
 
-  #serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.#queue.then(operation, operation)
-    this.#queue = run.then(
-      () => {},
-      () => {},
-    )
-    return run
-  }
+/** Point the platform alarm at the earliest due time, or clear it. */
+function syncAlarm(storage: DurableObjectStorage): Promise<void> {
+  const times = [...dueTimes(storage).values()]
+  return times.length === 0 ? storage.deleteAlarm() : storage.setAlarm(Math.min(...times))
+}
 
-  async #due(): Promise<Map<AlarmPurpose, number>> {
-    const due = new Map<AlarmPurpose, number>()
-    for (const purpose of PURPOSES) {
-      const at = await this.#storage.get<number>(KEY_PREFIX + purpose)
-      if (at !== undefined) due.set(purpose, at)
-    }
-    return due
-  }
+/** Wake for `purpose` at `at` (epoch ms), or no longer when `at` is undefined. */
+export function setAlarm(
+  storage: DurableObjectStorage,
+  purpose: AlarmPurpose,
+  at: number | undefined,
+): Promise<void> {
+  if (at === undefined) storage.kv.delete(KEY_PREFIX + purpose)
+  else storage.kv.put(KEY_PREFIX + purpose, at)
+  return syncAlarm(storage)
+}
 
-  async #sync(): Promise<void> {
-    const times = [...(await this.#due()).values()]
-    if (times.length === 0) await this.#storage.deleteAlarm()
-    else await this.#storage.setAlarm(Math.min(...times))
-  }
+/** When `purpose` is due, if it is scheduled. */
+export function alarmAt(storage: DurableObjectStorage, purpose: AlarmPurpose): number | undefined {
+  return storage.kv.get<number>(KEY_PREFIX + purpose)
+}
 
-  /** Wake for `purpose` at `at` (epoch ms), or no longer when `at` is undefined. */
-  set(purpose: AlarmPurpose, at: number | undefined): Promise<void> {
-    return this.#serialize(async () => {
-      if (at === undefined) await this.#storage.delete(KEY_PREFIX + purpose)
-      else await this.#storage.put(KEY_PREFIX + purpose, at)
-      await this.#sync()
-    })
-  }
+/** Wake for `purpose` at `at` unless it is already due earlier. */
+export async function setAlarmNoLaterThan(
+  storage: DurableObjectStorage,
+  purpose: AlarmPurpose,
+  at: number,
+): Promise<void> {
+  const current = alarmAt(storage, purpose)
+  if (current !== undefined && current <= at) return
+  await setAlarm(storage, purpose, at)
+}
 
-  /** When `purpose` is due, if it is scheduled. */
-  get(purpose: AlarmPurpose): Promise<number | undefined> {
-    return this.#serialize(() => this.#storage.get<number>(KEY_PREFIX + purpose))
+/** Remove and return the purposes due at `now`; the alarm moves to the next one. */
+export async function takeDueAlarms(
+  storage: DurableObjectStorage,
+  now: number,
+): Promise<AlarmPurpose[]> {
+  const taken: AlarmPurpose[] = []
+  for (const [purpose, at] of dueTimes(storage)) {
+    if (at > now) continue
+    taken.push(purpose)
+    storage.kv.delete(KEY_PREFIX + purpose)
   }
-
-  /** Wake for `purpose` at `at` unless it is already due earlier. */
-  setNoLaterThan(purpose: AlarmPurpose, at: number): Promise<void> {
-    return this.#serialize(async () => {
-      const current = await this.#storage.get<number>(KEY_PREFIX + purpose)
-      if (current !== undefined && current <= at) return
-      await this.#storage.put(KEY_PREFIX + purpose, at)
-      await this.#sync()
-    })
-  }
-
-  /** Remove and return the purposes due at `now`; the alarm moves to the next one. */
-  take(now: number): Promise<AlarmPurpose[]> {
-    return this.#serialize(async () => {
-      const taken: AlarmPurpose[] = []
-      for (const [purpose, at] of await this.#due()) {
-        if (at > now) continue
-        taken.push(purpose)
-        await this.#storage.delete(KEY_PREFIX + purpose)
-      }
-      await this.#sync()
-      return taken
-    })
-  }
+  await syncAlarm(storage)
+  return taken
 }

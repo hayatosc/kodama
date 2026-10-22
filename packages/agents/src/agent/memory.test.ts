@@ -3,7 +3,11 @@ import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from '../memory/store/records.ts'
 import { extractionCheckpoint } from '../memory/store/db.ts'
-import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
+import {
+  refreshAlwaysLoaded,
+  refreshAlwaysLoadedIfChanged,
+  storedMemoryText,
+} from '../memory/working/always-loaded.ts'
 import { openLocalDb } from '../storage/local.ts'
 import {
   isMemoryAgentRequest,
@@ -69,14 +73,14 @@ describe('always-loaded memory', () => {
 
     const texts = await runInDurableObject(stub, async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      const memory = new AlwaysLoadedMemory({
+      const memory = {
         env,
         agentId: () => agentId,
         local: () => Promise.resolve(local),
         sharedSpaces: () => Promise.resolve(['global']),
         now: () => clock,
-      })
-      await memory.refresh()
+      }
+      await refreshAlwaysLoaded(memory)
       await applyOperation(
         db,
         { opId: crypto.randomUUID(), jobId: 'job', runId: 'run', actor: 'test', now: clock },
@@ -94,11 +98,11 @@ describe('always-loaded memory', () => {
         },
       )
       clock += 1_000
-      await memory.refreshIfChanged()
-      const early = await memory.text()
+      await refreshAlwaysLoadedIfChanged(memory)
+      const early = await storedMemoryText(memory)
       clock += 60_000
-      await memory.refreshIfChanged()
-      return { early, late: await memory.text() }
+      await refreshAlwaysLoadedIfChanged(memory)
+      return { early, late: await storedMemoryText(memory) }
     })
 
     expect(texts.early).not.toContain('Answer in Japanese')

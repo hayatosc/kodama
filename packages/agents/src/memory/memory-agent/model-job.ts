@@ -8,14 +8,16 @@ import type { MemoryDb } from '../store/db.ts'
 import { memoryOps } from '../../../drizzle/d1/schema.ts'
 import type { JobOutcome, MemoryJob } from '../jobs.ts'
 import { jobPrompt } from './prompts.ts'
-import type { JobQueue, JobRow } from './queue.ts'
+import { recordSubmission } from './queue.ts'
+import type { JobRow } from './queue.ts'
+import type { LocalDb } from '../../storage/local.ts'
 
 const context = BACKGROUND_CONTEXT
 
 export interface ModelJobDeps {
   harness: Harness
   admit: (draft: SubmissionDraft) => Promise<Submission>
-  queue: JobQueue
+  local: LocalDb
   db: MemoryDb
 }
 
@@ -58,7 +60,7 @@ export async function runModelJob(
       content: jobPrompt(job),
       whenBusy: 'followUp',
     })
-    await deps.queue.recordSubmission(row.jobId, submission.id)
+    recordSubmission(deps.local, row.jobId, submission.id)
   }
   const settled = await submission.wait(context)
   if (settled.status !== 'done') return 'retry'

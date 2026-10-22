@@ -1,7 +1,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AlarmSchedule } from './alarms.ts'
+import { setAlarm, takeDueAlarms } from './alarms.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -13,13 +13,12 @@ describe('alarm schedule', () => {
     const now = Date.now()
 
     const alarms = await runInDurableObject(stub, async (_instance, state) => {
-      const schedule = new AlarmSchedule(state.storage)
-      await schedule.set('extract', now + 100_000)
-      await schedule.set('recovery', now + 50_000)
+      await setAlarm(state.storage, 'extract', now + 100_000)
+      await setAlarm(state.storage, 'recovery', now + 50_000)
       const both = await state.storage.getAlarm()
-      await schedule.set('recovery', undefined)
+      await setAlarm(state.storage, 'recovery', undefined)
       const extractOnly = await state.storage.getAlarm()
-      const taken = await schedule.take(now + 100_000)
+      const taken = await takeDueAlarms(state.storage, now + 100_000)
       return { both, extractOnly, taken, after: await state.storage.getAlarm() }
     })
 

@@ -6,13 +6,13 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 
 - `packages/agents/src/index.ts`: service-binding RPC entrypoint.
 - `packages/agents/drizzle/`: every Drizzle schema, next to the migrations drizzle-kit generates from it, one folder per database. `d1/schema.ts` is the D1 schema and `d1/migrations/` its migrations (apply them with `cf d1 migrations apply --dir drizzle/d1/migrations`). `durable-object/schema.ts` is kodama's tables in each Durable Object's own SQLite, and `durable-object/migrations/` their migrations, which `src/storage/local.ts` applies. Keep one schema file per SQLite database. Edit the schemas by hand; never edit the `migrations/` folders.
-- `src/lib/`: generic helpers that import nothing else from `src/` (`hash.ts`, `search-text.ts`, `redact.ts`).
+- `src/lib/`: generic helpers that import nothing else from `src/` (`hash.ts`, `search-text.ts`, `redact.ts`, and `serial.ts`, the ordering helpers the `Agent` class uses).
 - `src/agent/`: the `Agent` Durable Object and its runtime (`harness.ts`, `events.ts`, `alarms.ts`, `recovery.ts`). `agent.ts` only wires the parts and serves RPC; put behavior in its own module there (`session.ts` the harness and its exclusive section, `maintenance.ts` pruning control, `entries.ts` entry pages, `memory.ts` working-agent memory, `config.ts` configuration, `views.ts` snapshot and submission reads mapped from Pi state) or under `src/memory/`, not in `agent.ts`.
 - `src/validation.ts`: valibot schemas for untrusted RPC input; failures throw `TypeError`.
 - `src/configuration/`, `src/models/`, and `src/tools/`: configuration (with the default prompt and shared spaces), providers, and registered tools.
 - `src/memory/`: long-term memory, one folder or file per part. Keep each file to one concern; split a file before it grows past a few hundred lines, but do not split one that small.
   - `store/`: D1 through Drizzle, with the schema in `drizzle/d1/schema.ts`. `records.ts` applies write operations, `record-plans.ts` and `progress-plans.ts` plan them, `statements.ts` holds the statements they share, `search.ts` searches records. Write queries with Drizzle's query builder and migrations only with drizzle-kit; do not write SQL by hand.
-  - `memory-agent/`: the memory agent (`memory-agent.ts` runs the queue), its queue (`queue.ts`), harness, model jobs, prompts, daily consolidation, and its tools in `tools/`.
+  - `memory-agent/`: the memory agent (`memory-agent.ts` drains the queue), its queue (`queue.ts`), harness, model jobs, prompts, daily consolidation, and its tools in `tools/`.
   - `working/`: what working agents get: the always-loaded memory, the memory tools, and the extension.
   - `archive/`: archived segments in R2 (`segment.ts` writes, `reader.ts` reads) and `history_search`.
   - `prune/`: pruning of old Pi entries: limits, runs, the steps before the delete, and the delete.
@@ -26,7 +26,7 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 
 The abbreviated `src/` paths above are relative to `packages/agents/`.
 
-Prefer fewer, cohesive files over many small ones, and the simplest storage that stays correct after a stop (for example one D1 batch rather than a journal over R2). Add a mechanism only when the feature needs it now.
+Keep the code functional and simple. `Agent` is the only class, because a Durable Object must be one; it holds the object's in-memory state in private fields. Write everything else as plain functions that take what they need (`db`, `local`, `harness`, `env`) and return a result; do not add classes, or objects that only carry dependencies, to organize code. Prefer fewer, cohesive files over many small ones, and the simplest storage that stays correct after a stop (for example one D1 batch rather than a journal over R2). Add a mechanism only when the feature needs it now.
 
 Imports follow the layers in `docs/agents.md` (Dependencies): `lib` imports nothing else from `src/`, the memory parts never import `src/agent/` or `memory-agent/` (they use `src/memory/jobs.ts`), and `memory-agent/` sits above the agent runtime in `src/agent/`, with only `src/agent/agent.ts` (the `Agent` class, which takes the memory agent role under `MEMORY_AGENT_NAME`) above it. The memory agent is an `Agent` object, not its own Durable Object class or binding. `src/layers.test.ts` fails on an import that breaks the rule; put new code in the lowest layer it fits.
 

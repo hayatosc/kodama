@@ -8,7 +8,7 @@ import { applyOperation } from '../memory/store/records.ts'
 import type { NewRecord } from '../memory/store/records.ts'
 import { memoryRecords } from '../../drizzle/d1/schema.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
-import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
+import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.ts'
 import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../storage/local.ts'
 
@@ -55,13 +55,13 @@ export function storedAlwaysLoaded(agentId: string): Promise<string> {
 export function renderedAlwaysLoaded(agentId: string, spaces: string[]): Promise<string> {
   return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
     const local = await openLocalDb(state.storage)
-    const memory = new AlwaysLoadedMemory({
+    const memory = {
       env,
       agentId: () => agentId,
       local: () => Promise.resolve(local),
       sharedSpaces: () => Promise.resolve(spaces),
-    })
-    await memory.refresh()
-    return memory.text()
+    }
+    await refreshAlwaysLoaded(memory)
+    return storedMemoryText(memory)
   })
 }

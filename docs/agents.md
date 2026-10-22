@@ -45,21 +45,24 @@ packages/agents/
 
 ### The Agent Durable Object
 
-[`src/agent/agent.ts`](../packages/agents/src/agent/agent.ts) wires the parts in `src/agent/`
-together and serves RPC. Behavior lives in these parts:
+[`src/agent/agent.ts`](../packages/agents/src/agent/agent.ts) is the only class in the codebase,
+because a Durable Object must be one. It serves RPC and holds the object's in-memory state in
+private fields: the open harness, the tasks the recovery alarm watches, the pruning pass in
+progress, a pending memory refresh, and the memory agent's running drain. Everything else is a
+plain function that takes what it needs, in these files:
 
-| File             | Responsibility                                                                    |
-| ---------------- | --------------------------------------------------------------------------------- |
-| `session.ts`     | opening the Pi harness, holding requests until it is open, and exclusive sections |
-| `config.ts`      | reading and replacing the agent configuration                                     |
-| `views.ts`       | `snapshot()` and `submission()` results, mapped from Pi state                     |
-| `entries.ts`     | paged conversation entries, live or from the R2 archive, for the memory agent     |
-| `memory.ts`      | the agent's use of long-term memory: extension, skills, refresh, extraction       |
-| `maintenance.ts` | pruning, its scheduling, and refusing input above the hard storage limit          |
-| `harness.ts`     | Pi runtime composition shared by all agents                                       |
-| `events.ts`      | SSE streams for `send()` and `subscribe()`                                        |
-| `alarms.ts`      | one alarm per object, shared by several purposes                                  |
-| `recovery.ts`    | the recovery alarm                                                                |
+| File             | Responsibility                                                                |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `session.ts`     | opening the Pi harness, and the exclusive section that closes and reopens it  |
+| `config.ts`      | reading and replacing the agent configuration                                 |
+| `views.ts`       | `snapshot()` and `submission()` results, mapped from Pi state                 |
+| `entries.ts`     | paged conversation entries, live or from the R2 archive, for the memory agent |
+| `memory.ts`      | the agent's use of long-term memory: extension, skills, refresh, extraction   |
+| `maintenance.ts` | pruning, its scheduling, and refusing input above the hard storage limit      |
+| `harness.ts`     | Pi runtime composition shared by all agents                                   |
+| `events.ts`      | SSE streams for `send()` and `subscribe()`                                    |
+| `alarms.ts`      | one alarm per object, shared by several purposes                              |
+| `recovery.ts`    | the recovery alarm                                                            |
 
 The memory agent is one of these objects too, under the reserved name `kodama:memory`. An object
 with that name takes the memory agent role from `src/memory/memory-agent/`: its own harness and
@@ -97,7 +100,8 @@ that breaks the rule.
 Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
-  words (`search-text.ts`), and redaction (`redact.ts`).
+  words (`search-text.ts`), redaction (`redact.ts`), and the two ordering helpers the `Agent`
+  class uses (`serial.ts`).
 - The memory parts (archive, skills, prune, shared, working) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
@@ -329,8 +333,9 @@ Delivery works like this:
 
 ## Alarms and recovery
 
-A Durable Object has one alarm. [`AlarmSchedule`](../packages/agents/src/agent/alarms.ts) stores one due
-time per purpose and sets the platform alarm to the earliest:
+A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/alarms.ts) stores one due
+time per purpose and sets the platform alarm to the earliest. It reads and writes the times with the
+synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
 
 | Purpose    | Meaning                                                           |
 | ---------- | ----------------------------------------------------------------- |
@@ -339,9 +344,10 @@ time per purpose and sets the platform alarm to the earliest:
 | `prune`    | archive and delete old entries when storage is over its threshold |
 | `jobs`     | the memory agent's job runner                                     |
 
-[`RecoveryAlarm`](../packages/agents/src/agent/recovery.ts) keeps the `recovery` purpose set while Pi has
-runnable tasks. It arms the alarm before input is admitted, which covers the window between
-admission and Pi's scheduler.
+[`recovery.ts`](../packages/agents/src/agent/recovery.ts) keeps the `recovery` purpose set while Pi has
+runnable tasks. The alarm is armed before input is admitted, which covers the window between
+admission and Pi's scheduler. Admissions and recovery refreshes run in one serial queue
+(`src/lib/serial.ts`), so a refresh never clears an alarm that an admission just armed.
 
 On wake, the object reopens Pi's storage, reconstructs pending tasks, and resumes the scheduler.
 When no task is left, recovery clears only its own time and runs the idle work: scheduling

@@ -6,14 +6,12 @@ import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/stora
 
 const context = BACKGROUND_CONTEXT
 
-export interface SessionSetup {
-  /** Called on every open, so subclasses supply their own registry and settings. */
-  options: () => HarnessOptions
-  /** Runs on every open, before any request sees the harness. */
-  prepare: (harness: Harness) => Promise<void>
-}
-
-async function openHarness(ctx: DurableObjectState, options: HarnessOptions): Promise<Harness> {
+/** Open the harness and run `prepare` before anything else sees it; close it if that fails. */
+export async function openHarness(
+  ctx: DurableObjectState,
+  options: HarnessOptions,
+  prepare: (harness: Harness) => Promise<void>,
+): Promise<Harness> {
   const storage = await openDurableObjectSqliteStorage(ctx.storage)
   const harness = await Harness.open(
     storage,
@@ -23,7 +21,13 @@ async function openHarness(ctx: DurableObjectState, options: HarnessOptions): Pr
   void harness.closed.then((end) => {
     if (end.reason === 'failed') ctx.abort('Agent storage failed')
   })
-  return harness
+  try {
+    await prepare(harness)
+    return harness
+  } catch (error) {
+    await harness.close(context)
+    throw error
+  }
 }
 
 /** No task is left and no input or write is queued. */
@@ -32,57 +36,24 @@ export async function isIdle(harness: Harness): Promise<boolean> {
   return tasks.length === 0 && submissions.length === 0
 }
 
-export class AgentSession {
-  readonly #ctx: DurableObjectState
-  readonly #setup: SessionSetup
-  #harness: Promise<Harness>
-
-  /** Opens the harness once `ready` resolves, with every request held back until it is open. */
-  constructor(ctx: DurableObjectState, setup: SessionSetup, ready: Promise<unknown>) {
-    this.#ctx = ctx
-    this.#setup = setup
-    this.#harness = ctx.blockConcurrencyWhile(async () => {
-      await ready
-      return this.#open()
-    })
-  }
-
-  /** The open harness; after an exclusive section, the reopened one. */
-  harness(): Promise<Harness> {
-    return this.#harness
-  }
-
-  async #open(): Promise<Harness> {
-    const harness = await openHarness(this.#ctx, this.#setup.options())
-    try {
-      await this.#setup.prepare(harness)
-      return harness
-    } catch (error) {
-      await harness.close(context)
-      throw error
-    }
-  }
-
-  /**
-   * Run `check` against the open harness with every other event held back; if it passes, close the
-   * harness, run `mutate` in one storage transaction, and open the harness again.
-   */
-  async exclusive(
-    check: (harness: Harness) => Promise<boolean>,
-    mutate: () => void,
-  ): Promise<boolean> {
-    const previous = this.#harness
-    let mutated = false
-    this.#harness = this.#ctx.blockConcurrencyWhile(async () => {
-      const harness = await previous
-      if (!(await check(harness))) return harness
-      await harness.close(context)
-      // A failure here throws out of blockConcurrencyWhile, which resets the object.
-      this.#ctx.storage.transactionSync(mutate)
-      mutated = true
-      return this.#open()
-    })
-    await this.#harness
-    return mutated
-  }
+/**
+ * With every other event held back, run `check` against the open harness; if it passes, close the
+ * harness, run `mutate` in one storage transaction, and `reopen` it. Resolves with the harness to
+ * use from now on.
+ */
+export function exclusiveSection(
+  ctx: DurableObjectState,
+  current: Promise<Harness>,
+  check: (harness: Harness) => Promise<boolean>,
+  mutate: () => void,
+  reopen: () => Promise<Harness>,
+): Promise<{ harness: Harness; mutated: boolean }> {
+  return ctx.blockConcurrencyWhile(async () => {
+    const harness = await current
+    if (!(await check(harness))) return { harness, mutated: false }
+    await harness.close(context)
+    // A failure here throws out of blockConcurrencyWhile, which resets the object.
+    ctx.storage.transactionSync(mutate)
+    return { harness: await reopen(), mutated: true }
+  })
 }

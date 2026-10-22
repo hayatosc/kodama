@@ -7,6 +7,7 @@ import type { VisibleSkill } from '../skills.ts'
 import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
 import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
+import type { LocalDb } from '../../storage/local.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
 export const AGENT_MEMORY_BUDGET = 2_200
@@ -117,69 +118,61 @@ function parseRevisions(json: string): Revisions {
   )
 }
 
-/** The stored copy of the always-loaded memory. Refresh only while the agent is idle. */
-export class AlwaysLoadedMemory {
-  readonly #deps: WorkingMemoryDeps
+function storedCopy(local: LocalDb) {
+  return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
+}
 
-  constructor(deps: WorkingMemoryDeps) {
-    this.#deps = deps
-  }
+/** The stored always-loaded text, which the `memory` section shows. */
+export async function storedMemoryText(memory: WorkingMemoryDeps): Promise<string> {
+  return storedCopy(await memory.local())?.text ?? ''
+}
 
-  #now(): number {
-    return this.#deps.now?.() ?? Date.now()
-  }
+/** The skills listed in the `skills` section, from the same stored copy. */
+export async function storedSkills(memory: WorkingMemoryDeps): Promise<VisibleSkill[]> {
+  const row = storedCopy(await memory.local())
+  return row === undefined ? [] : parseSkills(row.skillsJson)
+}
 
-  async text(): Promise<string> {
-    const local = await this.#deps.local()
-    return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()?.text ?? ''
+/** Render the always-loaded memory again from D1 and store the copy. Run only while idle. */
+export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<void> {
+  const { text, revisions, skills } = await renderAlwaysLoaded(
+    memoryDb(memory.env.MEMORY_DB),
+    memory.agentId(),
+    await memory.sharedSpaces(),
+  )
+  const row = {
+    id: 1,
+    text,
+    revisionsJson: JSON.stringify(revisions),
+    skillsJson: JSON.stringify(skills),
+    checkedAt: memory.now?.() ?? Date.now(),
   }
+  const local = await memory.local()
+  local
+    .insert(alwaysLoaded)
+    .values(row)
+    .onConflictDoUpdate({ target: alwaysLoaded.id, set: row })
+    .run()
+}
 
-  /** The skills listed in the `skills` section, from the same stored copy. */
-  async skills(): Promise<VisibleSkill[]> {
-    const local = await this.#deps.local()
-    const row = local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
-    return row === undefined ? [] : parseSkills(row.skillsJson)
+/**
+ * Render again when a scope revision changed since the copy was built. Checks D1 at most once
+ * per `REVISION_CHECK_INTERVAL_MS`, so a lost change notice delays an update, not loses it.
+ */
+export async function refreshAlwaysLoadedIfChanged(memory: WorkingMemoryDeps): Promise<void> {
+  const local = await memory.local()
+  const stored = storedCopy(local)
+  const now = memory.now?.() ?? Date.now()
+  if (stored === undefined) return refreshAlwaysLoaded(memory)
+  if (now - stored.checkedAt < REVISION_CHECK_INTERVAL_MS) return
+  const scopes = readableScopes(memory.agentId(), await memory.sharedSpaces())
+  const rows = await memoryDb(memory.env.MEMORY_DB)
+    .select()
+    .from(scopeRevisions)
+    .where(inArray(scopeRevisions.scope, scopes))
+  const current = Object.fromEntries(rows.map((row) => [row.scope, row.revision]))
+  if (!sameRevisions(current, parseRevisions(stored.revisionsJson))) {
+    return refreshAlwaysLoaded(memory)
   }
-
-  /** Render again from D1 and store the copy. */
-  async refresh(): Promise<void> {
-    const { text, revisions, skills } = await renderAlwaysLoaded(
-      memoryDb(this.#deps.env.MEMORY_DB),
-      this.#deps.agentId(),
-      await this.#deps.sharedSpaces(),
-    )
-    const row = {
-      id: 1,
-      text,
-      revisionsJson: JSON.stringify(revisions),
-      skillsJson: JSON.stringify(skills),
-      checkedAt: this.#now(),
-    }
-    const local = await this.#deps.local()
-    local
-      .insert(alwaysLoaded)
-      .values(row)
-      .onConflictDoUpdate({ target: alwaysLoaded.id, set: row })
-      .run()
-  }
-
-  /**
-   * Render again when a scope revision changed since the copy was built. Checks D1 at most once
-   * per `REVISION_CHECK_INTERVAL_MS`, so a lost change notice delays an update, not loses it.
-   */
-  async refreshIfChanged(): Promise<void> {
-    const local = await this.#deps.local()
-    const stored = local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
-    const now = this.#now()
-    if (stored === undefined) return this.refresh()
-    if (now - stored.checkedAt < REVISION_CHECK_INTERVAL_MS) return
-    const scopes = readableScopes(this.#deps.agentId(), await this.#deps.sharedSpaces())
-    const rows = await memoryDb(this.#deps.env.MEMORY_DB)
-      .select()
-      .from(scopeRevisions)
-      .where(inArray(scopeRevisions.scope, scopes))
-    const current = Object.fromEntries(rows.map((row) => [row.scope, row.revision]))
-    if (!sameRevisions(current, parseRevisions(stored.revisionsJson))) return this.refresh()
-    local.update(alwaysLoaded).set({ checkedAt: now }).where(eq(alwaysLoaded.id, 1)).run()
-  }
+  local.update(alwaysLoaded).set({ checkedAt: now }).where(eq(alwaysLoaded.id, 1)).run()
 }
