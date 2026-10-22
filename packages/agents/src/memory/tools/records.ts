@@ -17,6 +17,7 @@ import {
   KIND,
   OVERRIDES,
   recordFor,
+  recordEvidence,
   searchScopes,
   text,
   toolDb,
@@ -88,12 +89,15 @@ export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
       id: Type.String(),
       revision: Type.Integer({ minimum: 1 }),
       reason: Type.String({ minLength: 1, maxLength: 500 }),
+      sourceEntryFrom: ENTRY,
+      sourceEntryTo: ENTRY,
     }),
-    operation: (args) => ({
+    operation: (args, job) => ({
       type: 'invalidate',
       id: args.id,
       revision: args.revision,
       reason: args.reason,
+      evidence: recordEvidence(job, args),
     }),
   })
   const decline = writingTool(deps, {

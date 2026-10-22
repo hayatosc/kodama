@@ -148,7 +148,12 @@ export async function invalidateOverridesOfRequired(
     .from(memoryRecords)
     .where(and(eq(memoryRecords.required, true), eq(memoryRecords.status, 'active')))
   const rows = await db
-    .select({ id: memoryRecords.id, revision: memoryRecords.revision })
+    .select({
+      id: memoryRecords.id,
+      revision: memoryRecords.revision,
+      scope: memoryRecords.scope,
+      sourceAgentId: memoryRecords.sourceAgentId,
+    })
     .from(memoryRecords)
     .where(and(eq(memoryRecords.status, 'active'), inArray(memoryRecords.overrides, required)))
     .limit(BATCH_ROWS)
@@ -167,6 +172,11 @@ export async function invalidateOverridesOfRequired(
         id: row.id,
         revision: row.revision,
         reason: 'overrides a required shared record',
+        evidence: {
+          scope: row.scope,
+          sourceAgentId: row.sourceAgentId,
+          origin: 'consolidation',
+        },
       },
     )
   }

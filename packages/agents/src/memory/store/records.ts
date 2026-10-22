@@ -30,12 +30,21 @@ export interface NewRecord {
   observedAt: number
 }
 
+/** Trusted ownership and evidence of a record change, supplied by the running job or maintenance. */
+export type RecordEvidence = Pick<NewRecord, 'scope' | 'origin' | 'sourceAgentId' | 'sourceEntries'>
+
 /** A change the memory agent makes, applied as one operation. */
 export type Operation =
   | { type: 'write'; record: NewRecord }
   /** Replace an active record of the same scope, named by ID at the revision the writer read. */
   | { type: 'supersede'; oldId: string; oldRevision: number; record: NewRecord }
-  | { type: 'invalidate'; id: string; revision: number; reason: string }
+  | {
+      type: 'invalidate'
+      id: string
+      revision: number
+      reason: string
+      evidence: RecordEvidence
+    }
   /** Keep a declined candidate in the ledger only. */
   | { type: 'decline'; candidate: string; reason: string }
   /** Record that extraction has covered an agent's entries through `lastEntryId`. */

@@ -7,7 +7,7 @@
  */
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
-import type { NewRecord, Operation } from './records.ts'
+import type { NewRecord, Operation, RecordEvidence } from './records.ts'
 import { memoryRecords } from '../../../drizzle/d1/schema.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
@@ -51,7 +51,7 @@ function affectsAlwaysLoaded(kind: RecordKind): boolean {
 }
 
 /** Rejects a candidate built on older evidence than the record it would replace. */
-function isStale(old: MemoryRecord, record: NewRecord): boolean {
+function isStale(old: MemoryRecord, record: RecordEvidence): boolean {
   const newer = record.sourceEntries?.to
   return newer === undefined || (old.sourceEntryTo !== null && newer <= old.sourceEntryTo)
 }
@@ -224,6 +224,20 @@ export async function planInvalidate(
   const old = await readRecord(db, op.id)
   if (old === undefined || old.status !== 'active' || old.revision !== op.revision) {
     return conflict(db, context, op.id, 'target_changed')
+  }
+  if (old.scope !== op.evidence.scope) return conflict(db, context, op.id, 'other_scope')
+  if (old.sourceAgentId !== op.evidence.sourceAgentId) {
+    return conflict(db, context, op.id, 'other_agent')
+  }
+  if (op.evidence.origin !== 'consolidation' && isStale(old, op.evidence)) {
+    const result: OperationResult = { status: 'stale' }
+    return {
+      result,
+      statements: [
+        insertOp(db, context, op.type, result),
+        recordLedger(db, context, 'decline_stale', op.id, { reason: op.reason }),
+      ],
+    }
   }
   const result: OperationResult = { status: 'applied', recordId: op.id }
   const statements: Statements = [

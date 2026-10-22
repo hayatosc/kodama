@@ -4,7 +4,8 @@
  * @module
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { memoryAgent, record, write } from '../../helper/memory.ts'
+import { context, db, memoryAgent, record, write } from '../../helper/memory.ts'
+import { applyOperation } from '../store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import type { MemoryJob } from '../jobs.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -61,7 +62,7 @@ describe('memory_invalidate', () => {
   )
 
   it.each(['remember', 'extract'] as const)(
-    'does not let a %s job invalidate another agent\'s record',
+    "does not let a %s job invalidate another agent's record",
     async (kind) => {
       const owner = crypto.randomUUID()
       const id = await write({
@@ -95,6 +96,34 @@ describe('memory_invalidate', () => {
     },
   )
 
+  it('does not invalidate a same-scope record attributed to a different source agent', async () => {
+    const owner = crypto.randomUUID()
+    const id = await write({
+      scope: `agent:${owner}`,
+      kind: 'fact',
+      content: 'Uses pnpm',
+      sourceAgentId: crypto.randomUUID(),
+      sourceEntries: { from: 50, to: 50 },
+    })
+    const response = await invalidate(job('extract', owner), id)
+    expect((await record(id))?.status).toBe('active')
+    expect(response).toContain('other_agent')
+  })
+
+  it('requires strictly newer evidence, not the same entry', async () => {
+    const owner = crypto.randomUUID()
+    const id = await write({
+      scope: `agent:${owner}`,
+      kind: 'fact',
+      content: 'Uses pnpm',
+      sourceAgentId: owner,
+      sourceEntries: { from: 150, to: 150 },
+    })
+    const response = await invalidate(job('extract', owner), id, 150)
+    expect((await record(id))?.status).toBe('active')
+    expect(response).toContain('stale:')
+  })
+
   it('applies newer extraction evidence', async () => {
     const owner = crypto.randomUUID()
     const id = await write({
@@ -107,6 +136,41 @@ describe('memory_invalidate', () => {
     const response = await invalidate(job('extract', owner), id, 200)
     expect((await record(id))?.status).toBe('invalid')
     expect(response).toContain(`applied ${id}`)
+  })
+
+  it('replays an accepted invalidation without changing the record again', async () => {
+    const owner = crypto.randomUUID()
+    const id = await write({
+      scope: `agent:${owner}`,
+      kind: 'fact',
+      content: 'Uses pnpm',
+      sourceAgentId: owner,
+      sourceEntries: { from: 150, to: 150 },
+    })
+    const operation = {
+      type: 'invalidate',
+      id,
+      revision: 1,
+      reason: 'No longer true',
+      evidence: {
+        scope: `agent:${owner}`,
+        sourceAgentId: owner,
+        origin: 'extraction',
+        sourceEntries: { from: 200, to: 200 },
+      },
+    } as const
+    const run = context()
+    expect(await applyOperation(db, run, operation)).toEqual({
+      status: 'applied',
+      recordId: id,
+      replayed: false,
+    })
+    expect(await applyOperation(db, run, operation)).toEqual({
+      status: 'applied',
+      recordId: id,
+      replayed: true,
+    })
+    expect(await record(id)).toMatchObject({ status: 'invalid', revision: 2 })
   })
 
   it('allows consolidation of its own scope without claiming newer evidence', async () => {

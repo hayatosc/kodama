@@ -186,7 +186,10 @@ Other rules:
 The order in which jobs run is not the order of the information. A candidate may supersede or
 invalidate a record of the same source agent only if its `source_entry_to` is greater than the
 record's. Otherwise the operation returns `stale` and the candidate is declined in the ledger. An
-extraction of an old range therefore never undoes a newer `remember`.
+extraction of an old range therefore never undoes a newer `remember`. Invalidation carries the
+same job-derived scope, source agent, and evidence as supersession; an extract job must cite its
+supporting entries. Consolidation can invalidate records of its own scope without newer entries,
+and code-driven cleanup supplies the target's ownership explicitly.
 
 Entry IDs of different agents cannot be compared. A candidate never supersedes another agent's
 record or a shared record directly; a shared record changes only through a checked shared write

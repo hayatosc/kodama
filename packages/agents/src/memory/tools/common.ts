@@ -11,7 +11,7 @@ import type { AgentEnv } from '../../env.ts'
 import { memoryDb } from '../store/db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from '../store/db.ts'
 import { applyOperation } from '../store/records.ts'
-import type { NewRecord, Operation } from '../store/records.ts'
+import type { NewRecord, Operation, RecordEvidence } from '../store/records.ts'
 import type { Scope } from '../../../drizzle/d1/schema.ts'
 import type { OperationResult } from '../store/statements.ts'
 import type { MemoryJob } from '../jobs.ts'
@@ -116,32 +116,21 @@ export interface RecordArgs {
 }
 
 /**
- * Build the record from the job, so origin, scope, and evidence never come from the model.
+ * Ownership and evidence of a write or invalidation, derived from the job.
  *
- * @throws {@link Error} When a shared record would override, or an extract job's record does not cite
- * entries after its checkpoint. The tool call fails and the model sees why.
+ * @throws {@link Error} When an extraction does not cite entries after its checkpoint.
  */
-export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRecord {
-  const content = args.content.trim()
+export function recordEvidence(
+  job: MemoryJob,
+  args: Pick<RecordArgs, 'sourceEntryFrom' | 'sourceEntryTo'>,
+): RecordEvidence {
   const scope = jobScope(job)
-  if (args.overrides !== undefined && !scope.startsWith('agent:')) {
-    throw new Error('Only an agent record can override a shared record')
-  }
-  const base = {
-    scope,
-    kind: args.kind,
-    content,
-    sourceAgentId: sourceAgentOf(job, scope),
-    importance: args.importance,
-    ...(args.overrides === undefined ? {} : { overrides: args.overrides }),
-    observedAt: now,
-  }
+  const base = { scope, sourceAgentId: sourceAgentOf(job, scope) }
   switch (job.kind) {
     case 'remember':
       return {
         ...base,
         origin: job.origin,
-        importance: args.importance ?? (job.origin === 'user_request' ? 0.7 : 0.4),
         sourceEntries: job.sourceEntries,
       }
     case 'extract': {
@@ -155,6 +144,28 @@ export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRec
     case 'consolidate':
     case 'record_archive':
       return { ...base, origin: 'consolidation' }
+  }
+}
+
+/**
+ * Build a record with job-derived ownership and evidence, and model-selected content.
+ *
+ * @throws {@link Error} When a shared record would override or extraction lacks valid citations.
+ */
+export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRecord {
+  const evidence = recordEvidence(job, args)
+  if (args.overrides !== undefined && !evidence.scope.startsWith('agent:')) {
+    throw new Error('Only an agent record can override a shared record')
+  }
+  return {
+    ...evidence,
+    kind: args.kind,
+    content: args.content.trim(),
+    importance:
+      args.importance ??
+      (job.kind === 'remember' ? (job.origin === 'user_request' ? 0.7 : 0.4) : undefined),
+    ...(args.overrides === undefined ? {} : { overrides: args.overrides }),
+    observedAt: now,
   }
 }
 
