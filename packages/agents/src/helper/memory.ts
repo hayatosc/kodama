@@ -6,8 +6,9 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/d1'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
-import { memoryDb } from '../memory/store/db.ts'
+import { memoryDb, schema } from '../memory/store/db.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { NewRecord } from '../memory/store/records.ts'
 import { memoryRecords } from '../../drizzle/d1/schema.ts'
@@ -18,6 +19,16 @@ import { openLocalDb } from '../storage/local.ts'
 
 /** The memory database of the tests. */
 export const db = memoryDb(env.MEMORY_DB)
+/** Real D1 queries with the production parameter limit enforced even in the local emulator. */
+export const parameterLimitedDb = drizzle(env.MEMORY_DB, {
+  schema,
+  logger: {
+    logQuery(_query, params) {
+      if (params.length > 100)
+        throw new Error(`D1 parameter limit exceeded: ${params.length} > 100`)
+    },
+  },
+})
 /** The memory agent's stub. */
 export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 

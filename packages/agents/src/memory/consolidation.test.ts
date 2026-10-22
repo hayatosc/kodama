@@ -1,15 +1,76 @@
-import { eq } from 'drizzle-orm'
+/**
+ * Daily consolidation and bounded ledger retention within D1's parameter limit.
+ *
+ * @module
+ */
+import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from './store/records.ts'
 import { memoryLedger } from '../../drizzle/d1/schema.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
-import { activeContents, db, memoryAgent } from '../helper/memory.ts'
+import { activeContents, db, memoryAgent, parameterLimitedDb } from '../helper/memory.ts'
+import { consolidateDaily } from './consolidation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
 
 describe('consolidation', () => {
+  it.each([
+    { expired: 101, remaining: 0 },
+    { expired: 500, remaining: 0 },
+    { expired: 501, remaining: 1 },
+  ])(
+    'retains its 500-row bound with $expired expired rows and continues daily maintenance',
+    async ({ expired, remaining }) => {
+      const runId = crypto.randomUUID()
+      const now = Date.now()
+      const inserts = Array.from({ length: expired }, () =>
+        db.insert(memoryLedger).values({
+          at: 0,
+          runId,
+          actor: 'test',
+          action: 'write',
+          target: 'record',
+          targetId: 'expired',
+        }),
+      )
+      for (let offset = 0; offset < inserts.length; offset += 50) {
+        const [first, ...rest] = inserts.slice(offset, offset + 50)
+        if (first !== undefined) await db.batch([first, ...rest])
+      }
+      await db.insert(memoryLedger).values({
+        at: now,
+        runId,
+        actor: 'test',
+        action: 'write',
+        target: 'record',
+        targetId: 'retained',
+      })
+
+      try {
+        const result = await consolidateDaily({
+          db: parameterLimitedDb,
+          now,
+          forgetSettledJobs: async () => 0,
+          enqueue: async () => {},
+        })
+
+        expect(result).toEqual({ scopes: 0 })
+        const rows = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, runId))
+        expect(rows.filter((row) => row.targetId === 'expired')).toHaveLength(remaining)
+        expect(rows.filter((row) => row.targetId === 'retained')).toHaveLength(1)
+        const meta = await db
+          .select()
+          .from(memoryLedger)
+          .where(and(eq(memoryLedger.action, 'meta'), eq(memoryLedger.at, now)))
+        expect(meta).toHaveLength(1)
+      } finally {
+        await db.delete(memoryLedger).where(eq(memoryLedger.runId, runId))
+      }
+    },
+  )
+
   it('merges duplicates of a changed scope and drops ledger rows past the rollback window', async () => {
     const agentId = crypto.randomUUID()
     const now = Date.now()
