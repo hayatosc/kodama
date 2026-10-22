@@ -37,7 +37,6 @@ packages/agents/
     agent/                  the Agent Durable Object, its runtime, and its parts
     configuration/          per-agent configuration: validation and persistence
     models/                 Pi provider catalog and Worker secret resolution
-    prompts/                default system prompt
     tools/                  tool implementations and their registry
     memory/                 long-term memory (see memory.md)
     storage/                opening kodama's tables in each object's SQLite, and Pi's tables
@@ -53,7 +52,7 @@ together and serves RPC. Behavior lives in these parts:
 | ---------------- | --------------------------------------------------------------------------------- |
 | `session.ts`     | opening the Pi harness, holding requests until it is open, and exclusive sections |
 | `config.ts`      | reading and replacing the agent configuration                                     |
-| `views.ts`       | `snapshot()` and `submission()` results from Pi state                             |
+| `views.ts`       | `snapshot()` and `submission()` results, mapped from Pi state                     |
 | `entries.ts`     | paged conversation entries, live or from the R2 archive, for the memory agent     |
 | `memory.ts`      | the agent's use of long-term memory: extension, skills, refresh, extraction       |
 | `maintenance.ts` | pruning, its scheduling, and refusing input above the hard storage limit          |
@@ -61,7 +60,6 @@ together and serves RPC. Behavior lives in these parts:
 | `events.ts`      | SSE streams for `send()` and `subscribe()`                                        |
 | `alarms.ts`      | one alarm per object, shared by several purposes                                  |
 | `recovery.ts`    | the recovery alarm                                                                |
-| `projection.ts`  | mapping Pi state to RPC results                                                   |
 
 `MemoryAgent` extends `Agent`. It overrides protected methods such as `harnessOptions()`,
 `defaultConfig()`, `afterOpen()`, `onIdle()`, `onAlarm()`, and `archivesEntries()`, instead of
@@ -82,17 +80,17 @@ Code in `src/` is split into layers. A layer imports only itself and the layers 
 imports say where it sits. `src/layers.test.ts` reads every source file and fails on an import
 that breaks the rule.
 
-| Layer        | Paths                                                             | May import                                  |
-| ------------ | ----------------------------------------------------------------- | ------------------------------------------- |
-| lib          | `src/lib/`                                                        | nothing in `src/`                           |
-| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`              | lib                                         |
-| settings     | `src/configuration/`, `src/models/`, `src/prompts/`, `src/tools/` | lib, contracts                              |
-| storage      | `drizzle/`, `src/storage/`                                        | lib                                         |
-| memory store | `src/memory/store/`                                               | lib, storage                                |
-| memory       | the rest of `src/memory/`, except `memory-agent/`                 | lib, contracts, storage, memory store       |
-| agent        | `src/agent/`                                                      | all of the above                            |
-| memory agent | `src/memory/memory-agent/`                                        | all of the above, including agent           |
-| entrypoint   | `src/index.ts`                                                    | lib, contracts, memory, agent, memory agent |
+| Layer        | Paths                                                | May import                                  |
+| ------------ | ---------------------------------------------------- | ------------------------------------------- |
+| lib          | `src/lib/`                                           | nothing in `src/`                           |
+| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                         |
+| settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                              |
+| storage      | `drizzle/`, `src/storage/`                           | lib                                         |
+| memory store | `src/memory/store/`                                  | lib, storage                                |
+| memory       | the rest of `src/memory/`, except `memory-agent/`    | lib, contracts, storage, memory store       |
+| agent        | `src/agent/`                                         | all of the above                            |
+| memory agent | `src/memory/memory-agent/`                           | all of the above, including agent           |
+| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, agent, memory agent |
 
 Some consequences:
 
@@ -123,9 +121,8 @@ the rows one turn writes.
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
 the `kodama-memory` extension with its memory tools and prompt sections, whatever tools it enables
-(see [memory.md](memory.md#working-agents)). The conversation's execution environment is
-`SkillsEnv`, a read-only view of the agent's skills. A working agent sees no other files and runs
-no commands.
+(see [memory.md](memory.md#working-agents)). No execution environment is configured, so a working
+agent sees no files and runs no commands.
 
 ## Configuration
 
@@ -145,7 +142,7 @@ interface AgentConfig {
 New agents start with these defaults:
 
 - the model is `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` from `cloudflare.config.ts`;
-- the system prompt is in `src/prompts/default.ts`;
+- the system prompt is `DEFAULT_SYSTEM_PROMPT` in `src/configuration/index.ts`;
 - thinking is off;
 - no tools are enabled;
 - `sharedSpaces` is `["global"]`.
@@ -436,7 +433,6 @@ migrations before the tests.
 | `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers    |
 | `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
 | `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
-| `src/helper/skills.ts`                      | writing a skill and reading it back                           |
 | `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
 | `src/agent/config.test.ts`                  | configuration over RPC and across eviction                    |
 | `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |

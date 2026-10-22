@@ -7,23 +7,26 @@ Kodama runs Pi Durable agents on Cloudflare Durable Objects, with one SQLite-bac
 - `packages/agents/src/index.ts`: service-binding RPC entrypoint.
 - `packages/agents/drizzle/`: every Drizzle schema, next to the migrations drizzle-kit generates from it, one folder per database. `d1/schema.ts` is the D1 schema and `d1/migrations/` its migrations (apply them with `cf d1 migrations apply --dir drizzle/d1/migrations`). `durable-object/schema.ts` is kodama's tables in each Durable Object's own SQLite, and `durable-object/migrations/` their migrations, which `src/storage/local.ts` applies. Keep one schema file per SQLite database. Edit the schemas by hand; never edit the `migrations/` folders.
 - `src/lib/`: generic helpers that import nothing else from `src/` (`hash.ts`, `search-text.ts`, `redact.ts`).
-- `src/agent/`: the `Agent` Durable Object and its runtime (`harness.ts`, `events.ts`, `alarms.ts`, `recovery.ts`, `projection.ts`). `agent.ts` only wires the parts and serves RPC; put behavior in its own module there (`session.ts` the harness and its exclusive section, `maintenance.ts` pruning control, `entries.ts` entry pages, `memory.ts` working-agent memory, `config.ts` configuration, `views.ts` snapshot and submission reads) or under `src/memory/`, not in `agent.ts`.
+- `src/agent/`: the `Agent` Durable Object and its runtime (`harness.ts`, `events.ts`, `alarms.ts`, `recovery.ts`). `agent.ts` only wires the parts and serves RPC; put behavior in its own module there (`session.ts` the harness and its exclusive section, `maintenance.ts` pruning control, `entries.ts` entry pages, `memory.ts` working-agent memory, `config.ts` configuration, `views.ts` snapshot and submission reads mapped from Pi state) or under `src/memory/`, not in `agent.ts`.
 - `src/validation.ts`: valibot schemas for untrusted RPC input; failures throw `TypeError`.
-- `src/configuration/`, `src/models/`, `src/prompts/`, and `src/tools/`: configuration, providers, prompts, and registered tools.
-- `src/memory/`: long-term memory, one folder per part. Keep each file to one concern; split a file before it grows past a few hundred lines.
+- `src/configuration/`, `src/models/`, and `src/tools/`: configuration (with the default prompt and shared spaces), providers, and registered tools.
+- `src/memory/`: long-term memory, one folder or file per part. Keep each file to one concern; split a file before it grows past a few hundred lines, but do not split one that small.
   - `store/`: D1 through Drizzle, with the schema in `drizzle/d1/schema.ts`. `records.ts` applies write operations, `record-plans.ts` and `progress-plans.ts` plan them, `statements.ts` holds the statements they share, `search.ts` searches records. Write queries with Drizzle's query builder and migrations only with drizzle-kit; do not write SQL by hand.
   - `memory-agent/`: the memory agent (`memory-agent.ts` runs the queue), its queue (`queue.ts`), harness, model jobs, prompts, daily consolidation, and its tools in `tools/`.
   - `working/`: what working agents get: the always-loaded memory, the memory tools, and the extension.
   - `archive/`: archived segments in R2 (`segment.ts` writes, `reader.ts` reads) and `history_search`.
   - `prune/`: pruning of old Pi entries: limits, runs, the steps before the delete, and the delete.
-  - `skills/`: skills in R2 and D1 (paths, blobs, writes, status changes, usage, curation); `env.ts` serves them read-only to Pi's `read` tool.
-  - `shared/`: proposals to shared spaces and their application.
+  - `skills.ts`: agent skills, one D1 row each with its body: writing, archiving, listing, reading, and curation.
+  - `shared.ts`: checked writes to shared spaces (two agents' records, or the space's own).
+  - `jobs.ts`: the memory agent's input contract; `transcript.ts`: the text of Pi entries.
 - `src/storage/`: opening kodama's tables in each Durable Object's own SQLite (`local.ts`; the schema is `drizzle/durable-object/schema.ts`) and `pi-tables.ts`, Pi Durable's tables as pruning reads them; re-run `src/memory/prune/prune.test.ts` and `src/storage/pi-assumptions.test.ts` on every Pi upgrade.
 - `src/protocol.ts`: transport types; consumers should use type-only imports.
 - Tests sit next to the code they test, as `<module>.test.ts` in the same folder (for example `src/agent/agent.test.ts` for the Agent RPC and `src/memory/prune/prune.test.ts` for pruning); `drizzle/schema.test.ts` checks the schemas against their migrations. Shared test helpers are in `src/helper/` and the Vitest setup is `vitest.setup.ts`; production code never imports either.
 - `packages/agents/cloudflare.config.ts`: Worker bindings, secrets, and SQLite configuration.
 
 The abbreviated `src/` paths above are relative to `packages/agents/`.
+
+Prefer fewer, cohesive files over many small ones, and the simplest storage that stays correct after a stop (for example one D1 batch rather than a journal over R2). Add a mechanism only when the feature needs it now.
 
 Imports follow the layers in `docs/agents.md` (Dependencies): `lib` imports nothing else from `src/`, the memory parts never import `src/agent/` or `memory-agent/` (they use `src/memory/jobs.ts`), and only `memory-agent/` sits above `src/agent/`. `src/layers.test.ts` fails on an import that breaks the rule; put new code in the lowest layer it fits.
 

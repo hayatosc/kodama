@@ -13,12 +13,12 @@ sections of this document by name.
 
 ## Components
 
-| Store                        | Binding        | Contents                                                                                    |
-| ---------------------------- | -------------- | ------------------------------------------------------------------------------------------- |
-| Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule        |
-| `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, named `memory`) and its job queue                           |
-| D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skill index, proposals, log |
-| R2 bucket                    | `ARCHIVE`      | archived entries and their indexes (`archive/`); skills and skill blobs (`skills/`)         |
+| Store                        | Binding        | Contents                                                                             |
+| ---------------------------- | -------------- | ------------------------------------------------------------------------------------ |
+| Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
+| `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, named `memory`) and its job queue                    |
+| D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skills, ledger       |
+| R2 bucket                    | `ARCHIVE`      | archived entries, their search indexes, and their summaries (`archive/`)             |
 
 ```text
 AgentService (public RPC entrypoint)
@@ -27,15 +27,13 @@ AgentService (public RPC entrypoint)
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, always-loaded query, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
-  |-- read (SkillsEnv) -----------> R2 ARCHIVE           SKILL.md and bundled files
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
   `-- MEMORY_AGENT.enqueue -------> MemoryAgent DO       remember, extract, record_archive
 
 MemoryAgent DO ("memory")
   |-- reads and writes -----------> D1 MEMORY_DB
-  |-- reads and writes -----------> R2 ARCHIVE           archived entries, summaries, skills, blobs
+  |-- reads and writes -----------> R2 ARCHIVE           archived entries and summaries
   |-- AGENTS readEntries ---------> Agent DO             paged entries for extraction
-  |-- AGENTS getConfig -----------> Agent DO             shared spaces, when a proposal is applied
   `-- AGENTS memoryChanged -------> Agent DO             refresh hint; revisions are the record
 
 scheduled handler (17 3 * * *) -> MemoryAgent DO       consolidate
@@ -53,8 +51,8 @@ and, while pruning, the archive catalog of their own entries.
 | `working/`      | what every working agent gets: tools, the always-loaded memory, and the Pi extension          |
 | `archive/`      | archived segments in R2: building, reading, and `history_search`                              |
 | `prune/`        | the pruning state machine and its limits                                                      |
-| `skills/`       | skill paths, blobs, writes, status, usage, curation, and `SkillsEnv`                          |
-| `shared/`       | shared proposals: their checks (`proposals.ts`) and their application (`apply.ts`)            |
+| `skills.ts`     | skills: writing, archiving, listing, reading, and curation                                    |
+| `shared.ts`     | checked writes to shared spaces                                                               |
 | `jobs.ts`       | the memory agent's input contract: job kinds, their validation, and the object's name         |
 | `transcript.ts` | the text of Pi entries that extraction and archives read                                      |
 
@@ -71,10 +69,10 @@ in [agents.md](agents.md#dependencies).
 
 ### Scopes
 
-| Scope                                          | Contents                                       | Writer                                  |
-| ---------------------------------------------- | ---------------------------------------------- | --------------------------------------- |
-| `agent:<agentId>`                              | the agent's notes, conventions, events, skills | memory agent                            |
-| `shared:<space>` (for example `shared:global`) | team conventions, shared facts, shared skills  | memory agent, through checked proposals |
+| Scope                                          | Contents                                   | Writer                               |
+| ---------------------------------------------- | ------------------------------------------ | ------------------------------------ |
+| `agent:<agentId>`                              | the agent's notes, conventions, and events | memory agent                         |
+| `shared:<space>` (for example `shared:global`) | team conventions and shared facts          | memory agent, through checked writes |
 
 There is no per-person scope. An agent's `sharedSpaces` configuration (default `["global"]`) lists
 the shared spaces it reads; see [Shared memory](#shared-memory).
@@ -94,7 +92,7 @@ shared record.
 | `task`        | dropped when done                                                  |
 
 A record's status is `active`, `superseded`, `invalid`, or `archived`. Its `origin` is
-`user_request`, `agent_judgment`, `extraction`, `consolidation`, or `proposal`. The code that
+`user_request`, `agent_judgment`, `extraction`, `consolidation`, or `shared`. The code that
 builds a record from a job sets the scope, origin, source agent, and cited entries, so the model
 never chooses them. Summaries of archived entries are not memory records; they live next to the
 archived entries in R2. Hard deletion is an operator action.
@@ -114,10 +112,7 @@ database.
 | `scope_revisions`        | a new random value with each change to a scope's always-loaded records and skills |
 | `extraction_checkpoints` | last extracted entry per agent                                                    |
 | `archive_segments`       | catalog entry of one archived range in R2                                         |
-| `skills`                 | skill index: name, description, status, content hash                              |
-| `skill_writes`           | a skill update recorded before its files are overwritten                          |
-| `skill_usage`            | skill uses per agent                                                              |
-| `shared_proposals`       | proposals for shared memory, their decisions, and their application               |
+| `skills`                 | one skill of one agent, with its body and use counters                            |
 | `memory_ledger`          | append-only log of every change, including declined items                         |
 
 Kodama writes no SQL by hand. Queries use Drizzle's query builder, and migrations come only from
@@ -135,16 +130,17 @@ drizzle/
 ```
 
 The schemas are written by hand. The `migrations/` folders are drizzle-kit output and are never
-edited by hand. Tests fail when a schema and its generated migrations differ. drizzle-kit 0.31 does not inline the values of check
-constraints, so the typed columns and the code that writes them enforce allowed values. The
+edited by hand. Tests fail when a schema and its generated migrations differ. drizzle-kit 0.31
+does not inline the values of check constraints, so the typed columns and the code that writes them enforce allowed values. The
 constraints in the schema are keys and relations between columns.
 
 ### Applying a write
 
 Every change the memory agent makes is an operation with an `op_id`. For a tool call, the `op_id`
 is the SHA-256 of the job ID and Pi's tool call ID, so running a recorded tool call again yields
-the same `op_id`. For code jobs, it is built from the job or proposal ID and the step.
-[`store/records.ts`](../packages/agents/src/memory/store/records.ts) applies it:
+the same `op_id`. For code steps, such as curation, it is built from the step and its target.
+[`store/records.ts`](../packages/agents/src/memory/store/records.ts) applies it; `applyPlan` there
+applies a batch that another module plans the same way, such as a skill write:
 
 1. Look up `memory_ops` by `op_id`. If a row exists, return its stored result and change nothing.
 2. Read the targets and check the operation's expectations. For example, the record to supersede
@@ -175,7 +171,7 @@ Other rules:
 - Superseding names the old record: `memory_supersede(oldId, oldRevision, ...)`. Before writing,
   the memory agent finds candidates with `memory_search`; there is no topic key. The new record
   keeps the old record's scope. A record of another scope changes only through `overrides` or a
-  shared proposal.
+  checked shared write.
 - A record's ID is the SHA-256 of its scope, kind, content, source agent, and first source entry.
 - `superseded_by` is not a foreign key. D1 checks foreign keys immediately, and the old row is
   updated before the new row exists.
@@ -191,9 +187,9 @@ record's. Otherwise the operation returns `stale` and the candidate is declined 
 extraction of an old range therefore never undoes a newer `remember`.
 
 Entry IDs of different agents cannot be compared. A candidate never supersedes another agent's
-record or a shared record directly. It becomes a shared proposal with a `base_revision` instead.
-If the memory agent cannot settle a contradiction, the contradiction stays as `conflict` in the
-ledger, and the memory agent may propose again against the current revision.
+record or a shared record directly; a shared record changes only through a checked shared write
+(see [Shared memory](#shared-memory)). If the memory agent cannot settle a contradiction, the
+contradiction stays as `conflict` in the ledger.
 
 ### Search text
 
@@ -241,8 +237,8 @@ exported as its own Durable Object class, with one instance named `memory`.
 
 - It inherits `Agent` as it is, including `subscribe`, `snapshot`, and `submission`. A UI can later
   watch its jobs through an authenticated `AgentService` method.
-- It is not part of `AgentService`. Jobs come only from working agents, pruning, its own accepted
-  proposals, and the `scheduled` handler.
+- It is not part of `AgentService`. Jobs come only from working agents, pruning, and the
+  `scheduled` handler.
 - `sendMessage`, `send`, and `sendTo` throw, because input that bypassed the queue would break
   "one job at a time". `cancel` stops the running job, which the runner retries like a failure.
 - Its configuration is fixed in code: the model is `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`
@@ -267,15 +263,15 @@ The memory agent's tools are registered only in its own harness, so working agen
 | `read_archive`          | `record_archive`          | read the entries of the archived segment                      |
 | `write_archive_summary` | `record_archive`          | store the segment's summary                                   |
 | `list_records`          | `consolidate`             | the scope's active records, by kind and then most used        |
-| `list_skills`           | `consolidate` of an agent | the scope's skills with status and revision                   |
-| `read_skill`            | `consolidate` of an agent | one file of a skill of the scope                              |
-| `skill_write`           | `consolidate` of an agent | create or overwrite an agent skill                            |
+| `list_skills`           | `consolidate` of an agent | the agent's skills with status and revision                   |
+| `read_skill`            | `consolidate` of an agent | the body and evidence of one skill                            |
+| `skill_write`           | `consolidate` of an agent | create or overwrite a skill                                   |
 | `skill_archive`         | `consolidate` of an agent | archive or restore a skill                                    |
-| `shared_propose`        | `consolidate`             | propose a change to a shared space                            |
+| `shared_write`          | `consolidate`             | write a shared record, checked first                          |
 
 Each writing tool applies its change as an operation (see [Applying a write](#applying-a-write)).
-During a `consolidate` job of a shared scope, every write but a decline is refused, so that job can
-only propose.
+During a `consolidate` job of a shared scope, every record write but a decline is refused, so that
+job changes the space only through `shared_write` and its checks.
 
 ### Jobs
 
@@ -283,39 +279,34 @@ only propose.
 the memory agent's own SQLite outside Pi's tables
 ([`memory-agent/queue.ts`](../packages/agents/src/memory/memory-agent/queue.ts)):
 
-| Column                        | Meaning                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `job_id`                      | primary key: a hash of the job's identifying fields, or the proposal ID |
-| `kind`, `priority`, `payload` | the job                                                                 |
-| `status`                      | `queued`, `running`, or `settled`                                       |
-| `outcome`                     | `persisted`, `declined`, `conflict`, or `failed` once settled           |
-| `attempts`, `not_before`      | retry state                                                             |
+| Column                        | Meaning                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `job_id`                      | primary key: a hash of the job's identifying fields           |
+| `kind`, `priority`, `payload` | the job                                                       |
+| `status`                      | `queued`, `running`, or `settled`                             |
+| `outcome`                     | `persisted`, `declined`, `conflict`, or `failed` once settled |
+| `attempts`, `not_before`      | retry state                                                   |
 
 The same job delivered twice gets the same ID, so a repeated `enqueue` returns the existing row.
 `jobStatus(jobId)` reads a row.
 
-| Kind             | Runs in | Priority | Payload                                |
-| ---------------- | ------- | -------- | -------------------------------------- |
-| `remember`       | model   | 0        | source agent, origin, content, entries |
-| `apply_proposal` | code    | 1        | proposal ID                            |
-| `record_archive` | model   | 1        | source agent, segment ID               |
-| `extract`        | model   | 2        | source agent, entry to start after     |
-| `consolidate`    | model   | 3        | scope, UTC day                         |
+| Kind             | Priority | Payload                                |
+| ---------------- | -------- | -------------------------------------- |
+| `remember`       | 0        | source agent, origin, content, entries |
+| `record_archive` | 1        | source agent, segment ID               |
+| `extract`        | 2        | source agent, entry to start after     |
+| `consolidate`    | 3        | scope, UTC day                         |
 
 One runner keeps at most one job in progress:
 
-1. Between jobs, queue an `apply_proposal` for every accepted proposal, and finish any pending
-   skill write.
-2. Take the queued job with the lowest priority number, then the oldest, whose `not_before` has
+1. Take the queued job with the lowest priority number, then the oldest, whose `not_before` has
    passed, and mark it `running`.
-3. Run the job:
-   - **Model job.** Wait until the conversation is idle and call `reset()`, which Pi places at
-     once while idle. Then submit the job prompt with the request ID `<jobId>-<attempt>`. Each job
-     starts in a fresh context.
-   - **Code job.** Run it in code, without Pi.
-4. When the submission settles, derive the outcome from the job's `memory_ops` rows and mark the
+2. Wait until the conversation is idle and call `reset()`, which Pi places at once while idle.
+   Then submit the job prompt with the request ID `<jobId>-<attempt>`. Each job starts in a fresh
+   context.
+3. When the submission settles, derive the outcome from the job's `memory_ops` rows and mark the
    job `settled`. Then send `memoryChanged` to the source agent, if there is one.
-5. Only then take the next job. After the last due job, prune the memory agent's own session if
+4. Only then take the next job. After the last due job, prune the memory agent's own session if
    needed, and set the `jobs` alarm for the next delayed job.
 
 While a job runs, the `jobs` alarm wakes the object every minute, so a job interrupted by eviction
@@ -331,10 +322,8 @@ Every working agent gets the `kodama-memory` Pi extension
 ([`working/extension.ts`](../packages/agents/src/memory/working/extension.ts)), whatever tools its
 configuration enables:
 
-- the tools `memory_search`, `history_search`, `remember`, and Pi Durable's `read` tool for
-  skills;
-- the `memory` and `skills` prompt sections;
-- an `afterTool` hook that counts skill uses.
+- the tools `memory_search`, `history_search`, `remember`, and `skill_read`;
+- the `memory` and `skills` prompt sections.
 
 The memory-writing tools of the memory agent are not in this extension, and `AgentService` cannot
 reach the memory agent.
@@ -378,8 +367,7 @@ finds the checkpoint behind the range it archives.
    refuses a citation outside the job's range.
 3. The model adds, supersedes, invalidates, or skips each candidate against existing records,
    subject to [Freshness](#freshness).
-4. `finish_extraction` advances the checkpoint, guarded by its revision, and marks the segments the
-   range completes as extracted.
+4. `finish_extraction` advances the checkpoint, guarded by its revision.
 
 A failed extraction keeps the checkpoint and does not affect the conversation.
 
@@ -394,10 +382,7 @@ In code, it does the following, deleting in small batches:
 - deletes ledger rows and revision claims older than 90 days;
 - rebuilds the terms of records with an old `search_version`;
 - invalidates agent records that override a `required` shared record;
-- finishes pending skill writes;
-- curates unused skills;
-- deletes skill blobs that no retained ledger row or pending skill write references and that are
-  older than one day;
+- archives skills unused for 30 days;
 - enqueues one `consolidate` job for each scope changed in the last day, up to 200 scopes;
 - records the database size and the active records per scope in the ledger.
 
@@ -406,8 +391,8 @@ then does the following:
 
 - merges duplicates and resolves contradictions with `memory_supersede` and `memory_invalidate`;
 - adjusts importance so the always-loaded memory fits its budget;
-- creates, updates, and archives agent skills;
-- prepares shared proposals.
+- creates, updates, and archives the agent's skills;
+- writes records several agents keep to a shared space with `shared_write`.
 
 ## Always-loaded memory
 
@@ -568,7 +553,7 @@ Each archived range has its search index in R2, next to its entries
 - **`.summary.json`** is written by the `record_archive` job: the summary and its normalized
   words. Writing it sets `has_summary` on the catalog row.
 - **The `archive_segments` row** in D1 is the catalog: range, times, size, SHA-256, and whether
-  extraction and the summary are done. It is one small row per range.
+  the summary is done. It is one small row per range.
 
 The objects and the row are deleted only together, by an operator. Consolidation never expires
 them.
@@ -587,155 +572,79 @@ them.
 
 ## Skills
 
-Skills follow the Agent Skills format: a directory with a `SKILL.md` file (frontmatter `name` and
-`description`) and optional `references/`, `assets/`, and `scripts/` directories. They are kept
-apart from facts so that only their name and description occupy the prompt, and the body is read
-when a task needs it.
-
-### Scopes and visibility
-
-| Scope             | Visible to                                    | Changed by                                     |
-| ----------------- | --------------------------------------------- | ---------------------------------------------- |
-| `agent:<agentId>` | that agent                                    | memory agent                                   |
-| `shared:<space>`  | agents whose `sharedSpaces` include `<space>` | memory agent, only through an applied proposal |
-
-An agent skill shadows a shared skill with the same name. Between shared spaces, the earlier space
-in `sharedSpaces` wins. Each name appears once in the listing.
-
-A skill's status is `proposed`, `active`, `stale`, or `archived`.
+A skill is a procedure the memory agent saved for one agent: a name, a description of when to use
+it, and a Markdown body with the steps. Skills are kept apart from facts so that only their names
+and descriptions occupy the prompt; the body is read when a task needs it.
+[`skills.ts`](../packages/agents/src/memory/skills.ts) holds all of it.
 
 ### Storage
 
-[`skills/write.ts`](../packages/agents/src/memory/skills/write.ts) stores each skill as one R2
-directory, `skills/<scope>/<name>/`, overwritten in place on update. The `skills` row holds
-`content_sha256` (over each path and its file's SHA-256) and `revision`.
+Each skill is one row of the D1 `skills` table, body included, keyed by agent and name. The body
+has at most 50,000 characters and the description at most 1,024. Secrets are redacted, and text
+that reads as instructions to obey is refused before a write.
 
-A skill has at most 32 files of at most 256 KiB each. Paths are `SKILL.md` or below
-`references/`, `assets/`, or `scripts/`.
+A write is one operation (see [Applying a write](#applying-a-write)):
 
-An update is one operation. It is recorded before any file changes, so a stop can be finished:
+- it creates the skill, or overwrites it at the revision the writer read, and claims the next
+  revision;
+- the same batch writes the ledger row, with the body it replaced, and a new `scope_revisions`
+  value for the agent, so its skill list refreshes like its memory.
 
-1. Upload the new files to `skills/.blobs/<sha256>`. Also copy there each file that will be
-   overwritten or removed. Blobs are content-addressed, so a file is stored once.
-2. Insert a `pending` `skill_writes` row with the `op_id` and each changed path's before and after
-   SHA-256.
-3. Overwrite and remove the files in the skill directory, supporting files first and `SKILL.md`
-   last.
-4. In one `batch()`, do the following:
-   - update `content_sha256`, guarded by `revision`;
-   - write the ledger row with the per-file hashes;
-   - write the new `scope_revisions` value and the `memory_ops` row;
-   - mark the `skill_writes` row `done`.
+One batch either happens or does not, so a stop never leaves a half-written skill. An earlier
+version can be restored by writing the body the ledger kept. Archiving and restoring are
+operations in the same way.
 
-Before each job and during daily consolidation, the memory agent finishes every pending
-`skill_writes` row. It copies the after blobs into the directory again and runs step 4. Step 3
-writes the same bytes each time, so a stop at any point ends in the new version.
-
-A rollback is an operation that writes a ledger row's before blobs back in the same way.
-
-A read during an update can see old and new files mixed until the update finishes. Updates run
-only in consolidation and `apply_proposal`, and `SKILL.md` is written last, so this is accepted.
+Skills are only agent skills. A procedure that several agents share is still kept per agent.
 
 ### Listing and loading
 
-- The `skills` section lists the visible active skills as name, description, and path
-  `/skills/<scope>/<name>/SKILL.md`. It lists at most 50, in this order:
-  1. agent skills;
-  2. shared skills, by this agent's uses;
-  3. shared skills, by all agents' uses.
-
-  The list is stored and refreshed with the always-loaded memory, and the same stored list decides
-  what `SkillsEnv` serves.
-
-- The model loads a skill with the `read` tool from `@earendil-works/pi-durable/tools`. The
-  conversation's `env` is [`SkillsEnv`](../packages/agents/src/memory/skills/env.ts), a read-only
-  `ExecutionEnv` that resolves `/skills/<scope>/<name>/...` to the skill's R2 directory.
-- Paths of skills the agent cannot see return not found. Writes, `exec`, and `watch` fail.
-- Relative paths, and `..`, resolve within `/skills`. Scripts can be read but not run.
-- The `afterTool` hook on `read` upserts `skill_usage` when a read of a `SKILL.md` succeeds.
+- The `skills` section lists the agent's active skills by name and description, at most 50, most
+  recently used first. The list is stored and refreshed with the always-loaded memory.
+- The model reads a listed skill with the `skill_read` tool, by name. A name the agent does not
+  have, or an archived skill, returns an error.
+- Each read raises the skill's `use_count` and sets `last_used_at`, which never change `revision`.
 
 ### Lifecycle
 
-All changes are operations of the memory agent during `consolidate` or `apply_proposal`, logged in
-`memory_ledger`.
+All changes are operations of the memory agent during an agent's `consolidate` job, or of the
+daily consolidation in code, logged in `memory_ledger`.
 
-- **Create.** An agent skill comes from a procedure that succeeded at least twice in that agent's
-  trajectories, with the trajectories and failure lessons as evidence. The memory agent writes it
-  with `skill_write` during the agent scope's `consolidate` job. The write checks the structure:
-  frontmatter `name` matching the skill, a 1–1024 character `description`, paths, and sizes. The
-  skill is stored `active`. A skill that does not help goes stale unused.
-- **Update an agent skill.** The memory agent overwrites it from new evidence of the same agent,
-  passing the revision it read.
-- **Promote.** When agent skills of two or more agents describe the same procedure, the memory
-  agent proposes the merged skill to a shared space, preferring a space every source agent reads.
-  When the proposal is applied:
-  1. The memory agent writes `shared:<space>/<name>` and moves the `skill_usage` rows.
-  2. For each source agent, it resolves the name with that agent's `sharedSpaces`. Only if the
-     result is the new shared skill does it archive the source skill, with `absorbed_into`.
-     Otherwise it keeps the agent skill and records why in the ledger.
-- **Update a shared skill.** A shared skill changes only through an applied proposal backed by
-  agent skills of two or more agents, such as their overrides of it.
-- **Override.** A shared skill may keep failing for one agent while a different procedure
-  succeeds. Then the memory agent writes an agent skill with the same name and `based_on` set to
-  the shared skill and its content hash. It shadows the shared skill for that agent only. When
-  several agents override a shared skill the same way, that becomes an update proposal.
-- **Curate.** Pinned skills are exempt, and archived skills can be restored with
-  `skill_archive`.
-
-  | Skill        | `stale` after | `archived` after | Unused by |
-  | ------------ | ------------- | ---------------- | --------- |
-  | agent skill  | 14 days       | 30 days          | its agent |
-  | shared skill | 30 days       | 60 days          | any agent |
-
-  Days count from the last use or the last content write (`updated_at`). A status change other
-  than a restore keeps `updated_at`.
+- **Create.** A skill comes from a procedure that succeeded at least twice in the agent's entries,
+  with those entry ranges and the failure lessons as evidence. The memory agent writes it with
+  `skill_write`.
+- **Update.** The memory agent overwrites it from new evidence, passing the revision it read.
+- **Archive.** The memory agent archives a skill the records show is wrong. The daily
+  consolidation archives skills that were neither used nor written for 30 days. An archived skill
+  can be restored with `skill_archive`.
 
 ## Shared memory
 
 - Agents read the shared spaces listed in their `sharedSpaces` configuration: at most eight unique
   names of lowercase letters, digits, and hyphens. They are stored under `kodama:shared-spaces`
   beside the configuration Pi keeps
-  ([`configuration/shared-spaces.ts`](../packages/agents/src/configuration/shared-spaces.ts)).
-- The memory agent writes shared scopes only through [proposals](#proposals). During a
-  `consolidate` job, it can propose a record (new, or replacing a shared record) or an agent skill
-  of the job's scope.
+  ([`configuration/index.ts`](../packages/agents/src/configuration/index.ts)).
 - An agent record overrides a shared record through `memory_write`'s `overrides`.
-- Applied proposals become new records; shared records are never rewritten in place.
 - Content from untrusted sources is stored as an `event` with its source. One agent's
   conversation alone never reaches a shared space.
 - Secrets are redacted before any write.
 
-### Proposals
+### Writing shared records
 
-No person approves or reviews a change. Code checks each proposal when the memory agent writes it,
-and the memory agent applies the accepted ones on its own
-([`shared/`](../packages/agents/src/memory/shared/)).
+No person approves or reviews a change. During a `consolidate` job, the memory agent writes a
+shared record with `shared_write`, and code checks it before applying it
+([`shared.ts`](../packages/agents/src/memory/shared.ts)):
 
-- A proposal stores its target, the `base_revision` it was written against, and a payload of
-  concrete operations: record contents, or skill files already uploaded as blobs. What is applied
-  is exactly what was checked.
-- The checks decide at once, and `decided_by` names the rule set (`checks:1`):
-  - A record or skill that comes into a space needs active records or skills of at least two
-    agents among its sources. Two agents are independent evidence that it is not one agent's
-    quirk or one poisoned conversation.
-  - Reorganizing a space (merging or replacing its records) needs sources that are all active
-    records of that space.
-  - `required` needs records of two agents, or sources that are already required.
-  - Record text must not read as instructions to obey. Secrets are redacted before the proposal.
-- A proposal that fails a check is stored `rejected` with the reason, and the tool tells the memory
-  agent why. A proposal that passes is stored `accepted`.
-- `accepted` means accepted and not yet applied, so the row itself is the durable pending work.
-  Between jobs, the memory agent queues an `apply_proposal` job for every accepted row. A proposal
-  written by the running job is therefore applied right after it, and a stop only delays the
-  application.
-- `apply_proposal` runs in code, with the proposal ID as `op_id`:
-  - An `applied` row returns at once.
-  - If the target's revision differs from `base_revision`, the row becomes `conflict` with a
-    reason. The memory agent may write a new proposal against the current revision.
-  - Otherwise, one `batch()` applies the payload and records the application: `applied` and
-    `applied_at`, the ledger row, `scope_revisions`, and the `memory_ops` row.
-- Every proposal, decision, and application is in the ledger, and a skill change can be rolled
-  back from it.
+- A record that comes into a space needs active records of at least two agents among its sources.
+  Two agents are independent evidence that it is not one agent's quirk or one poisoned
+  conversation.
+- Reorganizing a space (merging or replacing its records) needs sources that are all active
+  records of that space.
+- `required` needs records of two agents, or sources that are already required.
+- Record text must not read as instructions to obey.
+
+A write that passes is applied as one operation: a new record, or a supersede of the shared record
+it replaces at its current revision. A write that fails changes nothing but the ledger, and the
+tool tells the memory agent why. Shared records are never rewritten in place.
 
 ## Settings
 
@@ -753,23 +662,21 @@ and the memory agent applies the accepted ones on its own
 | consolidation job size             | one scope, 200 records; 200 scopes a day    | `memory-agent/consolidation.ts`       |
 | ledger and claim retention         | 90 days                                     | `memory-agent/consolidation.ts`       |
 | settled job retention              | 30 days                                     | `memory-agent/consolidation.ts`       |
-| pruning threshold / hard limit     | 1 GiB / 8 GiB                               | `prune/limits.ts`                     |
-| entries per pruning run            | at most 16 MiB                              | `prune/limits.ts`                     |
-| pruning retry after a failed check | 10 minutes                                  | `prune/limits.ts`                     |
+| pruning threshold / hard limit     | 1 GiB / 8 GiB                               | `prune/runs.ts`                       |
+| entries per pruning run            | at most 16 MiB                              | `prune/runs.ts`                       |
+| pruning retry after a failed check | 10 minutes                                  | `prune/runs.ts`                       |
 | archive chunk / tool result text   | 2,000 / 2,000 characters                    | `archive/segment.ts`, `transcript.ts` |
 | `history_search` index read        | 4 MiB per call, 5 matches                   | `archive/history.ts`                  |
-| skill files                        | 32 files, 256 KiB each                      | `skills/paths.ts`                     |
-| skills listed per agent            | 50                                          | `skills/usage.ts`                     |
-| agent skill stale / archive        | 14 / 30 days                                | `skills/curation.ts`                  |
-| shared skill stale / archive       | 30 / 60 days                                | `skills/curation.ts`                  |
-| unreferenced skill blob grace      | 1 day                                       | `skills/curation.ts`                  |
-| agents needed for a shared change  | 2                                           | `shared/proposals.ts`                 |
+| skill body / description           | 50,000 / 1,024 characters                   | `skills.ts`                           |
+| skills listed per agent            | 50                                          | `skills.ts`                           |
+| skill archived when unused         | 30 days                                     | `skills.ts`                           |
+| agents needed for a shared record  | 2                                           | `shared.ts`                           |
 
 ## Testing
 
 Memory is tested in workerd with a mocked model, like the rest of the agent (see
 [agents.md](agents.md#testing)). Each test sits next to the module it tests; shared
-setup lives in `src/helper/memory.ts` and `src/helper/skills.ts`. Paths below are relative to
+setup lives in `src/helper/memory.ts`. Paths below are relative to
 `src/memory/` unless they start with `src/`.
 
 | Test file                            | Covers                                                               |
@@ -780,10 +687,8 @@ setup lives in `src/helper/memory.ts` and `src/helper/skills.ts`. Paths below ar
 | `src/agent/alarms.test.ts`           | purposes coexist in one alarm                                        |
 | `prune/prune.test.ts`                | pruning states, stops at each step, delete checks, the hard limit    |
 | `archive/history.test.ts`            | the `record_archive` summary of a segment, found by `history_search` |
-| `skills/write.test.ts`               | skill writes, recovery of a stopped write, rollback                  |
-| `skills/skills.test.ts`              | listing, shadowing, `SkillsEnv`, usage, curation                     |
-| `shared/spaces.test.ts`              | shared spaces, overrides, required records                           |
-| `shared/proposals.test.ts`           | proposal checks, application, conflicts, promotion                   |
+| `skills.test.ts`                     | writes and conflicts, `skill_read`, curation, the consolidate job    |
+| `shared.test.ts`                     | shared spaces, overrides, required records, checked shared writes    |
 | `src/lib/redact.test.ts`             | secret redaction and the injection check                             |
 | `evaluation.test.ts`                 | probes after compaction, pruning, and eviction                       |
 | `src/agent/harness.test.ts`          | rows written per streamed turn stay under a recorded budget          |
@@ -823,8 +728,8 @@ the first three:
 
 ### Memory lives outside the agent's Durable Object
 
-The Pi session stays in the Durable Object. Long-term memory goes to D1, and raw entries and skill
-files go to R2. Per row and per GB, a Durable Object is not more expensive than D1, so cost is not
+The Pi session stays in the Durable Object. Long-term memory and skills go to D1, and raw entries
+go to R2. Per row and per GB, a Durable Object is not more expensive than D1, so cost is not
 the reason. Memory moves out because of three requirements:
 
 - agents share memory;
@@ -911,19 +816,21 @@ work hurt, and selection accuracy drops as the library grows. Hence the rules:
 
 - a skill needs a procedure that succeeded at least twice;
 - an agent sees at most 50 skills;
-- unused skills go stale and are then archived.
+- unused skills are archived.
 
-Skills are loaded the way Pi loads them: the section lists them, and the model reads them with
-`read`. Bundled files therefore keep working by relative path.
+A skill is one row with one Markdown body. Bundled files, a virtual file system for Pi's `read`
+tool, and shared skills were tried and removed: they needed a write journal, content-addressed
+blobs, and recovery code for little use. `skill_read` by name is enough to load a listed skill.
 
 ### Shared memory needs a second agent, not a person
 
-Agents run unattended for months, so a person in the loop would leave proposals waiting and shared
+Agents run unattended for months, so a person in the loop would leave changes waiting and shared
 memory stale. A second agent's independent record is the confirmation instead: one poisoned
 conversation or one agent's quirk cannot reach every agent on its own.
 
-Checking `base_revision` at application turns an outdated proposal into a `conflict` instead of
-undoing a newer change.
+The check and the write happen in one tool call, so there is no pending state to recover. A
+replacement supersedes the shared record at the revision just read, so a change made meanwhile
+turns it into a `conflict` instead of being undone.
 
 ## Known limits
 
@@ -937,12 +844,11 @@ undoing a newer change.
   calls with `before`.
 - D1 is one database for all agents. Consolidation records its size, but when to split it is not
   decided.
-- The shared-skill windows, the two agents needed for a shared change, and the 50-skill limit are
+- The 30-day skill window, the two agents needed for a shared record, and the 50-skill limit are
   kodama's choices, not measured values.
 
 ## Open questions
 
 - How long must archived entries be kept, and who may delete them?
-- Who may roll back a skill change, and through which RPC?
 - Which model should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?

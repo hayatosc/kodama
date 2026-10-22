@@ -17,7 +17,6 @@ packages/
     src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
     src/configuration/    Per-agent configuration validation and persistence
     src/models/           Pi provider catalog and Worker credential resolution
-    src/prompts/          Default system prompt
     src/tools/            Tool implementations and registration
     src/memory/           Long-term memory, the memory agent, pruning, and skills
     src/storage/          Kodama's tables in each Durable Object's SQLite
