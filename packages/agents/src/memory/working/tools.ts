@@ -8,6 +8,7 @@ import { searchHistory } from '../archive/history.ts'
 import type { HistoryResult } from '../archive/history.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { looksLikeInjection, redactSecrets } from '../../lib/redact.ts'
+import { isSkillName, useSkill } from '../skills.ts'
 import { memoryDb } from '../store/db.ts'
 import { readableScopes } from '../store/scopes.ts'
 import { searchMemory } from '../store/search.ts'
@@ -135,6 +136,27 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },
       }
+    },
+  })
+}
+
+export function skillReadTool(deps: WorkingMemoryDeps): ToolRegistration {
+  return defineTool({
+    name: 'skill_read',
+    description: 'Read one of the skills listed in your skills section, by name.',
+    parameters: Type.Object({ name: Type.String({ minLength: 1, maxLength: 64 }) }),
+    replay: 'safe',
+    execute: async ({ name }) => {
+      const body = isSkillName(name)
+        ? await useSkill(
+            memoryDb(deps.env.MEMORY_DB),
+            deps.agentId(),
+            name,
+            deps.now?.() ?? Date.now(),
+          )
+        : undefined
+      if (body === undefined) throw new Error(`No skill named ${name}`)
+      return { output: [{ type: 'text', text: body }] }
     },
   })
 }

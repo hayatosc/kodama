@@ -9,7 +9,6 @@
 import { isNotNull, lte } from 'drizzle-orm'
 import {
   check,
-  foreignKey,
   index,
   integer,
   primaryKey,
@@ -29,7 +28,7 @@ export const RECORD_ORIGINS = [
   'agent_judgment',
   'extraction',
   'consolidation',
-  'proposal',
+  'shared',
 ] as const
 
 export const memoryRecords = sqliteTable(
@@ -152,9 +151,9 @@ export const memoryLedger = sqliteTable(
     opId: text('op_id'),
     actor: text('actor').notNull(),
     action: text('action').notNull(),
-    target: text('target', { enum: ['record', 'skill', 'proposal'] }).notNull(),
+    target: text('target', { enum: ['record', 'skill'] }).notNull(),
     targetId: text('target_id').notNull(),
-    /** For a skill change: `[{ path, before_sha256, after_sha256 }]`, whose blobs stay in R2. */
+    /** For a skill change: the body before it, so an earlier version can be restored by hand. */
     detailJson: text('detail_json'),
   },
   (t) => [index('memory_ledger_by_target').on(t.target, t.targetId, t.seq)],
@@ -193,111 +192,34 @@ export const archiveSegments = sqliteTable(
   ],
 )
 
-// Skills: the index, pending writes, and usage.
+// Skills.
 
-export const SKILL_STATUSES = ['proposed', 'active', 'stale', 'archived'] as const
+export const SKILL_STATUSES = ['active', 'archived'] as const
 
+/**
+ * One skill of one agent: a procedure written by the memory agent, its body stored in the row so
+ * that a write is one statement. Working agents list active skills and read them by name.
+ */
 export const skills = sqliteTable(
   'skills',
   {
-    scope: text('scope').$type<Scope>().notNull(),
+    agentId: text('agent_id').notNull(),
     name: text('name').notNull(),
     description: text('description').notNull(),
-    status: text('status', { enum: SKILL_STATUSES }).notNull(),
-    /** R2 directory, overwritten in place on update: `skills/<scope>/<name>/`. */
-    r2Key: text('r2_key').notNull(),
-    /** SHA-256 over the sorted list of each path and its file's SHA-256. */
-    contentSha256: text('content_sha256').notNull(),
+    body: text('body').notNull(),
+    status: text('status', { enum: SKILL_STATUSES }).notNull().default('active'),
+    /** The entry ranges where the procedure worked, and lessons from failures. */
+    evidence: text('evidence').notNull(),
+    /** Incremented on every content or status change; writes compare it with what they read. */
     revision: integer('revision').notNull().default(1),
-    evidenceJson: text('evidence_json').notNull(),
-    /** For an agent skill that overrides a shared one: `<scope>/<name>@<content_sha256>`. */
-    basedOn: text('based_on'),
-    /** For an agent skill merged into a shared one: `<scope>/<name>`. */
-    absorbedInto: text('absorbed_into'),
-    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.scope, t.name] }),
-    index('skills_by_status').on(t.scope, t.status),
-    index('skills_by_name').on(t.name, t.status),
-  ],
-)
-
-/**
- * A skill update recorded before any file is overwritten. Before and after files are blobs in R2
- * at `skills/.blobs/<sha256>`, so a pending write is finished by copying the after files again.
- */
-export const skillWrites = sqliteTable(
-  'skill_writes',
-  {
-    opId: text('op_id').primaryKey(),
-    scope: text('scope').$type<Scope>().notNull(),
-    name: text('name').notNull(),
-    baseRevision: integer('base_revision'),
-    /** `[{ path, before_sha256, after_sha256 }]`; a null before adds a file, a null after removes it. */
-    filesJson: text('files_json').notNull(),
-    /** The skills row to write and the operation's job: what finishing the write needs. */
-    skillJson: text('skill_json').notNull(),
-    status: text('status', { enum: ['pending', 'done'] })
-      .notNull()
-      .default('pending'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-  },
-  (t) => [index('skill_writes_pending').on(t.status, t.createdAt)],
-)
-
-/** Uses per agent, so shared skills can be curated by who still uses them. */
-export const skillUsage = sqliteTable(
-  'skill_usage',
-  {
-    scope: text('scope').$type<Scope>().notNull(),
-    name: text('name').notNull(),
-    agentId: text('agent_id').notNull(),
+    /** Updated by working agents; never changes `revision`. */
     useCount: integer('use_count').notNull().default(0),
-    lastUsedAt: integer('last_used_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.scope, t.name, t.agentId] }),
-    foreignKey({
-      columns: [t.scope, t.name],
-      foreignColumns: [skills.scope, skills.name],
-    }).onDelete('cascade'),
-    index('skill_usage_by_agent').on(t.agentId, t.lastUsedAt),
+    primaryKey({ columns: [t.agentId, t.name] }),
+    index('skills_by_status').on(t.agentId, t.status),
   ],
-)
-
-// Proposals to shared spaces.
-
-export const PROPOSAL_STATUSES = ['accepted', 'applied', 'rejected', 'conflict'] as const
-
-/**
- * A change to a shared scope. Code checks it when it is written, with no person in the loop:
- * `accepted` passed the checks and is not yet applied, so the memory agent applies every accepted
- * row; `rejected` failed them, with the reason.
- */
-export const sharedProposals = sqliteTable(
-  'shared_proposals',
-  {
-    id: text('id').primaryKey(),
-    space: text('space').notNull(),
-    target: text('target', { enum: ['record', 'skill'] }).notNull(),
-    /** For a record: the ID it replaces, or `<scope>` for a new one; for a skill: `<scope>/<name>`. */
-    targetKey: text('target_key').notNull(),
-    /** Revision of the target the proposal was written against; null when the target is new. */
-    baseRevision: integer('base_revision'),
-    /** Concrete operations applied by code: record contents, or skill files already in R2. */
-    payloadJson: text('payload_json').notNull(),
-    sourceIdsJson: text('source_ids_json').notNull(),
-    status: text('status', { enum: PROPOSAL_STATUSES }).notNull(),
-    runId: text('run_id').notNull(),
-    proposedAt: integer('proposed_at').notNull(),
-    /** The rule set that decided, such as `checks:1`. */
-    decidedBy: text('decided_by').notNull(),
-    reason: text('reason'),
-    appliedAt: integer('applied_at'),
-  },
-  (t) => [index('shared_proposals_by_status').on(t.status, t.space, t.proposedAt)],
 )

@@ -98,63 +98,19 @@ CREATE TABLE `scope_revisions` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `shared_proposals` (
-	`id` text PRIMARY KEY NOT NULL,
-	`space` text NOT NULL,
-	`target` text NOT NULL,
-	`target_key` text NOT NULL,
-	`base_revision` integer,
-	`payload_json` text NOT NULL,
-	`source_ids_json` text NOT NULL,
-	`status` text NOT NULL,
-	`run_id` text NOT NULL,
-	`proposed_at` integer NOT NULL,
-	`decided_by` text NOT NULL,
-	`reason` text,
-	`applied_at` integer
-);
---> statement-breakpoint
-CREATE INDEX `shared_proposals_by_status` ON `shared_proposals` (`status`,`space`,`proposed_at`);--> statement-breakpoint
-CREATE TABLE `skill_usage` (
-	`scope` text NOT NULL,
-	`name` text NOT NULL,
-	`agent_id` text NOT NULL,
-	`use_count` integer DEFAULT 0 NOT NULL,
-	`last_used_at` integer NOT NULL,
-	PRIMARY KEY(`scope`, `name`, `agent_id`),
-	FOREIGN KEY (`scope`,`name`) REFERENCES `skills`(`scope`,`name`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `skill_usage_by_agent` ON `skill_usage` (`agent_id`,`last_used_at`);--> statement-breakpoint
-CREATE TABLE `skill_writes` (
-	`op_id` text PRIMARY KEY NOT NULL,
-	`scope` text NOT NULL,
-	`name` text NOT NULL,
-	`base_revision` integer,
-	`files_json` text NOT NULL,
-	`skill_json` text NOT NULL,
-	`status` text DEFAULT 'pending' NOT NULL,
-	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL
-);
---> statement-breakpoint
-CREATE INDEX `skill_writes_pending` ON `skill_writes` (`status`,`created_at`);--> statement-breakpoint
 CREATE TABLE `skills` (
-	`scope` text NOT NULL,
+	`agent_id` text NOT NULL,
 	`name` text NOT NULL,
 	`description` text NOT NULL,
-	`status` text NOT NULL,
-	`r2_key` text NOT NULL,
-	`content_sha256` text NOT NULL,
+	`body` text NOT NULL,
+	`status` text DEFAULT 'active' NOT NULL,
+	`evidence` text NOT NULL,
 	`revision` integer DEFAULT 1 NOT NULL,
-	`evidence_json` text NOT NULL,
-	`based_on` text,
-	`absorbed_into` text,
-	`pinned` integer DEFAULT false NOT NULL,
+	`use_count` integer DEFAULT 0 NOT NULL,
+	`last_used_at` integer,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	PRIMARY KEY(`scope`, `name`)
+	PRIMARY KEY(`agent_id`, `name`)
 );
 --> statement-breakpoint
-CREATE INDEX `skills_by_status` ON `skills` (`scope`,`status`);--> statement-breakpoint
-CREATE INDEX `skills_by_name` ON `skills` (`name`,`status`);
+CREATE INDEX `skills_by_status` ON `skills` (`agent_id`,`status`);

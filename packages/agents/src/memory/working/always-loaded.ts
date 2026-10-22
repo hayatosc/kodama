@@ -2,13 +2,12 @@
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
 import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
-import { visibleSkills } from '../skills/usage.ts'
-import type { VisibleSkill } from '../skills/paths.ts'
+import { visibleSkills } from '../skills.ts'
+import type { VisibleSkill } from '../skills.ts'
 import { memoryDb } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
 import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
-import { agentScope, isScope, readableScopes } from '../store/scopes.ts'
+import { agentScope, readableScopes } from '../store/scopes.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
 export const AGENT_MEMORY_BUDGET = 2_200
@@ -86,7 +85,7 @@ export async function renderAlwaysLoaded(
     .from(scopeRevisions)
     .where(inArray(scopeRevisions.scope, scopes))
   const revisions = Object.fromEntries(revisionRows.map((row) => [row.scope, row.revision]))
-  const skills = await visibleSkills(db, agentId, sharedSpaces)
+  const skills = await visibleSkills(db, agentId)
   if (agentRecords.length === 0 && sharedRecords.length === 0)
     return { text: '', revisions, skills }
   const text = [
@@ -102,13 +101,7 @@ function sameRevisions(a: Revisions, b: Revisions): boolean {
   return [...keys].every((key) => a[key] === b[key])
 }
 
-const visibleSkillSchema = v.array(
-  v.object({
-    scope: v.custom<Scope>((value) => typeof value === 'string' && isScope(value)),
-    name: v.string(),
-    description: v.string(),
-  }),
-)
+const visibleSkillSchema = v.array(v.object({ name: v.string(), description: v.string() }))
 
 function parseSkills(json: string): VisibleSkill[] {
   const parsed = v.safeParse(visibleSkillSchema, JSON.parse(json))

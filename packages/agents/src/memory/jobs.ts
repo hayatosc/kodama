@@ -33,10 +33,6 @@ export const MemoryJobSchema = v.variant('kind', [
     /** UTC day, so one consolidation per scope and day. */
     day: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
   }),
-  v.object({
-    kind: v.literal('apply_proposal'),
-    proposalId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
-  }),
 ])
 
 export type MemoryJob = v.InferOutput<typeof MemoryJobSchema>
@@ -54,15 +50,9 @@ export interface JobStatus {
 /** Lower runs first. */
 export const JOB_PRIORITY: Record<JobKind, number> = {
   remember: 0,
-  apply_proposal: 1,
   record_archive: 1,
   extract: 2,
   consolidate: 3,
-}
-
-/** Jobs that run in code, without the memory agent's model. */
-export function isCodeJob(job: MemoryJob): boolean {
-  return job.kind === 'apply_proposal'
 }
 
 /** The same job delivered twice gets the same ID, so the second delivery finds the first. */
@@ -78,8 +68,6 @@ export function jobId(job: MemoryJob): Promise<string> {
       return sha256Hex(JSON.stringify([job.kind, job.segmentId]))
     case 'consolidate':
       return sha256Hex(JSON.stringify([job.kind, job.scope, job.day]))
-    case 'apply_proposal':
-      return Promise.resolve(`apply:${job.proposalId}`)
   }
 }
 

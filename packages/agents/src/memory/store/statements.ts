@@ -131,6 +131,7 @@ export function recordLedger(
   action: string,
   targetId: string,
   detail: unknown,
+  target: 'record' | 'skill' = 'record',
 ) {
   return db.insert(memoryLedger).values({
     at: context.now,
@@ -138,7 +139,7 @@ export function recordLedger(
     opId: context.opId,
     actor: context.actor,
     action,
-    target: 'record',
+    target,
     targetId,
     detailJson: JSON.stringify(detail),
   })

@@ -105,11 +105,7 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Called on every open; subclasses supply their own registry and settings. */
   protected harnessOptions(): HarnessOptions {
-    return {
-      ...createAgentOptions(this.env, [this.#memory.extension()]),
-      // The only files a working agent sees are its skills, read-only.
-      env: () => this.#memory.skillsEnv(),
-    }
+    return createAgentOptions(this.env, [this.#memory.extension()])
   }
 
   protected defaultConfig(): AgentConfig {

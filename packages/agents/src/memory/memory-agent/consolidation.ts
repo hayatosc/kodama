@@ -3,8 +3,7 @@
  * (docs/memory.md, Consolidate). The model part runs as `consolidate` jobs.
  */
 import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { curateSkills, forgetSkillBlobs } from '../skills/curation.ts'
-import { finishPendingSkillWrites } from '../skills/write.ts'
+import { curateSkills } from '../skills.ts'
 import { applyOperation } from '../store/records.ts'
 import { termStatements } from '../store/statements.ts'
 import type { MemoryDb, MemoryRecord } from '../store/db.ts'
@@ -161,7 +160,6 @@ export async function invalidateOverridesOfRequired(
 
 export interface DailyConsolidationDeps {
   db: MemoryDb
-  bucket: R2Bucket
   /** Remove settled jobs older than the time given. */
   forgetSettledJobs: (before: number) => Promise<number>
   enqueue: (job: MemoryJob) => Promise<unknown>
@@ -173,16 +171,14 @@ export interface DailyConsolidationDeps {
  * curation in code, then one `consolidate` job per scope changed in the last day.
  */
 export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ scopes: number }> {
-  const { db, bucket, now } = deps
+  const { db, now } = deps
   const runId = `consolidate:${consolidationDay(now)}`
   await deps.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
   await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
   await forgetOldClaims(db, now - LEDGER_RETENTION_MS)
   await resegmentRecords(db)
   await invalidateOverridesOfRequired(db, runId, now)
-  await finishPendingSkillWrites(db, bucket, now)
   await curateSkills(db, runId, now)
-  await forgetSkillBlobs(db, bucket, now)
   const scopes = await changedScopes(db, now - DAY_MS)
   for (const scope of scopes) {
     await deps.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })

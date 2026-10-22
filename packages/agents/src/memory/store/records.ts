@@ -59,15 +59,27 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
  * Apply one operation at most once. A repeat with the same `opId` returns the first result and
  * changes nothing; a broken precondition returns `conflict` and changes nothing.
  */
-export async function applyOperation(
+export function applyOperation(
   db: MemoryDb,
   context: OperationContext,
   op: Operation,
 ): Promise<OperationResult & { replayed: boolean }> {
+  return applyPlan(db, context, () => plan(db, context, op))
+}
+
+/**
+ * Apply the batch `makePlan` builds at most once per `opId`, for changes other modules plan, such
+ * as skills. The plan reads its targets; the batch rolls back if one changed meanwhile.
+ */
+export async function applyPlan(
+  db: MemoryDb,
+  context: OperationContext,
+  makePlan: () => Promise<Plan>,
+): Promise<OperationResult & { replayed: boolean }> {
   const earlier = await appliedResult(db, context.opId)
   if (earlier !== undefined) return { ...earlier, replayed: true }
 
-  const { result, statements } = await plan(db, context, op)
+  const { result, statements } = await makePlan()
   await context.beforeBatch?.()
   try {
     await db.batch(statements)

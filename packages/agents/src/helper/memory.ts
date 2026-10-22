@@ -2,12 +2,11 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { expect } from 'vitest'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { NewRecord } from '../memory/store/records.ts'
-import { memoryRecords, sharedProposals } from '../../drizzle/d1/schema.ts'
+import { memoryRecords } from '../../drizzle/d1/schema.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
 import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
@@ -65,14 +64,4 @@ export function renderedAlwaysLoaded(agentId: string, spaces: string[]): Promise
     await memory.refresh()
     return memory.text()
   })
-}
-
-export async function waitForProposal(id: string, status: string): Promise<void> {
-  await expect
-    .poll(
-      async () =>
-        (await db.select().from(sharedProposals).where(eq(sharedProposals.id, id)).get())?.status,
-      { timeout: 10_000 },
-    )
-    .toBe(status)
 }

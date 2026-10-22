@@ -153,9 +153,9 @@ export async function planSupersede(
   if (old.sourceAgentId !== op.record.sourceAgentId) {
     return conflict(db, context, op.oldId, 'other_agent')
   }
-  // Consolidation reorganizes existing records, and a proposal is applied as it was checked;
-  // neither brings newer evidence.
-  const reorganizes = op.record.origin === 'consolidation' || op.record.origin === 'proposal'
+  // Consolidation reorganizes existing records, and a shared write rests on agents' records;
+  // neither brings newer evidence of the record's own source.
+  const reorganizes = op.record.origin === 'consolidation' || op.record.origin === 'shared'
   const record: NewRecord =
     reorganizes && op.record.sourceEntries === undefined && old.sourceEntryTo !== null
       ? {

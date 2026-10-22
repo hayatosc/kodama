@@ -41,7 +41,7 @@ export const alwaysLoaded = sqliteTable('kodama_always_loaded', {
   id: integer('id').primaryKey(),
   text: text('text').notNull(),
   revisionsJson: text('revisions_json').notNull(),
-  /** The skills this agent sees, as listed in its `skills` section and readable through SkillsEnv. */
+  /** The skills this agent sees, as listed in its `skills` section. */
   skillsJson: text('skills_json').notNull().default('[]'),
   checkedAt: integer('checked_at').notNull(),
 })

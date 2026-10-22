@@ -9,14 +9,12 @@ import type { AlarmPurpose } from '../../agent/alarms.ts'
 import type { AgentEnv } from '../../env.ts'
 import type { AgentConfig, SendMessageRequest, SendMessageResponse } from '../../protocol.ts'
 import { needsPrune } from '../prune/runs.ts'
-import { acceptedProposals, applyProposal } from '../shared/apply.ts'
-import { finishPendingSkillWrites } from '../skills/write.ts'
 import { memoryDb } from '../store/db.ts'
 import type { MemoryDb } from '../store/db.ts'
 import { memoryLedger } from '../../../drizzle/d1/schema.ts'
 import { consolidateDaily } from './consolidation.ts'
 import { memoryAgentConfig, memoryHarnessOptions } from './harness.ts'
-import { isCodeJob, parseMemoryJob } from '../jobs.ts'
+import { parseMemoryJob } from '../jobs.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from '../jobs.ts'
 import { runModelJob } from './model-job.ts'
 import { JobQueue } from './queue.ts'
@@ -106,7 +104,6 @@ export class MemoryAgent extends Agent {
   consolidate(now: number): Promise<{ scopes: number }> {
     return consolidateDaily({
       db: this.#db(),
-      bucket: this.env.ARCHIVE,
       forgetSettledJobs: (before) => this.forgetSettledJobs(before),
       enqueue: (job) => this.enqueue(job),
       now,
@@ -132,16 +129,9 @@ export class MemoryAgent extends Agent {
   async #drain(): Promise<void> {
     await this.harness()
     for (;;) {
-      // An accepted proposal is durable pending work: queued between jobs, so one the running
-      // job wrote is applied next.
-      for (const proposal of await acceptedProposals(this.#db())) {
-        await this.#queue.store({ kind: 'apply_proposal', proposalId: proposal.id })
-      }
       const row = await this.#queue.next(Date.now())
       if (row === undefined) break
       await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
-      // A skill write a stop left half done is finished before anything reads the skill again.
-      await finishPendingSkillWrites(this.#db(), this.env.ARCHIVE, Date.now())
       await this.#run(row)
     }
     if (await needsPrune(this.ctx.storage, await this.local())) await this.prune()
@@ -154,7 +144,7 @@ export class MemoryAgent extends Agent {
     const { row, job } = started
     let outcome: JobOutcome | 'retry'
     try {
-      outcome = isCodeJob(job) ? await this.runCodeJob(row.jobId, job) : await this.#model(row, job)
+      outcome = await this.#model(row, job)
     } catch (error) {
       console.error('Memory job failed', row.jobId, error)
       outcome = 'retry'
@@ -204,22 +194,5 @@ export class MemoryAgent extends Agent {
     } catch (error) {
       console.error('Memory change notice failed', job.sourceAgentId, error)
     }
-  }
-
-  /** Jobs that run in code, without the model. */
-  protected runCodeJob(_jobId: string, job: MemoryJob): Promise<JobOutcome | 'retry'> {
-    if (job.kind !== 'apply_proposal') {
-      return Promise.reject(new Error(`No code runner for ${job.kind}`))
-    }
-    return applyProposal(
-      {
-        db: this.#db(),
-        bucket: this.env.ARCHIVE,
-        sharedSpacesOf: async (agentId) =>
-          (await this.env.AGENTS.getByName(agentId).getConfig()).sharedSpaces,
-        now: Date.now(),
-      },
-      job.proposalId,
-    )
   }
 }

@@ -3,14 +3,12 @@ import { Type } from '@earendil-works/pi-ai'
 import type { Static, TSchema } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
-import { and, eq } from 'drizzle-orm'
 import type { AgentEnv } from '../../../env.ts'
 import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import { memoryDb } from '../../store/db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from '../../store/db.ts'
 import { applyOperation } from '../../store/records.ts'
 import type { NewRecord, Operation } from '../../store/records.ts'
-import { skills } from '../../../../drizzle/d1/schema.ts'
 import type { Scope } from '../../../../drizzle/d1/schema.ts'
 import type { OperationResult } from '../../store/statements.ts'
 import type { MemoryJob } from '../../jobs.ts'
@@ -83,8 +81,6 @@ export function jobScope(job: MemoryJob): Scope {
       return `agent:${job.sourceAgentId}`
     case 'consolidate':
       return job.scope
-    case 'apply_proposal':
-      throw new Error('apply_proposal jobs run in code')
   }
 }
 
@@ -137,7 +133,6 @@ export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRec
     }
     case 'consolidate':
     case 'record_archive':
-    case 'apply_proposal':
       return { ...base, origin: 'consolidation' }
   }
 }
@@ -165,7 +160,9 @@ export function writingTool<P extends TSchema>(
       const op = definition.operation(args, running.job, now)
       const { job } = running
       if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
-        throw new Error('Shared records change only through proposals; use shared_propose')
+        throw new Error(
+          'Shared records change only through shared_write, which checks their sources',
+        )
       }
       await definition.prepare?.(args, running.job)
       const result = await applyOperation(
@@ -193,13 +190,4 @@ export function searchScopes(job: MemoryJob): Scope[] {
 /** The memory database of the tools. */
 export function toolDb(deps: MemoryToolDeps): MemoryDb {
   return memoryDb(deps.env.MEMORY_DB)
-}
-
-/** The skill row of a scope and name, if any. */
-export function skillRow(db: MemoryDb, scope: Scope, name: string) {
-  return db
-    .select()
-    .from(skills)
-    .where(and(eq(skills.scope, scope), eq(skills.name, name)))
-    .get()
 }

@@ -1,7 +1,6 @@
 /** Long-term memory as one working agent object uses it (Working agents, Extract). */
 import type { Extension, Harness } from '@earendil-works/pi-durable'
 import { extractionCheckpoint, memoryDb } from '../memory/store/db.ts'
-import { SkillsEnv } from '../memory/skills/env.ts'
 import { AlwaysLoadedMemory } from '../memory/working/always-loaded.ts'
 import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
@@ -25,11 +24,6 @@ export class AgentMemory {
   /** The tools and sections every working agent gets. */
   extension(): Extension {
     return createWorkingMemoryExtension(this.#deps, this.#copy)
-  }
-
-  /** The read-only files a working agent sees: its skills. */
-  async skillsEnv(): Promise<SkillsEnv> {
-    return new SkillsEnv(this.#deps.env.ARCHIVE, await this.#copy.skills())
   }
 
   /** Render the always-loaded copy again. Memory is an aid: a failure is logged. */
