@@ -13,7 +13,7 @@ import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../storage/local.ts'
 
 export const db = memoryDb(env.MEMORY_DB)
-export const memoryAgent = () => env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME)
+export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
 /** A fresh operation, as if from its own job. */
 export function context(now = Date.now()): OperationContext {

@@ -1,6 +1,13 @@
 /** The memory agent's harness: its own tools, model, and instructions (Memory agent). */
-import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
-import type { HarnessOptions, ToolRegistration } from '@earendil-works/pi-durable'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import {
+  AgentDoc,
+  configure,
+  createRegistry,
+  defineExtension,
+  ROOT_CONVERSATION_ID,
+} from '@earendil-works/pi-durable'
+import type { Harness, HarnessOptions, ToolRegistration } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'
 import { harnessSettings } from '../../agent/harness.ts'
 import { createAgentModels } from '../../models/index.ts'
@@ -18,6 +25,26 @@ export function memoryModel(env: AgentEnv): { provider: string; modelId: string 
     provider: env.MEMORY_MODEL_PROVIDER || env.DEFAULT_MODEL_PROVIDER,
     modelId: env.MEMORY_MODEL_ID || env.DEFAULT_MODEL_ID,
   }
+}
+
+/**
+ * Store the model and instructions the memory agent should use now, if they changed. The model
+ * follows `MEMORY_MODEL_*` and the default model on every open, so changing either applies to the
+ * next job without touching the agent's storage by hand.
+ */
+export async function followMemoryModel(harness: Harness, env: AgentEnv): Promise<void> {
+  const model = memoryModel(env)
+  await harness.commit(async (tx) => {
+    const state = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)
+    const sameModel =
+      state.model?.provider === model.provider && state.model.modelId === model.modelId
+    if (sameModel && state.instructions === MEMORY_SYSTEM_PROMPT) return
+    await configure(tx, ROOT_CONVERSATION_ID, {
+      model,
+      instructions: MEMORY_SYSTEM_PROMPT,
+      thinkingLevel: 'off',
+    })
+  }, BACKGROUND_CONTEXT)
 }
 
 export function memoryAgentConfig(env: AgentEnv): AgentConfig {

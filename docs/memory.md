@@ -13,30 +13,30 @@ sections of this document by name.
 
 ## Components
 
-| Store                        | Binding        | Contents                                                                             |
-| ---------------------------- | -------------- | ------------------------------------------------------------------------------------ |
-| Agent Durable Object         | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
-| `MemoryAgent` Durable Object | `MEMORY_AGENT` | the memory agent (one instance, named `memory`) and its job queue                    |
-| D1 database                  | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skills, ledger       |
-| R2 bucket                    | `ARCHIVE`      | archived entries, their search indexes, and their summaries (`archive/`)             |
+| Store                       | Binding     | Contents                                                                             |
+| --------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| Agent Durable Object        | `AGENTS`    | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
+| Memory agent Durable Object | `AGENTS`    | the memory agent: an `Agent` object named `kodama:memory`, with its job queue        |
+| D1 database                 | `MEMORY_DB` | memory records, applied operations, revisions, archive catalog, skills, ledger       |
+| R2 bucket                   | `ARCHIVE`   | archived entries, their search indexes, and their summaries (`archive/`)             |
 
 ```text
 AgentService (public RPC entrypoint)
-  `-- AGENTS ---------------------> Agent DO (agentId)   MemoryAgent is not reachable from here
+  `-- AGENTS ---------------------> Agent DO (agentId)   rejects the memory agent's name
 
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, always-loaded query, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
-  `-- MEMORY_AGENT.enqueue -------> MemoryAgent DO       remember, extract, record_archive
+  `-- AGENTS enqueue -------------> memory agent         remember, extract, record_archive
 
-MemoryAgent DO ("memory")
+Agent DO "kodama:memory" (the memory agent)
   |-- reads and writes -----------> D1 MEMORY_DB
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and summaries
   |-- AGENTS readEntries ---------> Agent DO             paged entries for extraction
   `-- AGENTS memoryChanged -------> Agent DO             refresh hint; revisions are the record
 
-scheduled handler (17 3 * * *) -> MemoryAgent DO       consolidate
+scheduled handler (17 3 * * *) -> memory agent         consolidate
 ```
 
 Only the memory agent changes memory records and skills. Working agents write only usage counters
@@ -47,7 +47,7 @@ and, while pruning, the archive catalog of their own entries.
 | Path            | Contents                                                                                      |
 | --------------- | --------------------------------------------------------------------------------------------- |
 | `store/`        | operations and how they are applied, search text, search, scopes                              |
-| `memory-agent/` | `MemoryAgent`, its job queue, harness, prompts, daily consolidation, and its tools (`tools/`) |
+| `memory-agent/` | the memory agent role: job queue, harness, prompts, daily consolidation, and tools (`tools/`) |
 | `working/`      | what every working agent gets: tools, the always-loaded memory, and the Pi extension          |
 | `archive/`      | archived segments in R2: building, reading, and `history_search`                              |
 | `prune/`        | the pruning state machine and its limits                                                      |
@@ -232,20 +232,24 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
 
 ## Memory agent
 
-[`MemoryAgent`](../packages/agents/src/memory/memory-agent/memory-agent.ts) extends `Agent`. It is
-exported as its own Durable Object class, with one instance named `memory`.
+The memory agent is an ordinary `Agent` object of the `AGENTS` namespace, named `kodama:memory`
+(`MEMORY_AGENT_NAME` in `jobs.ts`). There is no separate Durable Object class or binding. When an
+`Agent` object starts under that name, it takes the memory agent role
+([`memory-agent/memory-agent.ts`](../packages/agents/src/memory/memory-agent/memory-agent.ts)):
+its own harness and configuration, and a job queue instead of chat input.
 
-- It inherits `Agent` as it is, including `subscribe`, `snapshot`, and `submission`. A UI can later
-  watch its jobs through an authenticated `AgentService` method.
-- It is not part of `AgentService`. Jobs come only from working agents, pruning, and the
-  `scheduled` handler.
-- `sendMessage`, `send`, and `sendTo` throw, because input that bypassed the queue would break
-  "one job at a time". `cancel` stops the running job, which the runner retries like a failure.
-- Its configuration is fixed in code: the model is `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`
-  (the default model when they are empty), with the memory-keeping system prompt in
-  `memory-agent/prompts.ts`. `setConfig` throws.
-- `Agent` has protected factories for its harness options, default configuration, idle and alarm
-  handling, and pruning. `MemoryAgent` overrides them.
+- It has every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
+  `getConfig`, so its work can be watched like any agent's.
+- The `:` in its name is not allowed in a public agent ID, so `AgentService` and `sendTo` reject
+  it. Jobs come only from working agents, pruning, and the `scheduled` handler, through
+  `enqueue`, `jobStatus`, and `consolidate`; a working agent rejects those calls.
+- `sendMessage`, `send`, `sendTo`, and `setConfig` throw, because input that bypassed the queue
+  would break "one job at a time". `cancel` stops the running job, which the runner retries like a
+  failure.
+- Its model is `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`. When they are empty, it uses the
+  same default model as every other agent (`DEFAULT_MODEL_*`). The model and the memory-keeping
+  system prompt (`memory-agent/prompts.ts`) are stored again on every open if they changed, so a
+  changed variable applies to the next job.
 - It keeps no memory of its own and extracts nothing. Its own Pi session is pruned like any
   agent's, without an archive.
 
@@ -373,7 +377,7 @@ A failed extraction keeps the checkpoint and does not affect the conversation.
 
 ### Consolidate
 
-The cron trigger (`17 3 * * *`, UTC) calls `MemoryAgent.consolidate()`
+The cron trigger (`17 3 * * *`, UTC) calls `consolidate()` on the memory agent
 ([`memory-agent/consolidation.ts`](../packages/agents/src/memory/memory-agent/consolidation.ts)).
 
 In code, it does the following, deleting in small batches:

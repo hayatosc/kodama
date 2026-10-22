@@ -1,6 +1,7 @@
-import { exports } from 'cloudflare:workers'
+import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { applyOperation } from '../store/records.ts'
 import { memoryLedger } from '../../../drizzle/d1/schema.ts'
 import {
@@ -127,6 +128,29 @@ describe('remember', () => {
       await rejection(memoryAgent().sendMessage({ requestId: 'direct', content: 'Remember this' })),
     ).toMatch(/enqueue/)
     expect(await rejection(memoryAgent().enqueue({ kind: 'unknown' }))).toMatch(/Invalid type/)
+  })
+
+  it('uses the default model when MEMORY_MODEL_* are not set', async () => {
+    using config = await memoryAgent().getConfig()
+    expect(config.model).toEqual({
+      provider: env.DEFAULT_MODEL_PROVIDER,
+      modelId: env.DEFAULT_MODEL_ID,
+    })
+  })
+
+  it('is an Agent object that public RPC cannot address, and working agents take no jobs', async () => {
+    const rejection = (promise: Promise<unknown>) =>
+      promise.then(
+        () => undefined,
+        (error: unknown) => String(error),
+      )
+    const status =
+      (await rejection(Promise.resolve(exports.default.snapshot(MEMORY_AGENT_NAME)))) ?? ''
+    expect(status).toMatch(/agentId/)
+    const working = env.AGENTS.getByName(crypto.randomUUID())
+    expect(
+      await rejection(working.enqueue({ kind: 'extract', sourceAgentId: 'a', afterEntry: 0 })),
+    ).toMatch(/Only the memory agent/)
   })
 })
 

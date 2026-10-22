@@ -77,5 +77,8 @@ export function parseMemoryJob(value: unknown): MemoryJob {
   throw new TypeError(result.issues[0].message)
 }
 
-/** The one memory agent object; jobs are enqueued at this name. */
-export const MEMORY_AGENT_NAME = 'memory'
+/**
+ * The name of the one memory agent, an `Agent` object like any other. The `:` makes it an invalid
+ * public agent ID, so `AgentService` and `sendTo` cannot address it.
+ */
+export const MEMORY_AGENT_NAME = 'kodama:memory'

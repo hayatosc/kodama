@@ -28,7 +28,7 @@ The abbreviated `src/` paths above are relative to `packages/agents/`.
 
 Prefer fewer, cohesive files over many small ones, and the simplest storage that stays correct after a stop (for example one D1 batch rather than a journal over R2). Add a mechanism only when the feature needs it now.
 
-Imports follow the layers in `docs/agents.md` (Dependencies): `lib` imports nothing else from `src/`, the memory parts never import `src/agent/` or `memory-agent/` (they use `src/memory/jobs.ts`), and only `memory-agent/` sits above `src/agent/`. `src/layers.test.ts` fails on an import that breaks the rule; put new code in the lowest layer it fits.
+Imports follow the layers in `docs/agents.md` (Dependencies): `lib` imports nothing else from `src/`, the memory parts never import `src/agent/` or `memory-agent/` (they use `src/memory/jobs.ts`), and `memory-agent/` sits above the agent runtime in `src/agent/`, with only `src/agent/agent.ts` (the `Agent` class, which takes the memory agent role under `MEMORY_AGENT_NAME`) above it. The memory agent is an `Agent` object, not its own Durable Object class or binding. `src/layers.test.ts` fails on an import that breaks the rule; put new code in the lowest layer it fits.
 
 `docs/agents.md` explains the runtime and `docs/memory.md` long-term memory. File comments cite
 their sections by name, so keep the headings and the code in step when either changes.

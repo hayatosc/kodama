@@ -27,6 +27,7 @@ type Layer =
   | 'memory'
   | 'agent'
   | 'memory-agent'
+  | 'agent-object'
   | 'entrypoint'
   | 'helper'
 
@@ -39,6 +40,8 @@ function layerOf(path: string): Layer | undefined {
   if (path.startsWith('src/memory/store/')) return 'memory-store'
   if (path.startsWith('src/memory/memory-agent/')) return 'memory-agent'
   if (path.startsWith('src/memory/')) return 'memory'
+  // The Agent class composes everything, including the memory agent role it may take.
+  if (path === 'src/agent/agent.ts') return 'agent-object'
   if (path.startsWith('src/agent/')) return 'agent'
   if (path === 'src/index.ts') return 'entrypoint'
   if (path.startsWith('src/helper/')) return 'helper'
@@ -55,7 +58,17 @@ const ALLOWED: Record<Layer, readonly Layer[]> = {
   memory: ['lib', 'contracts', 'storage', 'memory-store'],
   agent: ['lib', 'contracts', 'settings', 'storage', 'memory-store', 'memory'],
   'memory-agent': ['lib', 'contracts', 'settings', 'storage', 'memory-store', 'memory', 'agent'],
-  entrypoint: ['lib', 'contracts', 'agent', 'memory', 'memory-agent'],
+  'agent-object': [
+    'lib',
+    'contracts',
+    'settings',
+    'storage',
+    'memory-store',
+    'memory',
+    'agent',
+    'memory-agent',
+  ],
+  entrypoint: ['lib', 'contracts', 'memory', 'agent-object'],
   helper: [
     'lib',
     'contracts',
@@ -65,6 +78,7 @@ const ALLOWED: Record<Layer, readonly Layer[]> = {
     'memory',
     'agent',
     'memory-agent',
+    'agent-object',
   ],
 }
 

@@ -54,7 +54,7 @@ export class AgentMemory {
     const latest = await latestEntryId(harness)
     const checkpoint = await extractionCheckpoint(memoryDb(this.#deps.env.MEMORY_DB), agentId)
     if (latest === undefined || latest <= checkpoint) return
-    await this.#deps.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).enqueue({
+    await this.#deps.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
       kind: 'extract',
       sourceAgentId: agentId,
       afterEntry: checkpoint,

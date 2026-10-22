@@ -129,14 +129,15 @@ export async function readAgentConfig(
   sharedSpaces: readonly string[],
 ): Promise<AgentConfig> {
   const state = await harness.snapshot(AgentDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-  if (!state?.model || state.instructions === undefined || !state.thinkingLevel || !state.tools) {
+  if (!state?.model || state.instructions === undefined || !state.thinkingLevel) {
     throw new Error('Agent configuration is incomplete')
   }
   return {
     model: { ...state.model },
     systemPrompt: state.instructions,
     thinkingLevel: state.thinkingLevel,
-    tools: selectedTools(state.tools),
+    // The memory agent stores no tool selection: its registry holds only its own tools.
+    tools: state.tools ? selectedTools(state.tools) : [],
     sharedSpaces: [...sharedSpaces],
   }
 }

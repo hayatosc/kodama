@@ -13,7 +13,7 @@ export type PruneOutcome = 'nothing' | 'deferred' | 'pruned'
 
 export interface PruneDeps {
   storage: DurableObjectStorage
-  env: Pick<AgentEnv, 'MEMORY_DB' | 'ARCHIVE' | 'MEMORY_AGENT'>
+  env: Pick<AgentEnv, 'MEMORY_DB' | 'ARCHIVE' | 'AGENTS'>
   agentId: () => string
   local: () => Promise<LocalDb>
   harness: () => Promise<Harness>

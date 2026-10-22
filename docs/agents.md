@@ -61,9 +61,10 @@ together and serves RPC. Behavior lives in these parts:
 | `alarms.ts`      | one alarm per object, shared by several purposes                                  |
 | `recovery.ts`    | the recovery alarm                                                                |
 
-`MemoryAgent` extends `Agent`. It overrides protected methods such as `harnessOptions()`,
-`defaultConfig()`, `afterOpen()`, `onIdle()`, `onAlarm()`, and `archivesEntries()`, instead of
-copying the class.
+The memory agent is one of these objects too, under the reserved name `kodama:memory`. An object
+with that name takes the memory agent role from `src/memory/memory-agent/`: its own harness and
+configuration, a job queue instead of chat input, and pruning without an archive (see
+[memory.md](memory.md#memory-agent)). Every other object is a working agent.
 
 On every open, the agent prepares the harness before any request sees it:
 
@@ -80,17 +81,18 @@ Code in `src/` is split into layers. A layer imports only itself and the layers 
 imports say where it sits. `src/layers.test.ts` reads every source file and fails on an import
 that breaks the rule.
 
-| Layer        | Paths                                                | May import                                  |
-| ------------ | ---------------------------------------------------- | ------------------------------------------- |
-| lib          | `src/lib/`                                           | nothing in `src/`                           |
-| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                         |
-| settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                              |
-| storage      | `drizzle/`, `src/storage/`                           | lib                                         |
-| memory store | `src/memory/store/`                                  | lib, storage                                |
-| memory       | the rest of `src/memory/`, except `memory-agent/`    | lib, contracts, storage, memory store       |
-| agent        | `src/agent/`                                         | all of the above                            |
-| memory agent | `src/memory/memory-agent/`                           | all of the above, including agent           |
-| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, agent, memory agent |
+| Layer        | Paths                                                | May import                               |
+| ------------ | ---------------------------------------------------- | ---------------------------------------- |
+| lib          | `src/lib/`                                           | nothing in `src/`                        |
+| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                      |
+| settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                           |
+| storage      | `drizzle/`, `src/storage/`                           | lib                                      |
+| memory store | `src/memory/store/`                                  | lib, storage                             |
+| memory       | the rest of `src/memory/`, except `memory-agent/`    | lib, contracts, storage, memory store    |
+| agent        | `src/agent/`, except `agent.ts`                      | all of the above                         |
+| memory agent | `src/memory/memory-agent/`                           | all of the above, including agent        |
+| Agent class  | `src/agent/agent.ts`                                 | all of the above, including memory agent |
+| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, Agent class      |
 
 Some consequences:
 
@@ -99,7 +101,8 @@ Some consequences:
 - The memory parts (archive, skills, prune, shared, working) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
-- `MemoryAgent` extends `Agent`, so the memory agent is the one layer above `agent`.
+- The `Agent` class composes the working agent and the memory agent role, so `agent.ts` is the one
+  file above `src/memory/memory-agent/`, which in turn uses the agent runtime (harness, alarms).
 - Tests may import anything, including the helpers in `src/helper/`. Production code never
   imports `src/helper/`.
 
@@ -216,8 +219,8 @@ at the boundary and forwards to the agent's Durable Object:
 | `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
 | `cancel(agentId)`                              | Stop current work; resolves once idle        |
 
-`AgentService` cannot reach the memory agent. The Agent object has a few more methods for other
-Durable Objects:
+`AgentService` cannot reach the memory agent: its name is not a valid public agent ID. The Agent
+object has a few more methods for other Durable Objects:
 
 | Method                          | Caller       | Effect                                                         |
 | ------------------------------- | ------------ | -------------------------------------------------------------- |
@@ -225,6 +228,8 @@ Durable Objects:
 | `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
 | `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
 | `prune({ force })`              | maintenance  | archive and delete old entries                                 |
+| `enqueue(job)`, `jobStatus(id)` | agents       | queue a memory job and read its status (memory agent only)     |
+| `consolidate(now)`              | cron         | the daily consolidation (memory agent only)                    |
 
 ### IDs, limits, and retries
 
@@ -460,7 +465,8 @@ From `packages/agents`:
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.
 
-The Worker exports the `Agent` and `MemoryAgent` Durable Object classes with SQLite storage. Its
+The Worker exports one Durable Object class, `Agent`, with SQLite storage; the memory agent is an
+`Agent` object. Its
 cron trigger (`17 3 * * *`, UTC) runs the daily memory consolidation. `workersDev` is disabled.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin; Wrangler is only
 a transitive dependency.

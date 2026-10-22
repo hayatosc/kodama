@@ -1,87 +1,89 @@
 /**
- * The memory agent: the only writer of long-term memory (docs/memory.md, Memory
- * agent, Jobs). It inherits `Agent`, so its work can be watched like any agent's, but takes input
- * only through its job queue. This class runs the queue; the parts live next to it.
+ * The memory agent: the only writer of long-term memory (docs/memory.md, Memory agent, Jobs). It
+ * is an ordinary `Agent` object with a reserved name; this role gives that object its job queue,
+ * harness, and configuration. Its work can be watched like any agent's, but it takes input only
+ * through the queue.
  */
-import type { Harness, HarnessOptions } from '@earendil-works/pi-durable'
-import { Agent } from '../../agent/agent.ts'
-import type { AlarmPurpose } from '../../agent/alarms.ts'
+import type {
+  Harness,
+  HarnessOptions,
+  Submission,
+  SubmissionDraft,
+} from '@earendil-works/pi-durable'
+import type { AlarmPurpose, AlarmSchedule } from '../../agent/alarms.ts'
 import type { AgentEnv } from '../../env.ts'
-import type { AgentConfig, SendMessageRequest, SendMessageResponse } from '../../protocol.ts'
+import type { AgentConfig } from '../../protocol.ts'
+import type { LocalDb } from '../../storage/local.ts'
 import { needsPrune } from '../prune/runs.ts'
 import { memoryDb } from '../store/db.ts'
 import type { MemoryDb } from '../store/db.ts'
 import { memoryLedger } from '../../../drizzle/d1/schema.ts'
 import { consolidateDaily } from './consolidation.ts'
-import { memoryAgentConfig, memoryHarnessOptions } from './harness.ts'
+import { followMemoryModel, memoryAgentConfig, memoryHarnessOptions } from './harness.ts'
 import { parseMemoryJob } from '../jobs.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from '../jobs.ts'
 import { runModelJob } from './model-job.ts'
 import { JobQueue } from './queue.ts'
 import type { JobRow } from './queue.ts'
-import type { RunningJob } from './tools/common.ts'
+
+/** What the role needs from the `Agent` object it runs in. */
+export interface MemoryAgentHost {
+  env: AgentEnv
+  storage: DurableObjectStorage
+  alarms: AlarmSchedule
+  harness: () => Promise<Harness>
+  local: () => Promise<LocalDb>
+  admit: (draft: SubmissionDraft) => Promise<Submission>
+  prune: () => Promise<unknown>
+}
 
 /** While a job runs, the object wakes this often to resume it after an eviction. */
 const HEARTBEAT_MS = 60_000
 /** Waits before the second, third, and fourth attempt. */
 export const JOB_RETRY_DELAYS_MS: readonly number[] = [60_000, 10 * 60_000, 60 * 60_000]
 
-export class MemoryAgent extends Agent {
-  readonly #queue = new JobQueue(() => this.local())
+export class MemoryAgentRole {
+  readonly #host: MemoryAgentHost
+  readonly #queue: JobQueue
   #running: Promise<void> | undefined
   #again = false
 
-  constructor(ctx: DurableObjectState, env: AgentEnv) {
-    super(ctx, env)
-    void this.harness().then(() => this.#kick())
+  constructor(host: MemoryAgentHost) {
+    this.#host = host
+    this.#queue = new JobQueue(host.local)
   }
 
   #db(): MemoryDb {
-    return memoryDb(this.env.MEMORY_DB)
+    return memoryDb(this.#host.env.MEMORY_DB)
   }
 
-  protected override harnessOptions(): HarnessOptions {
-    return memoryHarnessOptions(this.env, () => this.runningJob())
+  harnessOptions(): HarnessOptions {
+    return memoryHarnessOptions(this.#host.env, () => this.#queue.running())
   }
 
-  protected override defaultConfig(): AgentConfig {
-    return memoryAgentConfig(this.env)
+  defaultConfig(): AgentConfig {
+    return memoryAgentConfig(this.#host.env)
   }
 
-  /** The memory agent keeps no memory of its own and extracts nothing. */
-  protected override async afterOpen(_harness: Harness): Promise<void> {}
-
-  protected override async onIdle(): Promise<void> {}
-
-  /** The memory agent's own history is job scratch work: pruning deletes it without an archive. */
-  protected override archivesEntries(): boolean {
-    return false
-  }
-
-  protected override async onAlarm(purpose: AlarmPurpose): Promise<void> {
-    // Pruning closes the harness, so it runs between jobs, at the end of the drain.
-    if (purpose === 'prune') return this.#kick()
-    if (purpose !== 'jobs') return super.onAlarm(purpose)
-    if (this.#running !== undefined) await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
+  /** Once the harness is open: follow the configured model, then resume the queue. */
+  async afterOpen(harness: Harness): Promise<void> {
+    await followMemoryModel(harness, this.#host.env)
+    // Not awaited: the drain waits for the open harness, which is still opening here.
     this.#kick()
   }
 
-  override sendMessage(_request: SendMessageRequest): Promise<number> {
-    return Promise.reject(new Error('The memory agent takes jobs through enqueue'))
-  }
-
-  override sendTo(_agentId: string, _request: SendMessageRequest): Promise<SendMessageResponse> {
-    return Promise.reject(new Error('The memory agent does not message other agents'))
-  }
-
-  override setConfig(_value: AgentConfig): Promise<AgentConfig> {
-    return Promise.reject(new Error('The memory agent configuration is fixed in code'))
+  async onAlarm(purpose: AlarmPurpose): Promise<void> {
+    // Pruning closes the harness, so it runs between jobs, at the end of the drain.
+    if (purpose === 'jobs' && this.#running !== undefined) {
+      await this.#host.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
+    }
+    this.#kick()
   }
 
   /** Queue a job; delivering the same job again returns its existing status. */
   async enqueue(value: unknown): Promise<JobStatus> {
     const status = await this.#queue.store(parseMemoryJob(value))
-    await this.alarms.setNoLaterThan('jobs', Date.now() + HEARTBEAT_MS)
+    await this.#host.alarms.setNoLaterThan('jobs', Date.now() + HEARTBEAT_MS)
     this.#kick()
     return status
   }
@@ -90,21 +92,11 @@ export class MemoryAgent extends Agent {
     return this.#queue.status(id)
   }
 
-  /** The running job, for the memory tools. */
-  protected runningJob(): Promise<RunningJob | undefined> {
-    return this.#queue.running()
-  }
-
-  /** Settled jobs older than `before`, removed in small batches. */
-  forgetSettledJobs(before: number): Promise<number> {
-    return this.#queue.forgetSettled(before)
-  }
-
   /** The daily consolidation, called by the scheduled handler. */
   consolidate(now: number): Promise<{ scopes: number }> {
     return consolidateDaily({
       db: this.#db(),
-      forgetSettledJobs: (before) => this.forgetSettledJobs(before),
+      forgetSettledJobs: (before) => this.#queue.forgetSettled(before),
       enqueue: (job) => this.enqueue(job),
       now,
     })
@@ -127,15 +119,15 @@ export class MemoryAgent extends Agent {
 
   /** Run jobs one at a time until none is due, then wake for the next delayed one. */
   async #drain(): Promise<void> {
-    await this.harness()
+    await this.#host.harness()
     for (;;) {
       const row = await this.#queue.next(Date.now())
       if (row === undefined) break
-      await this.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
+      await this.#host.alarms.set('jobs', Date.now() + HEARTBEAT_MS)
       await this.#run(row)
     }
-    if (await needsPrune(this.ctx.storage, await this.local())) await this.prune()
-    await this.alarms.set('jobs', await this.#queue.nextDueAt())
+    if (await needsPrune(this.#host.storage, await this.#host.local())) await this.#host.prune()
+    await this.#host.alarms.set('jobs', await this.#queue.nextDueAt())
   }
 
   async #run(queued: JobRow): Promise<void> {
@@ -158,8 +150,8 @@ export class MemoryAgent extends Agent {
   async #model(row: JobRow, job: MemoryJob): Promise<JobOutcome | 'retry'> {
     const outcome = await runModelJob(
       {
-        harness: await this.harness(),
-        admit: (draft) => this.admit(draft),
+        harness: await this.#host.harness(),
+        admit: (draft) => this.#host.admit(draft),
         queue: this.#queue,
         db: this.#db(),
       },
@@ -190,7 +182,7 @@ export class MemoryAgent extends Agent {
   async #notify(job: MemoryJob): Promise<void> {
     if (!('sourceAgentId' in job)) return
     try {
-      await this.env.AGENTS.getByName(job.sourceAgentId).memoryChanged()
+      await this.#host.env.AGENTS.getByName(job.sourceAgentId).memoryChanged()
     } catch (error) {
       console.error('Memory change notice failed', job.sourceAgentId, error)
     }
