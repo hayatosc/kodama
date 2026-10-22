@@ -26,7 +26,8 @@ function matchChunks(index: SegmentIndex, query: string): number[] {
     const [firstSet, ...rest] = sets
     return [...(firstSet ?? [])].filter((chunk) => rest.every((set) => set.has(chunk)))
   }
-  const exact = (word: string) => index.words[word] ?? []
+  const exact = (word: string) =>
+    Object.hasOwn(index.words, word) ? (index.words[word] ?? []) : []
   const prefix = (word: string) =>
     Object.entries(index.words).flatMap(([key, chunks]) => (key.startsWith(word) ? chunks : []))
   for (const attempt of [containing(merged, exact), containing(segments, exact)]) {

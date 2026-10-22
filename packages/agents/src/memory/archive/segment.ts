@@ -113,7 +113,7 @@ export async function buildSegment(
   const encoder = new TextEncoder()
   const lines: string[] = []
   const chunks: Chunk[] = []
-  const words: Record<string, number[]> = {}
+  const words = new Map<string, number[]>()
   let offset = 0
   let firstAt: number | undefined
   let lastAt: number | undefined
@@ -133,7 +133,9 @@ export async function buildSegment(
     })
     for (const word of new Set(storedSearchText(pending.text.join('\n')).split(' '))) {
       if (word.length === 0) continue
-      ;(words[word] ??= []).push(index)
+      const matches = words.get(word)
+      if (matches === undefined) words.set(word, [index])
+      else matches.push(index)
     }
     pending = undefined
   }
@@ -174,7 +176,12 @@ export async function buildSegment(
   return {
     jsonl,
     manifest,
-    index: { format: ARCHIVE_FORMAT, searchVersion: SEARCH_VERSION, chunks, words },
+    index: {
+      format: ARCHIVE_FORMAT,
+      searchVersion: SEARCH_VERSION,
+      chunks,
+      words: Object.fromEntries(words),
+    },
   }
 }
 

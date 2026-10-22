@@ -50,6 +50,17 @@ export async function readSegment(
   return parseLines(await object.text())
 }
 
+// Validate entries instead of using v.record, which drops words such as `constructor`.
+// Object.fromEntries defines own properties even for `__proto__`, preserving format-one indexes.
+const wordIndexSchema = v.pipe(
+  v.custom<Record<string, unknown>>(
+    (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  ),
+  v.transform((words) => Object.entries(words)),
+  v.array(v.tuple([v.string(), v.array(v.number())])),
+  v.transform((entries) => Object.fromEntries(entries)),
+)
+
 /** The shape of a segment's `.index.json`. */
 export const indexSchema = v.object({
   format: v.number(),
@@ -63,7 +74,7 @@ export const indexSchema = v.object({
       at: v.number(),
     }),
   ),
-  words: v.record(v.string(), v.array(v.number())),
+  words: wordIndexSchema,
 })
 /** The shape of a segment's `.summary.json`. */
 export const summarySchema = v.object({ summary: v.string(), words: v.array(v.string()) })
