@@ -33,6 +33,8 @@ function score(record: MemoryRecord, now: number): number {
 
 /** Candidates per query word, enough for a scope of a few thousand records. */
 const CANDIDATES_PER_WORD = 500
+/** One ID is one binding; D1 allows at most 100 parameters per statement. */
+const RECORDS_PER_FETCH = 100
 
 /** Active records of the scopes that have `term`, or a term starting with it. */
 async function recordsWithTerm(
@@ -79,10 +81,15 @@ export async function searchMemory(
       if (matches.size === 0) break
     }
     if (matches === undefined || matches.size === 0) continue
-    const records = await db
-      .select()
-      .from(memoryRecords)
-      .where(inArray(memoryRecords.id, [...matches].slice(0, CANDIDATES_PER_WORD)))
+    const ids = [...matches].slice(0, CANDIDATES_PER_WORD)
+    const records: MemoryRecord[] = []
+    for (let offset = 0; offset < ids.length; offset += RECORDS_PER_FETCH) {
+      const rows = await db
+        .select()
+        .from(memoryRecords)
+        .where(inArray(memoryRecords.id, ids.slice(offset, offset + RECORDS_PER_FETCH)))
+      records.push(...rows)
+    }
     const ranked = records
       .map((record) => ({ record, score: score(record, now) }))
       .sort((a, b) => b.score - a.score || b.record.updatedAt - a.record.updatedAt)

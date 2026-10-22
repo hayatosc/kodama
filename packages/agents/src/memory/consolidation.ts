@@ -94,19 +94,14 @@ export async function forgetOldClaims(db: MemoryDb, before: number): Promise<voi
  * @returns How many were deleted in this call.
  */
 export async function forgetOldLedger(db: MemoryDb, before: number): Promise<number> {
-  const rows = await db
+  // Keep the IDs in SQLite: expanding them into bindings would exceed D1's 100-parameter limit.
+  const expired = db
     .select({ seq: memoryLedger.seq })
     .from(memoryLedger)
     .where(lt(memoryLedger.at, before))
     .limit(BATCH_ROWS)
-  if (rows.length === 0) return 0
-  await db.delete(memoryLedger).where(
-    inArray(
-      memoryLedger.seq,
-      rows.map((row) => row.seq),
-    ),
-  )
-  return rows.length
+  const result = await db.delete(memoryLedger).where(inArray(memoryLedger.seq, expired)).run()
+  return result.meta.changes
 }
 
 /** Log the database size and the active records per scope, to watch growth against D1's limit. */
