@@ -7,7 +7,6 @@ import type { MemoryToolDeps } from './common.ts'
 import { eq } from 'drizzle-orm'
 import { readArchivedText } from '../../archive/reader.ts'
 import { writeSummary } from '../../archive/segment.ts'
-import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import type { MemoryDb } from '../../store/db.ts'
 import { archiveSegments } from '../../../../drizzle/d1/schema.ts'
 
@@ -100,9 +99,7 @@ export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
     prepare: async (args, job) => {
       if (job.kind !== 'record_archive')
         throw new Error('write_archive_summary needs a record_archive job')
-      const summary = redactSecrets(args.summary.trim())
-      if (looksLikeInjection(summary))
-        throw new Error('The summary looks like an instruction to obey')
+      const summary = args.summary.trim()
       const segment = await archivedSegment()
       await writeSummary(deps.env.ARCHIVE, segment.r2Prefix, summary)
     },

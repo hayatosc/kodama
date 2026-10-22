@@ -61,8 +61,7 @@ The schemas live next to their migrations under
 [D1 schema](#d1-schema)). Kodama's own tables in each Durable Object's SQLite are in
 [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): the
 memory agent's job queue, the per-turn `remember` count, the always-loaded copy, and pruning runs.
-The search-text function and the redaction checks are generic helpers in
-[`src/lib/`](../packages/agents/src/lib/). How the folders may depend on each other is described
+The search-text function is a generic helper in [`src/lib/`](../packages/agents/src/lib/). How the folders may depend on each other is described
 in [agents.md](agents.md#dependencies).
 
 ## Memory model
@@ -348,8 +347,7 @@ memory model. At most three `remember` calls are accepted per user entry, counte
 
 ### Remember
 
-1. Validate the input, cap its size at 2,000 characters, redact secrets, and reject text that tries
-   to instruct the memory system ([`src/lib/redact.ts`](../packages/agents/src/lib/redact.ts)).
+1. Validate the input and cap its size at 2,000 characters.
 2. Enqueue a `remember` job with the content, its origin (`user_request` or `agent_judgment`), and
    the source entry IDs. Return `accepted`.
 3. The memory agent classifies the content, reconciles it with existing records, and writes it:
@@ -584,8 +582,7 @@ and descriptions occupy the prompt; the body is read when a task needs it.
 ### Storage
 
 Each skill is one row of the D1 `skills` table, body included, keyed by agent and name. The body
-has at most 50,000 characters and the description at most 1,024. Secrets are redacted, and text
-that reads as instructions to obey is refused before a write.
+has at most 50,000 characters and the description at most 1,024.
 
 A write is one operation (see [Applying a write](#applying-a-write)):
 
@@ -630,7 +627,6 @@ daily consolidation in code, logged in `memory_ledger`.
 - An agent record overrides a shared record through `memory_write`'s `overrides`.
 - Content from untrusted sources is stored as an `event` with its source. One agent's
   conversation alone never reaches a shared space.
-- Secrets are redacted before any write.
 
 ### Writing shared records
 
@@ -644,7 +640,6 @@ shared record with `shared_write`, and code checks it before applying it
 - Reorganizing a space (merging or replacing its records) needs sources that are all active
   records of that space.
 - `required` needs records of two agents, or sources that are already required.
-- Record text must not read as instructions to obey.
 
 A write that passes is applied as one operation: a new record, or a supersede of the shared record
 it replaces at its current revision. A write that fails changes nothing but the ledger, and the
@@ -693,9 +688,7 @@ setup lives in `src/helper/memory.ts`. Paths below are relative to
 | `archive/history.test.ts`            | the `record_archive` summary of a segment, found by `history_search` |
 | `skills.test.ts`                     | writes and conflicts, `skill_read`, curation, the consolidate job    |
 | `shared.test.ts`                     | shared spaces, overrides, required records, checked shared writes    |
-| `src/lib/redact.test.ts`             | secret redaction and the injection check                             |
 | `evaluation.test.ts`                 | probes after compaction, pruning, and eviction                       |
-| `src/agent/harness.test.ts`          | rows written per streamed turn stay under a recorded budget          |
 | `src/storage/pi-assumptions.test.ts` | behavior of Pi Durable and D1 that this design relies on             |
 | `drizzle/schema.test.ts`             | the schemas match their generated migrations                         |
 
@@ -841,8 +834,8 @@ turns it into a `conflict` instead of being undone.
 - Whether `databaseSize` falls after pruning in production is not verified. Locally, it fell from
   20.5 MB to 5.1 MB.
 - `submissions` are never pruned; one row per input stays for the life of the agent.
-- About 111 rows are written for a one-second, 40-delta stream at a 100 ms progress interval, and
-  about 66 at 1 s (`src/agent/harness.test.ts`). Production numbers may differ.
+- Secrets in remembered text are not redacted, and text written as instructions is not rejected.
+  The archive keeps raw entries as they were.
 - 「プラクティス」 alone does not match 「ベストプラクティス」.
 - `history_search` has no ranking across all ranges, and finding something old can take several
   calls with `before`.

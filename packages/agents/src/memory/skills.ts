@@ -4,7 +4,6 @@
  */
 import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
 import { skills } from '../../drizzle/d1/schema.ts'
-import { looksLikeInjection, redactSecrets } from '../lib/redact.ts'
 import type { MemoryDb } from './store/db.ts'
 import { applyPlan } from './store/records.ts'
 import { agentScope } from './store/db.ts'
@@ -91,19 +90,16 @@ export interface SkillWrite {
   revision?: number
 }
 
-/** Rules a skill must follow before it is stored; secrets are redacted first. */
+/** Rules a skill must follow before it is stored. */
 function checkedSkill(write: SkillWrite): SkillWrite {
   if (!isSkillName(write.name)) throw new TypeError(`Invalid skill name: ${write.name}`)
-  const description = redactSecrets(write.description.trim())
-  const body = redactSecrets(write.body.trim())
+  const description = write.description.trim()
+  const body = write.body.trim()
   if (description.length === 0 || description.length > MAX_SKILL_DESCRIPTION) {
     throw new TypeError(`A skill description has 1–${MAX_SKILL_DESCRIPTION} characters`)
   }
   if (body.length === 0 || body.length > MAX_SKILL_BODY) {
     throw new TypeError(`A skill body has 1–${MAX_SKILL_BODY} characters`)
-  }
-  if (looksLikeInjection(description) || looksLikeInjection(body)) {
-    throw new TypeError('The skill reads as instructions to obey')
   }
   return { ...write, description, body }
 }

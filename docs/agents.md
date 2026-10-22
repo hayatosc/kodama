@@ -81,8 +81,7 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 ## Dependencies
 
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
-imports say where it sits. `src/layers.test.ts` reads every source file and fails on an import
-that breaks the rule.
+imports say where it sits.
 
 | Layer        | Paths                                                | May import                               |
 | ------------ | ---------------------------------------------------- | ---------------------------------------- |
@@ -100,8 +99,7 @@ that breaks the rule.
 Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
-  words (`search-text.ts`), redaction (`redact.ts`), and the two ordering helpers the `Agent`
-  class uses (`serial.ts`).
+  words (`search-text.ts`), and the two ordering helpers the `Agent` class uses (`serial.ts`).
 - The memory parts (archive, skills, prune, shared, working) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
@@ -119,12 +117,8 @@ memory agent share these settings:
 | ----------------------- | ----------------------------------------------------------------------- |
 | model request timeout   | 5 minutes; a stalled request fails as a timeout and is retried          |
 | retries                 | transient failures retried without an attempt limit, backing off 2–30 s |
-| progress commits        | at most every 100 ms for partial answers and tool output                |
 | document/context caches | retention 0, so idle agents can be evicted                              |
 | compaction              | Pi's built-in compaction with its defaults                              |
-
-Progress commits are the largest storage cost while streaming. `src/agent/harness.test.ts` records
-the rows one turn writes.
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
 the `kodama-memory` extension with its memory tools and prompt sections, whatever tools it enables
@@ -449,12 +443,10 @@ migrations before the tests.
 | `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
 | `src/agent/recovery.test.ts`                | failures, cancellation, and recovery after eviction           |
 | `src/agent/alarms.test.ts`                  | several alarm purposes in one alarm                           |
-| `src/agent/harness.test.ts`                 | rows written per streamed turn stay under a recorded budget   |
 | `src/configuration/index.test.ts`           | the configuration schema                                      |
 | `src/models/index.test.ts`                  | provider credentials                                          |
 | `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
 | `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
-| `src/layers.test.ts`                        | the dependency rule below                                     |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
 module it tests, describe the observable behavior it checks, and run `nr check` before submitting.
@@ -513,8 +505,8 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
 - Provider credentials are Worker secrets, outside agent settings and RPC results. Never commit
   `.dev.vars`, credentials, or generated `.cloudflare/` state.
 - Untrusted RPC input is validated with valibot at the boundary.
-- Text is checked before it becomes long-term memory: secrets are redacted, and text that tries to
-  instruct the memory system is rejected (see [memory.md](memory.md#shared-memory)).
+- Long-term memory does not yet redact secrets or reject text written as instructions; a shared
+  space accepts only records that two agents keep (see [memory.md](memory.md#shared-memory)).
 
 ## References
 

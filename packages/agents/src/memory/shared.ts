@@ -6,7 +6,6 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import type { Scope } from '../../drizzle/d1/schema.ts'
 import { memoryRecords } from '../../drizzle/d1/schema.ts'
-import { looksLikeInjection, redactSecrets } from '../lib/redact.ts'
 import type { MemoryDb, RecordKind } from './store/db.ts'
 import { applyOperation, applyPlan } from './store/records.ts'
 import type { NewRecord } from './store/records.ts'
@@ -48,7 +47,6 @@ async function rejection(
   scope: Scope,
   write: SharedWrite,
 ): Promise<string | undefined> {
-  if (looksLikeInjection(write.content)) return 'the content reads as instructions to obey'
   if (write.sourceIds.length === 0) return 'cite the records the write rests on'
   const sources = await db
     .select()
@@ -79,7 +77,7 @@ export async function writeShared(
   input: SharedWrite,
 ): Promise<(OperationResult & { replayed: boolean }) | { status: 'rejected'; reason: string }> {
   const scope = sharedScope(input.space)
-  const write = { ...input, content: redactSecrets(input.content.trim()) }
+  const write = { ...input, content: input.content.trim() }
   const reason = await rejection(db, scope, write)
   if (reason !== undefined) {
     await applyPlan(db, context, async () => {

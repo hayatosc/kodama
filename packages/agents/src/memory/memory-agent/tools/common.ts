@@ -4,7 +4,6 @@ import type { Static, TSchema } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../../env.ts'
-import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import { memoryDb } from '../../store/db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from '../../store/db.ts'
 import { applyOperation } from '../../store/records.ts'
@@ -100,8 +99,7 @@ export interface RecordArgs {
 
 /** Build the record from the job, so origin, scope, and evidence never come from the model. */
 export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRecord {
-  const content = redactSecrets(args.content.trim())
-  if (looksLikeInjection(content)) throw new Error('The content looks like an instruction to obey')
+  const content = args.content.trim()
   const scope = jobScope(job)
   if (args.overrides !== undefined && !scope.startsWith('agent:')) {
     throw new Error('Only an agent record can override a shared record')

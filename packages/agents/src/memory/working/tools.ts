@@ -7,7 +7,6 @@ import { rememberTurns } from '../../../drizzle/durable-object/schema.ts'
 import { searchHistory } from '../archive/history.ts'
 import type { HistoryResult } from '../archive/history.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import { looksLikeInjection, redactSecrets } from '../../lib/redact.ts'
 import { isSkillName, useSkill } from '../skills.ts'
 import { memoryDb, readableScopes } from '../store/db.ts'
 import { searchMemory } from '../store/search.ts'
@@ -94,10 +93,7 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
     }),
     replay: 'safe',
     execute: async ({ content, origin }, api, context) => {
-      const cleaned = redactSecrets(content.trim())
-      if (looksLikeInjection(cleaned)) {
-        throw new Error('Not saved: the content reads as instructions to whoever reads it later')
-      }
+      const cleaned = content.trim()
       const userEntry = await api.commit(async (tx) => {
         const page = await tx.scanEntries(
           { conversationId: api.conversationId, order: 'descending' },
