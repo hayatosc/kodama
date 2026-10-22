@@ -1,7 +1,6 @@
 /** When an agent prunes its session, and the input it refuses meanwhile (Pruning). */
 import type { AlarmSchedule } from './alarms.ts'
-import { needsPrune } from '../memory/prune/runs.ts'
-import { pruneLimits, PRUNE_RETRY_MS } from '../memory/prune/limits.ts'
+import { needsPrune, pruneLimits, PRUNE_RETRY_MS } from '../memory/prune/runs.ts'
 import { pruneOnce } from '../memory/prune/prune.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import type { LocalDb } from '../storage/local.ts'

@@ -10,7 +10,6 @@ CREATE TABLE `archive_segments` (
 	`first_at` integer NOT NULL,
 	`last_at` integer NOT NULL,
 	`has_summary` integer DEFAULT false NOT NULL,
-	`extracted` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	CONSTRAINT "archive_segments_range" CHECK("archive_segments"."first_entry" <= "archive_segments"."last_entry")
 );

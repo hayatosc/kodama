@@ -181,8 +181,6 @@ export const archiveSegments = sqliteTable(
     firstAt: integer('first_at').notNull(),
     lastAt: integer('last_at').notNull(),
     hasSummary: integer('has_summary', { mode: 'boolean' }).notNull().default(false),
-    /** Extraction has covered this range; after pruning it reads the range from R2. */
-    extracted: integer('extracted', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [

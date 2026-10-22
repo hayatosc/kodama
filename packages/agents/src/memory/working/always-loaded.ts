@@ -1,13 +1,12 @@
 /** The always-loaded memory of a working agent (docs/memory.md, Always-loaded memory). */
-import { and, desc, eq, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
 import { visibleSkills } from '../skills.ts'
 import type { VisibleSkill } from '../skills.ts'
-import { memoryDb } from '../store/db.ts'
+import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
 import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
-import { agentScope, readableScopes } from '../store/scopes.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
 export const AGENT_MEMORY_BUDGET = 2_200

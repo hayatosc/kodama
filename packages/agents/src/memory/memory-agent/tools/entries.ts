@@ -1,15 +1,56 @@
-/** Tools of a record_archive job: reading an archived segment and storing its summary. */
+/** Tools that read an agent's entries: an extract job's pages and checkpoint, and a record_archive job's segment and summary. */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
+import { text, writingTool, toolDb } from './common.ts'
+import type { MemoryToolDeps } from './common.ts'
 import { eq } from 'drizzle-orm'
 import { readArchivedText } from '../../archive/reader.ts'
 import { writeSummary } from '../../archive/segment.ts'
 import { looksLikeInjection, redactSecrets } from '../../../lib/redact.ts'
 import type { MemoryDb } from '../../store/db.ts'
 import { archiveSegments } from '../../../../drizzle/d1/schema.ts'
-import { text, toolDb, writingTool } from './common.ts'
-import type { MemoryToolDeps } from './common.ts'
+
+export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
+  const readEntries = defineTool({
+    name: 'read_entries',
+    description: 'Read the source agent entries of an extract job, oldest first.',
+    parameters: Type.Object({
+      after: Type.Optional(Type.Integer({ minimum: 0, description: 'Read entries after this ID' })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+    }),
+    replay: 'safe',
+    execute: async ({ after, limit }) => {
+      const running = await deps.runningJob()
+      if (running?.job.kind !== 'extract') throw new Error('read_entries needs an extract job')
+      const { job } = running
+      const page = await deps.env.AGENTS.getByName(job.sourceAgentId).readEntries({
+        after: Math.max(after ?? job.afterEntry, job.afterEntry),
+        limit: limit ?? 50,
+      })
+      const lines = page.entries.map((entry) => `#${entry.id} ${entry.role}: ${entry.text}`)
+      lines.push(
+        page.end ? `(end of entries, through #${page.through})` : `(more after #${page.through})`,
+      )
+      return text(lines.join('\n'))
+    },
+  })
+  const finishExtraction = writingTool(deps, {
+    name: 'finish_extraction',
+    description: 'Record that the extract job has covered entries through lastEntryId.',
+    parameters: Type.Object({ lastEntryId: Type.Integer({ minimum: 0 }) }),
+    operation: (args, job) => {
+      if (job.kind !== 'extract') throw new Error('finish_extraction needs an extract job')
+      return {
+        type: 'checkpoint',
+        agentId: job.sourceAgentId,
+        lastEntryId: Math.max(args.lastEntryId, job.afterEntry),
+      }
+    },
+  })
+
+  return [readEntries, finishExtraction]
+}
 
 export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
   const db = (): MemoryDb => toolDb(deps)

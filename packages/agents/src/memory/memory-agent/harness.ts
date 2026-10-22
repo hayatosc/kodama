@@ -1,13 +1,16 @@
 /** The memory agent's harness: its own tools, model, and instructions (Memory agent). */
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
-import type { HarnessOptions } from '@earendil-works/pi-durable'
+import type { HarnessOptions, ToolRegistration } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'
 import { harnessSettings } from '../../agent/harness.ts'
 import { createAgentModels } from '../../models/index.ts'
 import type { AgentConfig } from '../../protocol.ts'
 import { MEMORY_SYSTEM_PROMPT } from './prompts.ts'
-import { createMemoryAgentTools } from './tools/index.ts'
-import type { RunningJob } from './tools/common.ts'
+import type { RunningJob, MemoryToolDeps } from './tools/common.ts'
+import { archiveTools, extractionTools } from './tools/entries.ts'
+import { recordTools } from './tools/records.ts'
+import { sharedTools } from './tools/shared.ts'
+import { skillTools } from './tools/skills.ts'
 
 /** The memory agent's model: `MEMORY_MODEL_*`, or the default model when they are empty. */
 export function memoryModel(env: AgentEnv): { provider: string; modelId: string } {
@@ -51,4 +54,14 @@ export function memoryHarnessOptions(
           })
         : undefined,
   }
+}
+
+export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[] {
+  return [
+    ...sharedTools(deps),
+    ...skillTools(deps),
+    ...recordTools(deps),
+    ...extractionTools(deps),
+    ...archiveTools(deps),
+  ]
 }

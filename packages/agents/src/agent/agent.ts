@@ -8,8 +8,11 @@ import type {
 } from '@earendil-works/pi-durable'
 import { AlarmSchedule } from './alarms.ts'
 import type { AlarmPurpose } from './alarms.ts'
-import { defaultAgentConfig, initializeAgentConfig } from '../configuration/index.ts'
-import { readSharedSpaces } from '../configuration/shared-spaces.ts'
+import {
+  defaultAgentConfig,
+  initializeAgentConfig,
+  readSharedSpaces,
+} from '../configuration/index.ts'
 import type { AgentEnv } from '../env.ts'
 import { sendEvents, subscribeEvents } from './events.ts'
 import { createAgentOptions } from './harness.ts'

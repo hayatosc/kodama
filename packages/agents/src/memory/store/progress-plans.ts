@@ -1,5 +1,5 @@
 /** Plans of operations that record progress: checkpoints, archive summaries, and declines. */
-import { and, eq, lte } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
 import { archiveSegments, extractionCheckpoints } from '../../../drizzle/d1/schema.ts'
@@ -47,19 +47,7 @@ export async function planCheckpoint(
         ]
   return {
     result,
-    statements: [
-      insertOp(db, context, op.type, result),
-      ...advance,
-      db
-        .update(archiveSegments)
-        .set({ extracted: true })
-        .where(
-          and(
-            eq(archiveSegments.agentId, op.agentId),
-            lte(archiveSegments.lastEntry, op.lastEntryId),
-          ),
-        ),
-    ],
+    statements: [insertOp(db, context, op.type, result), ...advance],
   }
 }
 

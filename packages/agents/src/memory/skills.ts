@@ -7,7 +7,7 @@ import { skills } from '../../drizzle/d1/schema.ts'
 import { looksLikeInjection, redactSecrets } from '../lib/redact.ts'
 import type { MemoryDb } from './store/db.ts'
 import { applyPlan } from './store/records.ts'
-import { agentScope } from './store/scopes.ts'
+import { agentScope } from './store/db.ts'
 import { bumpScope, claimRevision, conflict, insertOp, recordLedger } from './store/statements.ts'
 import type { OperationContext, OperationResult, Plan, Statements } from './store/statements.ts'
 

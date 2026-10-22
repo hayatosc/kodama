@@ -1,12 +1,12 @@
+/** Per-agent configuration: defaults, validation, and where each part is stored. */
+import * as v from 'valibot'
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import * as v from 'valibot'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
 import type { AgentEnv } from '../env.ts'
 import type { AgentConfig } from '../protocol.ts'
-import { DEFAULT_SYSTEM_PROMPT } from '../prompts/default.ts'
 import { agentTools, isRegisteredTool, resolveTools } from '../tools/index.ts'
 
 export type DefaultModelEnv = Pick<AgentEnv, 'DEFAULT_MODEL_PROVIDER' | 'DEFAULT_MODEL_ID'>
@@ -140,3 +140,22 @@ export async function readAgentConfig(
     sharedSpaces: [...sharedSpaces],
   }
 }
+
+export const SHARED_SPACES_KEY = 'kodama:shared-spaces'
+
+export async function readSharedSpaces(
+  storage: DurableObjectStorage,
+  defaults: readonly string[],
+): Promise<string[]> {
+  const stored = v.safeParse(sharedSpacesSchema, await storage.get(SHARED_SPACES_KEY))
+  return stored.success ? stored.output : [...defaults]
+}
+
+export function writeSharedSpaces(
+  storage: DurableObjectStorage,
+  spaces: readonly string[],
+): Promise<void> {
+  return storage.put(SHARED_SPACES_KEY, [...spaces])
+}
+
+export const DEFAULT_SYSTEM_PROMPT = 'You are Kodama, a helpful and concise assistant.'

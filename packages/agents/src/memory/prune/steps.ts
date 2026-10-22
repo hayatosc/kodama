@@ -9,10 +9,9 @@ import { piEntries } from '../../storage/pi-tables.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from '../archive/segment.ts'
 import { extractionCheckpoint, memoryDb } from '../store/db.ts'
 import { archiveSegments } from '../../../drizzle/d1/schema.ts'
-import type { PruneLimits } from './limits.ts'
+import type { PruneLimits, Run } from './runs.ts'
 import type { PruneDeps } from './prune.ts'
 import { prunedThrough, setState } from './runs.ts'
-import type { Run } from './runs.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -170,7 +169,6 @@ export async function catalog(
       bytes: run.bytes ?? 0,
       firstAt: run.firstAt ?? now,
       lastAt: run.lastAt ?? now,
-      extracted: (await extractionCheckpoint(db, agentId)) >= run.lastEntry,
       createdAt: now,
     })
     const stored = await db.select().from(archiveSegments).where(eq(archiveSegments.id, id)).get()

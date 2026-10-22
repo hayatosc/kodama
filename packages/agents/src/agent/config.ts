@@ -3,8 +3,13 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
 import type { Models } from '@earendil-works/pi-ai/models'
-import { agentChange, agentConfigSchema, readAgentConfig } from '../configuration/index.ts'
-import { readSharedSpaces, writeSharedSpaces } from '../configuration/shared-spaces.ts'
+import {
+  agentChange,
+  agentConfigSchema,
+  readAgentConfig,
+  readSharedSpaces,
+  writeSharedSpaces,
+} from '../configuration/index.ts'
 import type { AgentConfig } from '../protocol.ts'
 import { parseInput } from '../validation.ts'
 

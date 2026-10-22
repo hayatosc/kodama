@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a5bd329d-7b9a-48ec-8d6d-00cf4033b64f",
+  "id": "0b5ceeae-b790-490b-9668-b8126e23c3a2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "archive_segments": {
@@ -79,14 +79,6 @@
         },
         "has_summary": {
           "name": "has_summary",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "extracted": {
-          "name": "extracted",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

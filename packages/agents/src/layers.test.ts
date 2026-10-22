@@ -34,7 +34,7 @@ type Layer =
 function layerOf(path: string): Layer | undefined {
   if (path.startsWith('src/lib/')) return 'lib'
   if (['src/env.ts', 'src/protocol.ts', 'src/validation.ts'].includes(path)) return 'contracts'
-  if (/^src\/(configuration|models|prompts|tools)\//.test(path)) return 'settings'
+  if (/^src\/(configuration|models|tools)\//.test(path)) return 'settings'
   if (path.startsWith('src/storage/') || path.startsWith('drizzle/')) return 'storage'
   if (path.startsWith('src/memory/store/')) return 'memory-store'
   if (path.startsWith('src/memory/memory-agent/')) return 'memory-agent'
