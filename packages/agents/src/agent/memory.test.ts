@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from '../memory/store/records.ts'
@@ -18,50 +18,97 @@ import {
 } from '../helper/model.ts'
 import { activeContents, db } from '../helper/memory.ts'
 import { waitForAnswer } from '../helper/rpc.ts'
+import { alarmAt, setAlarm } from './alarms.ts'
+import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
 
 describe('extraction', () => {
-  it('extracts the entries of an idle agent and advances its checkpoint', async () => {
-    const agentId = crypto.randomUUID()
-    const decision = `We decided to deploy with wrangler ${agentId.slice(0, 8)}`
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
-      const body = requestBody(init)
-      if (!isMemoryAgentRequest(body)) return textResponse('Noted.')
-      const step = toolResults(body)
-      if (step === 0) return toolCallResponse({ name: 'read_entries', arguments: {} })
-      if (step === 1) {
-        const entry = /#(\d+) user: We decided/.exec(body)?.[1]
-        return toolCallResponse({
-          name: 'memory_write',
-          arguments: { kind: 'fact', content: decision, sourceEntryFrom: Number(entry) },
-        })
-      }
-      if (step === 2) {
-        const through = /through #(\d+)/.exec(body)?.[1]
-        return toolCallResponse({
-          name: 'finish_extraction',
-          arguments: { lastEntryId: Number(through) },
-        })
-      }
-      return textResponse('Extracted.')
+  it.each([false, true])(
+    'extracts idle entries after eviction=%s and advances its checkpoint',
+    async (evict) => {
+      const agentId = crypto.randomUUID()
+      const decision = `We decided to deploy with wrangler ${agentId.slice(0, 8)}`
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const body = requestBody(init)
+        if (!isMemoryAgentRequest(body)) return textResponse('Noted.')
+        const step = toolResults(body)
+        if (step === 0) return toolCallResponse({ name: 'read_entries', arguments: {} })
+        if (step === 1) {
+          const entry = /#(\d+) user: We decided/.exec(body)?.[1]
+          return toolCallResponse({
+            name: 'memory_write',
+            arguments: { kind: 'fact', content: decision, sourceEntryFrom: Number(entry) },
+          })
+        }
+        if (step === 2) {
+          const through = /through #(\d+)/.exec(body)?.[1]
+          return toolCallResponse({
+            name: 'finish_extraction',
+            arguments: { lastEntryId: Number(through) },
+          })
+        }
+        return textResponse('Extracted.')
+      })
+      await exports.default.sendMessage(agentId, { requestId: 'decide', content: decision })
+      await waitForAnswer(agentId, 'decide')
+
+      const stub = env.AGENTS.getByName(agentId)
+      // The extraction alarm is due ten minutes after the agent goes idle; make it due now.
+      await runInDurableObject(stub, (_instance, state) =>
+        state.storage.put('kodama:alarm:extract', Date.now() - 1),
+      )
+      if (evict) await evictDurableObject(stub)
+      await runDurableObjectAlarm(stub)
+
+      await expect.poll(() => activeContents(agentId), { timeout: 10_000 }).toEqual([decision])
+      await expect
+        .poll(() => extractionCheckpoint(db, agentId), { timeout: 10_000 })
+        .toBeGreaterThan(0)
+    },
+  )
+
+  it('preserves the pending idle deadline when an idle object reopens', async () => {
+    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    const due = Date.now() + 60_000
+    await runInDurableObject(stub, async (_instance, state) => {
+      await setAlarm(state.storage, 'extract', due)
     })
-    await exports.default.sendMessage(agentId, { requestId: 'decide', content: decision })
-    await waitForAnswer(agentId, 'decide')
-
-    const stub = env.AGENTS.getByName(agentId)
-    // The extraction alarm is due ten minutes after the agent goes idle; make it due now.
-    await runInDurableObject(stub, (_instance, state) =>
-      state.storage.put('kodama:alarm:extract', Date.now() - 1),
+    await evictDurableObject(stub)
+    const reopened = await runInDurableObject(stub, (_instance, state) =>
+      alarmAt(state.storage, 'extract'),
     )
-    await runDurableObjectAlarm(stub)
+    expect(reopened).toBe(due)
+  })
 
-    await expect.poll(() => activeContents(agentId), { timeout: 10_000 }).toEqual([decision])
+  it('starts a new ten-minute idle delay after new activity finishes', async () => {
+    const agentId = crypto.randomUUID()
+    const stub = env.AGENTS.getByName(agentId)
+    const response = Promise.withResolvers<void>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      await response.promise
+      return textResponse('Done.')
+    })
+    const previousDue = Date.now() + 60_000
+    await runInDurableObject(stub, (_instance, state) =>
+      setAlarm(state.storage, 'extract', previousDue),
+    )
+    await exports.default.sendMessage(agentId, { requestId: 'again', content: 'New activity' })
+    const finishedAt = Date.now()
+    try {
+      const whileBusy = await runInDurableObject(stub, (_instance, state) =>
+        alarmAt(state.storage, 'extract'),
+      )
+      expect(whileBusy).toBeUndefined()
+    } finally {
+      response.resolve()
+    }
+    await waitForAnswer(agentId, 'again')
     await expect
-      .poll(() => extractionCheckpoint(db, agentId), { timeout: 10_000 })
-      .toBeGreaterThan(0)
+      .poll(() => runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')))
+      .toBeGreaterThanOrEqual(finishedAt + EXTRACT_IDLE_DELAY_MS)
   })
 })
 
