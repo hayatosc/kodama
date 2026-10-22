@@ -13,22 +13,22 @@ sections of this document by name.
 
 ## Components
 
-| Store                       | Binding        | Contents                                                                             |
-| --------------------------- | -------------- | ------------------------------------------------------------------------------------ |
-| Agent Durable Object        | `AGENTS`       | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
-| Memory agent Durable Object | `MEMORY_AGENT` | the memory agent: a `MemoryAgent` object named `kodama:memory`, with its job queue   |
-| D1 database                 | `MEMORY_DB`    | memory records, applied operations, revisions, archive catalog, skills, ledger       |
-| R2 bucket                   | `ARCHIVE`      | archived entries, their search indexes, and their summaries (`archive/`)             |
+| Store                       | Binding     | Contents                                                                             |
+| --------------------------- | ----------- | ------------------------------------------------------------------------------------ |
+| Agent Durable Object        | `AGENTS`    | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
+| Memory agent Durable Object | `AGENTS`    | the memory agent: a `MemoryAgent` object named `kodama:memory`, with its job queue   |
+| D1 database                 | `MEMORY_DB` | memory records, applied operations, revisions, archive catalog, skills, ledger       |
+| R2 bucket                   | `ARCHIVE`   | archived entries, their search indexes, and their summaries (`archive/`)             |
 
 ```text
 AgentService (public RPC entrypoint)
-  `-- AGENTS ---------------------> Agent DO (agentId)   never the memory agent
+  `-- AGENTS ---------------------> Agent DO (agentId)   rejects the memory agent's name
 
 Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, always-loaded query, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
-  `-- MEMORY_AGENT enqueue -------> memory agent         remember, extract, record_archive
+  `-- AGENTS enqueue -------------> memory agent         remember, extract, record_archive
 
 MemoryAgent DO "kodama:memory" (the memory agent)
   |-- reads and writes -----------> D1 MEMORY_DB
@@ -236,8 +236,9 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
 
 The memory agent is `MemoryAgent`, a subclass of `Agent`
 ([`src/agent/dedicated/memory/agent.ts`](../packages/agents/src/agent/dedicated/memory/agent.ts)).
-It is its own Durable Object class, bound as `MEMORY_AGENT`, and its one object is named
-`kodama:memory` (`MEMORY_AGENT_NAME` in `jobs.ts`). It overrides `Agent`'s hooks to get its own
+It is a dedicated agent (see [agents.md](agents.md#dedicated-agents)): the object named
+`kodama:memory` (`MEMORY_AGENT_NAME` in `jobs.ts`) in the `AGENTS` namespace is constructed as a
+`MemoryAgent`, with no Durable Object class or binding of its own. It overrides `Agent`'s hooks to get its own
 harness and configuration, and a job queue instead of chat input. Its folder holds only what the
 role adds to an agent:
 
@@ -252,10 +253,10 @@ Its tools and daily consolidation are memory parts (`src/memory/tools/`, `src/me
 
 - It inherits every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
   `getConfig`, so its work can be watched like any agent's.
-- `AgentService` and `sendTo` reach only the `AGENTS` namespace, so public RPC cannot reach it.
-  Jobs come only from working agents, pruning, and the `scheduled` handler, through `enqueue`,
-  `jobStatus`, and `consolidate`, which only `MemoryAgent` has. The `:` in its name is not allowed
-  in a public agent ID, so no working agent shares the ID its rows carry.
+- The `:` in its name is not allowed in a public agent ID, so `AgentService` and `sendTo` reject
+  it. Jobs come only from working agents, pruning, and the `scheduled` handler, through `enqueue`,
+  `jobStatus`, and `consolidate`; `Agent` declares them and rejects, and `MemoryAgent` overrides
+  them.
 - `sendMessage`, `send`, `sendTo`, and `setConfig` throw, because input that bypassed the queue
   would break "one job at a time". `cancel` stops the running job, which the runner retries like a
   failure.
@@ -782,8 +783,8 @@ Rejected:
 
 Memory editing in the conversing agent makes it slower and less reliable, spends the working model
 on bookkeeping, and leaves several writers per scope. One writer running one job at a time gives
-each scope one writer, and it can use its own model. The memory agent is an `Agent` subclass with
-its own binding, so public RPC cannot reach it, its tools live in a separate registry, and its work
+each scope one writer, and it can use its own model. The memory agent is an `Agent` subclass under a
+reserved name in the same namespace, so public RPC cannot reach it, its tools live in a separate registry, and its work
 stays observable like any agent's.
 
 A Cloudflare Workflow was rejected. It would rebuild durable admission, deduplication, and

@@ -133,7 +133,7 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
         .onConflictDoUpdate({ target: rememberTurns.entryId, set: { count } })
         .run()
 
-      const status = await deps.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).enqueue({
+      const status = await deps.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
         kind: 'remember',
         sourceAgentId: deps.agentId(),
         origin,

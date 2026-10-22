@@ -22,8 +22,8 @@ import type { MemoryAgentContext } from './runner.ts'
  * instead of taking chat input.
  *
  * @remarks
- * It is reached through the `MEMORY_AGENT` binding under `MEMORY_AGENT_NAME`, never through
- * `AgentService`. Everything else an `Agent` serves, such as `subscribe`, `snapshot`, `getConfig`,
+ * It lives in the `AGENTS` namespace under `MEMORY_AGENT_NAME`, which `dedicated/index.ts` maps to
+ * this class; that name is not a valid public agent ID, so `AgentService` cannot reach it. Everything else an `Agent` serves, such as `subscribe`, `snapshot`, `getConfig`,
  * and `cancel`, works as usual, so its work can be watched like any agent's. It keeps no memory
  * of its own, and its pruned history is deleted without an archive.
  */
@@ -111,14 +111,14 @@ export class MemoryAgent extends Agent {
    * @returns The job's status; delivering the same job again returns the existing one.
    * @throws {@link TypeError} When `job` is not a valid memory job.
    */
-  async enqueue(job: unknown): Promise<JobStatus> {
+  override async enqueue(job: unknown): Promise<JobStatus> {
     const status = await enqueueJob(this.#context(), job)
     this.#jobs.start()
     return status
   }
 
   /** A memory job's status, if the job is known. */
-  async jobStatus(jobId: string): Promise<JobStatus | undefined> {
+  override async jobStatus(jobId: string): Promise<JobStatus | undefined> {
     return jobStatus(await this.local(), jobId)
   }
 
@@ -127,7 +127,7 @@ export class MemoryAgent extends Agent {
    *
    * @returns How many scopes got a `consolidate` job.
    */
-  consolidate(now: number): Promise<{ scopes: number }> {
+  override consolidate(now: number): Promise<{ scopes: number }> {
     return consolidate(this.#context(), now, (job) => this.enqueue(job))
   }
 }

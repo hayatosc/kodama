@@ -35,7 +35,8 @@ packages/agents/
     validation.ts           valibot schemas for untrusted RPC input
     lib/                    generic helpers that import nothing else from src/
     agent/                  the Agent Durable Object, its runtime, and its parts
-      dedicated/memory/     MemoryAgent, the memory agent: its class, configuration, queue, runner
+      dedicated/            AgentObject, which picks a dedicated subclass by the object's name
+        memory/             MemoryAgent, the memory agent: its class, configuration, queue, runner
     configuration/          per-agent configuration: validation and persistence
     models/                 Pi provider catalog and Worker secret resolution
     tools/                  tool implementations and their registry
@@ -47,8 +48,8 @@ packages/agents/
 ### The Agent Durable Object
 
 [`src/agent/agent.ts`](../packages/agents/src/agent/agent.ts) is the `Agent` class, a working
-agent. It and `MemoryAgent`, which extends it, are the only classes in the codebase, because a
-Durable Object must be one. `Agent` serves RPC and holds the object's in-memory state in private
+agent and the base class of every dedicated agent (see [Dedicated agents](#dedicated-agents)).
+Classes exist only because a Durable Object must be one. `Agent` serves RPC and holds the object's in-memory state in private
 fields: the open harness, the tasks the recovery alarm watches, the pruning pass in progress, and a
 pending memory refresh. Everything else is a plain function that takes what it needs, in these
 files:
@@ -64,15 +65,34 @@ files:
 Reading and replacing the configuration is in `src/configuration/`, and the paged entries the memory
 agent reads are in `src/memory/transcript.ts`.
 
-The memory agent is `MemoryAgent`, a subclass of `Agent` in `src/agent/dedicated/memory/`, exported
-as its own Durable Object class and reached through the `MEMORY_AGENT` binding under the name
-`kodama:memory`. It overrides `Agent`'s protected hooks (harness options, default configuration,
-the last step of opening, idle work, alarms, and whether pruning archives), rejects chat input,
-and adds `enqueue`, `jobStatus`, and `consolidate`. That folder holds only what the role adds to an
-agent: the class (`agent.ts`), its configuration and prompts (`config.ts`), its job queue
-(`queue.ts`), and the runner that drains it (`runner.ts`); see
-[memory.md](memory.md#memory-agent). The tools it uses and daily consolidation are memory parts in
-`src/memory/`. Every object in the `AGENTS` namespace is a working agent.
+### Dedicated agents
+
+A dedicated agent is a subclass of `Agent` that lives in the same `AGENTS` namespace under a
+reserved name. There is no Durable Object class or binding per dedicated agent, so adding one
+changes no Worker configuration:
+
+- The Worker exports one Durable Object class, `AgentObject` from
+  [`src/agent/dedicated/index.ts`](../packages/agents/src/agent/dedicated/index.ts), as `Agent`.
+  Its constructor looks the object's name up in `DEDICATED_AGENTS` and returns an instance of that
+  subclass; any other name gets a working `Agent`.
+- A subclass changes behavior only through `Agent`'s protected hooks: harness options, default
+  configuration, the last step of opening (`prepare`), idle work, alarms, and whether pruning
+  archives.
+- A method only a dedicated agent serves is declared on `Agent`, which rejects it, and the subclass
+  overrides it. One stub type then covers every object in the namespace, with no type assertion.
+- Reserved names contain `:`, which a public agent ID cannot, so `AgentService` and `sendTo` never
+  reach a dedicated agent.
+
+Each dedicated agent has a folder under `src/agent/dedicated/` with only what it adds to an agent.
+The one today is the memory agent, `MemoryAgent`, named `kodama:memory`
+([memory.md](memory.md#memory-agent)): its class (`agent.ts`), its configuration and prompts
+(`config.ts`), its job queue (`queue.ts`), and the runner that drains it (`runner.ts`). The tools
+it uses and daily consolidation are memory parts in `src/memory/`.
+
+To add a dedicated agent, create its folder with a subclass, reserve a name with `:`, and add the
+pair to `DEDICATED_AGENTS`.
+
+### Opening an agent
 
 On every open, the agent prepares the harness before any request sees it:
 
@@ -99,8 +119,8 @@ imports say where it sits.
 | memory       | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
 | agent        | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
 | Agent class  | `src/agent/agent.ts`                                 | all of the above                        |
-| memory agent | `src/agent/dedicated/memory/`                        | all of the above, including Agent class |
-| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, both classes    |
+| memory agent | `src/agent/dedicated/`                               | all of the above, including Agent class |
+| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, memory agent    |
 
 Some consequences:
 
@@ -109,8 +129,9 @@ Some consequences:
 - The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
-- `Agent` knows nothing of the memory agent role. `MemoryAgent` extends it and overrides its
-  hooks, so `src/agent/dedicated/memory/` sits above `agent.ts` and the rest of the agent runtime.
+- `Agent` never imports a dedicated agent. `MemoryAgent` extends it and overrides its hooks, and
+  `src/agent/dedicated/index.ts` maps reserved names to subclasses, so `src/agent/dedicated/` sits
+  above `agent.ts` and the rest of the agent runtime.
 - Tests may import anything, including the helpers in `src/helper/`. Production code never
   imports `src/helper/`.
 
@@ -467,8 +488,8 @@ From `packages/agents`:
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.
 
-The Worker exports two Durable Object classes with SQLite storage: `Agent` (bound as `AGENTS`) and
-`MemoryAgent` (bound as `MEMORY_AGENT`). Its cron trigger (`17 3 * * *`, UTC) runs the daily memory consolidation. `workersDev` is disabled.
+The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
+memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). Its cron trigger (`17 3 * * *`, UTC) runs the daily memory consolidation. `workersDev` is disabled.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin; Wrangler is only
 a transitive dependency.
 

@@ -19,7 +19,7 @@ import { openLocalDb } from '../storage/local.ts'
 /** The memory database of the tests. */
 export const db = memoryDb(env.MEMORY_DB)
 /** The memory agent's stub. */
-export const memoryAgent = () => env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME)
+export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
 /** A fresh operation, as if from its own job. */
 export function context(now = Date.now()): OperationContext {

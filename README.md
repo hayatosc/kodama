@@ -15,7 +15,7 @@ packages/
     src/index.ts          Service-binding RPC entrypoint
     src/lib/              Generic helpers that import nothing else from src/
     src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
-    src/agent/dedicated/  Agent subclasses; memory/ is MemoryAgent, the memory agent
+    src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
     src/configuration/    Per-agent configuration validation and persistence
     src/models/           Pi provider catalog and Worker credential resolution
     src/tools/            Tool implementations and registration

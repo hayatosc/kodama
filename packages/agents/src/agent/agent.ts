@@ -30,6 +30,7 @@ import { createAgentOptions, exclusiveSection, isIdle, openHarness } from './har
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
+import type { JobStatus } from '../memory/jobs.ts'
 import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
@@ -65,11 +66,13 @@ const context = BACKGROUND_CONTEXT
  * The class serves RPC and holds the object's in-memory state in private fields; the work is done
  * by plain functions in `src/agent/` and `src/memory/`.
  *
- * `MemoryAgent` (`dedicated/memory/agent.ts`) extends it and overrides the protected hooks:
- * {@link Agent.harnessOptions}, {@link Agent.defaultConfig}, {@link Agent.prepare},
- * {@link Agent.onIdle}, {@link Agent.onAlarm}, and {@link Agent.archivesPrunedEntries}. TypeScript's
- * `protected` does not exist at runtime, so code holding a binding could call them over RPC; only
- * this Worker holds the bindings.
+ * Dedicated agents such as `MemoryAgent` (`dedicated/memory/agent.ts`) extend it, live in the same
+ * `AGENTS` namespace under reserved names (see `dedicated/index.ts`), and override the protected
+ * hooks: {@link Agent.harnessOptions}, {@link Agent.defaultConfig}, {@link Agent.prepare},
+ * {@link Agent.onIdle}, {@link Agent.onAlarm}, and {@link Agent.archivesPrunedEntries}. A method
+ * only a dedicated agent serves, such as {@link Agent.enqueue}, is declared here and rejects, so
+ * one stub type covers every object in the namespace. TypeScript's `protected` does not exist at
+ * runtime, so code holding the binding could call the hooks over RPC; only this Worker holds it.
  */
 export class Agent extends DurableObject<AgentEnv> {
   /** Kodama's own tables in this object's SQLite, opened before the harness. */
@@ -205,7 +208,7 @@ export class Agent extends DurableObject<AgentEnv> {
       harness: () => this.#harness,
       exclusive: (check, mutate) => this.#exclusive(check, mutate),
       archive: this.archivesPrunedEntries(),
-      memoryAgent: () => this.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME),
+      memoryAgent: () => this.env.AGENTS.getByName(MEMORY_AGENT_NAME),
     }
   }
 
@@ -400,5 +403,32 @@ export class Agent extends DurableObject<AgentEnv> {
       this.#pruning = undefined
     })
     return this.#pruning
+  }
+
+  /**
+   * Queue a memory job. Only the memory agent takes jobs.
+   *
+   * @throws Always, unless overridden by `MemoryAgent`.
+   */
+  enqueue(_job: unknown): Promise<JobStatus> {
+    return Promise.reject(new Error('Only the memory agent takes jobs'))
+  }
+
+  /**
+   * A memory job's status. Only the memory agent has jobs.
+   *
+   * @throws Always, unless overridden by `MemoryAgent`.
+   */
+  jobStatus(_jobId: string): Promise<JobStatus | undefined> {
+    return Promise.reject(new Error('Only the memory agent takes jobs'))
+  }
+
+  /**
+   * The daily consolidation. Only the memory agent consolidates.
+   *
+   * @throws Always, unless overridden by `MemoryAgent`.
+   */
+  consolidate(_now: number): Promise<{ scopes: number }> {
+    return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 }

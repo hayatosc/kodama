@@ -1,6 +1,6 @@
 /**
- * The agents Worker's entrypoint: `AgentService` for trusted Workers, and the `Agent` and
- * `MemoryAgent` Durable Object classes.
+ * The agents Worker's entrypoint: `AgentService` for trusted Workers, and the `Agent` Durable
+ * Object class.
  *
  * @see docs/agents.md — RPC contract
  *
@@ -18,17 +18,19 @@ import type {
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { parseAgentId } from './validation.ts'
 
-/** The Durable Object class of every working agent. */
-export { Agent } from './agent/agent.ts'
-/** The Durable Object class of the memory agent, an `Agent` that keeps the others' memory. */
-export { MemoryAgent } from './agent/dedicated/memory/agent.ts'
+/**
+ * The one Durable Object class, bound as `AGENTS`: a working agent, or the dedicated agent registered
+ * under the object's name, such as the memory agent.
+ */
+export { AgentObject as Agent } from './agent/dedicated/index.ts'
 
 /**
  * Service-binding RPC entrypoint for the UI server and other trusted Workers.
  *
  * @remarks
  * Each method validates the agent ID and forwards to that agent's Durable Object. There is no
- * public HTTP interface, and it reaches only the `AGENTS` namespace, never the memory agent.
+ * public HTTP interface; the memory agent's reserved name is not a valid agent ID, so this class
+ * cannot reach it.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   /** Reject HTTP requests: agents are reached only through RPC. */
@@ -38,7 +40,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
 
   /** The daily cron trigger: the memory agent consolidates what changed in the last day. */
   override async scheduled(controller: ScheduledController): Promise<void> {
-    await this.env.MEMORY_AGENT.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
+    await this.env.AGENTS.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
 
   /**
