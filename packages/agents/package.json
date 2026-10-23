@@ -16,12 +16,15 @@
     "cf": "cf",
     "cf:types": "cf workers types",
     "typecheck": "cf workers types && tsc --noEmit",
-    "test": "node --experimental-strip-types --test cli/*.test.ts && vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:generate:local": "drizzle-kit generate --config drizzle.local.config.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.2.0",
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",
+    "drizzle-orm": "0.45.3",
     "valibot": "1.5.0"
   },
   "devDependencies": {
@@ -29,6 +32,7 @@
     "@cloudflare/vitest-plugin": "1.4.1",
     "@types/node": "^26.6.5",
     "cf": "1.0.0-beta.18",
+    "drizzle-kit": "0.31.11",
     "vite": "^8.3.4",
     "vitest": "5.0.4"
   }

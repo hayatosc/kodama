@@ -1,3 +1,8 @@
+/**
+ * Vite configuration of the local Worker (`nr dev:agents`).
+ *
+ * @module
+ */
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { defineConfig } from 'vite'
 

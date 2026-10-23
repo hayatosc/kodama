@@ -10,19 +10,28 @@ and model-invoked delegation tools can be added on top of the RPC transport.
 ```text
 packages/
   agents/                 @kodama/agents: RPC Worker and Durable Objects
-    cloudflare.config.ts  cf bindings, secrets, and SQLite export
+    cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
+    drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint
-    src/agent.ts          Agent state, DO RPC, and recovery
-    src/harness.ts        Pi runtime composition
-    src/events.ts         Live SSE stream over RPC
+    src/lib/              Generic helpers that import nothing else from src/
+    src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
+    src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
     src/configuration/    Per-agent configuration validation and persistence
     src/models/           Pi provider catalog and Worker credential resolution
-    src/prompts/          Default system prompt
     src/tools/            Tool implementations and registration
+    src/memory/           Long-term memory: store, tools, pruning, archive, and skills
+    src/storage/          Kodama's tables in each Durable Object's SQLite
     src/protocol.ts       Transport data types (safe to import as types in a UI)
-    test/agent.test.ts    workerd integration tests
+    src/helper/           Shared test helpers; tests sit next to their modules as *.test.ts
   ui/                     Planned: web UI and its server Worker
 ```
+
+## Documentation
+
+- [docs/agents.md](docs/agents.md): the agent runtime, RPC contract, events, development,
+  testing, and deployment.
+- [docs/memory.md](docs/memory.md): long-term memory, the memory agent, pruning and the archive,
+  skills, and shared memory.
 
 ## Development
 

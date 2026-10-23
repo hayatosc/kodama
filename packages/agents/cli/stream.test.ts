@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { expect, it } from 'vitest'
 import { printStream } from './stream.ts'
 
 function stream(events: unknown[]): ReadableStream<Uint8Array> {
@@ -14,7 +13,7 @@ function stream(events: unknown[]): ReadableStream<Uint8Array> {
   })
 }
 
-await test('renders text across UTF-8 and SSE boundaries without leaking thinking', async () => {
+it('renders text across UTF-8 and SSE boundaries without leaking thinking', async () => {
   let output = ''
   await printStream(
     stream([
@@ -31,24 +30,20 @@ await test('renders text across UTF-8 and SSE boundaries without leaking thinkin
       output += text
     },
   )
-  assert.equal(output, 'こんにちは\n')
+  expect(output).toBe('こんにちは\n')
 })
 
-await test('rejects model failure and interrupted streams', async () => {
-  await assert.rejects(
+it('rejects model failure and interrupted streams', async () => {
+  await expect(
     printStream(
       stream([{ type: 'submission', record: { status: 'unanswered', reason: 'model_error' } }]),
       () => {},
     ),
-    /model_error/,
-  )
-  await assert.rejects(
-    printStream(stream([]), () => {}),
-    /before completion/,
-  )
+  ).rejects.toThrow(/model_error/)
+  await expect(printStream(stream([]), () => {})).rejects.toThrow(/before completion/)
 })
 
-await test('prints JSON events for debugging and accepts completed retries', async () => {
+it('prints JSON events for debugging and accepts completed retries', async () => {
   let output = ''
   const event = { type: 'submission', record: { status: 'done' } }
   await printStream(
@@ -58,7 +53,7 @@ await test('prints JSON events for debugging and accepts completed retries', asy
     },
     true,
   )
-  assert.deepEqual(JSON.parse(output), event)
+  expect(JSON.parse(output)).toEqual(event)
 })
 
 function assistant(text: string) {
@@ -71,7 +66,7 @@ function assistant(text: string) {
   }
 }
 
-await test('renders a complete message delivered without text deltas exactly once', async () => {
+it('renders a complete message delivered without text deltas exactly once', async () => {
   let output = ''
   await printStream(
     stream([
@@ -83,10 +78,10 @@ await test('renders a complete message delivered without text deltas exactly onc
       output += text
     },
   )
-  assert.equal(output, 'CLI_OK\n')
+  expect(output).toBe('CLI_OK\n')
 })
 
-await test('recovers missing text from the committed message without duplicating deltas', async () => {
+it('recovers missing text from the committed message without duplicating deltas', async () => {
   let output = ''
   await printStream(
     stream([
@@ -99,10 +94,10 @@ await test('recovers missing text from the committed message without duplicating
       output += text
     },
   )
-  assert.equal(output, 'CLI_OK\n')
+  expect(output).toBe('CLI_OK\n')
 })
 
-await test('replays the requested answer, not the latest answer in the snapshot', async () => {
+it('replays the requested answer, not the latest answer in the snapshot', async () => {
   let output = ''
   await printStream(
     stream([
@@ -119,5 +114,5 @@ await test('replays the requested answer, not the latest answer in the snapshot'
       output += text
     },
   )
-  assert.equal(output, 'requested answer\n')
+  expect(output).toBe('requested answer\n')
 })

@@ -8,15 +8,17 @@
     "erasableSyntaxOnly": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["@cloudflare/vitest-plugin/types", "node"]
+    "types": ["@cloudflare/vitest-plugin/types", "node", "vite/client"]
   },
   "include": [
     "src/**/*.ts",
-    "test/**/*.ts",
     "cli/**/*.ts",
+    "drizzle/**/*.ts",
     "*.config.ts",
+    "vitest.setup.ts",
     ".cloudflare/types/**/*.d.ts"
   ]
 }

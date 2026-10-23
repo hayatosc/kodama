@@ -1,0 +1,111 @@
+/**
+ * Helpers of the long-term memory tests: the memory database, records, and the memory agent.
+ *
+ * @module
+ */
+import { runInDurableObject } from 'cloudflare:test'
+import { env } from 'cloudflare:workers'
+import { and, eq } from 'drizzle-orm'
+import { vi } from 'vitest'
+import { drizzle } from 'drizzle-orm/d1'
+import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
+import { memoryDb, schema } from '../memory/store/db.ts'
+import { applyOperation } from '../memory/store/records.ts'
+import type { NewRecord } from '../memory/store/records.ts'
+import { memoryRecords } from '../../drizzle/d1/schema.ts'
+import type { OperationContext } from '../memory/store/statements.ts'
+import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.ts'
+import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
+import { openLocalDb } from '../storage/local.ts'
+
+/** The memory database of the tests. */
+export const db = memoryDb(env.MEMORY_DB)
+/** Real D1 queries with the production parameter limit enforced even in the local emulator. */
+export const parameterLimitedDb = drizzle(env.MEMORY_DB, {
+  schema,
+  logger: {
+    logQuery(_query, params) {
+      if (params.length > 100)
+        throw new Error(`D1 parameter limit exceeded: ${params.length} > 100`)
+    },
+  },
+})
+/** Interleave one write after the next real record query has captured its rows. */
+export function afterNextMemoryRecordsRead(database: D1Database, write: () => Promise<void>): void {
+  const prepare = database.prepare.bind(database)
+  const prepareSpy = vi.spyOn(database, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query)
+    if (!query.startsWith('select ') || !query.includes('from "memory_records"')) return statement
+    prepareSpy.mockRestore()
+    const bind = statement.bind.bind(statement)
+    vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+      const bound = bind(...values)
+      const raw = bound.raw.bind(bound)
+      vi.spyOn(bound, 'raw').mockImplementation(
+        async <T = unknown[]>(options?: { columnNames?: false }) => {
+          const rows = await raw<T>(options)
+          await write()
+          return rows
+        },
+      )
+      return bound
+    })
+    return statement
+  })
+}
+
+/** The memory agent's stub. */
+export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
+
+/** A fresh operation, as if from its own job. */
+export function context(now = Date.now()): OperationContext {
+  const opId = crypto.randomUUID()
+  return { opId, jobId: opId, runId: opId, actor: 'test', now }
+}
+
+/** Write a record directly, as the memory agent would; returns its ID. */
+export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): Promise<string> {
+  const result = await applyOperation(db, context(), {
+    type: 'write',
+    record: { origin: 'agent_judgment', observedAt: Date.now(), ...record },
+  })
+  if (result.status !== 'applied') throw new Error(`write ${result.status}`)
+  return result.recordId
+}
+
+/** A record by ID, in any status. */
+export function record(id: string) {
+  return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
+}
+
+/** The contents of an agent's active records. */
+export async function activeContents(agentId: string): Promise<string[]> {
+  const rows = await db
+    .select({ content: memoryRecords.content })
+    .from(memoryRecords)
+    .where(and(eq(memoryRecords.scope, `agent:${agentId}`), eq(memoryRecords.status, 'active')))
+  return rows.map((row) => row.content)
+}
+
+/** The always-loaded text an agent object has stored. */
+export function storedAlwaysLoaded(agentId: string): Promise<string> {
+  return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()?.text ?? ''
+  })
+}
+
+/** The always-loaded text rendered now for an agent that reads `spaces`. */
+export function renderedAlwaysLoaded(agentId: string, spaces: string[]): Promise<string> {
+  return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    const memory = {
+      env,
+      agentId: () => agentId,
+      local: () => Promise.resolve(local),
+      sharedSpaces: () => Promise.resolve(spaces),
+    }
+    await refreshAlwaysLoaded(memory)
+    return storedMemoryText(memory)
+  })
+}
