@@ -26,9 +26,26 @@ export interface RunningJob {
 /** What the memory agent's tools need from the agent object. */
 export interface MemoryToolDeps {
   env: AgentEnv
+  storage: DurableObjectStorage
   /** The job being run; tools refuse to write outside a job. */
   runningJob: () => Promise<RunningJob | undefined>
   now?: () => number
+}
+
+/** Durable high-water mark of pages read by the current extraction job. */
+export const EXTRACTION_READ_KEY = 'kodama:extraction-read'
+
+/** Read evidence survives eviction, but cannot leak from a different job. */
+export async function extractionReadThrough(
+  deps: MemoryToolDeps,
+  running: RunningJob,
+): Promise<number> {
+  const progress = await deps.storage.get<{ jobId: string; through: number }>(EXTRACTION_READ_KEY)
+  return progress?.jobId === running.jobId
+    ? progress.through
+    : running.job.kind === 'extract'
+      ? running.job.afterEntry
+      : 0
 }
 
 /** The kind of a record. */
@@ -199,6 +216,20 @@ export function writingTool<P extends TSchema>(
       const now = deps.now?.() ?? Date.now()
       const op = definition.operation(args, running.job, now)
       const { job } = running
+      if (job.kind === 'extract') {
+        const through = await extractionReadThrough(deps, running)
+        const end =
+          op.type === 'checkpoint'
+            ? op.lastEntryId
+            : op.type === 'write' || op.type === 'supersede'
+              ? op.record.sourceEntries?.to
+              : op.type === 'invalidate'
+                ? op.evidence.sourceEntries?.to
+                : undefined
+        if (end !== undefined && end > through) {
+          throw new Error(`Entry ${end} exceeds the job's read range through ${through}`)
+        }
+      }
       if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
         throw new Error(
           'Shared records change only through shared_write, which checks their sources',

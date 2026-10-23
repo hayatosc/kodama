@@ -45,7 +45,11 @@ export class MemoryAgent extends Agent {
 
   /** Only the memory agent's tools, which act on the running job. */
   protected override harnessOptions(): HarnessOptions {
-    return memoryHarnessOptions(this.env, async () => runningJob(await this.local()))
+    return memoryHarnessOptions(
+      this.env,
+      async () => runningJob(await this.local()),
+      this.ctx.storage,
+    )
   }
 
   /** The memory model and prompt, with no tools selected and no shared spaces. */

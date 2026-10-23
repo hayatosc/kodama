@@ -6,7 +6,7 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { text, writingTool, toolDb } from './common.ts'
+import { text, writingTool, toolDb, extractionReadThrough, EXTRACTION_READ_KEY } from './common.ts'
 import type { MemoryToolDeps } from './common.ts'
 import { eq } from 'drizzle-orm'
 import { readArchivedText } from '../archive/reader.ts'
@@ -28,9 +28,23 @@ export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
       const running = await deps.runningJob()
       if (running?.job.kind !== 'extract') throw new Error('read_entries needs an extract job')
       const { job } = running
+      const through = await extractionReadThrough(deps, running)
+      if (after !== undefined && after > through) {
+        throw new Error(`Start within the job's read range through ${through}`)
+      }
       const page = await deps.env.AGENTS.getByName(job.sourceAgentId).readEntries({
         after: Math.max(after ?? job.afterEntry, job.afterEntry),
         limit: limit ?? 50,
+      })
+      await deps.storage.transaction(async (txn) => {
+        const current = await txn.get<{ jobId: string; through: number }>(EXTRACTION_READ_KEY)
+        await txn.put(EXTRACTION_READ_KEY, {
+          jobId: running.jobId,
+          through: Math.max(
+            current?.jobId === running.jobId ? current.through : through,
+            page.through,
+          ),
+        })
       })
       const lines = page.entries.map((entry) => `#${entry.id} ${entry.role}: ${entry.text}`)
       lines.push(

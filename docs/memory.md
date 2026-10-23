@@ -382,12 +382,14 @@ enqueues an `extract` job if entries exist after its checkpoint. Pruning also en
 finds the checkpoint behind the range it archives.
 
 1. `read_entries` pages through entries after the checkpoint. The entries come from the agent DO
-   (`readEntries`), or from the R2 segment for a range already pruned.
+   (`readEntries`), or from the R2 segment for a range already pruned. The memory agent persists
+   the highest covered entry for the current job; pages cannot jump ahead of that read range.
 2. The model extracts candidate records. Each one cites the entries that support it, and code
    refuses a citation outside the job's range.
 3. The model adds, supersedes, invalidates, or skips each candidate against existing records,
    subject to [Freshness](#freshness).
-4. `finish_extraction` advances the checkpoint, guarded by its revision.
+4. `finish_extraction` advances the checkpoint, guarded by its revision and bounded by the
+   highest entry actually covered by `read_entries`. Citations use the same durable upper bound.
 
 A failed extraction keeps the checkpoint and does not affect the conversation.
 

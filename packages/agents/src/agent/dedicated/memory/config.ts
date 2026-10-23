@@ -87,10 +87,11 @@ export function memoryAgentConfig(env: AgentEnv): AgentConfig {
 export function memoryHarnessOptions(
   env: AgentEnv,
   runningJob: () => Promise<RunningJob | undefined>,
+  storage: DurableObjectStorage,
 ): HarnessOptions {
   const extension = defineExtension({
     name: 'kodama-memory-agent',
-    tools: createMemoryAgentTools({ env, runningJob }),
+    tools: createMemoryAgentTools({ env, runningJob, storage }),
   })
   const registry = createRegistry()
   registry.install(extension)

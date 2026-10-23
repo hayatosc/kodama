@@ -4,6 +4,9 @@
  * @module
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runInDurableObject } from 'cloudflare:test'
+import { jobId } from '../jobs.ts'
+import { EXTRACTION_READ_KEY } from './common.ts'
 import { context, db, memoryAgent, record, write } from '../../helper/memory.ts'
 import { applyOperation } from '../store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
@@ -13,6 +16,13 @@ import '@earendil-works/pi-ai/api/openai-responses'
 afterEach(() => vi.restoreAllMocks())
 
 async function invalidate(job: MemoryJob, id: string, sourceEntryFrom = 200) {
+  if (job.kind === 'extract') {
+    // These ownership/freshness fixtures model an already-read page through entry 200.
+    const id = await jobId(job)
+    await runInDurableObject(memoryAgent(), (_instance, state) =>
+      state.storage.put(EXTRACTION_READ_KEY, { jobId: id, through: 200 }),
+    )
+  }
   const responses: string[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
     const body = requestBody(init)
