@@ -19,21 +19,25 @@ describe('consolidation', () => {
   it.each([
     { expired: 101, remaining: 0 },
     { expired: 500, remaining: 0 },
-    { expired: 501, remaining: 1 },
+    { expired: 501, remaining: 0 },
+    { expired: 1001, remaining: 0 },
+    { expired: 10001, remaining: 1 },
   ])(
-    'retains its 500-row bound with $expired expired rows and continues daily maintenance',
+    'drains up to 20 bounded batches of $expired expired rows and continues maintenance',
     async ({ expired, remaining }) => {
       const runId = crypto.randomUUID()
       const now = Date.now()
-      const inserts = Array.from({ length: expired }, () =>
-        db.insert(memoryLedger).values({
-          at: 0,
-          runId,
-          actor: 'test',
-          action: 'write',
-          target: 'record',
-          targetId: 'expired',
-        }),
+      const inserts = Array.from({ length: Math.ceil(expired / 10) }, (_, index) =>
+        db.insert(memoryLedger).values(
+          Array.from({ length: Math.min(10, expired - index * 10) }, () => ({
+            at: 0,
+            runId,
+            actor: 'test',
+            action: 'write' as const,
+            target: 'record' as const,
+            targetId: 'expired',
+          })),
+        ),
       )
       for (let offset = 0; offset < inserts.length; offset += 50) {
         const [first, ...rest] = inserts.slice(offset, offset + 50)
@@ -65,11 +69,37 @@ describe('consolidation', () => {
           .from(memoryLedger)
           .where(and(eq(memoryLedger.action, 'meta'), eq(memoryLedger.at, now)))
         expect(meta).toHaveLength(1)
+        if (remaining > 0) {
+          await consolidateDaily({
+            db: parameterLimitedDb,
+            now: now + 86400000,
+            forgetSettledJobs: async () => 0,
+            enqueue: async () => {},
+          })
+          const later = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, runId))
+          expect(later.map((row) => row.targetId)).toEqual(['retained'])
+        }
       } finally {
         await db.delete(memoryLedger).where(eq(memoryLedger.runId, runId))
       }
     },
   )
+
+  it('drains settled jobs until empty but caps work when a backlog remains', async () => {
+    const now = Date.now()
+    const forget = vi
+      .fn<(before: number) => Promise<number>>()
+      .mockResolvedValueOnce(500)
+      .mockResolvedValueOnce(500)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValue(0)
+    await consolidateDaily({ db, now, forgetSettledJobs: forget, enqueue: async () => {} })
+    expect(forget).toHaveBeenCalledTimes(4)
+    expect(forget).toHaveBeenCalledWith(now - 30 * 86400000)
+    forget.mockReset().mockResolvedValue(500)
+    await consolidateDaily({ db, now, forgetSettledJobs: forget, enqueue: async () => {} })
+    expect(forget).toHaveBeenCalledTimes(20)
+  })
 
   it('merges duplicates of a changed scope and drops ledger rows past the rollback window', async () => {
     const agentId = crypto.randomUUID()
