@@ -199,7 +199,7 @@ export function setSkillStatus(
       insertOp(db, context, `skill_${target.status}`, result),
       db
         .update(skills)
-        .set({ status: target.status, revision: current.revision + 1 })
+        .set({ status: target.status, revision: current.revision + 1, updatedAt: context.now })
         .where(
           and(
             eq(skills.agentId, target.agentId),
