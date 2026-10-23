@@ -32,6 +32,8 @@ export const CONSOLIDATION_RECORD_LIMIT = 200
 const SCOPES_PER_DAY = 200
 /** Rows one maintenance step touches, to stay within one invocation's limits. */
 const BATCH_ROWS = 500
+/** Bound daily retention work per table; any remaining expired rows wait for the next run. */
+const RETENTION_BATCHES_PER_DAY = 20
 
 /** The UTC day of `now`, the key of one consolidation per scope. */
 export function consolidationDay(now: number): string {
@@ -196,8 +198,12 @@ export interface DailyConsolidationDeps {
 export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ scopes: number }> {
   const { db, now } = deps
   const runId = `consolidate:${consolidationDay(now)}`
-  await deps.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)
-  await forgetOldLedger(db, now - LEDGER_RETENTION_MS)
+  for (let batch = 0; batch < RETENTION_BATCHES_PER_DAY; batch += 1) {
+    if ((await deps.forgetSettledJobs(now - SETTLED_JOB_RETENTION_MS)) === 0) break
+  }
+  for (let batch = 0; batch < RETENTION_BATCHES_PER_DAY; batch += 1) {
+    if ((await forgetOldLedger(db, now - LEDGER_RETENTION_MS)) === 0) break
+  }
   await forgetOldClaims(db, now - LEDGER_RETENTION_MS)
   await resegmentRecords(db)
   await invalidateOverridesOfRequired(db, runId, now)

@@ -412,6 +412,17 @@ In code, it does the following, deleting in small batches:
 - enqueues one `consolidate` job for each scope changed in the last day, up to 200 scopes;
 - records the database size and the active records per scope in the ledger.
 
+Settled-job and ledger deletion each repeat until no expired rows remain, up to 20 batches of
+500 rows per daily run (10,000 rows per table). Remaining expired rows are eligible on the next
+run; the 30/90-day windows are eligibility thresholds, not guaranteed deletion deadlines when
+backlogs exceed that budget.
+
+`memory_ops` is deliberately retained, unlike the diagnostic ledger: its stored results prevent
+a replayed operation ID from applying the same write twice. There is no bounded replay horizon
+that would make deleting these results safe, so the ledger's 90-day window does not apply to
+operations. This table can continue to grow; database-size monitoring includes it. A bounded
+operation-retention policy requires a replay-lifetime contract before deletion is introduced.
+
 Each `consolidate` job reads its scope's active records with `list_records`, at most 200. It
 then does the following:
 
