@@ -1,3 +1,8 @@
+/**
+ * Memory jobs execute serially and only settled extractions without progress can be reopened.
+ *
+ * @module
+ */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,12 +16,70 @@ import {
   toolCallResponse,
   toolResults,
 } from '../../../helper/model.ts'
-import { activeContents, memoryAgent, storedAlwaysLoaded } from '../../../helper/memory.ts'
+import {
+  activeContents,
+  memoryAgent,
+  storedAlwaysLoaded,
+  context,
+  db,
+} from '../../../helper/memory.ts'
+import { applyOperation } from '../../../memory/store/records.ts'
+import { openLocalDb } from '../../../storage/local.ts'
+import { settleJob } from './queue.ts'
 import { waitForAnswer } from '../../../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('extraction redelivery', () => {
+  it.each(['declined', 'failed', 'progressed'] as const)(
+    'handles a settled %s extraction',
+    async (outcome) => {
+      let calls = 0
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        calls += 1
+        return textResponse('No checkpoint was written.')
+      })
+      const job = { kind: 'extract', sourceAgentId: crypto.randomUUID(), afterEntry: 0 } as const
+      const first = await memoryAgent().enqueue(job)
+      await expect
+        .poll(async () => (await memoryAgent().jobStatus(first.jobId))?.status, { timeout: 10_000 })
+        .toBe('settled')
+      if (outcome === 'failed') {
+        await runInDurableObject(memoryAgent(), async (_instance, state) => {
+          settleJob(await openLocalDb(state.storage), first.jobId, 'failed')
+        })
+      }
+      if (outcome === 'progressed') {
+        await applyOperation(db, context(), {
+          type: 'checkpoint',
+          agentId: job.sourceAgentId,
+          lastEntryId: 1,
+        })
+      }
+      const second = await memoryAgent().enqueue(job)
+      expect(second.jobId).toBe(first.jobId)
+      if (outcome === 'progressed') {
+        expect(second.status).toBe('settled')
+        expect(calls).toBe(1)
+      } else {
+        expect(second.status).toBe('queued')
+        await expect
+          .poll(async () => (await memoryAgent().jobStatus(first.jobId))?.attempts, {
+            timeout: 10_000,
+          })
+          .toBe(2)
+        await expect
+          .poll(async () => (await memoryAgent().jobStatus(first.jobId))?.status, {
+            timeout: 10_000,
+          })
+          .toBe('settled')
+        expect(calls).toBe(2)
+      }
+    },
+  )
+})
 
 describe('remember', () => {
   it('saves what the user asks for through the memory agent and loads it on later turns', async () => {
