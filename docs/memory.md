@@ -391,7 +391,11 @@ finds the checkpoint behind the range it archives.
 4. `finish_extraction` advances the checkpoint, guarded by its revision and bounded by the
    highest entry actually covered by `read_entries`. Citations use the same durable upper bound.
 
-A failed extraction keeps the checkpoint and does not affect the conversation.
+A failed extraction keeps the checkpoint and does not affect the conversation. Redelivering a
+settled extraction queues it again if its checkpoint has not advanced, including when the model
+finished without calling `finish_extraction`. Queued and running duplicates remain deduplicated.
+The attempt counter stays monotonic to avoid replaying an old Pi submission; redelivery permits
+another attempt without resetting the automatic retry budget.
 
 ### Consolidate
 

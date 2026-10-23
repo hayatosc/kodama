@@ -38,11 +38,17 @@ function jobRow(local: LocalDb, id: string): JobRow | undefined {
 }
 
 /**
- * Queue a job once.
+ * Queue a job once, or reopen a settled extraction whose checkpoint has not advanced.
  *
- * @returns The job's status; the same job delivered again finds the first.
+ * @remarks
+ * Attempts stay monotonic: resetting them would reuse an already completed Pi submission.
+ * Redelivery permits another attempt, but does not reset the automatic retry budget.
  */
-export async function storeJob(local: LocalDb, job: MemoryJob): Promise<JobStatus> {
+export async function storeJob(
+  local: LocalDb,
+  job: MemoryJob,
+  checkpoint: number | undefined,
+): Promise<JobStatus> {
   const id = await jobId(job)
   local
     .insert(memoryJobs)
@@ -56,6 +62,19 @@ export async function storeJob(local: LocalDb, job: MemoryJob): Promise<JobStatu
     })
     .onConflictDoNothing({ target: memoryJobs.jobId })
     .run()
+  if (job.kind === 'extract' && checkpoint !== undefined && checkpoint <= job.afterEntry) {
+    local
+      .update(memoryJobs)
+      .set({
+        status: 'queued',
+        outcome: null,
+        settledAt: null,
+        submissionId: null,
+        notBefore: Date.now(),
+      })
+      .where(and(eq(memoryJobs.jobId, id), eq(memoryJobs.status, 'settled')))
+      .run()
+  }
   const row = jobRow(local, id)
   if (row === undefined) throw new Error('Job was not stored')
   return toStatus(row)

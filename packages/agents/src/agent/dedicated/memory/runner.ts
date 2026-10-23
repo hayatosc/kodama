@@ -19,7 +19,7 @@ import { consolidateDaily } from '../../../memory/consolidation.ts'
 import { parseMemoryJob } from '../../../memory/jobs.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from '../../../memory/jobs.ts'
 import { needsPrune } from '../../../memory/prune/runs.ts'
-import { memoryDb } from '../../../memory/store/db.ts'
+import { memoryDb, extractionCheckpoint } from '../../../memory/store/db.ts'
 import type { MemoryDb } from '../../../memory/store/db.ts'
 import type { LocalDb } from '../../../storage/local.ts'
 import { setAlarm, setAlarmNoLaterThan } from '../../alarms.ts'
@@ -62,7 +62,12 @@ export interface MemoryAgentContext {
  * @throws {@link TypeError} When `value` is not a valid memory job.
  */
 export async function enqueueJob(ctx: MemoryAgentContext, value: unknown): Promise<JobStatus> {
-  const status = await storeJob(await ctx.local(), parseMemoryJob(value))
+  const job = parseMemoryJob(value)
+  const checkpoint =
+    job.kind === 'extract'
+      ? await extractionCheckpoint(memoryDb(ctx.env.MEMORY_DB), job.sourceAgentId)
+      : undefined
+  const status = await storeJob(await ctx.local(), job, checkpoint)
   await setAlarmNoLaterThan(ctx.storage, 'jobs', Date.now() + HEARTBEAT_MS)
   return status
 }
