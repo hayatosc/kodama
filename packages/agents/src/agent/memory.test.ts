@@ -67,8 +67,22 @@ describe('extraction', () => {
       await expect
         .poll(() => extractionCheckpoint(db, agentId), { timeout: 10_000 })
         .toBeGreaterThan(0)
+      expect(
+        await runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')),
+      ).toBeUndefined()
+      await evictDurableObject(stub)
+      expect(
+        await runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')),
+      ).toBeUndefined()
     },
   )
+
+  it('does not schedule extraction for an agent with no activity', async () => {
+    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    expect(
+      await runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')),
+    ).toBeUndefined()
+  })
 
   it('preserves the pending idle deadline when an idle object reopens', async () => {
     const stub = env.AGENTS.getByName(crypto.randomUUID())
