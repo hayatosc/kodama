@@ -152,8 +152,10 @@ export class Agent extends DurableObject<AgentEnv> {
    * change that arrived while busy.
    */
   protected async onIdle(): Promise<void> {
-    // Reopening an idle object must not postpone the deadline that woke it.
-    await setAlarmNoLaterThan(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
+    // Only actual activity starts an idle extraction period; reopening preserves its deadline.
+    if (await this.ctx.storage.get<boolean>('kodama:extract-pending')) {
+      await setAlarmNoLaterThan(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
+    }
     await schedulePruneIfNeeded(this.ctx.storage, await this.#local)
     if (!this.#memoryChanged) return
     this.#memoryChanged = false
@@ -164,7 +166,12 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async onAlarm(purpose: AlarmPurpose): Promise<void> {
     if (purpose === 'extract') {
       const harness = await this.#harness
-      if (await isIdle(harness)) await extractNewEntries(this.#workingMemory(), harness)
+      await this.#serial(async () => {
+        if (!(await isIdle(harness))) return
+        await extractNewEntries(this.#workingMemory(), harness)
+        await this.ctx.storage.delete('kodama:extract-pending')
+        await setAlarm(this.ctx.storage, 'extract', undefined)
+      })
     }
     if (purpose === 'prune') await this.prune()
   }
@@ -243,8 +250,8 @@ export class Agent extends DurableObject<AgentEnv> {
    * The platform alarm: take the due purposes, refresh recovery, and handle each purpose.
    *
    * @remarks
-   * Due purposes are taken first, because the recovery refresh reschedules extraction when it finds
-   * the agent idle.
+   * Due purposes are taken first. Successful extraction clears its pending activity and deadline,
+   * including any deadline restored by the recovery refresh.
    */
   override async alarm(): Promise<void> {
     const due = await takeDueAlarms(this.ctx.storage, Date.now())
@@ -265,6 +272,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const submission = await this.#serial(async () => {
       await armRecovery(this.ctx.storage)
       // New activity ends the previous idle period; its completion starts a fresh delay.
+      await this.ctx.storage.put('kodama:extract-pending', true)
       await setAlarm(this.ctx.storage, 'extract', undefined)
       return conversation.submit(draft, context)
     })
