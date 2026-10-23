@@ -1,3 +1,8 @@
+/**
+ * Skill writes, reads and retention preserve explicit user and memory-agent decisions.
+ *
+ * @module
+ */
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -90,6 +95,35 @@ describe('skills in a working agent', () => {
 })
 
 describe('skill curation', () => {
+  it('keeps a restored skill at the next curation and restarts its retention period', async () => {
+    const agentId = crypto.randomUUID()
+    const now = Date.now()
+    await writeSkill(
+      db,
+      { ...context(), now: now - 40 * DAY },
+      skill(agentId, 'restored', 'Keep me.'),
+    )
+    await curateSkills(db, 'archive-old', now)
+    const archived = await readSkill(db, agentId, 'restored')
+    expect(archived?.status).toBe('archived')
+    const restore = { ...context(), now }
+    const target = {
+      agentId,
+      name: 'restored',
+      revision: archived?.revision ?? 0,
+      status: 'active',
+    } as const
+    expect((await setSkillStatus(db, restore, target)).status).toBe('applied')
+    expect((await setSkillStatus(db, { ...restore, now: now + DAY }, target)).replayed).toBe(true)
+    await curateSkills(db, 'next-day', now + DAY)
+    expect(await readSkill(db, agentId, 'restored')).toMatchObject({
+      status: 'active',
+      updatedAt: now,
+    })
+    await curateSkills(db, 'unused-again', now + 31 * DAY)
+    expect((await readSkill(db, agentId, 'restored'))?.status).toBe('archived')
+  })
+
   it('archives a skill unused for 30 days and keeps one used since', async () => {
     const agentId = crypto.randomUUID()
     await create(agentId, 'idle', 'Unused.')
