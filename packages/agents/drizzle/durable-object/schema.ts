@@ -1,6 +1,6 @@
 /**
  * Tables kodama keeps in each agent's own Durable Object SQLite, next to Pi Durable's tables.
- * `pnpm db:generate:local` writes the migrations in ./migrations, which src/storage/local.ts applies
+ * `nr db:generate:durable-object` writes the migrations in ./migrations, which src/storage/local.ts applies
  * when the object starts. Times are Unix epoch milliseconds.
  *
  * @module

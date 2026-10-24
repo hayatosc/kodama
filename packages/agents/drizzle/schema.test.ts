@@ -26,7 +26,7 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
   const migrated = Object.fromEntries(
     Object.entries(env.TEST_MIGRATED_COLUMNS).map(([name, columns]) => [name, [...columns].sort()]),
   )
-  // A mismatch means drizzle/d1/schema.ts changed without `pnpm db:generate`.
+  // A mismatch means drizzle/d1/schema.ts changed without `nr db:generate:d1`.
   expect(migrated).toEqual(declared)
 })
 
@@ -62,7 +62,7 @@ it('the newest local migration snapshot has the tables and columns of the Drizzl
     ]),
   )
   // A mismatch means drizzle/durable-object/schema.ts changed without
-  // `pnpm db:generate:local`.
+  // `nr db:generate:durable-object`.
   expect(migrated).toEqual(declared)
 })
 

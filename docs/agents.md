@@ -23,9 +23,11 @@ planned and not implemented.
 ```text
 packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
-  drizzle.config.ts         drizzle-kit config for the long-term memory D1 schema
-  drizzle.control.config.ts drizzle-kit config for the control D1 schema
-  drizzle.local.config.ts   drizzle-kit config for kodama's tables in each Durable Object
+  drizzle.d1.config.ts      drizzle-kit config for the long-term memory D1 schema (drizzle/d1/)
+  drizzle.control.config.ts drizzle-kit config for the control D1 schema (drizzle/control/)
+  drizzle.durable-object.config.ts
+                            drizzle-kit config for kodama's tables in each Durable Object
+                            (drizzle/durable-object/)
   drizzle/
     d1/                     long-term memory D1 schema (schema.ts) and its migrations (migrations/)
     control/                control D1 schema: registry, versions, principals, audit; its migrations
@@ -602,16 +604,16 @@ nr dev:agents
 `nr dev:agents` runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
 Objects. It exposes RPC, not a browser page.
 
-| Command                                         | Effect                                                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------ |
-| `nr check`                                      | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
-| `nr test`                                       | workspace tests                                                          |
-| `nr format`                                     | format the repository                                                    |
-| `nr build` (in `packages/agents`)               | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
-| `nr cf:types` (in `packages/agents`)            | regenerate runtime types                                                 |
-| `nr db:generate` (in `packages/agents`)         | write a D1 migration after `drizzle/d1/schema.ts` changes                |
-| `nr db:generate:local` (in `packages/agents`)   | write a local migration after `drizzle/durable-object/schema.ts` changes |
-| `nr db:generate:control` (in `packages/agents`) | write a control migration after `drizzle/control/schema.ts` changes      |
+| Command                                                | Effect                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `nr check`                                             | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
+| `nr test`                                              | workspace tests                                                          |
+| `nr format`                                            | format the repository                                                    |
+| `nr build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
+| `nr cf:types` (in `packages/agents`)                   | regenerate runtime types                                                 |
+| `nr db:generate:d1` (in `packages/agents`)             | write a D1 migration after `drizzle/d1/schema.ts` changes                |
+| `nr db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes |
+| `nr db:generate:control` (in `packages/agents`)        | write a control migration after `drizzle/control/schema.ts` changes      |
 
 ### Local agent CLI
 

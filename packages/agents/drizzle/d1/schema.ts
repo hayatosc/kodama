@@ -1,5 +1,5 @@
 /**
- * The D1 schema of long-term memory: one file for the one database. `pnpm db:generate` turns this
+ * The D1 schema of long-term memory: one file for the one database. `nr db:generate:d1` turns this
  * file into the migrations in ./migrations.
  *
  * Times are Unix epoch milliseconds. Writes use plain inserts, never `INSERT OR IGNORE`: a constraint

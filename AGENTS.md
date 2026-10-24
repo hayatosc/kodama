@@ -50,7 +50,7 @@ Use Node.js >=22.19 and the pinned pnpm 12.14.0 through `ni`/`nr` wrappers.
 - `nr test`: run workspace tests.
 - `nr format`: format the repository; review resulting changes.
 - From `packages/agents`, `nr build` builds without deploying, and `nr cf:types` regenerates runtime types.
-- From `packages/agents`, `nr db:generate` writes a D1 migration after `drizzle/d1/schema.ts` changes, `nr db:generate:control` one after `drizzle/control/schema.ts` changes, and `nr db:generate:local` a local migration after `drizzle/durable-object/schema.ts` changes (add it to `src/storage/local.ts`); tests fail when they differ.
+- From `packages/agents`, `nr db:generate:d1` writes a D1 migration after `drizzle/d1/schema.ts` changes, `nr db:generate:control` one after `drizzle/control/schema.ts` changes, and `nr db:generate:durable-object` a local migration after `drizzle/durable-object/schema.ts` changes (add it to `src/storage/local.ts`); tests fail when they differ.
 
 ## Coding Style & Naming Conventions
 
