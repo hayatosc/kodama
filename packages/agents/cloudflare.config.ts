@@ -29,6 +29,9 @@ export const agentConfig = defineWorker({
       worker: agentWorker,
       exportName: 'Agent',
     }),
+    /** The control database: the agent registry, configuration versions, members, and audit. */
+    CONTROL_DB: bindings.d1({ name: 'kodama-control' }),
+    /** Long-term memory. */
     MEMORY_DB: bindings.d1({ name: 'kodama-memory' }),
     ARCHIVE: bindings.r2({ name: 'kodama-archive' }),
     DEFAULT_MODEL_PROVIDER: bindings.text('openai'),

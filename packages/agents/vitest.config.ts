@@ -9,6 +9,9 @@ import * as v from 'valibot'
 import { defineConfig } from 'vitest/config'
 
 const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/d1/migrations`)
+const controlMigrations = await readD1Migrations(
+  `${import.meta.dirname}/drizzle/control/migrations`,
+)
 
 const journalSchema = v.object({ entries: v.array(v.object({ idx: v.number() })) })
 const snapshotSchema = v.object({
@@ -45,6 +48,8 @@ export default defineConfig({
           XAI_API_KEY: 'xai-test-key',
           TEST_MIGRATIONS: migrations,
           TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/d1/migrations'),
+          TEST_CONTROL_MIGRATIONS: controlMigrations,
+          TEST_CONTROL_MIGRATED_COLUMNS: migratedColumns('drizzle/control/migrations'),
           TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
         },
         // The test runner renames the Worker; bind its local class rather than the production name.
