@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { agents } from '../../drizzle/management/schema.ts'
 import { reconcileAgents } from '../admin/reconcile.ts'
 import { managementDb } from '../management/db.ts'
-import { admin, management, newAgentId, owner, updateSettings } from '../helper/management.ts'
+import { admin, management, newAgentId, caller, updateSettings } from '../helper/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
 import { modelResponse, waitForAnswer } from '../helper/rpc.ts'
 import { createAgentModels } from '../models/index.ts'
@@ -65,7 +65,7 @@ describe('a version written while a turn runs', () => {
       systemPrompt: 'You are the new prompt.',
     })
     expect(written).toMatchObject({ version: 1, apply: { state: 'pending', appliedVersion: 0 } })
-    expect(await admin().getAgent(await owner(), agentId)).toMatchObject({
+    expect(await admin().getAgent(await caller(), agentId)).toMatchObject({
       desiredVersion: 1,
       appliedVersion: 0,
       pending: true,
@@ -92,7 +92,7 @@ describe('convergence', () => {
     vi.spyOn(Agent.prototype, 'applyConfig').mockRejectedValueOnce(new Error('push lost'))
     const written = await updateSettings(agentId, { systemPrompt: 'Pulled on open' })
     expect(written.apply.state).toBe('failed')
-    expect(await admin().getAgent(await owner(), agentId)).toMatchObject({
+    expect(await admin().getAgent(await caller(), agentId)).toMatchObject({
       desiredVersion: 1,
       appliedVersion: 0,
       pending: true,

@@ -11,15 +11,17 @@ import { parseAgentRef, parseMessage } from '../src/validation.ts'
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
 type Admin = Pick<AdminService, 'seed' | 'resolveAgent'>
 
+/** The actor the development CLI calls `AdminService` as. */
+const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
+
 /**
- * The UUID an agent reference names. A slug or UUID prefix is resolved as the administrator agent,
- * after making sure the seed has run, so `assistant` works on a fresh local database.
+ * The UUID an agent reference names. A slug or UUID prefix is resolved after making sure the seed
+ * has run, so `assistant` works on a fresh local database.
  */
 async function agentIdOf(admin: Admin, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  const { adminAgentId } = await admin.seed()
-  const actor = { kind: 'agent', externalId: adminAgentId } as const
-  return (await admin.resolveAgent(actor, ref)).agentId
+  await admin.seed()
+  return (await admin.resolveAgent(CLI_ACTOR, ref)).agentId
 }
 
 /** Development-only HTTP adapter; service methods deliver through Durable Object RPC. */

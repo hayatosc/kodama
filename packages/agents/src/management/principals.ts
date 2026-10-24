@@ -1,6 +1,6 @@
 /**
- * Principals: resolving the caller of `AdminService`, and the owner check every administration
- * call makes until roles arrive (issue #5).
+ * Principals: the caller of `AdminService` as a principal row. The calling Worker authenticates its
+ * caller, and `AdminService` trusts the actor it names; roles and permissions are issue #7.
  *
  * @see docs/agents.md — AdminService
  *
@@ -8,26 +8,46 @@
  */
 import { and, eq } from 'drizzle-orm'
 import { principals } from '../../drizzle/management/schema.ts'
+import { uuidv7 } from '../lib/uuid.ts'
 import type { AdminActor } from '../protocol.ts'
 import type { ManagementDb, PrincipalRow } from './db.ts'
 
-/**
- * The installation owner acting as `actor`.
- *
- * @throws {@link Error} Starting `forbidden:`, when `actor` is not an enabled principal with the owner role.
- */
-export async function requireOwner(db: ManagementDb, actor: AdminActor): Promise<PrincipalRow> {
-  const principal = await db
+async function principalRow(db: ManagementDb, actor: AdminActor) {
+  return db
     .select()
     .from(principals)
     .where(and(eq(principals.kind, actor.kind), eq(principals.externalId, actor.externalId)))
     .get()
-  if (
-    principal === undefined ||
-    principal.disabledAt !== null ||
-    principal.systemRole !== 'owner'
-  ) {
-    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} is not the owner`)
+}
+
+/**
+ * The principal `actor` names, registered on its first call so that owners, authors, and audit rows
+ * can refer to it.
+ *
+ * @throws {@link Error} Starting `forbidden:`, when the principal is disabled, or its external ID is
+ * registered under another kind.
+ */
+export async function principalOf(
+  db: ManagementDb,
+  actor: AdminActor,
+  now: number,
+): Promise<PrincipalRow> {
+  const known = await principalRow(db, actor)
+  if (known === undefined) {
+    await db
+      .insert(principals)
+      .values({
+        principalId: uuidv7(now),
+        kind: actor.kind,
+        externalId: actor.externalId,
+        displayName: actor.externalId,
+        createdAt: now,
+      })
+      .onConflictDoNothing()
+  }
+  const principal = known ?? (await principalRow(db, actor))
+  if (principal === undefined || principal.disabledAt !== null) {
+    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} may not call AdminService`)
   }
   return principal
 }

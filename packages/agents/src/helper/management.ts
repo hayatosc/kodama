@@ -1,11 +1,11 @@
 /**
- * Helpers of the registry tests: the seed, the owner, registry rows, and configuration changes.
+ * Helpers of the registry tests: the seed, the caller, registry rows, and configuration changes.
  *
  * @module
  */
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { agents } from '../../drizzle/management/schema.ts'
+import { agents, principals } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from '../configuration/index.ts'
 import { managementDb } from '../management/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'
@@ -25,9 +25,21 @@ export function seedOnce(): Promise<SeedResult> {
   return seeded
 }
 
-/** The installation owner: the administrator agent the seed registers. */
-export async function owner(): Promise<AdminActor> {
-  return { kind: 'agent', externalId: (await seedOnce()).adminAgentId }
+/** The caller of the tests, a person; the seed has run before it acts. */
+export async function caller(): Promise<AdminActor> {
+  await seedOnce()
+  return { kind: 'user', externalId: 'tester@example.com' }
+}
+
+/** The principal ID `AdminService` recorded for `actor`. */
+export async function principalIdOf(actor: AdminActor): Promise<string> {
+  const row = await management
+    .select()
+    .from(principals)
+    .where(eq(principals.externalId, actor.externalId))
+    .get()
+  if (row === undefined) throw new Error(`No principal for ${actor.externalId}`)
+  return row.principalId
 }
 
 /**
@@ -54,16 +66,16 @@ export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
 export async function desiredSettings(agentId: string): Promise<AgentSettings> {
   const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   if (row === undefined || row.currentVersion === 0) return defaultAgentSettings(env)
-  return (await admin().getConfig(await owner(), agentId)).settings
+  return (await admin().getConfig(await caller(), agentId)).settings
 }
 
-/** Write a new version with `change` over the desired settings, as the owner. */
+/** Write a new version with `change` over the desired settings, as the caller. */
 export async function updateSettings(
   agentId: string,
   change: Partial<AgentSettings>,
 ): Promise<ConfigWriteResult> {
   const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
-  return admin().updateConfig(await owner(), agentId, {
+  return admin().updateConfig(await caller(), agentId, {
     requestId: crypto.randomUUID(),
     settings: { ...(await desiredSettings(agentId)), ...change },
     expectedVersion: row?.currentVersion ?? 0,

@@ -6,8 +6,9 @@ import {
   agentMembers,
   agents,
   auditLog,
+  principals,
 } from '../../drizzle/management/schema.ts'
-import { admin, management, owner, seedOnce } from '../helper/management.ts'
+import { admin, caller, management, principalIdOf, seedOnce } from '../helper/management.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 import { write, db } from '../helper/memory.ts'
 import { agentScope } from '../memory/store/db.ts'
@@ -28,7 +29,7 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 }
 
 async function create(displayName = 'Researcher', slug?: string) {
-  return admin().createAgent(await owner(), {
+  return admin().createAgent(await caller(), {
     requestId: crypto.randomUUID(),
     displayName,
     ...(slug === undefined ? {} : { slug }),
@@ -39,7 +40,7 @@ const uniqueSlug = () => `agent-${crypto.randomUUID().slice(0, 8)}`
 
 describe('createAgent', () => {
   it('assigns a UUID v7, writes the registry, version 1, membership, and audit, and activates it', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const created = await create('Researcher', uniqueSlug())
     expect(created.agentId).toMatch(UUID_V7)
     expect(created).toMatchObject({
@@ -59,7 +60,7 @@ describe('createAgent', () => {
       .from(agentMembers)
       .where(eq(agentMembers.agentId, created.agentId))
     expect(members).toEqual([
-      { agentId: created.agentId, principalId: actor.externalId, role: 'owner' },
+      { agentId: created.agentId, principalId: await principalIdOf(actor), role: 'owner' },
     ])
     const audit = await management
       .select({ action: auditLog.action })
@@ -72,7 +73,7 @@ describe('createAgent', () => {
   })
 
   it('returns the first agent for a repeated requestId, and refuses a taken slug', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const request = { requestId: crypto.randomUUID(), displayName: 'Once', slug: uniqueSlug() }
     const first = await admin().createAgent(actor, request)
     const again = await admin().createAgent(actor, request)
@@ -81,8 +82,8 @@ describe('createAgent', () => {
     expect(await rejection(taken)).toMatch(/slug is taken/)
   })
 
-  it('never accepts an ID from the caller, and refuses callers that are not the owner', async () => {
-    const actor = await owner()
+  it('never accepts an ID from the caller', async () => {
+    const actor = await caller()
     const withId = admin().createAgent(actor, {
       requestId: crypto.randomUUID(),
       displayName: 'Chosen',
@@ -90,14 +91,62 @@ describe('createAgent', () => {
       agentId: crypto.randomUUID(),
     })
     expect(await rejection(withId)).toMatch(/requestId and displayName/)
-    const stranger = { kind: 'user', externalId: 'someone@example.com' } as const
-    expect(await rejection(admin().listAgents(stranger))).toMatch(/forbidden/)
+  })
+})
+
+describe('callers', () => {
+  it('lets an agent create and configure agents as a person does, and records it as the actor', async () => {
+    const { agentId: callerAgentId } = await create()
+    const actor = { kind: 'agent', externalId: callerAgentId } as const
+    const created = await admin().createAgent(actor, {
+      requestId: crypto.randomUUID(),
+      displayName: 'Made by an agent',
+    })
+    const { settings } = await admin().getConfig(actor, created.agentId)
+    await admin().updateConfig(actor, created.agentId, {
+      requestId: crypto.randomUUID(),
+      settings: { ...settings, systemPrompt: 'Set by an agent' },
+      expectedVersion: 1,
+    })
+
+    const principalId = await principalIdOf(actor)
+    const row = await management
+      .select()
+      .from(principals)
+      .where(eq(principals.principalId, principalId))
+      .get()
+    expect(row).toMatchObject({ kind: 'agent', externalId: callerAgentId, systemRole: null })
+    const audit = await management
+      .select({ action: auditLog.action, actorId: auditLog.actorId })
+      .from(auditLog)
+      .where(eq(auditLog.targetId, created.agentId))
+    expect(audit).toEqual([
+      { action: 'agent.create', actorId: principalId },
+      { action: 'agent.activate', actorId: principalId },
+      { action: 'agent.config', actorId: principalId },
+    ])
+    const history = await admin().configHistory(actor, created.agentId)
+    expect(history.map((entry) => entry.authorId)).toEqual([principalId, principalId])
+  })
+
+  it('accepts a person, a service, and an agent alike, and refuses a disabled principal', async () => {
+    const id = crypto.randomUUID()
+    for (const kind of ['user', 'service', 'agent'] as const) {
+      const actor = { kind, externalId: `${kind}-${id}` }
+      expect(Array.isArray(await admin().listAgents(actor))).toBe(true)
+    }
+    const disabled = { kind: 'user', externalId: `user-${id}` } as const
+    await management
+      .update(principals)
+      .set({ disabledAt: Date.now() })
+      .where(eq(principals.externalId, disabled.externalId))
+    expect(await rejection(admin().listAgents(disabled))).toMatch(/forbidden/)
   })
 })
 
 describe('renameAgent', () => {
   it('changes only the display name and slug: the UUID, object, memory, and history stay', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const created = await create('Before', uniqueSlug())
     const { agentId } = created
     await exports.default.sendMessage(agentId, { requestId: 'before', content: 'Hello' })
@@ -127,7 +176,7 @@ describe('renameAgent', () => {
 
 describe('listAgents and resolveAgent', () => {
   it('lists registry rows with desired and applied versions, and the memory agent as dedicated', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const created = await create()
     const listed = await admin().listAgents(actor)
     expect(listed.find((row) => row.agentId === created.agentId)).toMatchObject({
@@ -149,7 +198,7 @@ describe('listAgents and resolveAgent', () => {
 
 describe('configuration versions', () => {
   it('lets exactly one of two updates from the same version win, and leaves nothing of the other', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const { agentId } = await create()
     const { settings } = await admin().getConfig(actor, agentId)
     const update = (systemPrompt: string) =>
@@ -185,7 +234,7 @@ describe('configuration versions', () => {
   })
 
   it('treats a resent update as the first one', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const { agentId } = await create()
     const { settings } = await admin().getConfig(actor, agentId)
     const request = {
@@ -199,8 +248,9 @@ describe('configuration versions', () => {
   })
 
   it('rolls back by writing the old content as a new version, and lists who changed what and when', async () => {
-    const actor = await owner()
+    const actor = await caller()
     const { agentId } = await create()
+    const authorId = await principalIdOf(actor)
     const v1 = await admin().getConfig(actor, agentId)
     await admin().updateConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
@@ -222,9 +272,9 @@ describe('configuration versions', () => {
     expect(
       history.map(({ version, authorId, comment }) => ({ version, authorId, comment })),
     ).toEqual([
-      { version: 3, authorId: actor.externalId, comment: 'rollback to version 1' },
-      { version: 2, authorId: actor.externalId, comment: 'try a new prompt' },
-      { version: 1, authorId: actor.externalId, comment: 'create' },
+      { version: 3, authorId, comment: 'rollback to version 1' },
+      { version: 2, authorId, comment: 'try a new prompt' },
+      { version: 1, authorId, comment: 'create' },
     ])
     for (const entry of history) expect(entry.createdAt).toBeGreaterThan(0)
     expect(
@@ -234,7 +284,7 @@ describe('configuration versions', () => {
 })
 
 describe('the seed in this file', () => {
-  it('is in place before the other tests act as the owner', async () => {
+  it('is in place before the other tests act', async () => {
     expect((await seedOnce()).memoryAgentId).toBe(MEMORY_AGENT_ID)
   })
 })

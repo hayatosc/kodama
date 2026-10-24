@@ -5,7 +5,8 @@
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so
  * an agent ID is never reused, and foreign keys keep SQLite's default `NO ACTION`. Writes use plain
  * inserts, so a constraint violation fails its statement and rolls back the whole `batch()`; only
- * the idempotent seed uses `ON CONFLICT DO NOTHING`, and reconciliation upserts its cursor.
+ * the idempotent seed and the registration of a principal use `ON CONFLICT DO NOTHING`, and
+ * reconciliation upserts its cursor.
  *
  * @see docs/agents.md — Management database
  *
@@ -15,8 +16,8 @@ import { sql } from 'drizzle-orm'
 import { check, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /**
- * Who can act: a person signed in through Access, a service token, or an agent. The seed registers
- * the administrator agent as the first principal.
+ * Who can act: a person signed in through Access, a service token, or an agent. A principal is
+ * registered on its first `AdminService` call.
  */
 export const PRINCIPAL_KINDS = ['user', 'service', 'agent'] as const
 /** The installation-wide role; roles on one agent are in `agent_members`. */
@@ -126,11 +127,11 @@ export const agentMembers = sqliteTable(
 )
 
 /** Keys of `system_settings`. */
-export const SYSTEM_SETTING_KEYS = ['install_id', 'admin_agent_id', 'reconcile_cursor'] as const
+export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor'] as const
 
 /**
- * Installation settings. The seed writes the installation ID and the administrator agent's ID once,
- * and they never change; reconciliation keeps the agent ID its last run stopped at.
+ * Installation settings. The seed writes the installation ID once, and it never changes;
+ * reconciliation keeps the agent ID its last run stopped at.
  */
 export const systemSettings = sqliteTable('system_settings', {
   key: text('key', { enum: SYSTEM_SETTING_KEYS }).primaryKey(),

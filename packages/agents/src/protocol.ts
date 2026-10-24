@@ -163,8 +163,6 @@ export interface ConfigWriteResult {
 /** What the seed made sure exists. */
 export interface SeedResult {
   installId: string
-  /** The administrator agent, the installation's owner; act as it with `{ kind: 'agent' }`. */
-  adminAgentId: string
   memoryAgentId: string
 }
 

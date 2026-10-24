@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
 Start nr dev:agents in another terminal first (localhost:5173).
 <agent> is a UUID, a slug, or a unique UUID prefix; the seed creates the
-administrator agent, slug assistant, and the first send runs the seed if needed.
+first agent, slug assistant, and the first send runs the seed if needed.
 The same agent continues its conversation. --events prints JSON events.
 Retry with the same request ID and content to avoid duplicate input.
 Ctrl+C disconnects; use cancel to stop the agent's work.`)

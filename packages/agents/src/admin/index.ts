@@ -11,7 +11,7 @@ import * as v from 'valibot'
 import { AGENT_KINDS, AGENT_STATUSES } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import type { PrincipalRow } from '../management/db.ts'
-import { requireOwner } from '../management/principals.ts'
+import { principalOf } from '../management/principals.ts'
 import type { AgentEnv } from '../env.ts'
 import { createAgentModels } from '../models/index.ts'
 import type {
@@ -88,9 +88,10 @@ const HistoryPageSchema = v.strictObject({
  * Administration RPC for the UI Worker and the development CLI.
  *
  * @remarks
- * The calling Worker authenticates the caller and passes it as `actor`; every method except
- * {@link AdminService.seed} authorizes it here, in one place. Until roles arrive (issue #5), only
- * the installation owner may call: the administrator agent the seed registers.
+ * The calling Worker authenticates the caller and passes it as `actor`, and every method except
+ * {@link AdminService.seed} trusts it: people, services, and agents call alike, so an agent can
+ * create and configure agents as a person can. The actor is recorded as the author and in the audit
+ * rows. Roles and permissions are issue #7.
  */
 export class AdminService extends WorkerEntrypoint<AgentEnv> {
   /** Reject HTTP requests: administration is reached only through RPC. */
@@ -110,22 +111,20 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
   }
 
   /**
-   * The call of `actor`, after checking that it is the owner.
+   * The call of `actor`, as the principal it names.
    *
    * @throws {@link TypeError} When `actor` is malformed.
-   * @throws {@link Error} Starting `forbidden:`, when `actor` is not the owner.
+   * @throws {@link Error} Starting `forbidden:`, when the principal is disabled.
    */
   async #call(actor: unknown): Promise<AdminCall & { principal: PrincipalRow }> {
     const call = this.#systemCall()
-    const principal = await requireOwner(call.db, parseAdminActor(actor))
+    const principal = await principalOf(call.db, parseAdminActor(actor), call.now)
     return { ...call, principal }
   }
 
   /**
    * Create the installation's starting rows if missing: the installation ID, the memory agent with
-   * its version 1, and the administrator agent, the first agent and the owner. Idempotent.
-   *
-   * @returns The IDs; call the other methods as `{ kind: 'agent', externalId: adminAgentId }`.
+   * its version 1, and the first agent. Idempotent.
    */
   async seed(): Promise<SeedResult> {
     return seed(this.#systemCall())
@@ -139,7 +138,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
   async createAgent(actor: AdminActor, request: CreateAgentRequest): Promise<AgentSummary> {
     const call = await this.#call(actor)
     const input = parseInput(CreateAgentSchema, request)
-    return flows.createAgent(call, call.principal, {
+    return flows.createAgent(call, {
       requestId: input.requestId,
       displayName: input.displayName,
       ...(input.slug === undefined ? {} : { slug: input.slug }),

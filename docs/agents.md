@@ -178,14 +178,14 @@ memory ([memory.md](memory.md)). `kodama-management` (`MANAGEMENT_DB`, schema in
 [`drizzle/management/schema.ts`](../packages/agents/drizzle/management/schema.ts)) holds the source of
 truth for agents:
 
-| Table                   | Contents                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner            |
-| `agent_config_versions` | immutable configuration versions, numbered per agent                                       |
-| `principals`            | who may call `AdminService`: people, service tokens, and agents                            |
-| `agent_members`         | roles on one agent                                                                         |
-| `system_settings`       | `install_id` and `admin_agent_id`, written once by the seed, and the reconciliation cursor |
-| `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`                  |
+| Table                   | Contents                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner |
+| `agent_config_versions` | immutable configuration versions, numbered per agent                            |
+| `principals`            | who may call `AdminService`: people, service tokens, and agents                 |
+| `agent_members`         | roles on one agent                                                              |
+| `system_settings`       | `install_id`, written once by the seed, and the reconciliation cursor           |
+| `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
 RPC. Foreign keys are declared and enforced by D1, and every change is one `batch()`, so a violation
@@ -240,26 +240,28 @@ rows every installation starts with, and is idempotent:
 - the memory agent's row, `kind = 'dedicated'` with the fixed UUID
   `00000000-0000-7000-8000-00000000000a` mapped to `object_name = 'kodama:memory'`, and its
   version 1 from `MEMORY_MODEL_*`; it keeps its existing object;
-- the administrator agent, the first agent: a working agent with the slug `assistant` and a
-  general-purpose prompt (`ADMIN_AGENT_PROMPT`) as version 1, which `updateConfig` can change.
-  It is also the installation owner: a principal with `kind = 'agent'` and the owner role under
-  its own ID.
+- the first agent: a working agent with the slug `assistant` and a general-purpose prompt
+  (`FIRST_AGENT_PROMPT`) as version 1, which `updateConfig` can change. The system creates it
+  through `createAgent`, like any other agent; it has no owner and is not a principal.
 
-The first call fixes both IDs, and later calls write nothing new, so a renamed or reconfigured
-administrator agent keeps its changes. The seed then initializes and activates the administrator
-agent and applies the memory agent's version.
+Later calls write nothing new: the memory agent's rows are inserted only if missing, and the first
+agent's `createAgent` uses a fixed `requestId`, so a renamed or reconfigured first agent keeps its
+changes. The seed then applies the memory agent's version.
 
 ### AdminService
 
 `AdminService` ([`src/admin/index.ts`](../packages/agents/src/admin/index.ts)) is a named
 entrypoint of the agents Worker, reached only through a service binding. The calling Worker
-authenticates its caller and passes it as `actor: { kind: 'user' | 'service' | 'agent', externalId }`;
-`AdminService` authorizes it in one place. For now only the installation owner may call, which is
-the administrator agent: `{ kind: 'agent', externalId: adminAgentId }`.
+authenticates its caller and passes it as `actor: { kind: 'user' | 'service' | 'agent', externalId }`,
+and `AdminService` trusts it. People, services, and agents call alike: any agent can create,
+rename, and configure agents, as a person can from the UI or the CLI, and no kind is refused or
+limited for being that kind. An actor becomes a `principals` row on its first call, and that row
+is recorded as the author of versions, the owner of agents it creates, and the actor of audit
+rows; a disabled principal is refused with `forbidden:`. Roles and permissions are issue #7.
 
 | Method                                                             | Result                                                                       |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `seed()`                                                           | the starting rows; `{ installId, adminAgentId, memoryAgentId }`              |
+| `seed()`                                                           | the starting rows; `{ installId, memoryAgentId }`                            |
 | `createAgent(actor, { requestId, displayName, slug?, settings? })` | a new working agent with a server-issued UUID v7                             |
 | `listAgents(actor, { kind?, status? })`                            | registry rows, newest first                                                  |
 | `getAgent(actor, agentId)`                                         | one registry row                                                             |
@@ -334,7 +336,7 @@ policies on. Changing the defaults later changes no existing agent.
   comment, and time, and `getConfig(actor, agentId)` returns the desired version.
 
 ```ts
-const actor = { kind: 'agent', externalId: adminAgentId } as const
+const actor = { kind: 'user', externalId: 'you@example.com' } as const
 const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
 await env.ADMIN.updateConfig(actor, agentId, {
   requestId: crypto.randomUUID(),
@@ -637,8 +639,8 @@ nr agent --help
 
 The CLI works like this:
 
-- `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the administrator agent,
-  slug `assistant`; a `send` to a slug runs the seed first if needed.
+- `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the first agent, slug
+  `assistant`; a `send` to a slug runs the seed first if needed.
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
@@ -663,25 +665,25 @@ Tests sit next to the module they test, as `<module>.test.ts` in the same folder
 are in `src/helper/`, which production code never imports, and `vitest.setup.ts` applies the D1
 migrations before the tests.
 
-| Path                                        | Contents                                                       |
-| ------------------------------------------- | -------------------------------------------------------------- |
-| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection  |
-| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers     |
-| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests           |
-| `src/helper/memory.ts`                      | the memory database, records, and the memory agent             |
-| `src/helper/management.ts`                  | the seed, the owner, registry rows, and configuration changes  |
-| `src/admin/agents.test.ts`                  | creation, renames, listing, versions, conflicts, rollback      |
-| `src/admin/seed.test.ts`                    | the seed, the administrator agent, the memory agent's versions |
-| `src/management/registry.test.ts`           | admission without object storage, and resolving references     |
-| `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on             |
-| `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions  |
-| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                             |
-| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                 |
-| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery           |
-| `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction      |
-| `src/models/index.test.ts`                  | provider credentials                                           |
-| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling          |
-| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                   |
+| Path                                        | Contents                                                      |
+| ------------------------------------------- | ------------------------------------------------------------- |
+| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection |
+| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers    |
+| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
+| `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
+| `src/helper/management.ts`                  | the seed, the owner, registry rows, and configuration changes |
+| `src/admin/agents.test.ts`                  | creation, renames, listing, versions, conflicts, rollback     |
+| `src/admin/seed.test.ts`                    | the seed, the first agent, the memory agent's versions        |
+| `src/management/registry.test.ts`           | admission without object storage, and resolving references    |
+| `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on            |
+| `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions |
+| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
+| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
+| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery          |
+| `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction     |
+| `src/models/index.test.ts`                  | provider credentials                                          |
+| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
+| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
 module it tests, describe the observable behavior it checks, and run `nr check` before submitting.

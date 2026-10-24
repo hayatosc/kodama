@@ -2,31 +2,44 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agents, principals, systemSettings } from '../../drizzle/management/schema.ts'
+import {
+  agentMembers,
+  agents,
+  principals,
+  systemSettings,
+} from '../../drizzle/management/schema.ts'
 import { admin, management } from '../helper/management.ts'
 import { activeContents, memoryAgent } from '../helper/memory.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
 import { piEntries } from '../storage/pi-tables.ts'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
-import { ADMIN_AGENT_PROMPT, MEMORY_AGENT_ID } from './seed.ts'
+import { FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, MEMORY_AGENT_ID } from './seed.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
 afterEach(() => vi.restoreAllMocks())
 
+const actor = { kind: 'user', externalId: 'seed-tester@example.com' } as const
+
+async function firstAgent() {
+  const row = await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG)).get()
+  if (row === undefined) throw new Error('The seed created no first agent')
+  return row
+}
+
 describe('seed', () => {
-  it('registers the memory agent on its existing object, and the administrator agent as the owner', async () => {
+  it('registers the memory agent on its existing object, and the first agent like any other', async () => {
     // State the memory agent's object holds from before the registry existed.
     await runInDurableObject(memoryAgent(), async (_instance, state) => {
       await state.storage.put('test:marker', 'kept')
     })
 
-    const first = await admin().seed()
+    const seeded = await admin().seed()
     const again = await admin().seed()
-    expect(again).toEqual(first)
-    expect(first.memoryAgentId).toBe(MEMORY_AGENT_ID)
+    expect(again).toEqual(seeded)
+    expect(seeded.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
     const memory = await management
       .select()
@@ -45,64 +58,56 @@ describe('seed', () => {
     )
     expect(marker).toBe('kept')
 
-    const adminRow = await management
-      .select()
-      .from(agents)
-      .where(eq(agents.agentId, first.adminAgentId))
-      .get()
-    expect(adminRow).toMatchObject({
+    const first = await firstAgent()
+    expect(first).toMatchObject({
       kind: 'working',
-      objectName: first.adminAgentId,
-      slug: 'assistant',
+      slug: FIRST_AGENT_SLUG,
       status: 'active',
       currentVersion: 1,
       appliedVersion: 1,
-      ownerId: first.adminAgentId,
+      ownerId: null,
     })
+    expect(first.objectName).toBe(first.agentId)
+    // Like any other agent: no principal, membership, or setting of its own.
     expect(
-      await management
-        .select()
-        .from(principals)
-        .where(eq(principals.principalId, first.adminAgentId))
-        .get(),
-    ).toMatchObject({ kind: 'agent', externalId: first.adminAgentId, systemRole: 'owner' })
+      await management.select().from(principals).where(eq(principals.externalId, first.agentId)),
+    ).toEqual([])
+    expect(
+      await management.select().from(agentMembers).where(eq(agentMembers.agentId, first.agentId)),
+    ).toEqual([])
     const settings = await management.select().from(systemSettings)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
-      {
-        install_id: first.installId,
-        admin_agent_id: first.adminAgentId,
-      },
+      { install_id: seeded.installId },
     )
+    expect(
+      (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
+    ).toBe(1)
 
-    const actor = { kind: 'agent', externalId: first.adminAgentId } as const
-    const { settings: v1 } = await admin().getConfig(actor, first.adminAgentId)
-    expect(v1.systemPrompt).toBe(ADMIN_AGENT_PROMPT)
-    await exports.default.sendMessage(first.adminAgentId, { requestId: 'hi', content: 'Hello' })
-    await waitForAnswer(first.adminAgentId, 'hi')
+    const { settings: v1 } = await admin().getConfig(actor, first.agentId)
+    expect(v1.systemPrompt).toBe(FIRST_AGENT_PROMPT)
+    await exports.default.sendMessage(first.agentId, { requestId: 'hi', content: 'Hello' })
+    await waitForAnswer(first.agentId, 'hi')
   })
 
-  it('keeps later changes to the administrator agent when it runs again', async () => {
-    const { adminAgentId } = await admin().seed()
-    const actor = { kind: 'agent', externalId: adminAgentId } as const
-    const { settings } = await admin().getConfig(actor, adminAgentId)
-    const desired = (await admin().getAgent(actor, adminAgentId)).desiredVersion
-    await admin().updateConfig(actor, adminAgentId, {
+  it('keeps later changes to the first agent when it runs again', async () => {
+    await admin().seed()
+    const { agentId } = await firstAgent()
+    const { settings } = await admin().getConfig(actor, agentId)
+    const desired = (await admin().getAgent(actor, agentId)).desiredVersion
+    await admin().updateConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
-      settings: { ...settings, systemPrompt: 'Changed by the owner' },
+      settings: { ...settings, systemPrompt: 'Changed later' },
       expectedVersion: desired,
     })
-    await admin().renameAgent(actor, adminAgentId, { displayName: 'Renamed' })
+    await admin().renameAgent(actor, agentId, { displayName: 'Renamed' })
     await admin().seed()
-    const after = await admin().getAgent(actor, adminAgentId)
+    const after = await admin().getAgent(actor, agentId)
     expect(after).toMatchObject({ displayName: 'Renamed', desiredVersion: desired + 1 })
-    expect((await admin().getConfig(actor, adminAgentId)).settings.systemPrompt).toBe(
-      'Changed by the owner',
-    )
+    expect((await admin().getConfig(actor, agentId)).settings.systemPrompt).toBe('Changed later')
   })
 
   it('lets the memory agent take its model from its versions', async () => {
-    const { adminAgentId } = await admin().seed()
-    const actor = { kind: 'agent', externalId: adminAgentId } as const
+    await admin().seed()
     const current = await admin().getConfig(actor, MEMORY_AGENT_ID)
     const result = await admin().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),
@@ -118,8 +123,7 @@ describe('seed', () => {
   })
 
   it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
-    const { adminAgentId } = await admin().seed()
-    const actor = { kind: 'agent', externalId: adminAgentId } as const
+    await admin().seed()
     const current = await admin().getConfig(actor, MEMORY_AGENT_ID)
     const result = await admin().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),

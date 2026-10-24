@@ -45,7 +45,7 @@ export interface AdminCall {
   env: AdminEnv
   db: ManagementDb
   models: Models
-  /** The authorized caller; `null` for the system (reconciliation). */
+  /** The authorized caller; `null` for the system (the seed and reconciliation). */
   principal: PrincipalRow | null
   now: number
 }
@@ -153,7 +153,7 @@ export async function finishProvisioning(call: AdminCall, agentId: string): Prom
 /**
  * Create a working agent: a new UUID v7, then the registry row (`provisioning`), version 1, the
  * caller's owner membership, and the audit row in one batch; then initialize the object and
- * activate it.
+ * activate it. The system (the seed) creates agents with no owner.
  *
  * @remarks
  * Reusing `requestId` returns the agent the first attempt created. A stop after the batch leaves the
@@ -163,10 +163,10 @@ export async function finishProvisioning(call: AdminCall, agentId: string): Prom
  */
 export async function createAgent(
   call: AdminCall,
-  principal: PrincipalRow,
   request: Omit<CreateAgentRequest, 'settings'> & { settings?: unknown },
 ): Promise<AgentSummary> {
-  const opId = `agent.create:${principal.principalId}:${request.requestId}`
+  const creator = actorId(call)
+  const opId = `agent.create:${creator ?? 'system'}:${request.requestId}`
   const earlier = await auditByOpId(call.db, opId)
   if (earlier !== undefined) return summaryOf(await finishProvisioning(call, earlier.targetId))
   const settings =
@@ -174,6 +174,10 @@ export async function createAgent(
       ? defaultAgentSettings(call.env)
       : parseSettings(call.models, request.settings)
   const agentId = uuidv7(call.now)
+  const membership =
+    creator === null
+      ? []
+      : [call.db.insert(agentMembers).values({ agentId, principalId: creator, role: 'owner' })]
   try {
     await call.db.batch([
       call.db.insert(agents).values({
@@ -184,7 +188,7 @@ export async function createAgent(
         slug: request.slug ?? null,
         status: 'provisioning',
         currentVersion: 1,
-        ownerId: principal.principalId,
+        ownerId: creator,
         createdAt: call.now,
         updatedAt: call.now,
       }),
@@ -193,17 +197,15 @@ export async function createAgent(
         version: 1,
         settingsJson: JSON.stringify(settings),
         schemaVersion: SETTINGS_SCHEMA_VERSION,
-        authorId: principal.principalId,
+        authorId: creator,
         comment: 'create',
         createdAt: call.now,
       }),
-      call.db
-        .insert(agentMembers)
-        .values({ agentId, principalId: principal.principalId, role: 'owner' }),
+      ...membership,
       auditStatement(call.db, {
         opId,
         at: call.now,
-        actorId: principal.principalId,
+        actorId: creator,
         action: 'agent.create',
         targetKind: 'agent',
         targetId: agentId,

@@ -71,7 +71,7 @@ it('rejects malformed CLI input before RPC admission', async () => {
   expect(response.status).toBe(400)
 })
 
-it('seeds, and sends to the administrator agent by its slug', async () => {
+it('seeds, and sends to the first agent by its slug', async () => {
   const post = (path: string, body?: unknown) =>
     handleCli(
       new Request(`http://localhost/cli/${path}`, {
@@ -84,7 +84,7 @@ it('seeds, and sends to the administrator agent by its slug', async () => {
       exports.AdminService,
     )
   const seeded = await (await post('seed')).json()
-  expect(seeded).toMatchObject({ adminAgentId: expect.any(String) })
+  expect(seeded).toMatchObject({ installId: expect.any(String) })
   const sent = await post('send/assistant', { requestId: 'by-slug', content: 'Hello' })
   expect(sent.status).toBe(200)
   expect(JSON.stringify(decodeEvents(await sent.text()))).toContain('Hello from Kodama')

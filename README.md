@@ -5,8 +5,9 @@ Pi Durable agents on Cloudflare Durable Objects, managed with the `cf` CLI.
 Each agent has a server-issued UUID, its `agentId`, in a registry in the management D1 database,
 and addresses **one agent = one Durable Object**. The object owns its SQLite-backed Pi session,
 conversation history, inbox, recovery alarm, and applied configuration version. The seed creates
-the first agent, a general-purpose assistant that is also the installation's administrator. Agent orchestration
-and model-invoked delegation tools can be added on top of the RPC transport.
+the first agent, a general-purpose assistant. People, services, and agents manage agents alike
+through `AdminService`. Agent orchestration and model-invoked delegation tools can be added on top
+of the RPC transport.
 
 ```text
 packages/
@@ -80,7 +81,7 @@ nr agent snapshot assistant
 nr agent cancel assistant
 ```
 
-`seed` creates the administrator agent, slug `assistant`; a `send` to a slug runs it first if
+`seed` creates the first agent, a general-purpose assistant with the slug `assistant`; a `send` to a slug runs it first if
 needed. An agent is named by its UUID, its slug, or a unique UUID prefix, and it retains its
 conversation in local Durable Object storage.
 `send` prints assistant text as it arrives and exits nonzero on model failure or
@@ -221,7 +222,7 @@ Wrangler is only a transitive dependency of Cloudflare's tooling.
 ## Per-agent configuration and providers
 
 ```ts
-const actor = { kind: 'agent', externalId: adminAgentId } as const
+const actor = { kind: 'user', externalId: 'you@example.com' } as const
 const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
 await env.ADMIN.updateConfig(actor, agentId, {
   requestId: crypto.randomUUID(),

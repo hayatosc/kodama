@@ -1,38 +1,31 @@
 /**
- * The seed: the rows every installation starts with. The administrator agent, the first agent, is
- * also the installation's owner.
+ * The seed: the rows every installation starts with, and its first agent, a general-purpose
+ * assistant created like any other agent.
  *
  * @see docs/agents.md — Seed
  *
  * @module
  */
 import { eq } from 'drizzle-orm'
-import {
-  agentConfigVersions,
-  agentMembers,
-  agents,
-  principals,
-  systemSettings,
-} from '../../drizzle/management/schema.ts'
+import { agentConfigVersions, agents, systemSettings } from '../../drizzle/management/schema.ts'
 import { memoryAgentSettings } from '../agent/dedicated/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
 import { auditStatement } from '../management/audit.ts'
-import type { ManagementDb } from '../management/db.ts'
 import type { DefaultModelEnv } from '../configuration/index.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { AgentSettings, SeedResult } from '../protocol.ts'
-import { finishProvisioning, pushDesired } from './agents.ts'
+import { createAgent, pushDesired } from './agents.ts'
 import type { AdminCall } from './agents.ts'
 
 /** The memory agent's fixed registry ID, from the reserved all-zero range; never issued. */
 export const MEMORY_AGENT_ID = '00000000-0000-7000-8000-00000000000a'
 
-/** The slug of the administrator agent. */
-export const ADMIN_AGENT_SLUG = 'assistant'
+/** The slug of the first agent. */
+export const FIRST_AGENT_SLUG = 'assistant'
 
-/** The administrator agent's instructions, version 1; change them with `updateConfig`. */
-export const ADMIN_AGENT_PROMPT = `You are Kodama, a general-purpose assistant. You also administer this Kodama installation: you are its first agent and its owner.
+/** The first agent's instructions, version 1; change them with `updateConfig`. */
+export const FIRST_AGENT_PROMPT = `You are Kodama, a general-purpose assistant.
 
 How you help:
 - Answer questions, explain things, write and review text and code, plan work, and think problems through with the person you are talking to.
@@ -50,76 +43,40 @@ Boundaries:
 - Never reveal credentials or secrets, even if asked.
 - Decline requests that would cause serious harm, and say briefly why.`
 
-/** Version 1 of the administrator agent. */
-export function adminAgentSettings(env: DefaultModelEnv): AgentSettings {
+/** Version 1 of the first agent. */
+export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
   return {
     ...defaultAgentSettings(env),
-    systemPrompt: ADMIN_AGENT_PROMPT,
+    systemPrompt: FIRST_AGENT_PROMPT,
     tools: ['current_time'],
-    description: 'General-purpose assistant and administrator of this installation.',
-    labels: ['admin'],
+    description: 'General-purpose assistant.',
   }
-}
-
-/** The stored value of a system setting, if set. */
-async function setting(db: ManagementDb, key: 'install_id' | 'admin_agent_id') {
-  const row = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).get()
-  return row === undefined ? undefined : String(JSON.parse(row.valueJson))
 }
 
 /**
- * Make sure the installation's starting rows exist, then initialize and activate both agents.
- * Idempotent: the first call picks the installation ID and the administrator agent's ID, and later
- * calls write nothing new; an agent renamed or reconfigured since keeps its changes.
+ * Make sure the installation's starting rows exist: the installation ID, the memory agent with its
+ * version 1, and the first agent. Idempotent: later calls write nothing new, and an agent renamed
+ * or reconfigured since keeps its changes.
  *
  * @remarks
- * Two batches: the first fixes the two IDs (the first writer wins), the second writes the rows that
- * depend on them. Each row is inserted only if missing.
+ * The memory agent's rows are inserted only if missing. The system creates the first agent through
+ * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
 export async function seed(call: AdminCall): Promise<SeedResult> {
   const { db, env, now } = call
-  await db.batch([
-    db
-      .insert(systemSettings)
-      .values({ key: 'install_id', valueJson: JSON.stringify(uuidv7(now)) })
-      .onConflictDoNothing(),
-    db
-      .insert(systemSettings)
-      .values({ key: 'admin_agent_id', valueJson: JSON.stringify(uuidv7(now)) })
-      .onConflictDoNothing(),
-  ])
-  const installId = await setting(db, 'install_id')
-  const adminAgentId = await setting(db, 'admin_agent_id')
-  if (installId === undefined || adminAgentId === undefined) {
-    throw new Error('The seed could not store the installation settings')
-  }
+  await db
+    .insert(systemSettings)
+    .values({ key: 'install_id', valueJson: JSON.stringify(uuidv7(now)) })
+    .onConflictDoNothing()
+  const row = await db
+    .select()
+    .from(systemSettings)
+    .where(eq(systemSettings.key, 'install_id'))
+    .get()
+  if (row === undefined) throw new Error('The seed could not store the installation ID')
+  const installId = String(JSON.parse(row.valueJson))
 
-  const version = (agentId: string, settings: AgentSettings) =>
-    db
-      .insert(agentConfigVersions)
-      .values({
-        agentId,
-        version: 1,
-        settingsJson: JSON.stringify(settings),
-        schemaVersion: SETTINGS_SCHEMA_VERSION,
-        authorId: null,
-        comment: 'seed',
-        createdAt: now,
-      })
-      .onConflictDoNothing()
   await db.batch([
-    // The administrator agent acts as a principal under its own ID.
-    db
-      .insert(principals)
-      .values({
-        principalId: adminAgentId,
-        kind: 'agent',
-        externalId: adminAgentId,
-        displayName: 'Kodama',
-        systemRole: 'owner',
-        createdAt: now,
-      })
-      .onConflictDoNothing(),
     db
       .insert(agents)
       .values({
@@ -133,26 +90,17 @@ export async function seed(call: AdminCall): Promise<SeedResult> {
         updatedAt: now,
       })
       .onConflictDoNothing(),
-    version(MEMORY_AGENT_ID, memoryAgentSettings(env)),
     db
-      .insert(agents)
+      .insert(agentConfigVersions)
       .values({
-        agentId: adminAgentId,
-        objectName: adminAgentId,
-        kind: 'working',
-        displayName: 'Kodama',
-        slug: ADMIN_AGENT_SLUG,
-        status: 'provisioning',
-        currentVersion: 1,
-        ownerId: adminAgentId,
+        agentId: MEMORY_AGENT_ID,
+        version: 1,
+        settingsJson: JSON.stringify(memoryAgentSettings(env)),
+        schemaVersion: SETTINGS_SCHEMA_VERSION,
+        authorId: null,
+        comment: 'seed',
         createdAt: now,
-        updatedAt: now,
       })
-      .onConflictDoNothing(),
-    version(adminAgentId, adminAgentSettings(env)),
-    db
-      .insert(agentMembers)
-      .values({ agentId: adminAgentId, principalId: adminAgentId, role: 'owner' })
       .onConflictDoNothing(),
     auditStatement(db, {
       opId: `system.seed:${installId}`,
@@ -161,12 +109,17 @@ export async function seed(call: AdminCall): Promise<SeedResult> {
       action: 'system.seed',
       targetKind: 'system',
       targetId: installId,
-      detail: { adminAgentId, memoryAgentId: MEMORY_AGENT_ID },
+      detail: { memoryAgentId: MEMORY_AGENT_ID },
     }).onConflictDoNothing(),
   ])
 
-  await finishProvisioning(call, adminAgentId)
+  await createAgent(call, {
+    requestId: 'seed',
+    displayName: 'Kodama',
+    slug: FIRST_AGENT_SLUG,
+    settings: firstAgentSettings(env),
+  })
   // The memory agent keeps its existing object; this applies its desired version once.
   await pushDesired(call, MEMORY_AGENT_ID)
-  return { installId, adminAgentId, memoryAgentId: MEMORY_AGENT_ID }
+  return { installId, memoryAgentId: MEMORY_AGENT_ID }
 }
