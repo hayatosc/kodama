@@ -252,6 +252,12 @@ export class Agent extends DurableObject<AgentEnv> {
     if (purpose === 'extract') {
       const harness = await this.#harness
       await this.#serial(async () => {
+        // The applied version decides at run time: one that disabled extraction after this alarm
+        // was set wins, and the alarm is dropped. The pending activity stays for re-enabling.
+        if ((await appliedSettings(this.ctx.storage))?.memoryPolicy.extract === false) {
+          await setAlarm(this.ctx.storage, 'extract', undefined)
+          return
+        }
         if (!(await isIdle(harness))) return
         await extractNewEntries(this.#workingMemory(), harness)
         await this.ctx.storage.delete('kodama:extract-pending')
