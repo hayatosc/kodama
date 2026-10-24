@@ -107,12 +107,12 @@ describe('createAgent', () => {
 
   it('never accepts an ID from the caller', async () => {
     const actor = await caller()
-    const withId = managementService().createAgent(actor, {
+    const request = {
       requestId: crypto.randomUUID(),
       displayName: 'Chosen',
-      // @ts-expect-error The request has no agentId field.
       agentId: crypto.randomUUID(),
-    })
+    }
+    const withId = managementService().createAgent(actor, request)
     expect(await rejection(withId)).toMatch(/requestId and displayName/)
   })
 })

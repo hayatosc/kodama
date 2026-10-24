@@ -1,6 +1,7 @@
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import AgentService from '../index.ts'
 import { newAgentId } from '../helper/management.ts'
 import { parseMessage } from '../validation.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
@@ -89,14 +90,9 @@ describe('agent RPC', () => {
   })
 })
 
-it('serves no configuration through AgentService; ManagementService owns it', async () => {
-  const agentId = await newAgentId()
-  const call = (method: 'getConfig' | 'setConfig') =>
-    // @ts-expect-error AgentService has no configuration methods.
-    Promise.resolve(exports.default[method](agentId, {})).then(
-      () => 'served',
-      (error: unknown) => String(error),
-    )
-  expect(await call('getConfig')).not.toBe('served')
-  expect(await call('setConfig')).not.toBe('served')
+it('exposes no configuration on AgentService; ManagementService owns it', () => {
+  expectTypeOf(exports.default).not.toHaveProperty('getConfig')
+  expectTypeOf(exports.default).not.toHaveProperty('setConfig')
+  expect(AgentService.prototype).not.toHaveProperty('getConfig')
+  expect(AgentService.prototype).not.toHaveProperty('setConfig')
 })

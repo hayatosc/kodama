@@ -58,7 +58,7 @@ Use Node.js >=22.19 and the pinned pnpm 12.14.0 through `ni`/`nr` wrappers.
 
 ## Coding Style & Naming Conventions
 
-Use strict TypeScript with two-space indentation, single quotes, no semicolons, trailing commas, and a 100-column formatting width. Oxfmt controls formatting; Oxlint enforces type safety. Use type-only imports and handle promises explicitly. Avoid `any`, unsafe assertions, and non-null assertions.
+Use strict TypeScript with two-space indentation, single quotes, no semicolons, trailing commas, and a 100-column formatting width. Oxfmt controls formatting; Oxlint enforces type safety. Use type-only imports and handle promises explicitly. Never use `any`, type assertions (`as Type` or `<Type>`), non-null assertions, or TypeScript suppression comments (`@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`). Const assertions (`as const`) are allowed. Fix the types and implementation instead of disabling lint rules, weakening checks, or using an equivalent workaround.
 
 Document with TSDoc: every file opens with a module comment ending in `@module`, and every export has a `/** */` comment that states intent and non-obvious constraints without restating the types. Cite the docs with `@see docs/memory.md — Section`, and use `@param name - text`, `@returns`, `@throws {@link TypeError} When …`, and `@remarks` only where they add something.
 
