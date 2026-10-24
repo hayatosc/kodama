@@ -5,6 +5,7 @@
  */
 import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { newAgentId } from '../../helper/control.ts'
 import { db, memoryAgent, activeContents } from '../../helper/memory.ts'
 import { waitForAnswer } from '../../helper/rpc.ts'
 import {
@@ -23,7 +24,7 @@ describe('extraction read bounds', () => {
   it.each(['checkpoint', 'citation', 'skip', 'valid'] as const)(
     'checks %s against the read page',
     async (mode) => {
-      const agentId = crypto.randomUUID()
+      const agentId = await newAgentId()
       const responses: string[] = []
       let through = 0
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {

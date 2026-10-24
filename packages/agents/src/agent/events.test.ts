@@ -1,5 +1,6 @@
 import { exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
+import { newAgentId } from '../helper/control.ts'
 import {
   decodeEvents,
   modelResponse,
@@ -14,7 +15,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 useMockModel()
 
 it('streams an initial snapshot', async () => {
-  const stream = await exports.default.subscribe(crypto.randomUUID())
+  const stream = await exports.default.subscribe(await newAgentId())
   const reader = stream.getReader()
   const chunk = await reader.read()
   expect(new TextDecoder().decode(chunk.value)).toContain('event: snapshot')
@@ -22,7 +23,7 @@ it('streams an initial snapshot', async () => {
 })
 
 it('streams generation, completion and reconnect state without polling', async () => {
-  const agentId = crypto.randomUUID()
+  const agentId = await newAgentId()
   const events = readEvents(await exports.default.subscribe(agentId))
   const other = readEvents(await exports.default.subscribe(agentId))
   try {
@@ -94,7 +95,7 @@ it('streams generation, completion and reconnect state without polling', async (
 })
 
 it('sends and streams to completion in one RPC, including completed retries', async () => {
-  const agentId = crypto.randomUUID()
+  const agentId = await newAgentId()
   const message = { requestId: 'unified', content: 'Hello' }
   const events = decodeEvents(
     await new Response(await exports.default.send(agentId, message)).text(),
@@ -117,7 +118,7 @@ it('sends and streams to completion in one RPC, including completed retries', as
 it.each([undefined, 'followUp', 'steer'] as const)(
   'preserves the requested busy mode %s through streaming RPC',
   async (whenBusy) => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const started = Promise.withResolvers<void>()
     const response = Promise.withResolvers<Response>()
     vi.mocked(fetch).mockImplementationOnce(async () => {
@@ -156,7 +157,7 @@ it.each([undefined, 'followUp', 'steer'] as const)(
 )
 
 it('isolates queued send streams and closes each at its own terminal submission', async () => {
-  const agentId = crypto.randomUUID()
+  const agentId = await newAgentId()
   let calls = 0
   vi.mocked(fetch).mockImplementation(async () => {
     calls += 1
@@ -182,7 +183,7 @@ it('isolates queued send streams and closes each at its own terminal submission'
 
 it('closes a send stream with an unanswered receipt on provider failure', async () => {
   vi.mocked(fetch).mockResolvedValue(new Response('Unauthorized', { status: 401 }))
-  const stream = await exports.default.send(crypto.randomUUID(), {
+  const stream = await exports.default.send(await newAgentId(), {
     requestId: 'failed',
     content: 'Hello',
   })

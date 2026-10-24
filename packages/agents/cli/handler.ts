@@ -3,25 +3,41 @@
  *
  * @module
  */
+import type { AdminService } from '../src/admin/index.ts'
 import type AgentService from '../src/index.ts'
-import { parseAgentId, parseMessage } from '../src/validation.ts'
+import { isUuid } from '../src/lib/uuid.ts'
+import { parseAgentRef, parseMessage } from '../src/validation.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
+type Admin = Pick<AdminService, 'seed' | 'resolveAgent'>
+
+/**
+ * The UUID an agent reference names. A slug or UUID prefix is resolved as the administrator agent,
+ * after making sure the seed has run, so `assistant` works on a fresh local database.
+ */
+async function agentIdOf(admin: Admin, ref: string): Promise<string> {
+  if (isUuid(ref)) return ref
+  const { adminAgentId } = await admin.seed()
+  const actor = { kind: 'agent', externalId: adminAgentId } as const
+  return (await admin.resolveAgent(actor, ref)).agentId
+}
 
 /** Development-only HTTP adapter; service methods deliver through Durable Object RPC. */
 export async function handleCli(
   request: Request,
   token: string,
   service: Service,
+  admin: Admin,
 ): Promise<Response> {
   if (!token || request.headers.get('authorization') !== `Bearer ${token}`) {
     return new Response('Unauthorized', { status: 401 })
   }
   if (request.method !== 'POST') return new Response('Use POST', { status: 405 })
-  const [, prefix, action, rawAgentId] = new URL(request.url).pathname.split('/')
+  const [, prefix, action, rawAgentRef] = new URL(request.url).pathname.split('/')
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
-    const agentId = parseAgentId(rawAgentId)
+    if (action === 'seed') return Response.json(await admin.seed())
+    const agentId = await agentIdOf(admin, parseAgentRef(rawAgentRef))
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)

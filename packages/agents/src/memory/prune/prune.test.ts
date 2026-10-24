@@ -22,13 +22,14 @@ import {
 } from '../../helper/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../../helper/control.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())
 
 describe('pruning', () => {
   it('archives the entries before the newest head, deletes them, and the conversation goes on', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const codename = `zephyrine${agentId.slice(0, 6)}`
     const bodies = mockModel({
       usage: COMPACT_AFTER_TURN_7,
@@ -75,7 +76,7 @@ describe('pruning', () => {
   })
 
   it('defers the delete while a background compaction runs, then finishes it', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     let release = () => {}
     let gated = false
     const gate = new Promise<void>((resolve) => {
@@ -110,7 +111,7 @@ describe('pruning', () => {
   })
 
   it('resumes a run that stopped after it was prepared', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     mockModel({ usage: COMPACT_AFTER_TURN_7 })
     await compactedAgent(agentId, 'resumed')
     const head = (await headOf(agentId)) ?? 0
@@ -143,7 +144,7 @@ describe('pruning', () => {
   })
 
   it('schedules pruning when idle above the threshold', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     mockModel({ usage: COMPACT_AFTER_TURN_7 })
     const stub = env.AGENTS.getByName(agentId)
     await runInDurableObject(stub, (_i, state) =>
@@ -164,7 +165,7 @@ describe('pruning', () => {
   })
 
   it('refuses input above the hard limit with a retryable error', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     await runInDurableObject(stub, (_i, state) =>
       state.storage.put(PRUNE_LIMITS_KEY, { hardBytes: 0 }),

@@ -3,8 +3,8 @@
  *
  * @module
  */
-import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { newAgentId, updateSettings } from '../../helper/control.ts'
 import { mockModel, say } from '../../helper/conversation.ts'
 import { record, write } from '../../helper/memory.ts'
 import { toolCallResponse } from '../../helper/model.ts'
@@ -15,10 +15,9 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('working memory search', () => {
   it('hides prohibited overrides even when the required policy does not match the query', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const space = `space-${crypto.randomUUID().slice(0, 8)}`
-    using config = await exports.default.getConfig(agentId)
-    await exports.default.setConfig(agentId, { ...config, sharedSpaces: [space] })
+    await updateSettings(agentId, { sharedSpaces: [space] })
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',

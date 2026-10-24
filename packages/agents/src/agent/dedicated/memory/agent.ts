@@ -5,14 +5,20 @@
  *
  * @module
  */
-import type { Harness, HarnessOptions } from '@earendil-works/pi-durable'
+import type { AgentChange, Harness, HarnessOptions } from '@earendil-works/pi-durable'
 import type { AlarmPurpose } from '../../alarms.ts'
 import { setAlarm } from '../../alarms.ts'
 import { Agent } from '../../agent.ts'
 import { coalescingRunner } from '../../../lib/serial.ts'
 import type { JobStatus } from '../../../memory/jobs.ts'
-import type { AgentConfig, SendMessageRequest, SendMessageResponse } from '../../../protocol.ts'
-import { followMemoryModel, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
+import type {
+  AgentConfig,
+  AgentSettings,
+  SendMessageRequest,
+  SendMessageResponse,
+} from '../../../protocol.ts'
+import { toolGuardExtension } from '../../restrictions.ts'
+import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
 import { jobStatus, runningJob } from './queue.ts'
 import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS } from './runner.ts'
 import type { MemoryAgentContext } from './runner.ts'
@@ -45,10 +51,15 @@ export class MemoryAgent extends Agent {
 
   /** Only the memory agent's tools, which act on the running job. */
   protected override harnessOptions(): HarnessOptions {
+    const refusal = this.refusal()
     return memoryHarnessOptions(
       this.env,
       async () => runningJob(await this.local()),
       this.ctx.storage,
+      {
+        extension: toolGuardExtension(refusal, async () => undefined),
+        refusal,
+      },
     )
   }
 
@@ -57,12 +68,19 @@ export class MemoryAgent extends Agent {
     return memoryAgentConfig(this.env)
   }
 
-  /** Follow a changed memory model, and start the drain. */
-  protected override async prepare(harness: Harness): Promise<void> {
-    await followMemoryModel(harness, this.env)
+  /** Start the drain. */
+  protected override async prepare(_harness: Harness): Promise<void> {
     // Not awaited: the drain waits for the harness, which is still opening here.
     this.#jobs.start()
   }
+
+  /** Its versions set the model, instructions, and thinking level, and select no tools. */
+  protected override configChange(settings: AgentSettings): AgentChange {
+    return memoryAgentChange(settings)
+  }
+
+  /** It keeps no always-loaded memory of its own. */
+  protected override async rebuildMemory(_settings: AgentSettings): Promise<void> {}
 
   /** Nothing to do: it extracts nothing, and the drain prunes between jobs. */
   protected override async onIdle(): Promise<void> {}
@@ -93,13 +111,6 @@ export class MemoryAgent extends Agent {
    */
   override send(_request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     return Promise.reject(new Error('The memory agent takes no chat input; use enqueue'))
-  }
-
-  /**
-   * @throws Always: its configuration follows the `MEMORY_MODEL_*` variables.
-   */
-  override setConfig(_value: AgentConfig): Promise<AgentConfig> {
-    return Promise.reject(new Error('The memory agent is configured by MEMORY_MODEL_*'))
   }
 
   /**

@@ -15,6 +15,7 @@ import { textResponse, toolCallResponse, toolResults } from '../../helper/model.
 import { db } from '../../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../../helper/control.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -50,7 +51,7 @@ async function archiveChunks(agentId: string, first: number, times: number[]) {
 
 describe('archive pagination', () => {
   it('continues inside a segment after five hits without repeating its summary', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await archiveChunks(agentId, 1, [1_000, 2_000, 3_000, 4_000, 5_000, 6_000])
     const first = await searchHistory(db, env.ARCHIVE, agentId, 'needle')
     expect(first.hits.map((hit) => hit.firstEntry)).toEqual([6, 5, 4, 3, 2])
@@ -66,7 +67,7 @@ describe('archive pagination', () => {
   })
 
   it('applies a time bound inside a segment and carries it through continuation', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await archiveChunks(agentId, 1, [1_000, 2_000, 3_000, 4_000, 5_000, 6_000])
     const first = await searchHistory(db, env.ARCHIVE, agentId, 'needle', {
       before: 4_000,
@@ -84,7 +85,7 @@ describe('archive pagination', () => {
   })
 
   it('uses entry IDs to page equal timestamps across segments without skips or duplicates', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     for (const first of [1, 4, 7]) await archiveChunks(agentId, first, [1_000, 1_000, 1_000])
     const hits: number[] = []
     const summaries: string[] = []
@@ -103,7 +104,7 @@ describe('archive pagination', () => {
   })
 
   it('resumes at a segment boundary when the read budget stops a search without hits', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     for (const first of [1, 2]) await archiveChunks(agentId, first, [1_000])
     const first = await searchHistory(db, env.ARCHIVE, agentId, 'absent', { budgetBytes: 1 })
     expect(first).toMatchObject({ hits: [], complete: false, nextCursor: expect.any(String) })
@@ -115,7 +116,7 @@ describe('archive pagination', () => {
   })
 
   it('continues past a full catalog page even when every segment has the same time', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     for (let entry = 1; entry <= 101; entry++) {
       await db.insert(archiveSegments).values({
         id: segmentId(agentId, entry, entry),
@@ -140,7 +141,7 @@ describe('archive pagination', () => {
   })
 
   it('rejects malformed cursors and changes to their time bound', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     for (const cursor of ['not-a-cursor', btoa('{}'), btoa('{"lastAt":1,"lastEntry":-1}')]) {
       await expect(searchHistory(db, env.ARCHIVE, agentId, 'needle', { cursor })).rejects.toThrow(
         'Invalid history search cursor',
@@ -160,7 +161,7 @@ describe('archive pagination', () => {
   })
 
   it('marks a page complete when its last allowed hit exhausts the archive', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await archiveChunks(agentId, 1, [1_000, 2_000])
     const found = await searchHistory(db, env.ARCHIVE, agentId, 'needle', { limit: 2 })
     expect(found.hits.map((hit) => hit.firstEntry)).toEqual([2, 1])
@@ -168,7 +169,7 @@ describe('archive pagination', () => {
   })
 
   it('offers and accepts an opaque continuation through the working agent tool', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await archiveChunks(agentId, 1, [1_000, 2_000, 3_000, 4_000, 5_000, 6_000])
     let pending: ToolCall | undefined = { name: 'history_search', arguments: { query: 'needle' } }
     const bodies = mockModel({
@@ -194,7 +195,7 @@ describe('archive pagination', () => {
 
 describe('archive summaries', () => {
   it('summarizes an archived segment through the memory agent and finds the summary', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const summary = `Summary: the release train ${agentId.slice(0, 6)} was agreed`
     mockModel({
       usage: COMPACT_AFTER_TURN_7,

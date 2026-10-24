@@ -14,8 +14,11 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
-/** Who can act: a person signed in through Access, or a service token. */
-export const PRINCIPAL_KINDS = ['user', 'service'] as const
+/**
+ * Who can act: a person signed in through Access, a service token, or an agent. The seed registers
+ * the administrator agent as the first principal.
+ */
+export const PRINCIPAL_KINDS = ['user', 'service', 'agent'] as const
 /** The installation-wide role; roles on one agent are in `agent_members`. */
 export const SYSTEM_ROLES = ['owner'] as const
 
@@ -23,7 +26,7 @@ export const SYSTEM_ROLES = ['owner'] as const
 export const principals = sqliteTable('principals', {
   principalId: text('principal_id').primaryKey(),
   kind: text('kind', { enum: PRINCIPAL_KINDS }).notNull(),
-  /** The Access email or service token ID, as the calling Worker authenticated it. */
+  /** The Access email, service token ID, or agent ID, as the calling Worker authenticated it. */
   externalId: text('external_id').notNull().unique(),
   displayName: text('display_name').notNull(),
   systemRole: text('system_role', { enum: SYSTEM_ROLES }),
@@ -123,9 +126,12 @@ export const agentMembers = sqliteTable(
 )
 
 /** Keys of `system_settings`. */
-export const SYSTEM_SETTING_KEYS = ['install_id'] as const
+export const SYSTEM_SETTING_KEYS = ['install_id', 'admin_agent_id'] as const
 
-/** Installation settings; `install_id` is written once by the seed and never changes. */
+/**
+ * Installation settings, each written once by the seed and never changed: the installation ID and
+ * the administrator agent's ID.
+ */
 export const systemSettings = sqliteTable('system_settings', {
   key: text('key', { enum: SYSTEM_SETTING_KEYS }).primaryKey(),
   valueJson: text('value_json').notNull(),

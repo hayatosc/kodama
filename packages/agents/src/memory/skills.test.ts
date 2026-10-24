@@ -20,6 +20,7 @@ import {
 import { context, db } from '../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../helper/control.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -35,7 +36,7 @@ async function create(agentId: string, name: string, body: string): Promise<void
 
 describe('writing skills', () => {
   it('creates a skill, updates it only at the revision read, and applies a repeat once', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const created = context()
     await writeSkill(db, created, skill(agentId, 'deploy', 'Run deploy.'))
     const repeat = await writeSkill(db, created, skill(agentId, 'deploy', 'Run deploy.'))
@@ -59,7 +60,7 @@ describe('writing skills', () => {
 
 describe('skills in a working agent', () => {
   it('lists only its active skills and reads one with skill_read, counting the use', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await create(agentId, 'deploy', 'Run wrangler deploy --env production.')
     await create(agentId, 'old', 'Archived.')
     await create(crypto.randomUUID(), 'secret', 'Not yours.')
@@ -96,7 +97,7 @@ describe('skills in a working agent', () => {
 
 describe('skill curation', () => {
   it('keeps a restored skill at the next curation and restarts its retention period', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const now = Date.now()
     await writeSkill(
       db,
@@ -125,7 +126,7 @@ describe('skill curation', () => {
   })
 
   it('archives a skill unused for 30 days and keeps one used since', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await create(agentId, 'idle', 'Unused.')
     await create(agentId, 'busy', 'Used.')
     const now = Date.now()
@@ -141,7 +142,7 @@ describe('skill curation', () => {
   })
 
   it('writes a skill from a consolidate job of the memory agent', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const scope = `agent:${agentId}` as const
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = requestBody(init)

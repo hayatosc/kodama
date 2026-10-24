@@ -29,6 +29,7 @@ import { settleJob } from './queue.ts'
 import { waitForAnswer } from '../../../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../../../helper/control.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -83,7 +84,7 @@ describe('extraction redelivery', () => {
 
 describe('remember', () => {
   it('saves what the user asks for through the memory agent and loads it on later turns', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const fact = `The deploy target is region ${agentId.slice(0, 8)}`
     const bodies: string[] = []
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {

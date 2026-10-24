@@ -8,12 +8,14 @@
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type {
+  AgentChange,
   Harness,
   HarnessOptions,
   Submission,
   SubmissionDraft,
   TaskId,
 } from '@earendil-works/pi-durable'
+import * as v from 'valibot'
 import {
   setAlarm,
   setAlarmNoLaterThan,
@@ -23,12 +25,28 @@ import {
 } from './alarms.ts'
 import type { AlarmPurpose } from './alarms.ts'
 import {
+  agentChange,
   defaultAgentConfig,
   initializeAgentConfig,
+  parseSettings,
   readSharedSpaces,
   readConfig,
-  replaceConfig,
 } from '../configuration/index.ts'
+import { controlDb } from '../control/db.ts'
+import { AGENT_STATUSES } from '../../drizzle/control/schema.ts'
+import { admitAgent } from '../control/registry.ts'
+import { reportApplied } from '../control/versions.ts'
+import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './config-apply.ts'
+import type { ApplyDeps, PushedConfig } from './config-apply.ts'
+import {
+  anyRefusal,
+  assertAllowed,
+  STATUS_KEY,
+  statusRefusal,
+  toolGuardExtension,
+} from './restrictions.ts'
+import type { Refusal } from './restrictions.ts'
+import { refreshAlwaysLoaded } from '../memory/working/always-loaded.ts'
 import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './events.ts'
@@ -42,14 +60,17 @@ import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
 import type {
   AgentConfig,
+  AgentSettings,
   AgentSnapshot,
+  AgentStatus,
+  ApplyResult,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
-import { parseAgentId, parseMessage, parseRequestId } from '../validation.ts'
+import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../configuration/index.ts'
@@ -75,7 +96,8 @@ const context = BACKGROUND_CONTEXT
  * Dedicated agents such as `MemoryAgent` (`dedicated/memory/agent.ts`) extend it, live in the same
  * `AGENTS` namespace under reserved names (see `dedicated/index.ts`), and override the protected
  * hooks: {@link Agent.harnessOptions}, {@link Agent.defaultConfig}, {@link Agent.prepare},
- * {@link Agent.onIdle}, {@link Agent.onAlarm}, and {@link Agent.archivesPrunedEntries}. A method
+ * {@link Agent.onIdle}, {@link Agent.onAlarm}, {@link Agent.archivesPrunedEntries},
+ * {@link Agent.configChange}, and {@link Agent.rebuildMemory}. A method
  * only a dedicated agent serves, such as {@link Agent.enqueue}, is declared here and rejects, so
  * one stub type covers every object in the namespace. TypeScript's `protected` does not exist at
  * runtime, so code holding the binding could call the hooks over RPC; only this Worker holds it.
@@ -93,10 +115,13 @@ export class Agent extends DurableObject<AgentEnv> {
   #pruning: Promise<PruneOutcome> | undefined
   /** A memory change arrived while the agent was busy; refresh at the next idle moment. */
   #memoryChanged = false
+  /** Why the next external call must not happen, checked before each one. */
+  readonly #refusal: Refusal
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
+    this.#refusal = anyRefusal(statusRefusal(ctx.storage))
     this.#local = openLocalDb(ctx.storage)
     // Every request waits until the harness is open and prepared. The await comes first, so a
     // subclass has initialized its fields before `#open` calls its hooks.
@@ -107,16 +132,68 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /**
-   * Open and prepare the harness: the root conversation, the configuration, {@link Agent.prepare},
-   * and the recovery alarm.
+   * Open and prepare the harness: the root conversation, the configuration and the registry's
+   * desired version, {@link Agent.prepare}, and the recovery alarm.
    */
   #open(): Promise<Harness> {
     return openHarness(this.ctx, this.harnessOptions(), async (harness) => {
       await harness.root(context)
       await initializeAgentConfig(harness, this.defaultConfig())
+      await this.#catchUp(harness)
       await this.prepare(harness)
       await this.#refreshRecovery(harness)
     })
+  }
+
+  /**
+   * Apply or hold the registry's desired version if it is newer than the applied one. Opening
+   * holds every other request, so this runs outside the serial queue. A failure is logged, and
+   * reconciliation retries.
+   */
+  async #catchUp(harness: Harness): Promise<void> {
+    try {
+      await pullIfBehind(this.#applyDeps(harness), {
+        db: controlDb(this.env.CONTROL_DB),
+        objectName: this.#agentId(),
+        parse: (value) => parseSettings(createAgentModels(this.env), value),
+      })
+    } catch (error) {
+      console.error('Catching up with the registry failed', error)
+    }
+  }
+
+  /** Why the next external call must not happen; checked before each one. */
+  protected refusal(): Refusal {
+    return this.#refusal
+  }
+
+  /** How a version's settings become Pi's change; the memory agent has its own. */
+  protected configChange(settings: AgentSettings): AgentChange {
+    return agentChange(settings)
+  }
+
+  /**
+   * Rebuild the always-loaded memory for a version's shared spaces; a failure fails the apply, so
+   * the version stays pending.
+   */
+  protected async rebuildMemory(settings: AgentSettings): Promise<void> {
+    await refreshAlwaysLoaded({
+      ...this.#workingMemory(),
+      sharedSpaces: async () => [...settings.sharedSpaces],
+    })
+  }
+
+  /** What applying a version needs from this object. */
+  #applyDeps(harness: Harness): ApplyDeps {
+    return {
+      storage: this.ctx.storage,
+      harness,
+      change: (settings) => this.configChange(settings),
+      rebuildMemory: (settings) => this.rebuildMemory(settings),
+      report: async (agentId, version) => {
+        await reportApplied(controlDb(this.env.CONTROL_DB), agentId, version)
+      },
+    }
   }
 
   /** The open harness; it changes when pruning closes and reopens it. */
@@ -134,7 +211,14 @@ export class Agent extends DurableObject<AgentEnv> {
    * after eviction. A working agent gets its tools and the long-term memory extension.
    */
   protected harnessOptions(): HarnessOptions {
-    return createAgentOptions(this.env, [createWorkingMemoryExtension(this.#workingMemory())])
+    return createAgentOptions(
+      this.env,
+      [
+        createWorkingMemoryExtension(this.#workingMemory()),
+        toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
+      ],
+      this.#refusal,
+    )
   }
 
   /** The configuration a new agent starts with. */
@@ -152,8 +236,9 @@ export class Agent extends DurableObject<AgentEnv> {
    * change that arrived while busy.
    */
   protected async onIdle(): Promise<void> {
+    const extracts = (await appliedSettings(this.ctx.storage))?.memoryPolicy.extract !== false
     // Only actual activity starts an idle extraction period; reopening preserves its deadline.
-    if (await this.ctx.storage.get<boolean>('kodama:extract-pending')) {
+    if (extracts && (await this.ctx.storage.get<boolean>('kodama:extract-pending'))) {
       await setAlarmNoLaterThan(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
     }
     await schedulePruneIfNeeded(this.ctx.storage, await this.#local)
@@ -240,7 +325,11 @@ export class Agent extends DurableObject<AgentEnv> {
         harness,
         storage: this.ctx.storage,
         watching: this.#watching,
-        onIdle: () => this.onIdle(),
+        // A held version first, outside the overridable hook, which the memory agent replaces.
+        onIdle: async () => {
+          await applyPending(this.#applyDeps(harness))
+          await this.onIdle()
+        },
         refreshAgain: () => this.#refreshRecovery(harness),
       }),
     )
@@ -328,19 +417,27 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /**
-   * Replace the configuration while idle; history and request receipts are kept.
+   * Apply a configuration version pushed from the registry: now when idle, otherwise at the next
+   * idle moment. Idempotent by version number.
    *
-   * @throws {@link TypeError} When the configuration is invalid.
-   * @throws When work is pending.
+   * @throws {@link TypeError} When the settings are invalid.
    */
-  async setConfig(value: AgentConfig): Promise<AgentConfig> {
-    const store = await this.#config()
-    return this.#serial(async () => {
-      const config = await replaceConfig(store, createAgentModels(this.env), value)
-      // The spaces decide what the always-loaded memory and the skills list hold.
-      await refreshMemory(this.#workingMemory())
-      return config
-    })
+  async applyConfig(pushed: PushedConfig): Promise<ApplyResult> {
+    const settings = parseSettings(createAgentModels(this.env), pushed.settings)
+    const agentId = parseAgentId(pushed.agentId)
+    const harness = await this.#harness
+    const deps = this.#applyDeps(harness)
+    return this.#serial(() => applyOrHold(deps, { agentId, version: pushed.version, settings }))
+  }
+
+  /**
+   * Set this object's copy of its registry state. It takes effect at the next external call, even
+   * in the middle of a turn.
+   *
+   * @throws {@link TypeError} When `status` is not a lifecycle state.
+   */
+  async setStatus(status: AgentStatus): Promise<void> {
+    this.ctx.storage.kv.put(STATUS_KEY, parseInput(v.picklist(AGENT_STATUSES), status))
   }
 
   /**
@@ -360,12 +457,17 @@ export class Agent extends DurableObject<AgentEnv> {
   /**
    * Deliver a message to another agent; acceptance does not wait for its model response.
    *
-   * @throws {@link TypeError} When the target ID or the message is invalid.
+   * @throws {@link TypeError} When the target ID or the message is invalid, or the registry has no
+   * working agent with that ID.
+   * @throws {@link Error} When this agent's state stops external calls, or the target's state does
+   * not admit messages.
    */
   async sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
     parseAgentId(agentId)
     const message = parseMessage(request)
-    const submissionId = await this.env.AGENTS.getByName(agentId).sendMessage(message)
+    assertAllowed(this.#refusal)
+    const objectName = await admitAgent(controlDb(this.env.CONTROL_DB), agentId, 'chat')
+    const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
   }
 

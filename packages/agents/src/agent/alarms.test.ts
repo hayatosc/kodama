@@ -11,6 +11,7 @@ import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from '../hel
 import '@earendil-works/pi-ai/api/openai-responses'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId, updateSettings } from '../helper/control.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -54,7 +55,7 @@ describe('agent failures, cancellation, and recovery', () => {
         { status: 401 },
       ),
     )
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await exports.default.sendMessage(agentId, { requestId: 'failed', content: 'Hello' })
     await expect
       .poll(async () => (await exports.default.submission(agentId, 'failed'))?.submission.status)
@@ -75,7 +76,7 @@ describe('agent failures, cancellation, and recovery', () => {
         { status: 503 },
       ),
     )
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     await exports.default.sendMessage(agentId, { requestId: 'retried', content: 'Hello' })
     await expect
       .poll(async () => (await exports.default.submission(agentId, 'retried'))?.submission.status, {
@@ -91,8 +92,7 @@ describe('agent failures, cancellation, and recovery', () => {
       failed.resolve()
       return Response.json({ error: { message: 'Overloaded' } }, { status: 503 })
     })
-    const agentId = crypto.randomUUID()
-    using original = await exports.default.getConfig(agentId)
+    const agentId = await newAgentId()
     await exports.default.sendMessage(agentId, { requestId: 'stuck', content: 'First' })
     await exports.default.sendMessage(agentId, { requestId: 'queued', content: 'Second' })
     await failed.promise
@@ -103,7 +103,7 @@ describe('agent failures, cancellation, and recovery', () => {
       )
     }
     expect((await exports.default.snapshot(agentId)).snapshot.busy).toBe(false)
-    await exports.default.setConfig(agentId, { ...original, systemPrompt: 'Changed' })
+    await updateSettings(agentId, { systemPrompt: 'Changed' })
     vi.mocked(globalThis.fetch).mockImplementation(async () => modelResponse())
     await exports.default.sendMessage(agentId, { requestId: 'after', content: 'Third' })
     await waitForAnswer(agentId, 'after')
@@ -119,7 +119,7 @@ describe('agent failures, cancellation, and recovery', () => {
         else init?.signal?.addEventListener('abort', abort, { once: true })
       })
     })
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const text = new Response(
       await exports.default.send(agentId, { requestId: 'inflight', content: 'Hello' }),
     ).text()
@@ -134,7 +134,7 @@ describe('agent failures, cancellation, and recovery', () => {
   })
 
   it('resumes an interrupted generation from SQLite when an alarm wakes the object', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     const started = Promise.withResolvers<void>()
     vi.mocked(globalThis.fetch).mockImplementationOnce(async (_input, init) => {

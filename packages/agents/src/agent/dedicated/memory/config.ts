@@ -1,29 +1,30 @@
 /**
  * The memory agent's configuration, which `MemoryAgent` uses in place of a working agent's: its
- * model, instructions, and tools, and the message each job becomes.
+ * initial model and instructions, its version 1, its tools, and the message each job becomes.
  *
  * @see docs/memory.md — Memory agent
  *
  * @module
  */
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import {
-  AgentDoc,
-  configure,
-  createRegistry,
-  defineExtension,
-  ROOT_CONVERSATION_ID,
-} from '@earendil-works/pi-durable'
+import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
-  Harness,
+  Extension,
   HarnessOptions,
   ToolRegistration,
 } from '@earendil-works/pi-durable'
+import { SETTINGS_SCHEMA_VERSION } from '../../../configuration/index.ts'
 import type { AgentEnv } from '../../../env.ts'
+import type { DefaultModelEnv } from '../../../configuration/index.ts'
+
+/** The variables that name the memory agent's initial model. */
+export type MemoryModelEnv = DefaultModelEnv &
+  Pick<AgentEnv, 'MEMORY_MODEL_PROVIDER' | 'MEMORY_MODEL_ID'>
 import { harnessSettings } from '../../harness.ts'
+import { guardedModels } from '../../restrictions.ts'
+import type { Refusal } from '../../restrictions.ts'
 import { createAgentModels } from '../../../models/index.ts'
-import type { AgentConfig } from '../../../protocol.ts'
+import type { AgentConfig, AgentSettings } from '../../../protocol.ts'
 import type { RunningJob, MemoryToolDeps } from '../../../memory/tools/common.ts'
 import { archiveTools, extractionTools } from '../../../memory/tools/entries.ts'
 import { recordTools, sharedTools } from '../../../memory/tools/records.ts'
@@ -31,9 +32,10 @@ import { skillTools } from '../../../memory/tools/skills.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
 
 /**
- * The memory agent's model: `MEMORY_MODEL_*`, or the default model every agent uses when they are empty.
+ * The memory agent's initial model: `MEMORY_MODEL_*`, or the default model when they are empty. Only
+ * the seed's version 1 and a new object read it; afterwards the registry's versions decide.
  */
-export function memoryModel(env: AgentEnv): { provider: string; modelId: string } {
+export function memoryModel(env: MemoryModelEnv): { provider: string; modelId: string } {
   return {
     provider: env.MEMORY_MODEL_PROVIDER || env.DEFAULT_MODEL_PROVIDER,
     modelId: env.MEMORY_MODEL_ID || env.DEFAULT_MODEL_ID,
@@ -41,35 +43,19 @@ export function memoryModel(env: AgentEnv): { provider: string; modelId: string 
 }
 
 /**
- * Store the memory agent's model and instructions again if they changed.
- *
- * @remarks
- * Runs on every open, so a changed `MEMORY_MODEL_*` or default model applies to the next job
- * without touching the agent's storage by hand.
+ * The model, instructions, and thinking level the memory agent's conversation uses. It selects no
+ * tools: its registry holds only its own.
  */
-export async function followMemoryModel(harness: Harness, env: AgentEnv): Promise<void> {
-  const change = memoryAgentChange(env)
-  await harness.commit(async (tx) => {
-    const state = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)
-    const sameModel =
-      state.model?.provider === change.model.provider &&
-      state.model.modelId === change.model.modelId
-    if (sameModel && state.instructions === change.instructions) return
-    await configure(tx, ROOT_CONVERSATION_ID, change)
-  }, BACKGROUND_CONTEXT)
-}
-
-/** The model, instructions, and thinking level the memory agent's conversation uses. */
-function memoryAgentChange(env: AgentEnv) {
+export function memoryAgentChange(config: AgentConfig): AgentChange {
   return {
-    model: memoryModel(env),
-    instructions: MEMORY_SYSTEM_PROMPT,
-    thinkingLevel: 'off',
-  } satisfies AgentChange
+    model: config.model,
+    instructions: config.systemPrompt,
+    thinkingLevel: config.thinkingLevel,
+  }
 }
 
-/** The configuration the memory agent reports; it is fixed in code and cannot be replaced. */
-export function memoryAgentConfig(env: AgentEnv): AgentConfig {
+/** The configuration a new memory agent object starts with, before its first version. */
+export function memoryAgentConfig(env: MemoryModelEnv): AgentConfig {
   return {
     model: memoryModel(env),
     systemPrompt: MEMORY_SYSTEM_PROMPT,
@@ -79,15 +65,27 @@ export function memoryAgentConfig(env: AgentEnv): AgentConfig {
   }
 }
 
+/** Version 1 of the memory agent, written by the seed. */
+export function memoryAgentSettings(env: MemoryModelEnv): AgentSettings {
+  return {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    ...memoryAgentConfig(env),
+    // It reads and writes memory through its own tools, never through a working agent's.
+    memoryPolicy: { extract: false, remember: false },
+  }
+}
+
 /**
  * The memory agent's harness options: only its own tools, and its model and instructions.
  *
  * @param runningJob - Reads the job being run; the tools refuse to write outside a job.
+ * @param guard - The restriction checks of every tool call, and the refusal of model requests.
  */
 export function memoryHarnessOptions(
   env: AgentEnv,
   runningJob: () => Promise<RunningJob | undefined>,
   storage: DurableObjectStorage,
+  guard: { extension: Extension; refusal: Refusal },
 ): HarnessOptions {
   const extension = defineExtension({
     name: 'kodama-memory-agent',
@@ -95,13 +93,14 @@ export function memoryHarnessOptions(
   })
   const registry = createRegistry()
   registry.install(extension)
+  registry.install(guard.extension)
   return {
-    models: createAgentModels(env),
+    models: guardedModels(createAgentModels(env), guard.refusal),
     registry,
-    settings: harnessSettings([extension]),
+    settings: harnessSettings([extension, guard.extension]),
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
-        ? configure(tx, conversation.id, memoryAgentChange(env))
+        ? configure(tx, conversation.id, memoryAgentChange(memoryAgentConfig(env)))
         : undefined,
   }
 }

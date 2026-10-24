@@ -1,6 +1,6 @@
 /**
- * The agents Worker's entrypoint: `AgentService` for trusted Workers, and the `Agent` Durable
- * Object class.
+ * The agents Worker's entrypoint: `AgentService` for trusted Workers, `AdminService` for
+ * administration, and the `Agent` Durable Object class.
  *
  * @see docs/agents.md — RPC contract
  *
@@ -10,13 +10,20 @@ import { WorkerEntrypoint } from 'cloudflare:workers'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
-  AgentConfig,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
+import { reconcileAgents } from './admin/reconcile.ts'
+import { controlDb } from './control/db.ts'
+import type { AgentUse } from './control/lifecycle.ts'
+import { admitAgent } from './control/registry.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
+import { createAgentModels } from './models/index.ts'
 import { parseAgentId } from './validation.ts'
+
+/** Administration: the agent registry, configuration versions, and the seed. */
+export { AdminService } from './admin/index.ts'
 
 /**
  * The one Durable Object class, bound as `AGENTS`: a working agent, or the dedicated agent registered
@@ -28,9 +35,10 @@ export { AgentObject as Agent } from './agent/dedicated/index.ts'
  * Service-binding RPC entrypoint for the UI server and other trusted Workers.
  *
  * @remarks
- * Each method validates the agent ID and forwards to that agent's Durable Object. There is no
- * public HTTP interface; the memory agent's reserved name is not a valid agent ID, so this class
- * cannot reach it.
+ * Each method validates the agent ID, admits it from the registry, and forwards to that agent's
+ * Durable Object. Only UUIDs of working agents in the registry are admitted, so an unknown ID never
+ * creates an object and dedicated agents such as the memory agent are unreachable. There is no
+ * public HTTP interface, and configuration is read and written only through `AdminService`.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   /** Reject HTTP requests: agents are reached only through RPC. */
@@ -38,28 +46,41 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return new Response('Use a Cloudflare RPC service binding.', { status: 404 })
   }
 
-  /** The daily cron trigger: the memory agent consolidates what changed in the last day. */
+  /**
+   * The daily cron trigger: push configuration versions the objects have not applied, then the
+   * memory agent consolidates what changed in the last day.
+   */
   override async scheduled(controller: ScheduledController): Promise<void> {
+    try {
+      const result = await reconcileAgents({
+        env: this.env,
+        db: controlDb(this.env.CONTROL_DB),
+        models: createAgentModels(this.env),
+        principal: null,
+        now: controller.scheduledTime,
+      })
+      if (result.behind > 0) console.warn('Agents still behind their configuration', result)
+    } catch (error) {
+      console.error('Configuration reconciliation failed', error)
+    }
     await this.env.AGENTS.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
 
   /**
-   * The agent's stub, after validating the ID at the RPC boundary.
+   * The agent's stub, after validating the ID and admitting it from the registry right before the
+   * call.
    *
-   * @throws {@link TypeError} When `agentId` is not a valid public agent ID.
+   * @throws {@link TypeError} When `agentId` is not a UUID, or not a working agent in the registry.
+   * @throws {@link Error} Starting `agent_unavailable:`, when the agent's state does not allow `use`.
    */
-  #agent(agentId: string) {
-    return this.env.AGENTS.getByName(parseAgentId(agentId))
-  }
-
-  /** The agent's stored configuration. */
-  async getConfig(agentId: string): Promise<AgentConfig> {
-    return this.#agent(agentId).getConfig()
+  async #agent(agentId: string, use: AgentUse) {
+    const objectName = await admitAgent(controlDb(this.env.CONTROL_DB), parseAgentId(agentId), use)
+    return this.env.AGENTS.getByName(objectName)
   }
 
   /** An SSE stream of the agent's events, starting with a snapshot. */
   async subscribe(agentId: string): Promise<ReadableStream<Uint8Array>> {
-    return this.#agent(agentId).subscribe()
+    return (await this.#agent(agentId, 'read')).subscribe()
   }
 
   /**
@@ -68,22 +89,12 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link TypeError} When the message is invalid; nothing is admitted.
    */
   async send(agentId: string, message: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
-    return this.#agent(agentId).send(message)
-  }
-
-  /**
-   * Replace the agent's configuration while it is idle.
-   *
-   * @throws {@link TypeError} When the configuration is invalid.
-   * @throws When work is pending.
-   */
-  async setConfig(agentId: string, config: AgentConfig): Promise<AgentConfig> {
-    return this.#agent(agentId).setConfig(config)
+    return (await this.#agent(agentId, 'chat')).send(message)
   }
 
   /** Stop the current run and withdraw queued input; resolves once the agent is idle. */
   async cancel(agentId: string): Promise<void> {
-    return this.#agent(agentId).cancel()
+    return (await this.#agent(agentId, 'read')).cancel()
   }
 
   /**
@@ -93,19 +104,19 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * Reusing a request ID with the same content returns the first submission.
    */
   async sendMessage(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
-    const submissionId = await this.#agent(agentId).sendMessage(message)
+    const submissionId = await (await this.#agent(agentId, 'chat')).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */
   async snapshot(agentId: string): Promise<AgentSnapshotResponse> {
-    using snapshot = await this.#agent(agentId).snapshot()
+    using snapshot = await (await this.#agent(agentId, 'read')).snapshot()
     return { agentId, snapshot }
   }
 
   /** The status of the submission with this request ID, if there is one. */
   async submission(agentId: string, requestId: string): Promise<SubmissionResponse | undefined> {
-    using submission = await this.#agent(agentId).submission(requestId)
+    using submission = await (await this.#agent(agentId, 'read')).submission(requestId)
     return submission === undefined ? undefined : { agentId, submission }
   }
 }

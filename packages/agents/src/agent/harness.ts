@@ -15,6 +15,8 @@ import { createAgentModels } from '../models/index.ts'
 import type { ModelProviderEnv } from '../models/index.ts'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { agentTools } from '../tools/index.ts'
+import { guardedModels } from './restrictions.ts'
+import type { Refusal } from './restrictions.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -53,18 +55,21 @@ export function harnessSettings(extensions: readonly Extension[]): HarnessOption
  * A working agent's harness options. The agent's stored tool choice selects which registered
  * tools are enabled.
  *
- * @param always - Extensions that stay enabled whatever tools the agent selects, such as its memory.
+ * @param always - Extensions that stay enabled whatever tools the agent selects, such as its memory
+ * and the restriction checks.
+ * @param refusal - Checked before every model request; a refused request fails at once.
  */
 export function createAgentOptions(
   env: DefaultModelEnv & ModelProviderEnv,
   always: readonly Extension[] = [],
+  refusal: Refusal = () => undefined,
 ): HarnessOptions {
   const extension = defineExtension({ name: 'kodama', tools: agentTools })
   const registry = createRegistry()
   registry.install(extension)
   for (const extra of always) registry.install(extra)
   return {
-    models: createAgentModels(env),
+    models: guardedModels(createAgentModels(env), refusal),
     registry,
     settings: harnessSettings([extension, ...always]),
     conversationCreated: (tx, conversation) =>

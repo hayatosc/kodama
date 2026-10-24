@@ -22,6 +22,7 @@ import { alarmAt, setAlarm } from './alarms.ts'
 import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../helper/control.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -29,7 +30,7 @@ describe('extraction', () => {
   it.each([false, true])(
     'extracts idle entries after eviction=%s and advances its checkpoint',
     async (evict) => {
-      const agentId = crypto.randomUUID()
+      const agentId = await newAgentId()
       const decision = `We decided to deploy with wrangler ${agentId.slice(0, 8)}`
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
         const body = requestBody(init)
@@ -98,7 +99,7 @@ describe('extraction', () => {
   })
 
   it('starts a new ten-minute idle delay after new activity finishes', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     const response = Promise.withResolvers<void>()
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
@@ -128,7 +129,7 @@ describe('extraction', () => {
 
 describe('always-loaded memory', () => {
   it('picks up a change whose notice was lost once the revision check interval has passed', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     let clock = Date.UTC(2026, 9, 1)
 
