@@ -16,13 +16,7 @@ import type {
   TaskId,
 } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import {
-  setAlarm,
-  setAlarmNoLaterThan,
-  takeDueAlarms,
-  armRecovery,
-  refreshRecovery,
-} from '../runtime/alarms.ts'
+import { takeDueAlarms, armRecovery, refreshRecovery } from '../runtime/alarms.ts'
 import type { AlarmPurpose } from '../runtime/alarms.ts'
 import {
   agentChange,
@@ -81,7 +75,7 @@ import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../configuration/index.ts'
 import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from '../runtime/pruning.ts'
-import { EXTRACT_IDLE_DELAY_MS, extractNewEntries, refreshMemory } from './memory.ts'
+import { markActivity, refreshMemory, runExtraction, scheduleExtraction } from './memory.ts'
 import { snapshotOf, submissionOf } from '../runtime/views.ts'
 
 const context = BACKGROUND_CONTEXT
@@ -236,11 +230,7 @@ export class Agent extends DurableObject<AgentEnv> {
    * change that arrived while busy.
    */
   protected async onIdle(): Promise<void> {
-    const extracts = (await appliedSettings(this.ctx.storage))?.memoryPolicy.extract !== false
-    // Only actual activity starts an idle extraction period; reopening preserves its deadline.
-    if (extracts && (await this.ctx.storage.get<boolean>('kodama:extract-pending'))) {
-      await setAlarmNoLaterThan(this.ctx.storage, 'extract', Date.now() + EXTRACT_IDLE_DELAY_MS)
-    }
+    await scheduleExtraction(this.ctx.storage)
     await schedulePruneIfNeeded(this.ctx.storage, await this.#local)
     if (!this.#memoryChanged) return
     this.#memoryChanged = false
@@ -251,18 +241,7 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async onAlarm(purpose: AlarmPurpose): Promise<void> {
     if (purpose === 'extract') {
       const harness = await this.#harness
-      await this.#serial(async () => {
-        // The applied version decides at run time: one that disabled extraction after this alarm
-        // was set wins, and the alarm is dropped. The pending activity stays for re-enabling.
-        if ((await appliedSettings(this.ctx.storage))?.memoryPolicy.extract === false) {
-          await setAlarm(this.ctx.storage, 'extract', undefined)
-          return
-        }
-        if (!(await isIdle(harness))) return
-        await extractNewEntries(this.#workingMemory(), harness)
-        await this.ctx.storage.delete('kodama:extract-pending')
-        await setAlarm(this.ctx.storage, 'extract', undefined)
-      })
+      await this.#serial(() => runExtraction(this.#workingMemory(), harness, this.ctx.storage))
     }
     if (purpose === 'prune') await this.prune()
   }
@@ -366,9 +345,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
       await armRecovery(this.ctx.storage)
-      // New activity ends the previous idle period; its completion starts a fresh delay.
-      await this.ctx.storage.put('kodama:extract-pending', true)
-      await setAlarm(this.ctx.storage, 'extract', undefined)
+      await markActivity(this.ctx.storage)
       return conversation.submit(draft, context)
     })
     await this.#refreshRecovery(harness)
