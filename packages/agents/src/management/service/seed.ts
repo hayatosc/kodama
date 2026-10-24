@@ -7,16 +7,16 @@
  * @module
  */
 import { eq } from 'drizzle-orm'
-import { agentConfigVersions, agents, systemSettings } from '../../drizzle/management/schema.ts'
-import { memoryAgentSettings } from '../agent/dedicated/memory/config.ts'
-import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
-import { auditStatement } from '../management/audit.ts'
-import type { DefaultModelEnv } from '../configuration/index.ts'
-import { uuidv7 } from '../lib/uuid.ts'
-import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
-import type { AgentSettings, SeedResult } from '../protocol.ts'
+import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
+import { memoryAgentSettings } from '../../agent/dedicated/memory/config.ts'
+import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
+import { auditStatement } from '../audit.ts'
+import type { DefaultModelEnv } from '../../configuration/index.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
+import type { AgentSettings, SeedResult } from '../../protocol.ts'
 import { createAgent, pushDesired } from './agents.ts'
-import type { AdminCall } from './agents.ts'
+import type { ManagementCall } from './agents.ts'
 
 /** The memory agent's fixed registry ID, from the reserved all-zero range; never issued. */
 export const MEMORY_AGENT_ID = '00000000-0000-7000-8000-00000000000a'
@@ -62,7 +62,7 @@ export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
  * The memory agent's rows are inserted only if missing. The system creates the first agent through
  * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
-export async function seed(call: AdminCall): Promise<SeedResult> {
+export async function seed(call: ManagementCall): Promise<SeedResult> {
   const { db, env, now } = call
   await db
     .insert(systemSettings)

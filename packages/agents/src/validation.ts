@@ -6,7 +6,7 @@
  */
 import * as v from 'valibot'
 import { UUID_PATTERN } from './lib/uuid.ts'
-import type { AdminActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
+import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -66,14 +66,14 @@ export const DisplayNameSchema = v.pipe(
   v.maxLength(100, displayNameMessage),
 )
 
-/** The caller of `AdminService`. */
-export const AdminActorSchema = v.strictObject(
+/** The caller of `ManagementService`. */
+export const ManagementActorSchema = v.strictObject(
   {
     kind: v.picklist(['user', 'service', 'agent'], 'actor.kind must be user, service, or agent'),
     externalId: v.pipe(v.string(), v.minLength(1), v.maxLength(320)),
   },
   'Expected an actor with kind and externalId',
-) satisfies v.GenericSchema<unknown, AdminActor>
+) satisfies v.GenericSchema<unknown, ManagementActor>
 
 /** A rename: at least one of the display name and the slug. */
 export const RenameAgentSchema = v.pipe(
@@ -145,12 +145,12 @@ export function parseAgentRef(value: unknown): string {
 }
 
 /**
- * Parse the caller of `AdminService`.
+ * Parse the caller of `ManagementService`.
  *
  * @throws {@link TypeError} When `value` is not an actor.
  */
-export function parseAdminActor(value: unknown): AdminActor {
-  return parseInput(AdminActorSchema, value)
+export function parseManagementActor(value: unknown): ManagementActor {
+  return parseInput(ManagementActorSchema, value)
 }
 
 /**

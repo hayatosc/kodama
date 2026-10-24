@@ -7,9 +7,9 @@
  * @module
  */
 import { and, asc, eq, gt, lte, ne, or } from 'drizzle-orm'
-import { agents, systemSettings } from '../../drizzle/management/schema.ts'
+import { agents, systemSettings } from '../../../drizzle/management/schema.ts'
 import { finishProvisioning, pushDesired } from './agents.ts'
-import type { AdminCall } from './agents.ts'
+import type { ManagementCall } from './agents.ts'
 
 /** Agents handled per run; the rest wait for the next run. */
 const RECONCILE_BATCH = 100
@@ -27,7 +27,7 @@ const needsWork = or(
 )
 
 /** The agent ID the previous run stopped at; the next run starts after it. */
-async function readCursor(call: AdminCall): Promise<string> {
+async function readCursor(call: ManagementCall): Promise<string> {
   const row = await call.db
     .select()
     .from(systemSettings)
@@ -36,7 +36,7 @@ async function readCursor(call: AdminCall): Promise<string> {
   return row === undefined ? '' : String(JSON.parse(row.valueJson))
 }
 
-async function writeCursor(call: AdminCall, agentId: string): Promise<void> {
+async function writeCursor(call: ManagementCall, agentId: string): Promise<void> {
   const valueJson = JSON.stringify(agentId)
   await call.db
     .insert(systemSettings)
@@ -48,7 +48,7 @@ async function writeCursor(call: AdminCall, agentId: string): Promise<void> {
  * The next agents to reconcile, in agent ID order, starting after `cursor` and wrapping around to
  * the first, so every agent that needs work is reached within a bounded number of runs.
  */
-async function nextBatch(call: AdminCall, cursor: string) {
+async function nextBatch(call: ManagementCall, cursor: string) {
   const after = await call.db
     .select()
     .from(agents)
@@ -74,7 +74,7 @@ async function nextBatch(call: AdminCall, cursor: string) {
  * stopped (`system_settings.reconcile_cursor`), so agents that keep failing cannot keep the ones
  * after them from ever being pushed.
  */
-export async function reconcileAgents(call: AdminCall): Promise<ReconcileResult> {
+export async function reconcileAgents(call: ManagementCall): Promise<ReconcileResult> {
   const rows = await nextBatch(call, await readCursor(call))
   let behind = 0
   for (const row of rows) {

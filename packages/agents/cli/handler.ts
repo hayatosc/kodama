@@ -3,25 +3,25 @@
  *
  * @module
  */
-import type { AdminService } from '../src/admin/index.ts'
+import type { ManagementService } from '../src/management/service/index.ts'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseMessage } from '../src/validation.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
-type Admin = Pick<AdminService, 'seed' | 'resolveAgent'>
+type Management = Pick<ManagementService, 'seed' | 'resolveAgent'>
 
-/** The actor the development CLI calls `AdminService` as. */
+/** The actor the development CLI calls `ManagementService` as. */
 const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
 
 /**
  * The UUID an agent reference names. A slug or UUID prefix is resolved after making sure the seed
  * has run, so `assistant` works on a fresh local database.
  */
-async function agentIdOf(admin: Admin, ref: string): Promise<string> {
+async function agentIdOf(management: Management, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  await admin.seed()
-  return (await admin.resolveAgent(CLI_ACTOR, ref)).agentId
+  await management.seed()
+  return (await management.resolveAgent(CLI_ACTOR, ref)).agentId
 }
 
 /** Development-only HTTP adapter; service methods deliver through Durable Object RPC. */
@@ -29,7 +29,7 @@ export async function handleCli(
   request: Request,
   token: string,
   service: Service,
-  admin: Admin,
+  management: Management,
 ): Promise<Response> {
   if (!token || request.headers.get('authorization') !== `Bearer ${token}`) {
     return new Response('Unauthorized', { status: 401 })
@@ -38,8 +38,8 @@ export async function handleCli(
   const [, prefix, action, rawAgentRef] = new URL(request.url).pathname.split('/')
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
-    if (action === 'seed') return Response.json(await admin.seed())
-    const agentId = await agentIdOf(admin, parseAgentRef(rawAgentRef))
+    if (action === 'seed') return Response.json(await management.seed())
+    const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)

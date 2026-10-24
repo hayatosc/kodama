@@ -1,18 +1,18 @@
 /**
- * Principals: the caller of `AdminService` as a principal row. The calling Worker authenticates its
- * caller, and `AdminService` trusts the actor it names; roles and permissions are issue #7.
+ * Principals: the caller of `ManagementService` as a principal row. The calling Worker authenticates its
+ * caller, and `ManagementService` trusts the actor it names; roles and permissions are issue #7.
  *
- * @see docs/agents.md — AdminService
+ * @see docs/agents.md — ManagementService
  *
  * @module
  */
 import { and, eq } from 'drizzle-orm'
 import { principals } from '../../drizzle/management/schema.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import type { AdminActor } from '../protocol.ts'
+import type { ManagementActor } from '../protocol.ts'
 import type { ManagementDb, PrincipalRow } from './db.ts'
 
-async function principalRow(db: ManagementDb, actor: AdminActor) {
+async function principalRow(db: ManagementDb, actor: ManagementActor) {
   return db
     .select()
     .from(principals)
@@ -29,7 +29,7 @@ async function principalRow(db: ManagementDb, actor: AdminActor) {
  */
 export async function principalOf(
   db: ManagementDb,
-  actor: AdminActor,
+  actor: ManagementActor,
   now: number,
 ): Promise<PrincipalRow> {
   const known = await principalRow(db, actor)
@@ -47,7 +47,7 @@ export async function principalOf(
   }
   const principal = known ?? (await principalRow(db, actor))
   if (principal === undefined || principal.disabledAt !== null) {
-    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} may not call AdminService`)
+    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} may not call ManagementService`)
   }
   return principal
 }

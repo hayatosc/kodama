@@ -37,8 +37,8 @@ packages/agents/
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
-    admin/                  AdminService: registry, configuration versions, seed, reconciliation
     management/             the management database: registry, admission, versions, lifecycle, audit
+      service/              ManagementService: registry, configuration versions, seed, reconciliation
     env.ts                  the Worker's bindings, as a type
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
@@ -122,29 +122,30 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer        | Paths                                                | May import                              |
-| ------------ | ---------------------------------------------------- | --------------------------------------- |
-| lib          | `src/lib/`                                           | nothing in `src/`                       |
-| contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                     |
-| settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                          |
-| storage      | `drizzle/`, `src/storage/`                           | lib                                     |
-| management   | `src/management/`                                    | lib, contracts, settings, storage       |
-| memory store | `src/memory/store/`                                  | lib, storage                            |
-| memory       | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
-| agent        | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
-| Agent class  | `src/agent/agent.ts`                                 | all of the above                        |
-| memory agent | `src/agent/dedicated/`                               | all of the above, including Agent class |
-| admin        | `src/admin/`                                         | all of the above                        |
-| entrypoint   | `src/index.ts`                                       | all of the above                        |
+| Layer              | Paths                                                | May import                              |
+| ------------------ | ---------------------------------------------------- | --------------------------------------- |
+| lib                | `src/lib/`                                           | nothing in `src/`                       |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                     |
+| settings           | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                          |
+| storage            | `drizzle/`, `src/storage/`                           | lib                                     |
+| management         | `src/management/`, except `service/`                 | lib, contracts, settings, storage       |
+| memory store       | `src/memory/store/`                                  | lib, storage                            |
+| memory             | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
+| agent              | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
+| Agent class        | `src/agent/agent.ts`                                 | all of the above                        |
+| memory agent       | `src/agent/dedicated/`                               | all of the above, including Agent class |
+| management service | `src/management/service/`                            | all of the above                        |
+| entrypoint         | `src/index.ts`                                       | all of the above                        |
 
 Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
   words (`search-text.ts`), UUIDs (`uuid.ts`), error text (`errors.ts`), and the two ordering
   helpers the `Agent` class uses (`serial.ts`).
-- `src/management/` knows the management database and nothing of objects; the agent runtime uses it to
-  report applied versions and to admit `sendTo`. Only `src/admin/` and the entrypoint push to
-  objects, because the seed needs the memory agent's configuration.
+- `src/management/`, except `service/`, knows the management database and nothing of objects; the
+  agent runtime uses it to report applied versions and to admit `sendTo`. Only
+  `src/management/service/` and the entrypoint push to objects, because the seed needs the memory
+  agent's configuration.
 - The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
@@ -182,7 +183,7 @@ truth for agents:
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner |
 | `agent_config_versions` | immutable configuration versions, numbered per agent                            |
-| `principals`            | who may call `AdminService`: people, service tokens, and agents                 |
+| `principals`            | who may call `ManagementService`: people, service tokens, and agents            |
 | `agent_members`         | roles on one agent                                                              |
 | `system_settings`       | `install_id`, written once by the seed, and the reconciliation cursor           |
 | `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
@@ -233,7 +234,7 @@ here and carried out by later work.
 
 ### Seed
 
-`AdminService.seed()` ([`src/admin/seed.ts`](../packages/agents/src/admin/seed.ts)) creates the
+`ManagementService.seed()` ([`src/management/service/seed.ts`](../packages/agents/src/management/service/seed.ts)) creates the
 rows every installation starts with, and is idempotent:
 
 - `install_id`, a UUID v7 chosen once;
@@ -248,12 +249,12 @@ Later calls write nothing new: the memory agent's rows are inserted only if miss
 agent's `createAgent` uses a fixed `requestId`, so a renamed or reconfigured first agent keeps its
 changes. The seed then applies the memory agent's version.
 
-### AdminService
+### ManagementService
 
-`AdminService` ([`src/admin/index.ts`](../packages/agents/src/admin/index.ts)) is a named
+`ManagementService` ([`src/management/service/index.ts`](../packages/agents/src/management/service/index.ts)) is a named
 entrypoint of the agents Worker, reached only through a service binding. The calling Worker
 authenticates its caller and passes it as `actor: { kind: 'user' | 'service' | 'agent', externalId }`,
-and `AdminService` trusts it. People, services, and agents call alike: any agent can create,
+and `ManagementService` trusts it. People, services, and agents call alike: any agent can create,
 rename, and configure agents, as a person can from the UI or the CLI, and no kind is refused or
 limited for being that kind. An actor becomes a `principals` row on its first call, and that row
 is recorded as the author of versions, the owner of agents it creates, and the actor of audit
@@ -282,7 +283,7 @@ and the audit row in one batch, then initializes the object and sets it `active`
 An agent's configuration is a sequence of immutable versions in the management database. The registry
 asks for one, the desired version (`agents.current_version`), and the agent's object applies it and
 keeps a copy ([`src/configuration/`](../packages/agents/src/configuration/)). Configuration is read
-and written only through [AdminService](#adminservice); `AgentService` has no configuration methods.
+and written only through [ManagementService](#managementservice); `AgentService` has no configuration methods.
 
 Each version is one `AgentSettings` object, validated strictly with valibot. Every field has one
 accepted shape, and unknown fields, unknown models, and unregistered tools are rejected:
@@ -337,8 +338,8 @@ policies on. Changing the defaults later changes no existing agent.
 
 ```ts
 const actor = { kind: 'user', externalId: 'you@example.com' } as const
-const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
-await env.ADMIN.updateConfig(actor, agentId, {
+const { version, settings } = await env.MANAGEMENT.getConfig(actor, agentId)
+await env.MANAGEMENT.updateConfig(actor, agentId, {
   requestId: crypto.randomUUID(),
   settings: { ...settings, model: { provider: 'xai', modelId: 'grok-4.3' }, thinkingLevel: 'low' },
   expectedVersion: version,
@@ -351,7 +352,7 @@ await env.ADMIN.updateConfig(actor, agentId, {
 Writing the version in D1 is the commitment; pushing it to the object is a notification that may
 be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply.ts)):
 
-1. `AdminService` writes the version, then calls `Agent.applyConfig({ agentId, version, settings })`
+1. `ManagementService` writes the version, then calls `Agent.applyConfig({ agentId, version, settings })`
    on `AGENTS.getByName(object_name)`. The call is idempotent by version number.
 2. An idle object applies the version at once. A busy one holds it under `kodama:pending-config`
    and applies it when it next becomes idle, so a change made during a turn takes effect from the
@@ -365,7 +366,7 @@ be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply
 4. Missed versions converge: the object compares the registry's desired version with its own when
    the harness opens, and the daily cron pushes every row where `current_version ≠ applied_version`
    again and finishes agents stuck in `provisioning`
-   ([`src/admin/reconcile.ts`](../packages/agents/src/admin/reconcile.ts)). Each run takes up to 100
+   ([`src/management/service/reconcile.ts`](../packages/agents/src/management/service/reconcile.ts)). Each run takes up to 100
    agents in ID order, starting after the agent the previous run stopped at
    (`system_settings.reconcile_cursor`) and wrapping around, so agents that keep failing cannot keep
    the others from being reached.
@@ -437,19 +438,19 @@ and forwards to the agent's Durable Object:
 | `cancel(agentId)`                              | Stop current work; resolves once idle        |
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
-few more methods, for other Durable Objects and for `AdminService`:
+few more methods, for other Durable Objects and for `ManagementService`:
 
-| Method                          | Caller       | Effect                                                         |
-| ------------------------------- | ------------ | -------------------------------------------------------------- |
-| `sendTo(agentId, message)`      | an agent     | deliver to another agent; returns once the target admits input |
-| `applyConfig(pushed)`           | AdminService | apply a configuration version now, or hold it until idle       |
-| `setStatus(status)`             | AdminService | set the object's copy of its registry state                    |
-| `getConfig()`                   | tests, tools | the applied configuration as Pi holds it                       |
-| `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
-| `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
-| `prune({ force })`              | maintenance  | archive and delete old entries                                 |
-| `enqueue(job)`, `jobStatus(id)` | agents       | queue a memory job and read its status (memory agent only)     |
-| `consolidate(now)`              | cron         | the daily consolidation (memory agent only)                    |
+| Method                          | Caller            | Effect                                                         |
+| ------------------------------- | ----------------- | -------------------------------------------------------------- |
+| `sendTo(agentId, message)`      | an agent          | deliver to another agent; returns once the target admits input |
+| `applyConfig(pushed)`           | ManagementService | apply a configuration version now, or hold it until idle       |
+| `setStatus(status)`             | ManagementService | set the object's copy of its registry state                    |
+| `getConfig()`                   | tests, tools      | the applied configuration as Pi holds it                       |
+| `readEntries({ after, limit })` | memory agent      | conversation text after an entry, from Pi or from the archive  |
+| `memoryChanged()`               | memory agent      | refresh the always-loaded memory now, or when next idle        |
+| `prune({ force })`              | maintenance       | archive and delete old entries                                 |
+| `enqueue(job)`, `jobStatus(id)` | agents            | queue a memory job and read its status (memory agent only)     |
+| `consolidate(now)`              | cron              | the daily consolidation (memory agent only)                    |
 
 ### IDs, limits, and retries
 
@@ -672,8 +673,8 @@ migrations before the tests.
 | `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
 | `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
 | `src/helper/management.ts`                  | the seed, the owner, registry rows, and configuration changes |
-| `src/admin/agents.test.ts`                  | creation, renames, listing, versions, conflicts, rollback     |
-| `src/admin/seed.test.ts`                    | the seed, the first agent, the memory agent's versions        |
+| `src/management/service/agents.test.ts`     | creation, renames, listing, versions, conflicts, rollback     |
+| `src/management/service/seed.test.ts`       | the seed, the first agent, the memory agent's versions        |
 | `src/management/registry.test.ts`           | admission without object storage, and resolving references    |
 | `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on            |
 | `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions |
@@ -701,11 +702,11 @@ From `packages/agents`:
 4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.
-6. Call `AdminService.seed()` once from the trusted Worker that binds it; it is idempotent.
+6. Call `ManagementService.seed()` once from the trusted Worker that binds it; it is idempotent.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the
-named entrypoint `AdminService`. Its cron trigger (`17 3 * * *`, UTC) reconciles configuration
+named entrypoint `ManagementService`. Its cron trigger (`17 3 * * *`, UTC) reconciles configuration
 versions, then runs the daily memory consolidation. `workersDev` is disabled.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin; Wrangler is only
 a transitive dependency.
@@ -720,8 +721,11 @@ import agents from '@kodama/agents/config'
 import { bindings } from 'cf/config'
 
 const agentBinding = bindings.worker({ worker: agents.worker })
-const adminBinding = bindings.worker({ worker: agents.worker, exportName: 'AdminService' })
-// env: { AGENT_SERVICE: agentBinding, ADMIN: adminBinding } — and no D1 binding
+const managementBinding = bindings.worker({
+  worker: agents.worker,
+  exportName: 'ManagementService',
+})
+// env: { AGENT_SERVICE: agentBinding, MANAGEMENT: managementBinding } — and no D1 binding
 ```
 
 ```ts
@@ -745,7 +749,7 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
 - The agent Worker has no public HTTP interface. Only server Workers call its service-binding RPC.
   A UI Worker must authenticate users and authorize their access to agent IDs.
 - Only the agents Worker binds D1. The UI Worker never binds a D1 database; it reaches the
-  registry and configuration through `AdminService`, which authorizes every call but `seed`.
+  registry and configuration through `ManagementService`, which authorizes every call but `seed`.
 - `AgentService` admits only registered working agents, so an unknown or mistyped ID never creates
   an object.
 - Provider credentials are Worker secrets, outside agent settings and RPC results. Never commit

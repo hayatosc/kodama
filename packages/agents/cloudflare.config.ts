@@ -14,10 +14,10 @@ const agentWorker = defineWorker({
   compatibilityDate: '2026-10-01',
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
-    // Administration for the UI Worker and the development CLI (src/admin/index.ts).
-    AdminService: exports.worker(),
+    // Agent management for the UI Worker and the development CLI (src/management/service/index.ts).
+    ManagementService: exports.worker(),
   },
-  // Daily reconciliation (src/admin/reconcile.ts), then memory consolidation
+  // Daily reconciliation (src/management/service/reconcile.ts), then memory consolidation
   // (src/memory/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,

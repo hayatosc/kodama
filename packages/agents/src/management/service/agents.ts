@@ -1,29 +1,24 @@
 /**
- * The administration flows of the agent registry and configuration versions. Each takes the call
- * `AdminService` authorized and the already-validated input.
+ * The management flows of the agent registry and configuration versions. Each takes the call
+ * `ManagementService` authorized and the already-validated input.
  *
- * @see docs/agents.md — AdminService
+ * @see docs/agents.md — ManagementService
  *
  * @module
  */
 import { and, eq } from 'drizzle-orm'
 import type { Models } from '@earendil-works/pi-ai/models'
-import { agentConfigVersions, agentMembers, agents } from '../../drizzle/management/schema.ts'
-import { defaultAgentSettings, parseSettings } from '../configuration/index.ts'
-import { auditByOpId, auditStatement } from '../management/audit.ts'
-import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../management/db.ts'
-import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../management/registry.ts'
-import {
-  reportApplied,
-  versionRow,
-  versionRows,
-  writeVersionStatements,
-} from '../management/versions.ts'
-import { SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
-import type { MemoryModelEnv } from '../agent/dedicated/memory/config.ts'
-import type { AgentEnv } from '../env.ts'
-import { errorText, isConstraintError } from '../lib/errors.ts'
-import { uuidv7 } from '../lib/uuid.ts'
+import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
+import { defaultAgentSettings, parseSettings } from '../../configuration/index.ts'
+import { auditByOpId, auditStatement } from '../audit.ts'
+import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../db.ts'
+import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../registry.ts'
+import { reportApplied, versionRow, versionRows, writeVersionStatements } from '../versions.ts'
+import { SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
+import type { MemoryModelEnv } from '../../agent/dedicated/memory/config.ts'
+import type { AgentEnv } from '../../env.ts'
+import { errorText, isConstraintError } from '../../lib/errors.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import type {
   AgentSettings,
   AgentStatus,
@@ -35,14 +30,14 @@ import type {
   RenameAgentRequest,
   RollbackConfigRequest,
   UpdateConfigRequest,
-} from '../protocol.ts'
+} from '../../protocol.ts'
 
-/** The bindings and variables the administration flows use. */
-export type AdminEnv = Pick<AgentEnv, 'AGENTS' | 'MANAGEMENT_DB'> & MemoryModelEnv
+/** The bindings and variables the management flows use. */
+export type ManagementEnv = Pick<AgentEnv, 'AGENTS' | 'MANAGEMENT_DB'> & MemoryModelEnv
 
-/** What every administration flow receives. */
-export interface AdminCall {
-  env: AdminEnv
+/** What every management flow receives. */
+export interface ManagementCall {
+  env: ManagementEnv
   db: ManagementDb
   models: Models
   /** The authorized caller; `null` for the system (the seed and reconciliation). */
@@ -51,11 +46,11 @@ export interface AdminCall {
 }
 
 /** The acting principal's ID, or `null` for the system. */
-function actorId(call: AdminCall): string | null {
+function actorId(call: ManagementCall): string | null {
   return call.principal?.principalId ?? null
 }
 
-/** A stored version as `AdminService` returns it. */
+/** A stored version as `ManagementService` returns it. */
 function configVersionOf(models: Models, row: VersionRow): ConfigVersion {
   return {
     version: row.version,
@@ -71,7 +66,7 @@ function configVersionOf(models: Models, row: VersionRow): ConfigVersion {
  *
  * @throws {@link TypeError} When the agent has no such version.
  */
-async function storedSettings(call: AdminCall, agentId: string, version: number) {
+async function storedSettings(call: ManagementCall, agentId: string, version: number) {
   const row = await versionRow(call.db, agentId, version)
   if (row === undefined) throw new TypeError(`Unknown version ${version} of agent ${agentId}`)
   return configVersionOf(call.models, row).settings
@@ -82,7 +77,7 @@ async function storedSettings(call: AdminCall, agentId: string, version: number)
  * commitment; a lost or failed push is applied later, when the object opens or at reconciliation.
  */
 export async function pushVersion(
-  env: AdminEnv,
+  env: ManagementEnv,
   db: ManagementDb,
   row: Pick<AgentRow, 'agentId' | 'objectName' | 'appliedVersion'>,
   version: number,
@@ -110,7 +105,7 @@ export async function pushVersion(
  *
  * @throws {@link TypeError} When the agent is unknown.
  */
-export async function pushDesired(call: AdminCall, agentId: string): Promise<ApplyResult> {
+export async function pushDesired(call: ManagementCall, agentId: string): Promise<ApplyResult> {
   const row = await agentRow(call.db, agentId)
   if (row.appliedVersion >= row.currentVersion) {
     return { state: 'stale', appliedVersion: row.appliedVersion }
@@ -124,7 +119,7 @@ export async function pushDesired(call: AdminCall, agentId: string): Promise<App
  *
  * @returns The agent's row after the attempt; still `provisioning` when the push did not apply.
  */
-export async function finishProvisioning(call: AdminCall, agentId: string): Promise<AgentRow> {
+export async function finishProvisioning(call: ManagementCall, agentId: string): Promise<AgentRow> {
   const row = await agentRow(call.db, agentId)
   if (row.status !== 'provisioning') return row
   const settings = await storedSettings(call, agentId, row.currentVersion)
@@ -162,7 +157,7 @@ export async function finishProvisioning(call: AdminCall, agentId: string): Prom
  * @throws {@link TypeError} When the settings are invalid or the slug is taken.
  */
 export async function createAgent(
-  call: AdminCall,
+  call: ManagementCall,
   request: Omit<CreateAgentRequest, 'settings'> & { settings?: unknown },
 ): Promise<AgentSummary> {
   const creator = actorId(call)
@@ -226,7 +221,7 @@ export async function createAgent(
 
 /** Registry rows, newest first. */
 export async function listAgents(
-  call: AdminCall,
+  call: ManagementCall,
   filter: { kind?: AgentRow['kind']; status?: AgentStatus },
 ): Promise<AgentSummary[]> {
   return (await listAgentRows(call.db, filter)).map(summaryOf)
@@ -237,7 +232,7 @@ export async function listAgents(
  *
  * @throws {@link TypeError} When the registry has no such agent.
  */
-export async function getAgent(call: AdminCall, agentId: string): Promise<AgentSummary> {
+export async function getAgent(call: ManagementCall, agentId: string): Promise<AgentSummary> {
   return summaryOf(await agentRow(call.db, agentId))
 }
 
@@ -246,7 +241,7 @@ export async function getAgent(call: AdminCall, agentId: string): Promise<AgentS
  *
  * @throws {@link TypeError} When nothing matches, or a prefix is ambiguous.
  */
-export async function resolveAgent(call: AdminCall, ref: string): Promise<AgentSummary> {
+export async function resolveAgent(call: ManagementCall, ref: string): Promise<AgentSummary> {
   return summaryOf(await resolveAgentRef(call.db, ref))
 }
 
@@ -257,7 +252,7 @@ export async function resolveAgent(call: AdminCall, ref: string): Promise<AgentS
  * @throws {@link TypeError} When the agent is unknown or the slug is taken.
  */
 export async function renameAgent(
-  call: AdminCall,
+  call: ManagementCall,
   agentId: string,
   change: RenameAgentRequest,
 ): Promise<AgentSummary> {
@@ -302,7 +297,7 @@ function versionConflict(agentId: string, expected: number): Error {
  * @throws {@link Error} Starting `version_conflict:`, when `expected` is not the newest version.
  */
 async function writeVersion(
-  call: AdminCall,
+  call: ManagementCall,
   agentId: string,
   write: {
     opId: string
@@ -355,7 +350,7 @@ async function writeVersion(
  * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
  */
 export function updateConfig(
-  call: AdminCall,
+  call: ManagementCall,
   agentId: string,
   request: Omit<UpdateConfigRequest, 'settings'> & { settings: unknown },
 ): Promise<ConfigWriteResult> {
@@ -374,7 +369,7 @@ export function updateConfig(
  * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
  */
 export async function rollbackConfig(
-  call: AdminCall,
+  call: ManagementCall,
   agentId: string,
   request: RollbackConfigRequest,
 ): Promise<ConfigWriteResult> {
@@ -392,7 +387,7 @@ export async function rollbackConfig(
  *
  * @throws {@link TypeError} When the agent is unknown or has no version yet.
  */
-export async function getConfig(call: AdminCall, agentId: string): Promise<ConfigVersion> {
+export async function getConfig(call: ManagementCall, agentId: string): Promise<ConfigVersion> {
   const row = await agentRow(call.db, agentId)
   const stored = await versionRow(call.db, agentId, row.currentVersion)
   if (stored === undefined) throw new TypeError(`Agent ${agentId} has no configuration version`)
@@ -404,7 +399,7 @@ const HISTORY_PAGE = { default: 20, max: 100 }
 
 /** An agent's versions, newest first: who wrote what, and when. */
 export async function configHistory(
-  call: AdminCall,
+  call: ManagementCall,
   agentId: string,
   page: { before?: number; limit?: number },
 ): Promise<ConfigVersion[]> {

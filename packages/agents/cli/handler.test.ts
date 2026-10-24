@@ -16,7 +16,7 @@ it('authenticates the CLI adapter and sends through real Durable Object RPC', as
     new Request(url, { method: 'POST' }),
     'test-token',
     exports.default,
-    exports.AdminService,
+    exports.ManagementService,
   )
   expect(denied.status).toBe(401)
   expect((await exports.default.snapshot(agentId)).snapshot.messages).toEqual([])
@@ -28,7 +28,7 @@ it('authenticates the CLI adapter and sends through real Durable Object RPC', as
     }),
     'test-token',
     exports.default,
-    exports.AdminService,
+    exports.ManagementService,
   )
   expect(response.status).toBe(200)
   expect(response.headers.get('content-type')).toBe('text/event-stream')
@@ -42,7 +42,7 @@ it('authenticates the CLI adapter and sends through real Durable Object RPC', as
     }),
     'test-token',
     exports.default,
-    exports.AdminService,
+    exports.ManagementService,
   )
   expect(await snapshot.text()).toContain('Hello from CLI')
   const cancelled = await handleCli(
@@ -52,7 +52,7 @@ it('authenticates the CLI adapter and sends through real Durable Object RPC', as
     }),
     'test-token',
     exports.default,
-    exports.AdminService,
+    exports.ManagementService,
   )
   expect(await cancelled.json()).toEqual({ cancelled: true })
 })
@@ -66,7 +66,7 @@ it('rejects malformed CLI input before RPC admission', async () => {
     }),
     'test-token',
     exports.default,
-    exports.AdminService,
+    exports.ManagementService,
   )
   expect(response.status).toBe(400)
 })
@@ -81,7 +81,7 @@ it('seeds, and sends to the first agent by its slug', async () => {
       }),
       'test-token',
       exports.default,
-      exports.AdminService,
+      exports.ManagementService,
     )
   const seeded = await (await post('seed')).json()
   expect(seeded).toMatchObject({ installId: expect.any(String) })

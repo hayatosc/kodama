@@ -7,13 +7,13 @@ import {
   agents,
   principals,
   systemSettings,
-} from '../../drizzle/management/schema.ts'
-import { admin, management } from '../helper/management.ts'
-import { activeContents, memoryAgent } from '../helper/memory.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
-import { piEntries } from '../storage/pi-tables.ts'
+} from '../../../drizzle/management/schema.ts'
+import { managementService, management } from '../../helper/management.ts'
+import { activeContents, memoryAgent } from '../../helper/memory.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
+import { piEntries } from '../../storage/pi-tables.ts'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
+import { useMockModel, waitForAnswer } from '../../helper/rpc.ts'
 import { FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, MEMORY_AGENT_ID } from './seed.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -36,8 +36,8 @@ describe('seed', () => {
       await state.storage.put('test:marker', 'kept')
     })
 
-    const seeded = await admin().seed()
-    const again = await admin().seed()
+    const seeded = await managementService().seed()
+    const again = await managementService().seed()
     expect(again).toEqual(seeded)
     expect(seeded.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
@@ -83,33 +83,35 @@ describe('seed', () => {
       (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
     ).toBe(1)
 
-    const { settings: v1 } = await admin().getConfig(actor, first.agentId)
+    const { settings: v1 } = await managementService().getConfig(actor, first.agentId)
     expect(v1.systemPrompt).toBe(FIRST_AGENT_PROMPT)
     await exports.default.sendMessage(first.agentId, { requestId: 'hi', content: 'Hello' })
     await waitForAnswer(first.agentId, 'hi')
   })
 
   it('keeps later changes to the first agent when it runs again', async () => {
-    await admin().seed()
+    await managementService().seed()
     const { agentId } = await firstAgent()
-    const { settings } = await admin().getConfig(actor, agentId)
-    const desired = (await admin().getAgent(actor, agentId)).desiredVersion
-    await admin().updateConfig(actor, agentId, {
+    const { settings } = await managementService().getConfig(actor, agentId)
+    const desired = (await managementService().getAgent(actor, agentId)).desiredVersion
+    await managementService().updateConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
       settings: { ...settings, systemPrompt: 'Changed later' },
       expectedVersion: desired,
     })
-    await admin().renameAgent(actor, agentId, { displayName: 'Renamed' })
-    await admin().seed()
-    const after = await admin().getAgent(actor, agentId)
+    await managementService().renameAgent(actor, agentId, { displayName: 'Renamed' })
+    await managementService().seed()
+    const after = await managementService().getAgent(actor, agentId)
     expect(after).toMatchObject({ displayName: 'Renamed', desiredVersion: desired + 1 })
-    expect((await admin().getConfig(actor, agentId)).settings.systemPrompt).toBe('Changed later')
+    expect((await managementService().getConfig(actor, agentId)).settings.systemPrompt).toBe(
+      'Changed later',
+    )
   })
 
   it('lets the memory agent take its model from its versions', async () => {
-    await admin().seed()
-    const current = await admin().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await admin().updateConfig(actor, MEMORY_AGENT_ID, {
+    await managementService().seed()
+    const current = await managementService().getConfig(actor, MEMORY_AGENT_ID)
+    const result = await managementService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),
       settings: { ...current.settings, model: { provider: 'xai', modelId: 'grok-4.3' } },
       expectedVersion: current.version,
@@ -123,9 +125,9 @@ describe('seed', () => {
   })
 
   it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
-    await admin().seed()
-    const current = await admin().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await admin().updateConfig(actor, MEMORY_AGENT_ID, {
+    await managementService().seed()
+    const current = await managementService().getConfig(actor, MEMORY_AGENT_ID)
+    const result = await managementService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),
       settings: { ...current.settings, toolPolicy: { memory_write: 'deny' } },
       expectedVersion: current.version,

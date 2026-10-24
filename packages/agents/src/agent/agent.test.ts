@@ -89,7 +89,7 @@ describe('agent RPC', () => {
   })
 })
 
-it('serves no configuration through AgentService; AdminService owns it', async () => {
+it('serves no configuration through AgentService; ManagementService owns it', async () => {
   const agentId = await newAgentId()
   const call = (method: 'getConfig' | 'setConfig') =>
     // @ts-expect-error AgentService has no configuration methods.

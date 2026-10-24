@@ -1,6 +1,6 @@
 /**
- * The agents Worker's entrypoint: `AgentService` for trusted Workers, `AdminService` for
- * administration, and the `Agent` Durable Object class.
+ * The agents Worker's entrypoint: `AgentService` for trusted Workers, `ManagementService` for
+ * managing agents, and the `Agent` Durable Object class.
  *
  * @see docs/agents.md — RPC contract
  *
@@ -14,7 +14,7 @@ import type {
   SendMessageResponse,
   SubmissionResponse,
 } from './protocol.ts'
-import { reconcileAgents } from './admin/reconcile.ts'
+import { reconcileAgents } from './management/service/reconcile.ts'
 import { managementDb } from './management/db.ts'
 import type { AgentUse } from './management/lifecycle.ts'
 import { admitAgent } from './management/registry.ts'
@@ -22,8 +22,8 @@ import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './models/index.ts'
 import { parseAgentId } from './validation.ts'
 
-/** Administration: the agent registry, configuration versions, and the seed. */
-export { AdminService } from './admin/index.ts'
+/** Management: the agent registry, configuration versions, and the seed. */
+export { ManagementService } from './management/service/index.ts'
 
 /**
  * The one Durable Object class, bound as `AGENTS`: a working agent, or the dedicated agent registered
@@ -38,7 +38,7 @@ export { AgentObject as Agent } from './agent/dedicated/index.ts'
  * Each method validates the agent ID, admits it from the registry, and forwards to that agent's
  * Durable Object. Only UUIDs of working agents in the registry are admitted, so an unknown ID never
  * creates an object and dedicated agents such as the memory agent are unreachable. There is no
- * public HTTP interface, and configuration is read and written only through `AdminService`.
+ * public HTTP interface, and configuration is read and written only through `ManagementService`.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   /** Reject HTTP requests: agents are reached only through RPC. */

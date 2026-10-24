@@ -71,8 +71,8 @@ export interface AgentSettings extends AgentConfig {
   toolPolicy?: Record<string, 'allow' | 'deny'>
 }
 
-/** Who calls `AdminService`, as the calling Worker authenticated them. */
-export interface AdminActor {
+/** Who calls `ManagementService`, as the calling Worker authenticated them. */
+export interface ManagementActor {
   kind: 'user' | 'service' | 'agent'
   /** The Access email, service token ID, or agent ID; resolved to a principal. */
   externalId: string
@@ -88,7 +88,7 @@ export type AgentStatus =
   | 'deleting'
   | 'deleted'
 
-/** One registry row as `AdminService` returns it. */
+/** One registry row as `ManagementService` returns it. */
 export interface AgentSummary {
   agentId: string
   kind: 'working' | 'dedicated'

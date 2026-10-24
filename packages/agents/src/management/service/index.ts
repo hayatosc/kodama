@@ -1,21 +1,21 @@
 /**
- * `AdminService`, the named entrypoint for administration: the agent registry, configuration
+ * `ManagementService`, the named entrypoint for managing agents: the agent registry, configuration
  * versions, and the seed. Reached only through a service binding, never over HTTP.
  *
- * @see docs/agents.md — AdminService
+ * @see docs/agents.md — ManagementService
  *
  * @module
  */
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as v from 'valibot'
-import { AGENT_KINDS, AGENT_STATUSES } from '../../drizzle/management/schema.ts'
-import { managementDb } from '../management/db.ts'
-import type { PrincipalRow } from '../management/db.ts'
-import { principalOf } from '../management/principals.ts'
-import type { AgentEnv } from '../env.ts'
-import { createAgentModels } from '../models/index.ts'
+import { AGENT_KINDS, AGENT_STATUSES } from '../../../drizzle/management/schema.ts'
+import { managementDb } from '../db.ts'
+import type { PrincipalRow } from '../db.ts'
+import { principalOf } from '../principals.ts'
+import type { AgentEnv } from '../../env.ts'
+import { createAgentModels } from '../../models/index.ts'
 import type {
-  AdminActor,
+  ManagementActor,
   AgentStatus,
   AgentSummary,
   ConfigVersion,
@@ -25,12 +25,12 @@ import type {
   RollbackConfigRequest,
   SeedResult,
   UpdateConfigRequest,
-} from '../protocol.ts'
+} from '../../protocol.ts'
 import {
   CommentSchema,
   DisplayNameSchema,
   ExpectedVersionSchema,
-  parseAdminActor,
+  parseManagementActor,
   parseAgentId,
   parseAgentRef,
   parseInput,
@@ -38,9 +38,9 @@ import {
   RequestIdSchema,
   SlugSchema,
   VersionSchema,
-} from '../validation.ts'
+} from '../../validation.ts'
 import * as flows from './agents.ts'
-import type { AdminCall } from './agents.ts'
+import type { ManagementCall } from './agents.ts'
 import { seed } from './seed.ts'
 
 const CreateAgentSchema = v.strictObject(
@@ -85,22 +85,22 @@ const HistoryPageSchema = v.strictObject({
 })
 
 /**
- * Administration RPC for the UI Worker and the development CLI.
+ * Management RPC for the UI Worker and the development CLI.
  *
  * @remarks
  * The calling Worker authenticates the caller and passes it as `actor`, and every method except
- * {@link AdminService.seed} trusts it: people, services, and agents call alike, so an agent can
+ * {@link ManagementService.seed} trusts it: people, services, and agents call alike, so an agent can
  * create and configure agents as a person can. The actor is recorded as the author and in the audit
  * rows. Roles and permissions are issue #7.
  */
-export class AdminService extends WorkerEntrypoint<AgentEnv> {
-  /** Reject HTTP requests: administration is reached only through RPC. */
+export class ManagementService extends WorkerEntrypoint<AgentEnv> {
+  /** Reject HTTP requests: management is reached only through RPC. */
   override async fetch(_request: Request): Promise<Response> {
     return new Response('Use a Cloudflare RPC service binding.', { status: 404 })
   }
 
   /** The call of the system, before any principal exists. */
-  #systemCall(): AdminCall {
+  #systemCall(): ManagementCall {
     return {
       env: this.env,
       db: managementDb(this.env.MANAGEMENT_DB),
@@ -116,9 +116,9 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link TypeError} When `actor` is malformed.
    * @throws {@link Error} Starting `forbidden:`, when the principal is disabled.
    */
-  async #call(actor: unknown): Promise<AdminCall & { principal: PrincipalRow }> {
+  async #call(actor: unknown): Promise<ManagementCall & { principal: PrincipalRow }> {
     const call = this.#systemCall()
-    const principal = await principalOf(call.db, parseAdminActor(actor), call.now)
+    const principal = await principalOf(call.db, parseManagementActor(actor), call.now)
     return { ...call, principal }
   }
 
@@ -135,7 +135,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the request is invalid or the slug is taken.
    */
-  async createAgent(actor: AdminActor, request: CreateAgentRequest): Promise<AgentSummary> {
+  async createAgent(actor: ManagementActor, request: CreateAgentRequest): Promise<AgentSummary> {
     const call = await this.#call(actor)
     const input = parseInput(CreateAgentSchema, request)
     return flows.createAgent(call, {
@@ -148,7 +148,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
 
   /** Registry rows, newest first, with desired and applied versions. */
   async listAgents(
-    actor: AdminActor,
+    actor: ManagementActor,
     filter: { kind?: 'working' | 'dedicated'; status?: AgentStatus } = {},
   ): Promise<AgentSummary[]> {
     return flows.listAgents(await this.#call(actor), parseInput(ListFilterSchema, filter))
@@ -159,7 +159,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the agent is unknown.
    */
-  async getAgent(actor: AdminActor, agentId: string): Promise<AgentSummary> {
+  async getAgent(actor: ManagementActor, agentId: string): Promise<AgentSummary> {
     return flows.getAgent(await this.#call(actor), parseAgentId(agentId))
   }
 
@@ -168,7 +168,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When nothing matches, or a prefix is ambiguous (with candidates).
    */
-  async resolveAgent(actor: AdminActor, ref: string): Promise<AgentSummary> {
+  async resolveAgent(actor: ManagementActor, ref: string): Promise<AgentSummary> {
     return flows.resolveAgent(await this.#call(actor), parseAgentRef(ref))
   }
 
@@ -178,7 +178,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link TypeError} When the agent is unknown, the change is invalid, or the slug is taken.
    */
   async renameAgent(
-    actor: AdminActor,
+    actor: ManagementActor,
     agentId: string,
     change: RenameAgentRequest,
   ): Promise<AgentSummary> {
@@ -194,7 +194,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the agent is unknown.
    */
-  async getConfig(actor: AdminActor, agentId: string): Promise<ConfigVersion> {
+  async getConfig(actor: ManagementActor, agentId: string): Promise<ConfigVersion> {
     return flows.getConfig(await this.#call(actor), parseAgentId(agentId))
   }
 
@@ -206,7 +206,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
    */
   async updateConfig(
-    actor: AdminActor,
+    actor: ManagementActor,
     agentId: string,
     request: UpdateConfigRequest,
   ): Promise<ConfigWriteResult> {
@@ -222,7 +222,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
 
   /** Versions newest first: who changed what, and when. */
   async configHistory(
-    actor: AdminActor,
+    actor: ManagementActor,
     agentId: string,
     page: { before?: number; limit?: number } = {},
   ): Promise<ConfigVersion[]> {
@@ -240,7 +240,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
    */
   async rollbackConfig(
-    actor: AdminActor,
+    actor: ManagementActor,
     agentId: string,
     request: RollbackConfigRequest,
   ): Promise<ConfigWriteResult> {

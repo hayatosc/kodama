@@ -6,7 +6,7 @@ Each agent has a server-issued UUID, its `agentId`, in a registry in the managem
 and addresses **one agent = one Durable Object**. The object owns its SQLite-backed Pi session,
 conversation history, inbox, recovery alarm, and applied configuration version. The seed creates
 the first agent, a general-purpose assistant. People, services, and agents manage agents alike
-through `AdminService`. Agent orchestration and model-invoked delegation tools can be added on top
+through `ManagementService`. Agent orchestration and model-invoked delegation tools can be added on top
 of the RPC transport.
 
 ```text
@@ -15,8 +15,9 @@ packages/
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
     drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint (AgentService)
-    src/admin/            AdminService: registry, configuration versions, seed, reconciliation
-    src/management/          The management database: registry, admission, versions, lifecycle
+    src/management/       The management database: registry, admission, versions, lifecycle
+    src/management/service/
+                          ManagementService: registry, configuration versions, seed, reconciliation
     src/lib/              Generic helpers that import nothing else from src/
     src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
     src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
@@ -53,7 +54,7 @@ nr dev:agents
 calls use a Worker service binding or DO binding; local CLI access is described below.
 The initial model uses `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` in
 `cloudflare.config.ts`. Defaults apply only to new agents. Each agent's configuration is a
-sequence of versions in the management database, changed through `AdminService`.
+sequence of versions in the management database, changed through `ManagementService`.
 
 ```sh
 nr check
@@ -183,8 +184,11 @@ import { bindings } from 'cf/config'
 
 // Add to the UI Worker's env configuration:
 const agentBinding = bindings.worker({ worker: agents.worker })
-const adminBinding = bindings.worker({ worker: agents.worker, exportName: 'AdminService' })
-// env: { AGENT_SERVICE: agentBinding, ADMIN: adminBinding } — the UI Worker binds no D1
+const managementBinding = bindings.worker({
+  worker: agents.worker,
+  exportName: 'ManagementService',
+})
+// env: { AGENT_SERVICE: agentBinding, MANAGEMENT: managementBinding } — the UI Worker binds no D1
 ```
 
 ```ts
@@ -208,7 +212,7 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
 `kodama-management` and apply their migrations, configure each provider's Worker secret (for
 example, `nr cf workers secrets update OPENAI_API_KEY`), deploy with `nr deploy`, and call
-`AdminService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
+`ManagementService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
 Use `nr cf workers secrets update --help` for the pinned CLI's input options.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin;
 Wrangler is only a transitive dependency of Cloudflare's tooling.
@@ -223,8 +227,8 @@ Wrangler is only a transitive dependency of Cloudflare's tooling.
 
 ```ts
 const actor = { kind: 'user', externalId: 'you@example.com' } as const
-const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
-await env.ADMIN.updateConfig(actor, agentId, {
+const { version, settings } = await env.MANAGEMENT.getConfig(actor, agentId)
+await env.MANAGEMENT.updateConfig(actor, agentId, {
   requestId: crypto.randomUUID(),
   settings: {
     ...settings,
@@ -236,7 +240,7 @@ await env.ADMIN.updateConfig(actor, agentId, {
 ```
 
 Configuration is a sequence of immutable versions in the management database, read and written only
-through `AdminService`. A new version takes effect from the agent's next turn, without a restart
+through `ManagementService`. A new version takes effect from the agent's next turn, without a restart
 or a deploy, even if the agent is busy when it is written; `getAgent` shows the desired and
 applied versions separately until they converge. Two updates from the same version conflict:
 exactly one succeeds. `rollbackConfig` writes an old version's content as a new version. The
