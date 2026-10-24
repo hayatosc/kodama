@@ -178,14 +178,14 @@ memory ([memory.md](memory.md)). `kodama-management` (`MANAGEMENT_DB`, schema in
 [`drizzle/management/schema.ts`](../packages/agents/drizzle/management/schema.ts)) holds the source of
 truth for agents:
 
-| Table                   | Contents                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner |
-| `agent_config_versions` | immutable configuration versions, numbered per agent                            |
-| `principals`            | who may call `AdminService`: people, service tokens, and agents                 |
-| `agent_members`         | roles on one agent                                                              |
-| `system_settings`       | `install_id` and `admin_agent_id`, written once by the seed                     |
-| `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
+| Table                   | Contents                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner            |
+| `agent_config_versions` | immutable configuration versions, numbered per agent                                       |
+| `principals`            | who may call `AdminService`: people, service tokens, and agents                            |
+| `agent_members`         | roles on one agent                                                                         |
+| `system_settings`       | `install_id` and `admin_agent_id`, written once by the seed, and the reconciliation cursor |
+| `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`                  |
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
 RPC. Foreign keys are declared and enforced by D1, and every change is one `batch()`, so a violation
@@ -363,7 +363,10 @@ be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply
 4. Missed versions converge: the object compares the registry's desired version with its own when
    the harness opens, and the daily cron pushes every row where `current_version ≠ applied_version`
    again and finishes agents stuck in `provisioning`
-   ([`src/admin/reconcile.ts`](../packages/agents/src/admin/reconcile.ts)).
+   ([`src/admin/reconcile.ts`](../packages/agents/src/admin/reconcile.ts)). Each run takes up to 100
+   agents in ID order, starting after the agent the previous run stopped at
+   (`system_settings.reconcile_cursor`) and wrapping around, so agents that keep failing cannot keep
+   the others from being reached.
 
 `listAgents` and `getAgent` return `desiredVersion`, `appliedVersion`, and `pending` separately.
 

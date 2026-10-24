@@ -5,7 +5,7 @@
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so
  * an agent ID is never reused, and foreign keys keep SQLite's default `NO ACTION`. Writes use plain
  * inserts, so a constraint violation fails its statement and rolls back the whole `batch()`; only
- * the idempotent seed uses `ON CONFLICT DO NOTHING`.
+ * the idempotent seed uses `ON CONFLICT DO NOTHING`, and reconciliation upserts its cursor.
  *
  * @see docs/agents.md — Management database
  *
@@ -126,11 +126,11 @@ export const agentMembers = sqliteTable(
 )
 
 /** Keys of `system_settings`. */
-export const SYSTEM_SETTING_KEYS = ['install_id', 'admin_agent_id'] as const
+export const SYSTEM_SETTING_KEYS = ['install_id', 'admin_agent_id', 'reconcile_cursor'] as const
 
 /**
- * Installation settings, each written once by the seed and never changed: the installation ID and
- * the administrator agent's ID.
+ * Installation settings. The seed writes the installation ID and the administrator agent's ID once,
+ * and they never change; reconciliation keeps the agent ID its last run stopped at.
  */
 export const systemSettings = sqliteTable('system_settings', {
   key: text('key', { enum: SYSTEM_SETTING_KEYS }).primaryKey(),
