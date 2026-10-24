@@ -11,6 +11,7 @@ import { setAlarm } from '../../runtime/alarms.ts'
 import { Agent } from '../../agent/agent.ts'
 import { coalescingRunner } from '../../lib/serial.ts'
 import type { JobStatus } from '../../memory/jobs.ts'
+import type { EntryPage } from '../../memory/transcript.ts'
 import type {
   AgentConfig,
   AgentSettings,
@@ -120,6 +121,20 @@ export class MemoryAgent extends Agent {
    */
   override sendTo(_agentId: string, _request: SendMessageRequest): Promise<SendMessageResponse> {
     return Promise.reject(new Error('The memory agent does not message other agents'))
+  }
+
+  /**
+   * @throws Always: it keeps no memory to extract, so its own entries are never read.
+   */
+  override readEntries(_request: { after: number; limit: number }): Promise<EntryPage> {
+    return Promise.reject(new Error('The memory agent has no entries to extract'))
+  }
+
+  /**
+   * @throws Always: it keeps no always-loaded memory to refresh.
+   */
+  override memoryChanged(): Promise<void> {
+    return Promise.reject(new Error('The memory agent keeps no memory of its own'))
   }
 
   /**

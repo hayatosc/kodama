@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../memory/jobs.ts'
 import { EXTRACTION_READ_KEY } from '../../storage/memory.ts'
-import { context, db, memoryAgent, record, write } from '../../helper/memory.ts'
+import { context, db, memoryAgent, record, runScriptedJob, write } from '../../helper/memory.ts'
 import { applyOperation } from '../../memory/store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import type { MemoryJob } from '../../memory/jobs.ts'
@@ -198,5 +198,92 @@ describe('memory_invalidate', () => {
     )
     expect((await record(id))?.status).toBe('invalid')
     expect(response).toContain(`applied ${id}`)
+  })
+})
+
+describe('consolidation tools', () => {
+  const day = '2026-10-02'
+  const remember = (sourceAgentId: string): MemoryJob => ({
+    kind: 'remember',
+    sourceAgentId,
+    origin: 'user_request',
+    content: 'Tidy the shared rules',
+    sourceEntries: { from: 1, to: 1 },
+  })
+
+  it('lists the active records of the scope with their flags', async () => {
+    const owner = crypto.randomUUID()
+    const shared = await write({
+      scope: 'shared:global',
+      kind: 'instruction',
+      content: `Shared rule ${owner}`,
+      sourceAgentId: 'memory',
+    })
+    const id = await write({
+      scope: `agent:${owner}`,
+      kind: 'instruction',
+      content: 'Answer in English',
+      sourceAgentId: owner,
+      overrides: shared,
+    })
+    const empty = crypto.randomUUID()
+
+    const listed = await runScriptedJob({ kind: 'consolidate', scope: `agent:${owner}`, day }, [
+      { name: 'list_records', arguments: {} },
+    ])
+    const none = await runScriptedJob({ kind: 'consolidate', scope: `agent:${empty}`, day }, [
+      { name: 'list_records', arguments: {} },
+    ])
+
+    expect(listed.outputs[0]).toMatch(
+      new RegExp(
+        `^- id=${id} revision=1 kind=instruction .* overrides=${shared}: Answer in English$`,
+      ),
+    )
+    expect(none.outputs[0]).toBe('No active records.')
+  })
+
+  it('refuses list_records and shared_write outside a consolidate job', async () => {
+    const { outputs } = await runScriptedJob(remember(crypto.randomUUID()), [
+      { name: 'list_records', arguments: {} },
+      {
+        name: 'shared_write',
+        arguments: { space: 'team', kind: 'fact', content: 'Uses pnpm', sourceIds: ['x'] },
+      },
+    ])
+
+    expect(outputs[0]).toContain('list_records needs a consolidate job')
+    expect(outputs[1]).toContain('shared_write needs a consolidate job')
+  })
+
+  it('applies a shared write that rests on two agents and rejects one that does not', async () => {
+    const space = `team-${crypto.randomUUID().slice(0, 8)}`
+    const [first, second] = [crypto.randomUUID(), crypto.randomUUID()]
+    const sourceIds = await Promise.all(
+      [first, second].map((agentId) =>
+        write({
+          scope: `agent:${agentId}`,
+          kind: 'fact',
+          content: 'Uses pnpm',
+          sourceAgentId: agentId,
+        }),
+      ),
+    )
+    const shared = { space, kind: 'fact', content: 'The team uses pnpm' }
+
+    const { outputs } = await runScriptedJob(
+      { kind: 'consolidate', scope: `shared:${space}`, day },
+      [
+        { name: 'shared_write', arguments: { ...shared, sourceIds } },
+        { name: 'shared_write', arguments: { ...shared, sourceIds: sourceIds.slice(0, 1) } },
+        { name: 'memory_write', arguments: { kind: 'fact', content: 'Direct shared write' } },
+      ],
+    )
+
+    expect(outputs[0]).toMatch(/^applied /)
+    expect(outputs[1]).toBe(
+      `rejected: a shared record needs records of 2 agents, or only records of shared:${space}`,
+    )
+    expect(outputs[2]).toContain('Shared records change only through shared_write')
   })
 })

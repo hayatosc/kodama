@@ -33,7 +33,6 @@ packages/agents/
     memory/                 long-term memory D1 schema (schema.ts) and its migrations (migrations/)
     management/             management D1 schema: registry, versions, principals, audit; migrations
     durable-object/         schema of kodama's tables in each object, and their migrations
-    schema.test.ts          each schema matches its generated migrations
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
@@ -223,7 +222,7 @@ truth for agents:
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
 RPC. Foreign keys are declared and enforced by D1, and every change is one `batch()`, so a violation
-rolls the whole change back (`src/management/d1-assumptions.test.ts` checks these behaviors). Registry
+rolls the whole change back (`src/management/db.test.ts` checks these behaviors). Registry
 rows are never deleted, so an agent ID is never reused.
 
 ### Registry and admission
@@ -248,9 +247,10 @@ prefix is an error that lists the candidates.
 
 ### Lifecycle
 
-[`src/management/lifecycle.ts`](../packages/agents/src/management/lifecycle.ts) defines the states and
-their moves. The registry's `status` is the source, and each object holds a copy (see
-[Restrictions](#restrictions)).
+The table lists the states and their planned moves.
+[`src/management/lifecycle.ts`](../packages/agents/src/management/lifecycle.ts) defines what each
+state admits; the moves are enforced once the work that carries them out lands. The registry's
+`status` is the source, and each object holds a copy (see [Restrictions](#restrictions)).
 
 | State          | May move to                       | Chat | Reads | External calls |
 | -------------- | --------------------------------- | ---- | ----- | -------------- |
@@ -644,8 +644,13 @@ cp packages/agents/.dev.vars.example packages/agents/.dev.vars
 nr dev:agents
 ```
 
-`nr dev:agents` runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
-Objects. It exposes RPC, not a browser page.
+`nr dev:agents` first applies both D1 databases' Drizzle migrations locally, then runs `cf dev`,
+which starts the Vite-powered Worker with local D1, R2, and Durable Objects. It exposes RPC, not a
+browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3` persistence root and the binding
+names as local D1 IDs. It requires no Cloudflare account or remote database ID; `cf d1 list --local`
+uses a different local resource catalog and is not needed. Repeated starts preserve existing data,
+and migration failure prevents the Worker from starting. Stop the dev server before restarting it
+so only one process is using its local storage.
 
 | Command                                                | Effect                                                                    |
 | ------------------------------------------------------ | ------------------------------------------------------------------------- |
@@ -695,35 +700,53 @@ server if another configuration evaluation replaces it.
 
 Tests use Vitest with the Cloudflare plugin, so they run inside workerd with real RPC, Pi Durable,
 SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked, and no API key is
-needed. `vitest.config.ts` reads the generated migrations of both D1 databases for the setup. It also passes the
-columns from the drizzle-kit snapshots, so a test fails when a schema and its migrations differ.
+needed. `vitest.worker.config.ts` reads the generated migrations of both D1 databases for the setup.
+It also passes the columns from the drizzle-kit snapshots, so a test fails when a schema and its
+migrations differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
+entrypoint and token filesystem tests. Both projects run with `nr check` and share the Istanbul
+coverage report from `nr test:coverage`. The entrypoint tests mock token access and HTTP transport,
+not argument parsing or stream output; the token tests use temporary directories and remove them.
 
 Tests sit next to the module they test, as `<module>.test.ts` in the same folder. Shared helpers
 are in `src/helper/`, which production code never imports, and `vitest.setup.ts` applies the D1
 migrations before the tests.
 
-| Path                                        | Contents                                                      |
-| ------------------------------------------- | ------------------------------------------------------------- |
-| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection |
-| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers    |
-| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
-| `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
-| `src/helper/management.ts`                  | the seed, the owner, registry rows, and configuration changes |
-| `src/management/service/agents.test.ts`     | creation, renames, listing, versions, conflicts, rollback     |
-| `src/management/service/seed.test.ts`       | the seed, the first agent, the memory agent's versions        |
-| `src/management/registry.test.ts`           | admission without object storage, and resolving references    |
-| `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on            |
-| `src/runtime/config-apply.test.ts`          | applying at idle, convergence, partial failures, restrictions |
-| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
-| `src/runtime/events.test.ts`                | `send` and `subscribe` streams                                |
-| `src/runtime/alarms.test.ts`                | alarm purposes; failures, cancellation, and recovery          |
-| `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction     |
-| `src/models/index.test.ts`                  | provider credentials                                          |
-| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
-| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
+Check a Durable Object method that rejects inside the object with `rejectionInObject`
+(`src/helper/rpc.ts`): under the Vitest plugin, an RPC to an object that rejects leaves it with an
+active reference, and a later `evictDurableObject` on it times out. Public RPC rejection tests are
+retained, but currently emit unhandled-rejection and request-cancellation diagnostics under the
+plugin; see [workers-sdk #14736](https://github.com/cloudflare/workers-sdk/issues/14736). These
+logs are not suppressed, and a passing assertion does not mean this runtime issue is resolved.
+The current risk assessment permits these known diagnostics: a deliberately incorrect rejection
+assertion still fails the suite with exit code 1, and the local dev Worker rejects an unknown-agent
+management RPC without these diagnostics and continues serving snapshot, cancel, and seed calls.
+This is evidence for the tested paths, not a guarantee about every RPC failure. Do not generalize
+this allowance to new errors or timeouts; keep rejection assertions and the object-eviction tests.
 
-The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
-module it tests, describe the observable behavior it checks, and run `nr check` before submitting.
+| Path                                    | Contents                                                      |
+| --------------------------------------- | ------------------------------------------------------------- |
+| `src/helper/model.ts`                   | mocked OpenAI Responses streams: text, tool calls, inspection |
+| `src/helper/rpc.ts`                     | a scripted model, `waitForAnswer`, SSE readers, rejections    |
+| `src/helper/conversation.ts`            | a long conversation that compacts, for pruning tests          |
+| `src/helper/memory.ts`                  | the memory database, records, and the memory agent            |
+| `src/helper/management.ts`              | the seed, the owner, registry rows, and configuration changes |
+| `src/management/service/agents.test.ts` | creation, renames, listing, versions, conflicts, rollback     |
+| `src/management/service/seed.test.ts`   | the seed, the first agent, the memory agent's versions        |
+| `src/management/registry.test.ts`       | admission without object storage, and resolving references    |
+| `src/management/principals.test.ts`     | every kind of caller as a principal and actor; disabled ones  |
+| `src/management/db.test.ts`             | the D1 behaviors the management database relies on            |
+| `src/runtime/config-apply.test.ts`      | applying at idle, convergence, partial failures, restrictions |
+| `src/index.test.ts`                     | the entrypoint's HTTP refusal and the daily cron              |
+| `src/agent/agent.test.ts`               | the Agent RPC and input validation                            |
+| `src/runtime/events.test.ts`            | `send` and `subscribe` streams                                |
+| `src/runtime/alarms.test.ts`            | alarm purposes; failures, cancellation, and recovery          |
+| `src/configuration/index.test.ts`       | the settings schema, and versions applied across eviction     |
+| `src/models/index.test.ts`              | provider credentials                                          |
+| `cli/*.test.ts`                         | the CLI's commands, token, stream output, and adapter Worker  |
+| `drizzle/*/schema.test.ts`              | each schema matches its generated migrations                  |
+
+The memory tests are listed in [memory.md](memory.md#testing). Name every test file
+`<module>.test.ts` after the module it tests, in the same folder; describe the observable behavior it checks, and run `nr check` before submitting.
 
 ## Deployment
 
@@ -732,9 +755,11 @@ From `packages/agents`:
 1. Log in with `nr cf auth login`.
 2. Create the D1 databases `kodama-memory` and `kodama-management` and the R2 bucket
    `kodama-archive` that `cloudflare.config.ts` binds.
-3. Apply the migrations with `nr cf d1 migrations apply kodama-memory --dir drizzle/memory/migrations`
-   and `nr cf d1 migrations apply kodama-management --dir drizzle/management/migrations`, then check
-   that `nr cf d1 execute kodama-management --command "PRAGMA foreign_keys"` returns 1.
+3. Find the database IDs with `nr cf d1 list`; the pinned CLI requires IDs, not database or
+   binding names. Apply the migrations with
+   `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
+   `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
+   check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
 4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.

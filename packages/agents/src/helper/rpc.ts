@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { runInDurableObject } from 'cloudflare:test'
 import { exports } from 'cloudflare:workers'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 
@@ -36,6 +37,26 @@ export function modelResponseText(text = 'Hello from Kodama'): string {
 /** A model answer of `text`. */
 export function modelResponse(text = 'Hello from Kodama'): Response {
   return new Response(modelResponseText(text), { headers: { 'Content-Type': 'text/event-stream' } })
+}
+
+/**
+ * The error of a method that should reject, called inside the object; empty when it resolves.
+ *
+ * @remarks
+ * Under the Vitest plugin, a Durable Object RPC that rejects leaves the object with an active
+ * reference, so a later `evictDurableObject` on it times out after 30 seconds. Calling the method
+ * inside the object checks the same rejection without that.
+ */
+export function rejectionInObject<O extends Rpc.DurableObjectBranded>(
+  stub: DurableObjectStub<O>,
+  call: (instance: O) => Promise<unknown>,
+): Promise<string> {
+  return runInDurableObject(stub, (instance) =>
+    call(instance).then(
+      () => '',
+      (error: unknown) => String(error),
+    ),
+  )
 }
 
 /** Wait until the submission of `requestId` is done. */

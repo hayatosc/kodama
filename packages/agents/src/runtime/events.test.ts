@@ -1,6 +1,9 @@
-import { exports } from 'cloudflare:workers'
+import { runInDurableObject } from 'cloudflare:test'
+import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
 import { newAgentId } from '../helper/management.ts'
+import { PRUNE_LIMITS_KEY } from '../memory/prune/runs.ts'
+import { STORAGE_MAINTENANCE_ERROR } from './pruning.ts'
 import {
   decodeEvents,
   modelResponse,
@@ -192,4 +195,27 @@ it('closes a send stream with an unanswered receipt on provider failure', async 
     type: 'submission',
     data: { record: { status: 'unanswered' } },
   })
+})
+
+it('returns no stream when admission fails, and later streams still open', async () => {
+  const agentId = await newAgentId()
+  const stub = env.AGENTS.getByName(agentId)
+  await runInDurableObject(stub, (_i, state) =>
+    state.storage.put(PRUNE_LIMITS_KEY, { hardBytes: 0 }),
+  )
+
+  const refused = await runInDurableObject(stub, (instance) =>
+    instance.send({ requestId: 'refused', content: 'Hello' }).then(
+      () => '',
+      (error: unknown) => String(error),
+    ),
+  )
+
+  expect(refused).toContain(STORAGE_MAINTENANCE_ERROR)
+  const events = readEvents(await exports.default.subscribe(agentId))
+  try {
+    expect((await events.next()).type).toBe('snapshot')
+  } finally {
+    await events.cancel()
+  }
 })

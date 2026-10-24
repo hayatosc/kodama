@@ -6,7 +6,7 @@
 import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { newAgentId } from '../../helper/management.ts'
-import { db, memoryAgent, activeContents } from '../../helper/memory.ts'
+import { db, memoryAgent, activeContents, runScriptedJob } from '../../helper/memory.ts'
 import { waitForAnswer } from '../../helper/rpc.ts'
 import {
   isMemoryAgentRequest,
@@ -81,4 +81,39 @@ describe('extraction read bounds', () => {
       }
     },
   )
+})
+
+describe('job kinds', () => {
+  it('refuses the extraction and archive tools in a job of another kind', async () => {
+    const { outputs } = await runScriptedJob(
+      {
+        kind: 'remember',
+        sourceAgentId: crypto.randomUUID(),
+        origin: 'user_request',
+        content: 'Read my history',
+        sourceEntries: { from: 1, to: 1 },
+      },
+      [
+        { name: 'read_entries', arguments: {} },
+        { name: 'finish_extraction', arguments: { lastEntryId: 1 } },
+        { name: 'read_archive', arguments: {} },
+        { name: 'write_archive_summary', arguments: { summary: 'Nothing happened' } },
+      ],
+    )
+
+    expect(outputs[0]).toContain('read_entries needs an extract job')
+    expect(outputs[1]).toContain('finish_extraction needs an extract job')
+    expect(outputs[2]).toContain('This tool needs a record_archive job')
+    expect(outputs[3]).toContain('write_archive_summary needs a record_archive job')
+  })
+
+  it('fails a record_archive job whose segment is not in the catalog', async () => {
+    const segmentId = `missing-${crypto.randomUUID()}`
+    const { outputs } = await runScriptedJob(
+      { kind: 'record_archive', sourceAgentId: crypto.randomUUID(), segmentId },
+      [{ name: 'read_archive', arguments: {} }],
+    )
+
+    expect(outputs[0]).toContain(`Archived segment ${segmentId} is missing`)
+  })
 })

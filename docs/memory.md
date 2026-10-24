@@ -272,7 +272,8 @@ in `src/memory/consolidation.ts`, backed by queries in `src/memory/store/mainten
   `jobStatus`, and `consolidate`; `Agent` declares them and rejects, and `MemoryAgent` overrides
   them.
 - `sendMessage`, `send`, and `sendTo` throw, because input that bypassed the queue
-  would break "one job at a time". `cancel` stops the running job, which the runner retries like a
+  would break "one job at a time". `readEntries` and `memoryChanged` throw too: it keeps no memory
+  of its own, so nothing extracts its entries or refreshes its prompt. `cancel` stops the running job, which the runner retries like a
   failure.
 - Its model, prompt, and thinking level come from its configuration versions, like any agent's
   (see [agents.md](agents.md#configuration-versions)); its versions select no tools. The seed
@@ -592,7 +593,7 @@ end of each drain, because closing the harness mid-job would fail the job.
 
 Pruning writes to Pi's internal tables, described in
 [`src/storage/pi-tables.ts`](../packages/agents/src/storage/pi-tables.ts). The Pi Durable version
-is pinned. Re-run `prune/prune.test.ts` and `src/storage/pi-assumptions.test.ts` on every Pi upgrade.
+is pinned. Re-run `prune/prune.test.ts` and `src/runtime/harness.test.ts` on every Pi upgrade.
 
 ### Archive index
 
@@ -741,23 +742,25 @@ setup lives in `src/helper/memory.ts`. Paths below are relative to
 
 | Test file                                 | Covers                                                               |
 | ----------------------------------------- | -------------------------------------------------------------------- |
-| `store/records.test.ts`                   | operations: replays, conflicts, freshness, revision claims; search   |
-| `src/system-agents/memory/runner.test.ts` | jobs, `remember`, the role's RPC limits, the default model           |
+| `store/records.test.ts`                   | operations: replays, conflicts, freshness, revision claims, checks   |
+| `store/search.test.ts`                    | Japanese and English queries, scopes, precedence, usage counts       |
+| `src/system-agents/memory/runner.test.ts` | jobs, `remember`, redelivery, retries, recovery after eviction       |
+| `src/system-agents/memory/agent.test.ts`  | the role's RPC limits, the default model, its class                  |
 | `consolidation.test.ts`                   | merging duplicates and dropping old ledger rows                      |
 | `src/agent/memory.test.ts`                | extraction, the always-loaded copy, revision checks                  |
 | `src/runtime/alarms.test.ts`              | purposes coexist in one alarm                                        |
-| `prune/prune.test.ts`                     | pruning states, stops at each step, delete checks, the hard limit    |
+| `prune/prune.test.ts`                     | pruning states, stops, delete checks, the hard limit; evaluation     |
 | `archive/history.test.ts`                 | the `record_archive` summary of a segment, found by `history_search` |
-| `skills.test.ts`                          | writes and conflicts, `skill_read`, curation, the consolidate job    |
+| `store/skills.test.ts`                    | writes and conflicts, `skill_read`, curation, the consolidate job    |
 | `shared.test.ts`                          | shared spaces, overrides, required records, checked shared writes    |
-| `evaluation.test.ts`                      | probes after compaction, pruning, and eviction                       |
-| `src/storage/pi-assumptions.test.ts`      | behavior of Pi Durable and D1 that this design relies on             |
-| `drizzle/schema.test.ts`                  | the schemas match their generated migrations                         |
+| `src/runtime/harness.test.ts`             | behavior of Pi Durable that this design relies on                    |
+| `store/db.test.ts`                        | behavior of D1 that this design relies on                            |
+| `drizzle/*/schema.test.ts`                | each schema matches its generated migrations                         |
 
 ### Evaluation
 
-`src/memory/evaluation.test.ts` runs probe questions with a scripted model, after pruning and eviction.
-It checks the following:
+The `evaluation after pruning` tests in `prune/prune.test.ts` run probe questions with a scripted model, after pruning and eviction.
+They check the following:
 
 - the decision is in the always-loaded memory, and the early turns are in the summary;
 - `history_search` finds a word that only the pruned entries hold;
@@ -770,9 +773,8 @@ With a scripted model, these probes check what reaches the context, not how well
 
 ### Pi Durable assumptions
 
-The design relies on this behavior of Pi Durable 1.2.0 and D1. `src/storage/pi-assumptions.test.ts`
-pins
-the first three:
+The design relies on this behavior of Pi Durable 1.2.0 and D1. `src/runtime/harness.test.ts` pins
+the first two, and `store/db.test.ts` the third:
 
 - In Pi Durable 1.2.0, `reset()` resolves once the reset is admitted, not placed. A reset placed
   at a later boundary could cut the next job, or leak the previous job's context into it. With one

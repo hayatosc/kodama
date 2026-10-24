@@ -6,13 +6,13 @@ import {
   agentMembers,
   agents,
   auditLog,
-  principals,
 } from '../../../drizzle/management/schema.ts'
 import {
   managementService,
   caller,
   management,
   principalIdOf,
+  newAgentId,
   seedOnce,
 } from '../../helper/management.ts'
 import { useMockModel, waitForAnswer } from '../../helper/rpc.ts'
@@ -91,6 +91,20 @@ describe('createAgent', () => {
     expect(await rejection(taken)).toMatch(/slug is taken/)
   })
 
+  it('creates one agent for two concurrent deliveries of the same request', async () => {
+    const actor = await caller()
+    const request = { requestId: crypto.randomUUID(), displayName: 'Twice', slug: uniqueSlug() }
+
+    const [first, second] = await Promise.all([
+      managementService().createAgent(actor, request),
+      managementService().createAgent(actor, request),
+    ])
+
+    expect(second.agentId).toBe(first.agentId)
+    const rows = await management.select().from(agents).where(eq(agents.slug, request.slug))
+    expect(rows).toHaveLength(1)
+  })
+
   it('never accepts an ID from the caller', async () => {
     const actor = await caller()
     const withId = managementService().createAgent(actor, {
@@ -100,56 +114,6 @@ describe('createAgent', () => {
       agentId: crypto.randomUUID(),
     })
     expect(await rejection(withId)).toMatch(/requestId and displayName/)
-  })
-})
-
-describe('callers', () => {
-  it('lets an agent create and configure agents as a person does, and records it as the actor', async () => {
-    const { agentId: callerAgentId } = await create()
-    const actor = { kind: 'agent', externalId: callerAgentId } as const
-    const created = await managementService().createAgent(actor, {
-      requestId: crypto.randomUUID(),
-      displayName: 'Made by an agent',
-    })
-    const { settings } = await managementService().getConfig(actor, created.agentId)
-    await managementService().updateConfig(actor, created.agentId, {
-      requestId: crypto.randomUUID(),
-      settings: { ...settings, systemPrompt: 'Set by an agent' },
-      expectedVersion: 1,
-    })
-
-    const principalId = await principalIdOf(actor)
-    const row = await management
-      .select()
-      .from(principals)
-      .where(eq(principals.principalId, principalId))
-      .get()
-    expect(row).toMatchObject({ kind: 'agent', externalId: callerAgentId, systemRole: null })
-    const audit = await management
-      .select({ action: auditLog.action, actorId: auditLog.actorId })
-      .from(auditLog)
-      .where(eq(auditLog.targetId, created.agentId))
-    expect(audit).toEqual([
-      { action: 'agent.create', actorId: principalId },
-      { action: 'agent.activate', actorId: principalId },
-      { action: 'agent.config', actorId: principalId },
-    ])
-    const history = await managementService().configHistory(actor, created.agentId)
-    expect(history.map((entry) => entry.authorId)).toEqual([principalId, principalId])
-  })
-
-  it('accepts a person, a service, and an agent alike, and refuses a disabled principal', async () => {
-    const id = crypto.randomUUID()
-    for (const kind of ['user', 'service', 'agent'] as const) {
-      const actor = { kind, externalId: `${kind}-${id}` }
-      expect(Array.isArray(await managementService().listAgents(actor))).toBe(true)
-    }
-    const disabled = { kind: 'user', externalId: `user-${id}` } as const
-    await management
-      .update(principals)
-      .set({ disabledAt: Date.now() })
-      .where(eq(principals.externalId, disabled.externalId))
-    expect(await rejection(managementService().listAgents(disabled))).toMatch(/forbidden/)
   })
 })
 
@@ -183,6 +147,19 @@ describe('renameAgent', () => {
     expect(memory.map((row) => row.content)).toEqual(['Likes tea'])
     const cleared = await managementService().renameAgent(actor, agentId, { slug: null })
     expect(cleared.slug).toBeUndefined()
+  })
+
+  it('refuses a slug another agent has and keeps the old one', async () => {
+    const actor = await caller()
+    const taken = uniqueSlug()
+    await create('Holder', taken)
+    const slug = uniqueSlug()
+    const { agentId } = await create('Mover', slug)
+
+    const refused = managementService().renameAgent(actor, agentId, { slug: taken })
+
+    expect(await rejection(refused)).toMatch(`slug is taken: ${taken}`)
+    expect((await managementService().getAgent(actor, agentId)).slug).toBe(slug)
   })
 })
 
@@ -257,6 +234,33 @@ describe('configuration versions', () => {
     expect((await managementService().updateConfig(actor, agentId, request)).version).toBe(2)
     expect((await managementService().updateConfig(actor, agentId, request)).version).toBe(2)
     expect((await managementService().getAgent(actor, agentId)).desiredVersion).toBe(2)
+  })
+
+  it('answers two concurrent deliveries of one update with the same version', async () => {
+    const actor = await caller()
+    const { agentId } = await create()
+    const { settings } = await managementService().getConfig(actor, agentId)
+    const request = {
+      requestId: crypto.randomUUID(),
+      settings: { ...settings, systemPrompt: 'Concurrent' },
+      expectedVersion: 1,
+    }
+
+    const results = await Promise.all([
+      managementService().updateConfig(actor, agentId, request),
+      managementService().updateConfig(actor, agentId, request),
+    ])
+
+    expect(results.map((result) => result.version)).toEqual([2, 2])
+    expect((await managementService().getAgent(actor, agentId)).desiredVersion).toBe(2)
+  })
+
+  it('refuses to read the configuration of an agent with no version', async () => {
+    const agentId = await newAgentId()
+
+    const refused = managementService().getConfig(await caller(), agentId)
+
+    expect(await rejection(refused)).toMatch(`Agent ${agentId} has no configuration version`)
   })
 
   it('rolls back by writing the old content as a new version, and lists who changed what and when', async () => {

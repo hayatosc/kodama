@@ -4,17 +4,19 @@
  * @module
  */
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { URL } from 'node:url'
 
 /** Where the local token is stored. */
 export const tokenPath = new URL('../.cloudflare/cli-token', import.meta.url)
 
-/** Create a new token and store it, readable only by the owner. */
-export function createLocalToken(): string {
+/** Create a new token and store it at `path`, readable only by the owner. */
+export function createLocalToken(path: URL = tokenPath): string {
   const token = randomUUID()
-  mkdirSync(new URL('.', tokenPath), { recursive: true })
-  writeFileSync(tokenPath, token, { mode: 0o600 })
+  mkdirSync(new URL('.', path), { recursive: true })
+  writeFileSync(path, token, { mode: 0o600 })
+  // The write mode only applies when the file is first created.
+  chmodSync(path, 0o600)
   return token
 }
 
@@ -23,9 +25,11 @@ export function createLocalToken(): string {
  *
  * @throws {@link Error} When the local Worker has not created one yet.
  */
-export function readLocalToken(): string {
+export function readLocalToken(path: URL = tokenPath): string {
   try {
-    return readFileSync(tokenPath, 'utf8').trim()
+    const token = readFileSync(path, 'utf8').trim()
+    if (!token) throw new Error('Empty CLI token')
+    return token
   } catch {
     throw new Error('Start the local Worker first: nr dev:agents')
   }

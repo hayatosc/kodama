@@ -1,14 +1,17 @@
 /**
- * Memory jobs execute serially and only settled extractions without progress can be reopened.
+ * Memory jobs execute serially, only settled extractions without progress can be reopened, failed
+ * attempts are retried, and recovery uses Pi's durable submissions rather than duplicating their
+ * identity in the queue.
  *
  * @module
  */
-import { runInDurableObject } from 'cloudflare:test'
-import { env, exports } from 'cloudflare:workers'
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
+import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
-import { Agent } from '../../agent/agent.ts'
-import { MemoryAgent } from './agent.ts'
+import { and, eq } from 'drizzle-orm'
+import { memoryLedger } from '../../../drizzle/memory/schema.ts'
+import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
+import { JOB_RETRY_DELAYS_MS } from './runner.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
@@ -24,6 +27,7 @@ import {
   db,
 } from '../../helper/memory.ts'
 import { applyOperation } from '../../memory/store/records.ts'
+import { setAlarm } from '../../runtime/alarms.ts'
 import { openLocalDb } from '../../storage/local.ts'
 import { settleJob } from '../../storage/memory-jobs.ts'
 import { waitForAnswer } from '../../helper/rpc.ts'
@@ -181,45 +185,96 @@ describe('remember', () => {
     }
     expect(mixed).toEqual([])
   })
+})
 
-  it('takes input only through its job queue', async () => {
-    const rejection = (promise: Promise<unknown>) =>
-      promise.then(
-        () => undefined,
-        (error: unknown) => String(error),
-      )
-    expect(
-      await rejection(memoryAgent().sendMessage({ requestId: 'direct', content: 'Remember this' })),
-    ).toMatch(/enqueue/)
-    expect(await rejection(memoryAgent().enqueue({ kind: 'unknown' }))).toMatch(/Invalid type/)
-  })
-
-  it('uses the default model when MEMORY_MODEL_* are not set', async () => {
-    using config = await memoryAgent().getConfig()
-    expect(config.model).toEqual({
-      provider: env.DEFAULT_MODEL_PROVIDER,
-      modelId: env.DEFAULT_MODEL_ID,
-    })
-  })
-
-  it('is a MemoryAgent in the AGENTS namespace that public RPC cannot address', async () => {
-    const rejection = (promise: Promise<unknown>) =>
-      promise.then(
-        () => '',
-        (error: unknown) => String(error),
-      )
-    expect(await rejection(Promise.resolve(exports.default.snapshot(MEMORY_AGENT_NAME)))).toMatch(
-      /agentId/,
+describe('retries', () => {
+  it('queues a failed attempt again, and records a job that fails every attempt', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'bad', type: 'invalid_request_error' } }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
     )
-    const kinds = (instance: unknown) => [
-      instance instanceof Agent,
-      instance instanceof MemoryAgent,
-    ]
-    const working = env.AGENTS.getByName(crypto.randomUUID())
-    expect(await runInDurableObject(memoryAgent(), kinds)).toEqual([true, true])
-    expect(await runInDurableObject(working, kinds)).toEqual([true, false])
-    expect(
-      await rejection(working.enqueue({ kind: 'extract', sourceAgentId: 'a', afterEntry: 0 })),
-    ).toMatch(/Only the memory agent/)
+    const { jobId } = await memoryAgent().enqueue({
+      kind: 'remember',
+      sourceAgentId: crypto.randomUUID(),
+      origin: 'agent_judgment',
+      content: 'A job the model never answers',
+      sourceEntries: { from: 1, to: 1 },
+    })
+    const attempts = JOB_RETRY_DELAYS_MS.length + 1
+
+    for (let attempt = 1; attempt < attempts; attempt++) {
+      await expect
+        .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
+        .toMatchObject({ status: 'queued', attempts: attempt })
+      // Make the delayed retry due now rather than waiting for its delay.
+      await runInDurableObject(memoryAgent(), async (_instance, state) => {
+        const local = await openLocalDb(state.storage)
+        local.update(memoryJobs).set({ notBefore: 0 }).where(eq(memoryJobs.jobId, jobId)).run()
+        await setAlarm(state.storage, 'jobs', Date.now())
+      })
+      await runDurableObjectAlarm(memoryAgent())
+    }
+
+    await expect
+      .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'settled', outcome: 'failed', attempts })
+    const failure = await db
+      .select()
+      .from(memoryLedger)
+      .where(and(eq(memoryLedger.targetId, jobId), eq(memoryLedger.action, 'job_failed')))
+      .get()
+    expect(failure?.detailJson).toBe(JSON.stringify({ kind: 'remember', attempts }))
+  })
+})
+
+describe('memory job recovery', () => {
+  it('settles a completed Pi submission after eviction without another model call or write', async () => {
+    const sourceAgentId = await newAgentId()
+    const content = 'Deploy only after the checks pass.'
+    const model = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (_input, init) =>
+        toolResults(requestBody(init)) === 0
+          ? toolCallResponse({ name: 'memory_write', arguments: { kind: 'instruction', content } })
+          : textResponse('Saved.'),
+      )
+    const stub = memoryAgent()
+    const { jobId } = await stub.enqueue({
+      kind: 'remember',
+      sourceAgentId,
+      origin: 'user_request',
+      content,
+      sourceEntries: { from: 1, to: 1 },
+    })
+    await expect
+      .poll(async () => stub.jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'settled', outcome: 'persisted', attempts: 1 })
+    using original = await stub.submission(`${jobId}-1`)
+    expect(original?.status).toBe('done')
+    expect(model).toHaveBeenCalledTimes(2)
+
+    // Recreate a stop after Pi committed its result but before Kodama settled the job.
+    await runInDurableObject(stub, async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      local
+        .update(memoryJobs)
+        .set({ status: 'running', outcome: null, settledAt: null })
+        .where(eq(memoryJobs.jobId, jobId))
+        .run()
+      await setAlarm(state.storage, 'jobs', Date.now() + 60_000)
+    })
+    await evictDurableObject(stub)
+    await runDurableObjectAlarm(stub)
+
+    await expect
+      .poll(async () => stub.jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'settled', outcome: 'persisted', attempts: 1 })
+    using resumed = await stub.submission(`${jobId}-1`)
+    expect(resumed?.id).toBe(original?.id)
+    expect(await activeContents(sourceAgentId)).toEqual([content])
+    expect(model).toHaveBeenCalledTimes(2)
   })
 })

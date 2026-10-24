@@ -13,7 +13,7 @@ import {
   updateSettings,
 } from '../helper/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
-import { modelResponse, waitForAnswer } from '../helper/rpc.ts'
+import { modelResponse, rejectionInObject, waitForAnswer } from '../helper/rpc.ts'
 import { createAgentModels } from '../models/index.ts'
 import { currentTimeTool } from '../tools/current-time.ts'
 import { Agent } from '../agent/agent.ts'
@@ -177,11 +177,10 @@ describe('restrictions', () => {
     expect(execute).not.toHaveBeenCalled()
 
     const other = await newAgentId()
-    const sent = Promise.resolve(stub().sendTo(other, { requestId: 'm', content: 'Hello' })).then(
-      () => 'sent',
-      (error: unknown) => String(error),
+    const sent = await rejectionInObject(stub(), (agent) =>
+      agent.sendTo(other, { requestId: 'm', content: 'Hello' }),
     )
-    expect(await sent).toMatch(/agent_restricted/)
+    expect(sent).toMatch(/agent_restricted/)
 
     await stub().setStatus('active')
     vi.mocked(globalThis.fetch).mockImplementation(async () => modelResponse())

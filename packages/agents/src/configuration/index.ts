@@ -278,14 +278,6 @@ export async function readSharedSpaces(
   return stored.success ? stored.output : [...defaults]
 }
 
-/** Store the shared spaces an agent reads. */
-export function writeSharedSpaces(
-  storage: DurableObjectStorage,
-  spaces: readonly string[],
-): Promise<void> {
-  return storage.put(SHARED_SPACES_KEY, [...spaces])
-}
-
 /** The prompt of an agent nobody configured. */
 export const DEFAULT_SYSTEM_PROMPT = 'You are Kodama, a helpful and concise assistant.'
 

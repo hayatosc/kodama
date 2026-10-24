@@ -37,7 +37,7 @@ export const principals = sqliteTable('principals', {
 
 /** A working agent, or a dedicated agent under a reserved object name. */
 export const AGENT_KINDS = ['working', 'dedicated'] as const
-/** Lifecycle states; `AGENT_TRANSITIONS` in src/management/lifecycle.ts lists the allowed moves. */
+/** Lifecycle states; docs/agents.md (Lifecycle) lists the planned moves. */
 export const AGENT_STATUSES = [
   'provisioning',
   'active',

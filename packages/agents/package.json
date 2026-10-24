@@ -10,13 +10,14 @@
   },
   "scripts": {
     "cli": "node --experimental-strip-types cli/index.ts",
-    "dev": "cf dev",
+    "dev": "node --experimental-strip-types cli/migrate.ts && cf dev",
     "deploy": "cf deploy",
     "build": "cf build",
     "cf": "cf",
     "cf:types": "cf workers types",
     "typecheck": "cf workers types && tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "db:generate:memory": "drizzle-kit generate --config drizzle.memory.config.ts",
     "db:generate:durable-object": "drizzle-kit generate --config drizzle.durable-object.config.ts",
     "db:generate:management": "drizzle-kit generate --config drizzle.management.config.ts"
@@ -32,8 +33,10 @@
     "@cloudflare/vite-plugin": "^1.64.0",
     "@cloudflare/vitest-plugin": "1.4.1",
     "@types/node": "^26.6.5",
+    "@vitest/coverage-istanbul": "5.0.4",
     "cf": "1.0.0-beta.18",
     "drizzle-kit": "0.31.11",
+    "miniflare": "5.20261006.2-beta",
     "vite": "^8.3.4",
     "vitest": "5.0.4"
   }

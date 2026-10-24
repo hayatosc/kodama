@@ -1,5 +1,5 @@
 /**
- * Agent lifecycle states: the allowed moves, and what each state lets an agent do. The registry's
+ * Agent lifecycle states: what each state lets an agent do. The registry's
  * `agents.status` is the source; each object holds a copy, set through `Agent.setStatus`.
  *
  * @see docs/agents.md — Lifecycle
@@ -7,22 +7,6 @@
  * @module
  */
 import type { AgentStatus } from '../protocol.ts'
-
-/** The states each state may move to. Pause, archive, and delete are carried out by issue #5. */
-export const AGENT_TRANSITIONS: Readonly<Record<AgentStatus, readonly AgentStatus[]>> = {
-  provisioning: ['active', 'deleting'],
-  active: ['pausing', 'archived', 'deleting'],
-  pausing: ['paused', 'active'],
-  paused: ['active', 'archived', 'deleting'],
-  archived: ['active', 'deleting'],
-  deleting: ['deleted'],
-  deleted: [],
-}
-
-/** Whether an agent may move from `from` to `to`. */
-export function canTransition(from: AgentStatus, to: AgentStatus): boolean {
-  return AGENT_TRANSITIONS[from].includes(to)
-}
 
 /** What a public call wants to do with an agent. */
 export type AgentUse = 'chat' | 'read'

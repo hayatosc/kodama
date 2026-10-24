@@ -1,6 +1,8 @@
 /**
- * Behavior of Pi Durable 1.2.0 and D1 that the long-term memory design relies on
+ * Behavior of Pi Durable 1.2.0 that the harness and the long-term memory design rely on
  * (docs/memory.md, Pi Durable assumptions). Run these again on every Pi upgrade.
+ *
+ * @module
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
@@ -8,11 +10,8 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import type { HarnessOptions } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
-import { inArray } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../agent/config.ts'
-import { memoryDb } from '../memory/store/db.ts'
-import { memoryOps } from '../../drizzle/memory/schema.ts'
 import { createAgentModels } from '../models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -143,21 +142,4 @@ it('runs input submitted after an idle reset without the earlier context', async
   const last = bodies.at(-1) ?? ''
   expect(last).toContain('second-job-marker')
   expect(last).not.toContain('first-job-marker')
-})
-
-it('rolls back every statement of a D1 batch when one statement fails', async () => {
-  const db = memoryDb(env.MEMORY_DB)
-  const [a, b] = [crypto.randomUUID(), crypto.randomUUID()]
-  const op = (opId: string) =>
-    db
-      .insert(memoryOps)
-      .values({ opId, jobId: 'batch', op: 'test', resultJson: '{}', appliedAt: 0 })
-
-  await expect(db.batch([op(a), op(b), op(a)])).rejects.toThrow()
-
-  const stored = await db
-    .select()
-    .from(memoryOps)
-    .where(inArray(memoryOps.opId, [a, b]))
-  expect(stored).toEqual([])
 })
