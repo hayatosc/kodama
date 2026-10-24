@@ -8,7 +8,7 @@ import {
   auditLog,
 } from '../../../drizzle/management/schema.ts'
 import {
-  managementService,
+  agentService,
   caller,
   management,
   principalIdOf,
@@ -35,7 +35,7 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 }
 
 async function create(displayName = 'Researcher', slug?: string) {
-  return managementService().createAgent(await caller(), {
+  return agentService().createAgent(await caller(), {
     requestId: crypto.randomUUID(),
     displayName,
     ...(slug === undefined ? {} : { slug }),
@@ -81,10 +81,10 @@ describe('createAgent', () => {
   it('returns the first agent for a repeated requestId, and refuses a taken slug', async () => {
     const actor = await caller()
     const request = { requestId: crypto.randomUUID(), displayName: 'Once', slug: uniqueSlug() }
-    const first = await managementService().createAgent(actor, request)
-    const again = await managementService().createAgent(actor, request)
+    const first = await agentService().createAgent(actor, request)
+    const again = await agentService().createAgent(actor, request)
     expect(again.agentId).toBe(first.agentId)
-    const taken = managementService().createAgent(actor, {
+    const taken = agentService().createAgent(actor, {
       ...request,
       requestId: crypto.randomUUID(),
     })
@@ -96,8 +96,8 @@ describe('createAgent', () => {
     const request = { requestId: crypto.randomUUID(), displayName: 'Twice', slug: uniqueSlug() }
 
     const [first, second] = await Promise.all([
-      managementService().createAgent(actor, request),
-      managementService().createAgent(actor, request),
+      agentService().createAgent(actor, request),
+      agentService().createAgent(actor, request),
     ])
 
     expect(second.agentId).toBe(first.agentId)
@@ -112,7 +112,7 @@ describe('createAgent', () => {
       displayName: 'Chosen',
       agentId: crypto.randomUUID(),
     }
-    const withId = managementService().createAgent(actor, request)
+    const withId = agentService().createAgent(actor, request)
     expect(await rejection(withId)).toMatch(/requestId and displayName/)
   })
 })
@@ -132,12 +132,12 @@ describe('renameAgent', () => {
     })
     const slug = uniqueSlug()
 
-    const renamed = await managementService().renameAgent(actor, agentId, {
+    const renamed = await agentService().renameAgent(actor, agentId, {
       displayName: 'After',
       slug,
     })
     expect(renamed).toMatchObject({ agentId, displayName: 'After', slug, desiredVersion: 1 })
-    expect((await managementService().resolveAgent(actor, slug)).agentId).toBe(agentId)
+    expect((await agentService().resolveAgent(actor, slug)).agentId).toBe(agentId)
     const history = (await exports.default.snapshot(agentId)).snapshot.messages
     expect(history.filter((message) => message.role === 'user')).toHaveLength(1)
     const memory = await db
@@ -145,7 +145,7 @@ describe('renameAgent', () => {
       .from(memoryRecords)
       .where(eq(memoryRecords.scope, agentScope(agentId)))
     expect(memory.map((row) => row.content)).toEqual(['Likes tea'])
-    const cleared = await managementService().renameAgent(actor, agentId, { slug: null })
+    const cleared = await agentService().renameAgent(actor, agentId, { slug: null })
     expect(cleared.slug).toBeUndefined()
   })
 
@@ -156,10 +156,10 @@ describe('renameAgent', () => {
     const slug = uniqueSlug()
     const { agentId } = await create('Mover', slug)
 
-    const refused = managementService().renameAgent(actor, agentId, { slug: taken })
+    const refused = agentService().renameAgent(actor, agentId, { slug: taken })
 
     expect(await rejection(refused)).toMatch(`slug is taken: ${taken}`)
-    expect((await managementService().getAgent(actor, agentId)).slug).toBe(slug)
+    expect((await agentService().getAgent(actor, agentId)).slug).toBe(slug)
   })
 })
 
@@ -167,7 +167,7 @@ describe('listAgents and resolveAgent', () => {
   it('lists registry rows with desired and applied versions, and the memory agent as dedicated', async () => {
     const actor = await caller()
     const created = await create()
-    const listed = await managementService().listAgents(actor)
+    const listed = await agentService().listAgents(actor)
     expect(listed.find((row) => row.agentId === created.agentId)).toMatchObject({
       desiredVersion: 1,
       appliedVersion: 1,
@@ -177,11 +177,11 @@ describe('listAgents and resolveAgent', () => {
       kind: 'dedicated',
       desiredVersion: 1,
     })
-    const dedicated = await managementService().listAgents(actor, { kind: 'dedicated' })
+    const dedicated = await agentService().listAgents(actor, { kind: 'dedicated' })
     expect(dedicated.map((row) => row.agentId)).toEqual([MEMORY_AGENT_ID])
-    expect(
-      (await managementService().resolveAgent(actor, created.agentId.slice(0, 30))).agentId,
-    ).toBe(created.agentId)
+    expect((await agentService().resolveAgent(actor, created.agentId.slice(0, 30))).agentId).toBe(
+      created.agentId,
+    )
   })
 })
 
@@ -189,10 +189,10 @@ describe('configuration versions', () => {
   it('lets exactly one of two updates from the same version win, and leaves nothing of the other', async () => {
     const actor = await caller()
     const { agentId } = await create()
-    const { settings } = await managementService().getConfig(actor, agentId)
+    const { settings } = await agentService().getConfig(actor, agentId)
     const update = (systemPrompt: string) =>
       Promise.resolve(
-        managementService().updateConfig(actor, agentId, {
+        agentService().updateConfig(actor, agentId, {
           requestId: crypto.randomUUID(),
           settings: { ...settings, systemPrompt },
           expectedVersion: 1,
@@ -225,21 +225,21 @@ describe('configuration versions', () => {
   it('treats a resent update as the first one', async () => {
     const actor = await caller()
     const { agentId } = await create()
-    const { settings } = await managementService().getConfig(actor, agentId)
+    const { settings } = await agentService().getConfig(actor, agentId)
     const request = {
       requestId: crypto.randomUUID(),
       settings: { ...settings, systemPrompt: 'Once' },
       expectedVersion: 1,
     }
-    expect((await managementService().updateConfig(actor, agentId, request)).version).toBe(2)
-    expect((await managementService().updateConfig(actor, agentId, request)).version).toBe(2)
-    expect((await managementService().getAgent(actor, agentId)).desiredVersion).toBe(2)
+    expect((await agentService().updateConfig(actor, agentId, request)).version).toBe(2)
+    expect((await agentService().updateConfig(actor, agentId, request)).version).toBe(2)
+    expect((await agentService().getAgent(actor, agentId)).desiredVersion).toBe(2)
   })
 
   it('answers two concurrent deliveries of one update with the same version', async () => {
     const actor = await caller()
     const { agentId } = await create()
-    const { settings } = await managementService().getConfig(actor, agentId)
+    const { settings } = await agentService().getConfig(actor, agentId)
     const request = {
       requestId: crypto.randomUUID(),
       settings: { ...settings, systemPrompt: 'Concurrent' },
@@ -247,18 +247,18 @@ describe('configuration versions', () => {
     }
 
     const results = await Promise.all([
-      managementService().updateConfig(actor, agentId, request),
-      managementService().updateConfig(actor, agentId, request),
+      agentService().updateConfig(actor, agentId, request),
+      agentService().updateConfig(actor, agentId, request),
     ])
 
     expect(results.map((result) => result.version)).toEqual([2, 2])
-    expect((await managementService().getAgent(actor, agentId)).desiredVersion).toBe(2)
+    expect((await agentService().getAgent(actor, agentId)).desiredVersion).toBe(2)
   })
 
   it('refuses to read the configuration of an agent with no version', async () => {
     const agentId = await newAgentId()
 
-    const refused = managementService().getConfig(await caller(), agentId)
+    const refused = agentService().getConfig(await caller(), agentId)
 
     expect(await rejection(refused)).toMatch(`Agent ${agentId} has no configuration version`)
   })
@@ -267,24 +267,24 @@ describe('configuration versions', () => {
     const actor = await caller()
     const { agentId } = await create()
     const authorId = await principalIdOf(actor)
-    const v1 = await managementService().getConfig(actor, agentId)
-    await managementService().updateConfig(actor, agentId, {
+    const v1 = await agentService().getConfig(actor, agentId)
+    await agentService().updateConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
       settings: { ...v1.settings, systemPrompt: 'Changed' },
       expectedVersion: 1,
       comment: 'try a new prompt',
     })
-    const rolled = await managementService().rollbackConfig(actor, agentId, {
+    const rolled = await agentService().rollbackConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
       toVersion: 1,
       expectedVersion: 2,
     })
     expect(rolled.version).toBe(3)
-    expect((await managementService().getConfig(actor, agentId)).settings).toEqual(v1.settings)
+    expect((await agentService().getConfig(actor, agentId)).settings).toEqual(v1.settings)
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe(
       v1.settings.systemPrompt,
     )
-    const history = await managementService().configHistory(actor, agentId)
+    const history = await agentService().configHistory(actor, agentId)
     expect(
       history.map(({ version, authorId, comment }) => ({ version, authorId, comment })),
     ).toEqual([
@@ -294,7 +294,7 @@ describe('configuration versions', () => {
     ])
     for (const entry of history) expect(entry.createdAt).toBeGreaterThan(0)
     expect(
-      (await managementService().configHistory(actor, agentId, { before: 3, limit: 1 })).map(
+      (await agentService().configHistory(actor, agentId, { before: 3, limit: 1 })).map(
         (e) => e.version,
       ),
     ).toEqual([2])

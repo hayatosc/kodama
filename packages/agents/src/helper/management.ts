@@ -14,14 +14,14 @@ import type { ManagementActor, AgentSettings, ConfigWriteResult, SeedResult } fr
 /** The management database of the tests. */
 export const management = managementDb(env.MANAGEMENT_DB)
 
-/** The management entrypoint. */
-export const managementService = () => exports.ManagementService
+/** The default entrypoint, including its management methods. */
+export const agentService = () => exports.default
 
 let seeded: Promise<SeedResult> | undefined
 
 /** The seed's result; the first call of a test file seeds. */
 export function seedOnce(): Promise<SeedResult> {
-  seeded ??= managementService().seed()
+  seeded ??= agentService().seed()
   return seeded
 }
 
@@ -31,7 +31,7 @@ export async function caller(): Promise<ManagementActor> {
   return { kind: 'user', externalId: 'tester@example.com' }
 }
 
-/** The principal ID `ManagementService` recorded for `actor`. */
+/** The principal ID `AgentService` recorded for `actor`. */
 export async function principalIdOf(actor: ManagementActor): Promise<string> {
   const row = await management
     .select()
@@ -45,7 +45,7 @@ export async function principalIdOf(actor: ManagementActor): Promise<string> {
 /**
  * A new active working agent, written to the registry directly so RPC tests stay fast; its object
  * starts on the first call with the default configuration and no version. Use
- * `managementService().createAgent` to test creation itself.
+ * `agentService().createAgent` to test creation itself.
  */
 export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
   const now = Date.now()
@@ -66,7 +66,7 @@ export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
 export async function desiredSettings(agentId: string): Promise<AgentSettings> {
   const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   if (row === undefined || row.currentVersion === 0) return defaultAgentSettings(env)
-  return (await managementService().getConfig(await caller(), agentId)).settings
+  return (await agentService().getConfig(await caller(), agentId)).settings
 }
 
 /** Write a new version with `change` over the desired settings, as the caller. */
@@ -75,7 +75,7 @@ export async function updateSettings(
   change: Partial<AgentSettings>,
 ): Promise<ConfigWriteResult> {
   const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
-  return managementService().updateConfig(await caller(), agentId, {
+  return agentService().updateConfig(await caller(), agentId, {
     requestId: crypto.randomUUID(),
     settings: { ...(await desiredSettings(agentId)), ...change },
     expectedVersion: row?.currentVersion ?? 0,

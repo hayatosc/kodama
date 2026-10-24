@@ -14,8 +14,6 @@ const agentWorker = defineWorker({
   compatibilityDate: '2026-10-01',
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
-    // Agent management for the UI Worker and the development CLI (src/management/service/index.ts).
-    ManagementService: exports.worker(),
   },
   // Daily reconciliation (src/management/service/reconcile.ts), then memory consolidation
   // (src/memory/consolidation.ts).

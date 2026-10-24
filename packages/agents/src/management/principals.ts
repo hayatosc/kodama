@@ -1,8 +1,8 @@
 /**
- * Principals: the caller of `ManagementService` as a principal row. The calling Worker authenticates its
- * caller, and `ManagementService` trusts the actor it names; roles and permissions are issue #7.
+ * Principals: the caller of management RPC as a principal row. The calling Worker authenticates its
+ * caller, and `AgentService` trusts the actor it names; roles and permissions are issue #7.
  *
- * @see docs/agents.md — ManagementService
+ * @see docs/agents.md — Management RPC
  *
  * @module
  */
@@ -47,7 +47,7 @@ export async function principalOf(
   }
   const principal = known ?? (await principalRow(db, actor))
   if (principal === undefined || principal.disabledAt !== null) {
-    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} may not call ManagementService`)
+    throw new Error(`forbidden: ${actor.kind}:${actor.externalId} may not call management RPC`)
   }
   return principal
 }

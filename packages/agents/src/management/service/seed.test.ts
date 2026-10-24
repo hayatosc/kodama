@@ -8,7 +8,7 @@ import {
   principals,
   systemSettings,
 } from '../../../drizzle/management/schema.ts'
-import { managementService, management } from '../../helper/management.ts'
+import { agentService, management } from '../../helper/management.ts'
 import { activeContents, memoryAgent } from '../../helper/memory.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import { piEntries } from '../../storage/pi-tables.ts'
@@ -36,8 +36,8 @@ describe('seed', () => {
       await state.storage.put('test:marker', 'kept')
     })
 
-    const seeded = await managementService().seed()
-    const again = await managementService().seed()
+    const seeded = await agentService().seed()
+    const again = await agentService().seed()
     expect(again).toEqual(seeded)
     expect(seeded.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
@@ -83,35 +83,35 @@ describe('seed', () => {
       (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
     ).toBe(1)
 
-    const { settings: v1 } = await managementService().getConfig(actor, first.agentId)
+    const { settings: v1 } = await agentService().getConfig(actor, first.agentId)
     expect(v1.systemPrompt).toBe(FIRST_AGENT_PROMPT)
     await exports.default.sendMessage(first.agentId, { requestId: 'hi', content: 'Hello' })
     await waitForAnswer(first.agentId, 'hi')
   })
 
   it('keeps later changes to the first agent when it runs again', async () => {
-    await managementService().seed()
+    await agentService().seed()
     const { agentId } = await firstAgent()
-    const { settings } = await managementService().getConfig(actor, agentId)
-    const desired = (await managementService().getAgent(actor, agentId)).desiredVersion
-    await managementService().updateConfig(actor, agentId, {
+    const { settings } = await agentService().getConfig(actor, agentId)
+    const desired = (await agentService().getAgent(actor, agentId)).desiredVersion
+    await agentService().updateConfig(actor, agentId, {
       requestId: crypto.randomUUID(),
       settings: { ...settings, systemPrompt: 'Changed later' },
       expectedVersion: desired,
     })
-    await managementService().renameAgent(actor, agentId, { displayName: 'Renamed' })
-    await managementService().seed()
-    const after = await managementService().getAgent(actor, agentId)
+    await agentService().renameAgent(actor, agentId, { displayName: 'Renamed' })
+    await agentService().seed()
+    const after = await agentService().getAgent(actor, agentId)
     expect(after).toMatchObject({ displayName: 'Renamed', desiredVersion: desired + 1 })
-    expect((await managementService().getConfig(actor, agentId)).settings.systemPrompt).toBe(
+    expect((await agentService().getConfig(actor, agentId)).settings.systemPrompt).toBe(
       'Changed later',
     )
   })
 
   it('lets the memory agent take its model from its versions', async () => {
-    await managementService().seed()
-    const current = await managementService().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await managementService().updateConfig(actor, MEMORY_AGENT_ID, {
+    await agentService().seed()
+    const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
+    const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),
       settings: { ...current.settings, model: { provider: 'xai', modelId: 'grok-4.3' } },
       expectedVersion: current.version,
@@ -125,9 +125,9 @@ describe('seed', () => {
   })
 
   it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
-    await managementService().seed()
-    const current = await managementService().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await managementService().updateConfig(actor, MEMORY_AGENT_ID, {
+    await agentService().seed()
+    const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
+    const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: crypto.randomUUID(),
       settings: { ...current.settings, toolPolicy: { memory_write: 'deny' } },
       expectedVersion: current.version,

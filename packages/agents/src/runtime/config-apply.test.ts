@@ -6,7 +6,7 @@ import { agents } from '../../drizzle/management/schema.ts'
 import { reconcileAgents } from '../management/service/reconcile.ts'
 import { managementDb } from '../management/db.ts'
 import {
-  managementService,
+  agentService,
   management,
   newAgentId,
   caller,
@@ -71,7 +71,7 @@ describe('a version written while a turn runs', () => {
       systemPrompt: 'You are the new prompt.',
     })
     expect(written).toMatchObject({ version: 1, apply: { state: 'pending', appliedVersion: 0 } })
-    expect(await managementService().getAgent(await caller(), agentId)).toMatchObject({
+    expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
       desiredVersion: 1,
       appliedVersion: 0,
       pending: true,
@@ -98,7 +98,7 @@ describe('convergence', () => {
     vi.spyOn(Agent.prototype, 'applyConfig').mockRejectedValueOnce(new Error('push lost'))
     const written = await updateSettings(agentId, { systemPrompt: 'Pulled on open' })
     expect(written.apply.state).toBe('failed')
-    expect(await managementService().getAgent(await caller(), agentId)).toMatchObject({
+    expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
       desiredVersion: 1,
       appliedVersion: 0,
       pending: true,

@@ -3,15 +3,14 @@
  *
  * @module
  */
-import type { ManagementService } from '../src/management/service/index.ts'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseMessage } from '../src/validation.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
-type Management = Pick<ManagementService, 'seed' | 'resolveAgent'>
+type Management = Pick<AgentService, 'seed' | 'resolveAgent'>
 
-/** The actor the development CLI calls `ManagementService` as. */
+/** The actor the development CLI calls `AgentService` management methods as. */
 const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
 
 /**

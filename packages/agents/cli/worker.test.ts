@@ -7,8 +7,8 @@ import { createExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { AgentObject } from '../src/agent-object.ts'
-import { ManagementService as Service } from '../src/management/service/index.ts'
-import CliService, { Agent, ManagementService } from './worker.ts'
+import AgentService from '../src/index.ts'
+import CliService, { Agent } from './worker.ts'
 
 it('answers HTTP through the token-checked CLI adapter', async () => {
   // Outside development the Worker's token is empty, so the adapter admits no request.
@@ -19,7 +19,8 @@ it('answers HTTP through the token-checked CLI adapter', async () => {
   expect(response.status).toBe(401)
 })
 
-it('exports the same Durable Object and management service as the production Worker', () => {
+it('exports the same Durable Object and inherits the default service RPC', () => {
   expect(Agent).toBe(AgentObject)
-  expect(ManagementService).toBe(Service)
+  expect(CliService.prototype).toBeInstanceOf(AgentService)
+  expect(Object.getPrototypeOf(CliService.prototype)).toBe(AgentService.prototype)
 })

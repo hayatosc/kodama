@@ -13,7 +13,7 @@ import { defaultAgentSettings } from './configuration/index.ts'
 import { management, newAgentId } from './helper/management.ts'
 import { memoryAgent, write } from './helper/memory.ts'
 import { textResponse, toolCallResponse, toolResults, requestBody } from './helper/model.ts'
-import AgentService from './index.ts'
+import AgentService, * as entrypoint from './index.ts'
 import { consolidationDay } from './memory/consolidation.ts'
 import { jobId } from './memory/jobs.ts'
 import type { MemoryJob } from './memory/jobs.ts'
@@ -46,6 +46,27 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
 }
 
 describe('AgentService', () => {
+  it('exports only the default RPC entrypoint and the Durable Object class', () => {
+    expect(Object.keys(entrypoint).sort()).toEqual(['Agent', 'default'])
+    for (const method of [
+      'seed',
+      'createAgent',
+      'listAgents',
+      'getAgent',
+      'resolveAgent',
+      'renameAgent',
+      'getConfig',
+      'updateConfig',
+      'rollbackConfig',
+      'configHistory',
+      'sendMessage',
+      'snapshot',
+      'scheduled',
+    ]) {
+      expect(AgentService.prototype).toHaveProperty(method, expect.any(Function))
+    }
+  })
+
   it('answers HTTP with 404, since agents are reached only through RPC', async () => {
     const response = await exports.default.fetch('https://kodama.test/')
 

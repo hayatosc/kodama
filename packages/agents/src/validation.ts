@@ -5,6 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
 import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
 
@@ -66,7 +67,7 @@ export const DisplayNameSchema = v.pipe(
   v.maxLength(100, displayNameMessage),
 )
 
-/** The caller of `ManagementService`. */
+/** The caller of the management methods on `AgentService`. */
 export const ManagementActorSchema = v.strictObject(
   {
     kind: v.picklist(['user', 'service', 'agent'], 'actor.kind must be user, service, or agent'),
@@ -109,6 +110,51 @@ export const CommentSchema = v.optional(v.pipe(v.string(), v.maxLength(500)))
 /** A request ID: 1–128 letters, digits, `_`, or `-`. */
 export const RequestIdSchema = idSchema('requestId', 128)
 
+/** Creation input; the flow validates settings against the model catalog. */
+export const CreateAgentSchema = v.strictObject(
+  {
+    requestId: RequestIdSchema,
+    displayName: DisplayNameSchema,
+    slug: v.optional(SlugSchema),
+    settings: v.optional(v.unknown()),
+  },
+  'Expected requestId and displayName',
+)
+
+/** A configuration update with optimistic version checking. */
+export const UpdateConfigSchema = v.strictObject(
+  {
+    requestId: RequestIdSchema,
+    settings: v.unknown(),
+    expectedVersion: ExpectedVersionSchema,
+    comment: CommentSchema,
+  },
+  'Expected requestId, settings, and expectedVersion',
+)
+
+/** A rollback writes a new version from a historical version. */
+export const RollbackConfigSchema = v.strictObject(
+  {
+    requestId: RequestIdSchema,
+    toVersion: VersionSchema,
+    expectedVersion: ExpectedVersionSchema,
+    comment: CommentSchema,
+  },
+  'Expected requestId, toVersion, and expectedVersion',
+)
+
+/** Optional registry filters. */
+export const ListFilterSchema = v.strictObject({
+  kind: v.optional(v.picklist(AGENT_KINDS)),
+  status: v.optional(v.picklist(AGENT_STATUSES)),
+})
+
+/** A page of configuration versions. */
+export const HistoryPageSchema = v.strictObject({
+  before: v.optional(VersionSchema),
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+})
+
 const MESSAGE_CONTENT_MAX_LENGTH = 16_000
 const contentMessage = `content must contain 1–${MESSAGE_CONTENT_MAX_LENGTH} characters and cannot be blank`
 
@@ -145,7 +191,7 @@ export function parseAgentRef(value: unknown): string {
 }
 
 /**
- * Parse the caller of `ManagementService`.
+ * Parse the caller of the management methods on `AgentService`.
  *
  * @throws {@link TypeError} When `value` is not an actor.
  */

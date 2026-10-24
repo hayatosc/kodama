@@ -90,9 +90,9 @@ describe('agent RPC', () => {
   })
 })
 
-it('exposes no configuration on AgentService; ManagementService owns it', () => {
-  expectTypeOf(exports.default).not.toHaveProperty('getConfig')
+it('exposes versioned configuration on the same service as conversations', () => {
+  expectTypeOf(exports.default).toHaveProperty('getConfig')
   expectTypeOf(exports.default).not.toHaveProperty('setConfig')
-  expect(AgentService.prototype).not.toHaveProperty('getConfig')
+  expect(AgentService.prototype).toHaveProperty('getConfig')
   expect(AgentService.prototype).not.toHaveProperty('setConfig')
 })

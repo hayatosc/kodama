@@ -17,13 +17,13 @@ import { check, index, integer, primaryKey, sqliteTable, text } from 'drizzle-or
 
 /**
  * Who can act: a person signed in through Access, a service token, or an agent. A principal is
- * registered on its first `ManagementService` call.
+ * registered on its first management RPC call.
  */
 export const PRINCIPAL_KINDS = ['user', 'service', 'agent'] as const
 /** The installation-wide role; roles on one agent are in `agent_members`. */
 export const SYSTEM_ROLES = ['owner'] as const
 
-/** People and services that call `ManagementService`. */
+/** People and services that call management RPC. */
 export const principals = sqliteTable('principals', {
   principalId: text('principal_id').primaryKey(),
   kind: text('kind', { enum: PRINCIPAL_KINDS }).notNull(),

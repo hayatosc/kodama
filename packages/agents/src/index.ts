@@ -1,6 +1,6 @@
 /**
- * The agents Worker's entrypoint: `AgentService` for trusted Workers, `ManagementService` for
- * managing agents, and the `Agent` Durable Object class.
+ * The agents Worker's single default entrypoint: `AgentService` for conversation and management
+ * RPC, alongside the `Agent` Durable Object class.
  *
  * @see docs/agents.md — RPC contract
  *
@@ -13,6 +13,16 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
+  ManagementActor,
+  AgentStatus,
+  AgentSummary,
+  ConfigVersion,
+  ConfigWriteResult,
+  CreateAgentRequest,
+  RenameAgentRequest,
+  RollbackConfigRequest,
+  SeedResult,
+  UpdateConfigRequest,
 } from './protocol.ts'
 import { reconcileAgents } from './management/service/reconcile.ts'
 import { managementDb } from './management/db.ts'
@@ -20,10 +30,23 @@ import type { AgentUse } from './management/lifecycle.ts'
 import { admitAgent } from './management/registry.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './models/index.ts'
-import { parseAgentId } from './validation.ts'
-
-/** Management: the agent registry, configuration versions, and the seed. */
-export { ManagementService } from './management/service/index.ts'
+import type { PrincipalRow } from './management/db.ts'
+import { principalOf } from './management/principals.ts'
+import * as flows from './management/service/agents.ts'
+import type { ManagementCall } from './management/service/agents.ts'
+import { seed } from './management/service/seed.ts'
+import {
+  CreateAgentSchema,
+  UpdateConfigSchema,
+  RollbackConfigSchema,
+  ListFilterSchema,
+  HistoryPageSchema,
+  RenameAgentSchema,
+  parseManagementActor,
+  parseAgentId,
+  parseAgentRef,
+  parseInput,
+} from './validation.ts'
 
 /**
  * The one Durable Object class, bound as `AGENTS`: a working agent, or the dedicated agent registered
@@ -35,10 +58,12 @@ export { AgentObject as Agent } from './agent-object.ts'
  * Service-binding RPC entrypoint for the UI server and other trusted Workers.
  *
  * @remarks
- * Each method validates the agent ID, admits it from the registry, and forwards to that agent's
- * Durable Object. Only UUIDs of working agents in the registry are admitted, so an unknown ID never
- * creates an object and dedicated agents such as the memory agent are unreachable. There is no
- * public HTTP interface, and configuration is read and written only through `ManagementService`.
+ * Conversation methods admit registered working-agent UUIDs before forwarding to Durable Objects;
+ * unknown IDs never create objects, and dedicated agents cannot be addressed through those methods.
+ * Management methods validate their input and call the registry flows. The calling Worker
+ * authenticates callers and supplies their actor; all management methods except seed resolve that
+ * actor to a principal and reject disabled principals. Roles and permissions are issue #7.
+ * There is no public HTTP interface.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   /** Reject HTTP requests: agents are reached only through RPC. */
@@ -80,6 +105,161 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       use,
     )
     return this.env.AGENTS.getByName(objectName)
+  }
+
+  /** The call of the system, before any principal exists. */
+  #systemCall(): ManagementCall {
+    return {
+      env: this.env,
+      db: managementDb(this.env.MANAGEMENT_DB),
+      models: createAgentModels(this.env),
+      principal: null,
+      now: Date.now(),
+    }
+  }
+
+  /**
+   * The call of `actor`, as the principal it names.
+   *
+   * @throws {@link TypeError} When `actor` is malformed.
+   * @throws {@link Error} Starting `forbidden:`, when the principal is disabled.
+   */
+  async #call(actor: unknown): Promise<ManagementCall & { principal: PrincipalRow }> {
+    const call = this.#systemCall()
+    const principal = await principalOf(call.db, parseManagementActor(actor), call.now)
+    return { ...call, principal }
+  }
+
+  /**
+   * Create the installation's starting rows if missing: the installation ID, the memory agent with
+   * its version 1, and the first agent. Idempotent.
+   */
+  async seed(): Promise<SeedResult> {
+    return seed(this.#systemCall())
+  }
+
+  /**
+   * Create a working agent; the server assigns its UUID.
+   *
+   * @throws {@link TypeError} When the request is invalid or the slug is taken.
+   */
+  async createAgent(actor: ManagementActor, request: CreateAgentRequest): Promise<AgentSummary> {
+    const call = await this.#call(actor)
+    const input = parseInput(CreateAgentSchema, request)
+    return flows.createAgent(call, {
+      requestId: input.requestId,
+      displayName: input.displayName,
+      ...(input.slug === undefined ? {} : { slug: input.slug }),
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+    })
+  }
+
+  /** Registry rows, newest first, with desired and applied versions. */
+  async listAgents(
+    actor: ManagementActor,
+    filter: { kind?: 'working' | 'dedicated'; status?: AgentStatus } = {},
+  ): Promise<AgentSummary[]> {
+    return flows.listAgents(await this.#call(actor), parseInput(ListFilterSchema, filter))
+  }
+
+  /**
+   * One registry row, with desired and applied versions.
+   *
+   * @throws {@link TypeError} When the agent is unknown.
+   */
+  async getAgent(actor: ManagementActor, agentId: string): Promise<AgentSummary> {
+    return flows.getAgent(await this.#call(actor), parseAgentId(agentId))
+  }
+
+  /**
+   * The agent a UUID, slug, or unique UUID prefix names.
+   *
+   * @throws {@link TypeError} When nothing matches, or a prefix is ambiguous (with candidates).
+   */
+  async resolveAgent(actor: ManagementActor, ref: string): Promise<AgentSummary> {
+    return flows.resolveAgent(await this.#call(actor), parseAgentRef(ref))
+  }
+
+  /**
+   * Change the display name or slug; the UUID never changes.
+   *
+   * @throws {@link TypeError} When the agent is unknown, the change is invalid, or the slug is taken.
+   */
+  async renameAgent(
+    actor: ManagementActor,
+    agentId: string,
+    change: RenameAgentRequest,
+  ): Promise<AgentSummary> {
+    return flows.renameAgent(
+      await this.#call(actor),
+      parseAgentId(agentId),
+      parseInput(RenameAgentSchema, change),
+    )
+  }
+
+  /**
+   * The desired configuration version.
+   *
+   * @throws {@link TypeError} When the agent is unknown.
+   */
+  async getConfig(actor: ManagementActor, agentId: string): Promise<ConfigVersion> {
+    return flows.getConfig(await this.#call(actor), parseAgentId(agentId))
+  }
+
+  /**
+   * Write a new version on top of `expectedVersion` and push it; it applies from the agent's next
+   * turn.
+   *
+   * @throws {@link TypeError} When the agent is unknown or the request is invalid.
+   * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
+   */
+  async updateConfig(
+    actor: ManagementActor,
+    agentId: string,
+    request: UpdateConfigRequest,
+  ): Promise<ConfigWriteResult> {
+    const call = await this.#call(actor)
+    const input = parseInput(UpdateConfigSchema, request)
+    return flows.updateConfig(call, parseAgentId(agentId), {
+      requestId: input.requestId,
+      settings: input.settings,
+      expectedVersion: input.expectedVersion,
+      ...(input.comment === undefined ? {} : { comment: input.comment }),
+    })
+  }
+
+  /** Versions newest first: who changed what, and when. */
+  async configHistory(
+    actor: ManagementActor,
+    agentId: string,
+    page: { before?: number; limit?: number } = {},
+  ): Promise<ConfigVersion[]> {
+    return flows.configHistory(
+      await this.#call(actor),
+      parseAgentId(agentId),
+      parseInput(HistoryPageSchema, page),
+    )
+  }
+
+  /**
+   * Write the settings of `toVersion` as a new version and push it.
+   *
+   * @throws {@link TypeError} When the agent or the version is unknown.
+   * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
+   */
+  async rollbackConfig(
+    actor: ManagementActor,
+    agentId: string,
+    request: RollbackConfigRequest,
+  ): Promise<ConfigWriteResult> {
+    const call = await this.#call(actor)
+    const input = parseInput(RollbackConfigSchema, request)
+    return flows.rollbackConfig(call, parseAgentId(agentId), {
+      requestId: input.requestId,
+      toVersion: input.toVersion,
+      expectedVersion: input.expectedVersion,
+      ...(input.comment === undefined ? {} : { comment: input.comment }),
+    })
   }
 
   /** An SSE stream of the agent's events, starting with a snapshot. */

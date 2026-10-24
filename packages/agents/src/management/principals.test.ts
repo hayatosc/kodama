@@ -7,7 +7,7 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { auditLog, principals } from '../../drizzle/management/schema.ts'
-import { caller, management, managementService, principalIdOf } from '../helper/management.ts'
+import { caller, management, agentService, principalIdOf } from '../helper/management.ts'
 import { useMockModel } from '../helper/rpc.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -22,7 +22,7 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 }
 
 async function create() {
-  return managementService().createAgent(await caller(), {
+  return agentService().createAgent(await caller(), {
     requestId: crypto.randomUUID(),
     displayName: 'Caller',
   })
@@ -32,12 +32,12 @@ describe('callers', () => {
   it('lets an agent create and configure agents as a person does, and records it as the actor', async () => {
     const { agentId: callerAgentId } = await create()
     const actor = { kind: 'agent', externalId: callerAgentId } as const
-    const created = await managementService().createAgent(actor, {
+    const created = await agentService().createAgent(actor, {
       requestId: crypto.randomUUID(),
       displayName: 'Made by an agent',
     })
-    const { settings } = await managementService().getConfig(actor, created.agentId)
-    await managementService().updateConfig(actor, created.agentId, {
+    const { settings } = await agentService().getConfig(actor, created.agentId)
+    await agentService().updateConfig(actor, created.agentId, {
       requestId: crypto.randomUUID(),
       settings: { ...settings, systemPrompt: 'Set by an agent' },
       expectedVersion: 1,
@@ -59,7 +59,7 @@ describe('callers', () => {
       { action: 'agent.activate', actorId: principalId },
       { action: 'agent.config', actorId: principalId },
     ])
-    const history = await managementService().configHistory(actor, created.agentId)
+    const history = await agentService().configHistory(actor, created.agentId)
     expect(history.map((entry) => entry.authorId)).toEqual([principalId, principalId])
   })
 
@@ -67,13 +67,13 @@ describe('callers', () => {
     const id = crypto.randomUUID()
     for (const kind of ['user', 'service', 'agent'] as const) {
       const actor = { kind, externalId: `${kind}-${id}` }
-      expect(Array.isArray(await managementService().listAgents(actor))).toBe(true)
+      expect(Array.isArray(await agentService().listAgents(actor))).toBe(true)
     }
     const disabled = { kind: 'user', externalId: `user-${id}` } as const
     await management
       .update(principals)
       .set({ disabledAt: Date.now() })
       .where(eq(principals.externalId, disabled.externalId))
-    expect(await rejection(managementService().listAgents(disabled))).toMatch(/forbidden/)
+    expect(await rejection(agentService().listAgents(disabled))).toMatch(/forbidden/)
   })
 })

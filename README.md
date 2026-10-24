@@ -6,7 +6,7 @@ Each agent has a server-issued UUID, its `agentId`, in a registry in the managem
 and addresses **one agent = one Durable Object**. The object owns its SQLite-backed Pi session,
 conversation history, inbox, recovery alarm, and applied configuration version. The seed creates
 the first agent, a general-purpose assistant. People, services, and agents manage agents alike
-through `ManagementService`. Agent orchestration and model-invoked delegation tools can be added on top
+through the same default `AgentService`. Agent orchestration and model-invoked delegation tools can be added on top
 of the RPC transport.
 
 ```text
@@ -17,7 +17,7 @@ packages/
     src/index.ts          Service-binding RPC entrypoint (AgentService)
     src/management/       The management database: registry, admission, versions, lifecycle
     src/management/service/
-                          ManagementService: registry, configuration versions, seed, reconciliation
+                          AgentService management: registry, configuration versions, seed, reconciliation
     src/lib/              Generic helpers that import nothing else from src/
     src/agent/            Agent RPC, working-agent options, and memory integration
     src/runtime/          Shared execution: Pi harness, SSE, alarms, configuration, pruning
@@ -59,7 +59,7 @@ nr dev:agents
 calls use a Worker service binding or DO binding; local CLI access is described below.
 The initial model uses `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` in
 `cloudflare.config.ts`. Defaults apply only to new agents. Each agent's configuration is a
-sequence of versions in the management database, changed through `ManagementService`.
+sequence of versions in the management database, changed through `AgentService`.
 
 ```sh
 nr check
@@ -189,11 +189,7 @@ import { bindings } from 'cf/config'
 
 // Add to the UI Worker's env configuration:
 const agentBinding = bindings.worker({ worker: agents.worker })
-const managementBinding = bindings.worker({
-  worker: agents.worker,
-  exportName: 'ManagementService',
-})
-// env: { AGENT_SERVICE: agentBinding, MANAGEMENT: managementBinding } — the UI Worker binds no D1
+// env: { AGENT_SERVICE: agentBinding } — conversation and management; the UI Worker binds no D1
 ```
 
 ```ts
@@ -217,7 +213,7 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
 `kodama-management` and apply their migrations, configure each provider's Worker secret (for
 example, `nr cf workers secrets update OPENAI_API_KEY`), deploy with `nr deploy`, and call
-`ManagementService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
+`AgentService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
 Use `nr cf workers secrets update --help` for the pinned CLI's input options.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin;
 Wrangler is only a transitive dependency of Cloudflare's tooling.
@@ -232,8 +228,8 @@ Wrangler is only a transitive dependency of Cloudflare's tooling.
 
 ```ts
 const actor = { kind: 'user', externalId: 'you@example.com' } as const
-const { version, settings } = await env.MANAGEMENT.getConfig(actor, agentId)
-await env.MANAGEMENT.updateConfig(actor, agentId, {
+const { version, settings } = await env.AGENT_SERVICE.getConfig(actor, agentId)
+await env.AGENT_SERVICE.updateConfig(actor, agentId, {
   requestId: crypto.randomUUID(),
   settings: {
     ...settings,
@@ -245,7 +241,7 @@ await env.MANAGEMENT.updateConfig(actor, agentId, {
 ```
 
 Configuration is a sequence of immutable versions in the management database, read and written only
-through `ManagementService`. A new version takes effect from the agent's next turn, without a restart
+through `AgentService`. A new version takes effect from the agent's next turn, without a restart
 or a deploy, even if the agent is busy when it is written; `getAgent` shows the desired and
 applied versions separately until they converge. Two updates from the same version conflict:
 exactly one succeeds. `rollbackConfig` writes an old version's content as a new version. The

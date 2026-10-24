@@ -29,7 +29,7 @@ export function agentRowByObjectName(db: ManagementDb, objectName: string) {
   return db.select().from(agents).where(eq(agents.objectName, objectName)).get()
 }
 
-/** A registry row as `ManagementService` returns it. */
+/** A registry row as `AgentService` returns it. */
 export function summaryOf(row: AgentRow): AgentSummary {
   return {
     agentId: row.agentId,

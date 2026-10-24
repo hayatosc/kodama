@@ -1,8 +1,8 @@
 /**
  * The management flows of the agent registry and configuration versions. Each takes the call
- * `ManagementService` authorized and the already-validated input.
+ * `AgentService` authorized and the already-validated input.
  *
- * @see docs/agents.md — ManagementService
+ * @see docs/agents.md — Management RPC
  *
  * @module
  */
@@ -50,7 +50,7 @@ function actorId(call: ManagementCall): string | null {
   return call.principal?.principalId ?? null
 }
 
-/** A stored version as `ManagementService` returns it. */
+/** A stored version as `AgentService` returns it. */
 function configVersionOf(models: Models, row: VersionRow): ConfigVersion {
   return {
     version: row.version,
