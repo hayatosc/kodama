@@ -2,9 +2,10 @@
 
 Pi Durable agents on Cloudflare Durable Objects, managed with the `cf` CLI.
 
-Each `agentId` addresses **one agent = one Durable Object**. The object owns its
-SQLite-backed Pi session, conversation history, inbox, and recovery alarm.
-The initial agent has one root conversation and an OpenAI model. Agent orchestration
+Each agent has a server-issued UUID, its `agentId`, in a registry in the control D1 database,
+and addresses **one agent = one Durable Object**. The object owns its SQLite-backed Pi session,
+conversation history, inbox, recovery alarm, and applied configuration version. The seed creates
+the first agent, a general-purpose assistant that is also the installation's administrator. Agent orchestration
 and model-invoked delegation tools can be added on top of the RPC transport.
 
 ```text
@@ -12,11 +13,13 @@ packages/
   agents/                 @kodama/agents: RPC Worker and Durable Objects
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
     drizzle/              Drizzle schemas and their generated migrations, per database
-    src/index.ts          Service-binding RPC entrypoint
+    src/index.ts          Service-binding RPC entrypoint (AgentService)
+    src/admin/            AdminService: registry, configuration versions, seed, reconciliation
+    src/control/          The control database: registry, admission, versions, lifecycle
     src/lib/              Generic helpers that import nothing else from src/
     src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
     src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
-    src/configuration/    Per-agent configuration validation and persistence
+    src/configuration/    Configuration versions: settings, validation, and the applied parts
     src/models/           Pi provider catalog and Worker credential resolution
     src/tools/            Tool implementations and registration
     src/memory/           Long-term memory: store, tools, pruning, archive, and skills
@@ -48,8 +51,8 @@ nr dev:agents
 `cf dev` starts the Vite-powered Worker. There is no browser page. Production
 calls use a Worker service binding or DO binding; local CLI access is described below.
 The initial model uses `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` in
-`cloudflare.config.ts`. Defaults apply only to new agents. Each agent persists its
-own configuration in Pi Durable and can change it through RPC.
+`cloudflare.config.ts`. Defaults apply only to new agents. Each agent's configuration is a
+sequence of versions in the control database, changed through `AdminService`.
 
 ```sh
 nr check
@@ -70,13 +73,16 @@ Configure provider credentials in `packages/agents/.dev.vars`, then start
 `nr dev:agents`. In another terminal, run these commands from the repository root:
 
 ```sh
+nr agent seed
 nr agent send assistant "Hello!"
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
 ```
 
-The same agent ID retains its conversation in local Durable Object storage.
+`seed` creates the administrator agent, slug `assistant`; a `send` to a slug runs it first if
+needed. An agent is named by its UUID, its slug, or a unique UUID prefix, and it retains its
+conversation in local Durable Object storage.
 `send` prints assistant text as it arrives and exits nonzero on model failure or
 an interrupted stream. Request IDs appear on stderr. To retry a delivery without
 duplicating input, pass the original ID and identical content:
@@ -111,13 +117,11 @@ The default `AgentService` Worker exposes:
 | `subscribe(agentId)`                           | Continuous agent-wide SSE observation        |
 | `sendMessage(agentId, { requestId, content })` | Durable acceptance with `submissionId`       |
 | `submission(agentId, requestId)`               | Submission status, or `undefined`            |
-| `getConfig(agentId)`                           | Persisted agent configuration                |
-| `setConfig(agentId, config)`                   | Replace configuration while idle             |
 | `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
 | `cancel(agentId)`                              | Stop current work; resolves once idle        |
 
-Agent IDs contain 1–64 letters, digits, `_`, or `-`. Request IDs use the same
-characters, up to 128. Messages must be nonblank and at most 16000 characters.
+Agent IDs are lowercase UUIDs from the registry; an ID that is not registered is rejected
+before any Durable Object is created. Request IDs contain 1–128 letters, digits, `_`, or `-`. Messages must be nonblank and at most 16000 characters.
 Reuse the same request ID and content to retry a delivery; use a new request ID
 for a new turn. Request IDs are scoped to the receiving agent's root conversation.
 Input arriving while an agent is busy is queued by Pi Durable. Messages accept an
@@ -126,7 +130,7 @@ The default, `followUp`, waits for the current run to answer and starts the next
 Use `steer` to join the current run after its current tool round, for example:
 
 ```ts
-await env.AGENT_SERVICE.sendMessage('assistant', {
+await env.AGENT_SERVICE.sendMessage(agentId, {
   requestId: crypto.randomUUID(),
   content: 'Prioritize the failing tests.',
   whenBusy: 'steer',
@@ -154,11 +158,10 @@ credentials or exhausted quota settle the turn as `unanswered`.
 Esc in opencode. It stops the current run, including an in-flight model request
 or a retry wait, and withdraws queued input. Those submissions settle as
 `unanswered`, and open `send()` streams close with that receipt. History and
-configuration are kept, so `setConfig` and new messages work immediately after.
+configuration are kept, so a held configuration version and new messages apply immediately after.
 
-Inside an agent, `this.env.AGENTS.getByName(targetId).sendMessage(message)` calls
-the target's public method over Durable Object RPC. `Agent.sendTo(targetId, message)`
-exposes this delivery path for callers and future orchestration. It acknowledges
+`Agent.sendTo(targetId, message)` admits the target from the registry and calls its
+`sendMessage` over Durable Object RPC, for callers and future orchestration. It acknowledges
 durable admission rather than waiting for the target model to finish. This is a
 transport primitive, not a durable multi-agent workflow or automatic LLM tool.
 
@@ -179,12 +182,13 @@ import { bindings } from 'cf/config'
 
 // Add to the UI Worker's env configuration:
 const agentBinding = bindings.worker({ worker: agents.worker })
-// env: { AGENT_SERVICE: agentBinding }
+const adminBinding = bindings.worker({ worker: agents.worker, exportName: 'AdminService' })
+// env: { AGENT_SERVICE: agentBinding, ADMIN: adminBinding } — the UI Worker binds no D1
 ```
 
 ```ts
 // Inside the UI's server-side handler:
-const stream = await env.AGENT_SERVICE.send('assistant', {
+const stream = await env.AGENT_SERVICE.send(agentId, {
   requestId: crypto.randomUUID(),
   content: 'Hello',
 })
@@ -200,8 +204,10 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 
 ## Deployment
 
-From `packages/agents`, use `nr cf auth login`, configure each provider's Worker
-secret (for example, `nr cf workers secrets update OPENAI_API_KEY`), and deploy with `nr deploy`.
+From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
+`kodama-control` and apply their migrations, configure each provider's Worker secret (for
+example, `nr cf workers secrets update OPENAI_API_KEY`), deploy with `nr deploy`, and call
+`AdminService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
 Use `nr cf workers secrets update --help` for the pinned CLI's input options.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin;
 Wrangler is only a transitive dependency of Cloudflare's tooling.
@@ -215,21 +221,26 @@ Wrangler is only a transitive dependency of Cloudflare's tooling.
 ## Per-agent configuration and providers
 
 ```ts
-using config = await env.AGENT_SERVICE.getConfig('researcher')
-using updated = await env.AGENT_SERVICE.setConfig('researcher', {
-  ...config,
-  model: { provider: 'xai', modelId: 'grok-4.3' },
-  systemPrompt: 'You are a careful research assistant.',
-  thinkingLevel: 'low',
-  tools: ['current_time'],
+const actor = { kind: 'agent', externalId: adminAgentId } as const
+const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
+await env.ADMIN.updateConfig(actor, agentId, {
+  requestId: crypto.randomUUID(),
+  settings: {
+    ...settings,
+    model: { provider: 'xai', modelId: 'grok-4.3' },
+    tools: ['current_time'],
+  },
+  expectedVersion: version,
 })
 ```
 
-`setConfig` replaces the full configuration, validates model and tool names, and
-rejects updates while work is pending. Changes preserve history and request IDs;
-they survive object eviction. Each agent has independent settings. The default
-tool list is empty. Add tool implementations in `src/tools/` and register them in
-`src/tools/index.ts`; agents explicitly enable registered tools by name.
+Configuration is a sequence of immutable versions in the control database, read and written only
+through `AdminService`. A new version takes effect from the agent's next turn, without a restart
+or a deploy, even if the agent is busy when it is written; `getAgent` shows the desired and
+applied versions separately until they converge. Two updates from the same version conflict:
+exactly one succeeds. `rollbackConfig` writes an old version's content as a new version. The
+default tool list is empty. Add tool implementations in `src/tools/` and register them in
+`src/tools/index.ts`; agents enable registered tools by name.
 
 `src/models/index.ts` registers Pi's built-in providers and model catalogs. The
 provider keys are individual Worker secrets. For local development, write one

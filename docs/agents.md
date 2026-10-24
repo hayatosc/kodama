@@ -1,12 +1,14 @@
 # Agents
 
 Kodama runs [Pi Durable](https://earendil.com/posts/pi-durable-on-cloudflare/) agents on
-Cloudflare Durable Objects. Each `agentId` addresses one agent, and each agent is one
-SQLite-backed Durable Object that owns these parts:
+Cloudflare Durable Objects. Each agent has a server-issued UUID, its `agentId`, in a registry in the
+control database (see [Control database](#control-database)), and each agent is one SQLite-backed
+Durable Object that owns these parts:
 
 - its Pi session: conversation history, inbox, and configuration;
 - its recovery alarm;
-- its local copy of long-term memory.
+- its local copy of long-term memory;
+- its applied copy of the configuration version the registry asks for.
 
 Trusted Workers reach agents only through service-binding RPC; there is no public HTTP interface.
 
@@ -21,15 +23,19 @@ planned and not implemented.
 ```text
 packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
-  drizzle.config.ts         drizzle-kit config for the D1 schema
+  drizzle.config.ts         drizzle-kit config for the long-term memory D1 schema
+  drizzle.control.config.ts drizzle-kit config for the control D1 schema
   drizzle.local.config.ts   drizzle-kit config for kodama's tables in each Durable Object
   drizzle/
-    d1/                     D1 schema (schema.ts) and its generated migrations (migrations/)
+    d1/                     long-term memory D1 schema (schema.ts) and its migrations (migrations/)
+    control/                control D1 schema: registry, versions, principals, audit; its migrations
     durable-object/         schema of kodama's tables in each object, and their migrations
     schema.test.ts          each schema matches its generated migrations
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
+    admin/                  AdminService: registry, configuration versions, seed, reconciliation
+    control/                the control database: registry, admission, versions, lifecycle, audit
     env.ts                  the Worker's bindings, as a type
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
@@ -80,8 +86,9 @@ changes no Worker configuration:
   archives.
 - A method only a dedicated agent serves is declared on `Agent`, which rejects it, and the subclass
   overrides it. One stub type then covers every object in the namespace, with no type assertion.
-- Reserved names contain `:`, which a public agent ID cannot, so `AgentService` and `sendTo` never
-  reach a dedicated agent.
+- Reserved names contain `:`, which a public agent ID (a UUID) cannot. Each dedicated agent is a
+  registry row with `kind = 'dedicated'` and a fixed UUID mapped to its reserved `object_name`;
+  `AgentService` and `sendTo` admit only working agents, so they never reach a dedicated agent.
 
 Each dedicated agent has a folder under `src/agent/dedicated/` with only what it adds to an agent.
 The one today is the memory agent, `MemoryAgent`, named `kodama:memory`
@@ -98,9 +105,12 @@ On every open, the agent prepares the harness before any request sees it:
 
 1. Pi's storage opens inside `blockConcurrencyWhile`, after kodama's own migrations are applied.
 2. The root conversation is created, and its configuration is initialized from the defaults.
-3. The subclass hook runs: a working agent refreshes its always-loaded memory, and the memory
-   agent follows its model setting and starts its job drain.
-4. The recovery alarm is reconciled with Pi's tasks.
+3. The object catches up with the registry: when the desired version is newer than the one it
+   applied, it applies it, or holds it if work is pending (see
+   [Applying versions](#applying-versions)).
+4. The subclass hook runs: a working agent refreshes its always-loaded memory, and the memory
+   agent starts its job drain.
+5. The recovery alarm is reconciled with Pi's tasks.
 
 If Pi's storage fails, the object aborts and is recreated on the next request.
 
@@ -115,17 +125,23 @@ imports say where it sits.
 | contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                     |
 | settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                          |
 | storage      | `drizzle/`, `src/storage/`                           | lib                                     |
+| control      | `src/control/`                                       | lib, contracts, settings, storage       |
 | memory store | `src/memory/store/`                                  | lib, storage                            |
 | memory       | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
 | agent        | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
 | Agent class  | `src/agent/agent.ts`                                 | all of the above                        |
 | memory agent | `src/agent/dedicated/`                               | all of the above, including Agent class |
-| entrypoint   | `src/index.ts`                                       | lib, contracts, memory, memory agent    |
+| admin        | `src/admin/`                                         | all of the above                        |
+| entrypoint   | `src/index.ts`                                       | all of the above                        |
 
 Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
-  words (`search-text.ts`), and the two ordering helpers the `Agent` class uses (`serial.ts`).
+  words (`search-text.ts`), UUIDs (`uuid.ts`), error text (`errors.ts`), and the two ordering
+  helpers the `Agent` class uses (`serial.ts`).
+- `src/control/` knows the control database and nothing of objects; the agent runtime uses it to
+  report applied versions and to admit `sendTo`. Only `src/admin/` and the entrypoint push to
+  objects, because the seed needs the memory agent's configuration.
 - The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
@@ -152,49 +168,218 @@ the `kodama-memory` extension with its memory tools and prompt sections, whateve
 (see [memory.md](memory.md#working-agents)). No execution environment is configured, so a working
 agent sees no files and runs no commands.
 
+## Control database
+
+Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `drizzle/d1/`) holds long-term
+memory ([memory.md](memory.md)). `kodama-control` (`CONTROL_DB`, schema in
+[`drizzle/control/schema.ts`](../packages/agents/drizzle/control/schema.ts)) holds the source of
+truth for agents:
+
+| Table                   | Contents                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `agents`                | the registry: ID, object name, kind, display name, slug, state, versions, owner |
+| `agent_config_versions` | immutable configuration versions, numbered per agent                            |
+| `principals`            | who may call `AdminService`: people, service tokens, and agents                 |
+| `agent_members`         | roles on one agent                                                              |
+| `system_settings`       | `install_id` and `admin_agent_id`, written once by the seed                     |
+| `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
+
+Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
+RPC. Foreign keys are declared and enforced by D1, and every change is one `batch()`, so a violation
+rolls the whole change back (`src/control/d1-assumptions.test.ts` checks these behaviors). Registry
+rows are never deleted, so an agent ID is never reused.
+
+### Registry and admission
+
+- `agent_id` is a UUID v7 issued by the server, never reused, and never changed by a rename.
+  Public IDs are lowercase canonical UUIDs; v4 is accepted too.
+- `display_name` and `slug`, a unique alias that is never UUID-shaped, can change at any time.
+- `object_name` is the Durable Object name and the storage key of the memory scope, skills, and
+  archive. It equals `agent_id`, except for dedicated agents; a check constraint allows the
+  exception only for `kind = 'dedicated'`. Every object is reached as
+  `AGENTS.getByName(object_name)` read from the registry.
+
+`AgentService` admits a call right before it reaches the object
+([`src/control/registry.ts`](../packages/agents/src/control/registry.ts)). It rejects an ID that is
+not a UUID, a UUID not in the registry, and a dedicated agent's UUID with a `TypeError`, before
+any harness or storage is opened, so an unknown ID never creates an object. A known agent whose
+state does not allow the call is refused with `agent_unavailable:`. `sendTo` admits its target the
+same way.
+
+`resolveAgent` accepts a UUID, a slug, or a UUID prefix of at least 4 characters; an ambiguous
+prefix is an error that lists the candidates.
+
+### Lifecycle
+
+[`src/control/lifecycle.ts`](../packages/agents/src/control/lifecycle.ts) defines the states and
+their moves. The registry's `status` is the source, and each object holds a copy (see
+[Restrictions](#restrictions)).
+
+| State          | May move to                       | Chat | Reads | External calls |
+| -------------- | --------------------------------- | ---- | ----- | -------------- |
+| `provisioning` | `active`, `deleting`              | no   | no    | yes            |
+| `active`       | `pausing`, `archived`, `deleting` | yes  | yes   | yes            |
+| `pausing`      | `paused`, `active`                | no   | yes   | no             |
+| `paused`       | `active`, `archived`, `deleting`  | no   | yes   | no             |
+| `archived`     | `active`, `deleting`              | no   | yes   | no             |
+| `deleting`     | `deleted`                         | no   | no    | no             |
+| `deleted`      | —                                 | no   | no    | no             |
+
+Creation moves an agent from `provisioning` to `active`. Pause, archive, and delete are defined
+here and carried out by later work.
+
+### Seed
+
+`AdminService.seed()` ([`src/admin/seed.ts`](../packages/agents/src/admin/seed.ts)) creates the
+rows every installation starts with, and is idempotent:
+
+- `install_id`, a UUID v7 chosen once;
+- the memory agent's row, `kind = 'dedicated'` with the fixed UUID
+  `00000000-0000-7000-8000-00000000000a` mapped to `object_name = 'kodama:memory'`, and its
+  version 1 from `MEMORY_MODEL_*`; it keeps its existing object;
+- the administrator agent, the first agent: a working agent with the slug `assistant` and a
+  general-purpose prompt (`ADMIN_AGENT_PROMPT`) as version 1, which `updateConfig` can change.
+  It is also the installation owner: a principal with `kind = 'agent'` and the owner role under
+  its own ID.
+
+The first call fixes both IDs, and later calls write nothing new, so a renamed or reconfigured
+administrator agent keeps its changes. The seed then initializes and activates the administrator
+agent and applies the memory agent's version.
+
+### AdminService
+
+`AdminService` ([`src/admin/index.ts`](../packages/agents/src/admin/index.ts)) is a named
+entrypoint of the agents Worker, reached only through a service binding. The calling Worker
+authenticates its caller and passes it as `actor: { kind: 'user' | 'service' | 'agent', externalId }`;
+`AdminService` authorizes it in one place. For now only the installation owner may call, which is
+the administrator agent: `{ kind: 'agent', externalId: adminAgentId }`.
+
+| Method                                                             | Result                                                                       |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `seed()`                                                           | the starting rows; `{ installId, adminAgentId, memoryAgentId }`              |
+| `createAgent(actor, { requestId, displayName, slug?, settings? })` | a new working agent with a server-issued UUID v7                             |
+| `listAgents(actor, { kind?, status? })`                            | registry rows, newest first                                                  |
+| `getAgent(actor, agentId)`                                         | one registry row                                                             |
+| `resolveAgent(actor, ref)`                                         | the agent a UUID, slug, or unique prefix names                               |
+| `renameAgent(actor, agentId, { displayName?, slug? })`             | the row after the change; `slug: null` removes the slug                      |
+| `getConfig(actor, agentId)`                                        | the desired version                                                          |
+| `updateConfig(actor, agentId, request)`                            | `{ version, apply }` (see [Configuration versions](#configuration-versions)) |
+| `rollbackConfig(actor, agentId, request)`                          | `{ version, apply }`                                                         |
+| `configHistory(actor, agentId, page)`                              | versions, newest first                                                       |
+
+`createAgent` writes the registry row (`provisioning`), version 1, the caller's owner membership,
+and the audit row in one batch, then initializes the object and sets it `active`. Reusing
+`requestId` returns the first agent. Registry rows carry `desiredVersion`, `appliedVersion`, and
+`pending`.
+
 ## Configuration
 
-Each agent persists its own configuration in Pi Durable
-([`src/configuration/`](../packages/agents/src/configuration/)):
+An agent's configuration is a sequence of immutable versions in the control database. The registry
+asks for one, the desired version (`agents.current_version`), and the agent's object applies it and
+keeps a copy ([`src/configuration/`](../packages/agents/src/configuration/)). Configuration is read
+and written only through [AdminService](#adminservice); `AgentService` has no configuration methods.
+
+Each version is one `AgentSettings` object, validated strictly with valibot. Every field has one
+accepted shape, and unknown fields, unknown models, and unregistered tools are rejected:
 
 ```ts
-interface AgentConfig {
+interface AgentSettings {
+  schemaVersion: 1
   model: { provider: string; modelId: string }
   systemPrompt: string // at most 64,000 characters
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   tools: string[] // unique names of registered tools
-  sharedSpaces: string[] // shared memory spaces read by this agent; default ["global"]
+  sharedSpaces: string[] // shared memory spaces read by this agent, earliest first
+  description?: string // at most 1,000 characters
+  labels?: string[] // up to 16 unique labels of lowercase letters, digits, or hyphens
+  memoryPolicy: { extract: boolean; remember: boolean }
+  budget?: {
+    dailyUsd?: number
+    monthlyUsd?: number
+    turnTokens?: number
+    onExceed: 'refuse' | 'downgrade'
+  }
+  credentials?: { primary: Record<string, string>; fallback: Record<string, string | null> }
+  toolPolicy?: Record<string, 'allow' | 'deny'>
 }
 ```
 
-New agents start with these defaults:
+- `memoryPolicy.extract: false` stops handing new entries to the memory agent, and
+  `memoryPolicy.remember: false` blocks the `remember` tool.
+- `toolPolicy` blocks a denied tool at its call; a tool not listed is allowed.
+- Only the shape of `budget` and `credentials` (credential UUIDs by Pi provider ID) is stored so
+  far; their enforcement is later work.
+- The status, display name, and slug are registry columns, not version fields.
 
-- the model is `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` from `cloudflare.config.ts`;
-- the system prompt is `DEFAULT_SYSTEM_PROMPT` in `src/configuration/index.ts`;
-- thinking is off;
-- no tools are enabled;
-- `sharedSpaces` is `["global"]`.
+A new agent's version 1 holds the defaults of its creation: the model `DEFAULT_MODEL_PROVIDER` and
+`DEFAULT_MODEL_ID` from `cloudflare.config.ts`, the prompt `DEFAULT_SYSTEM_PROMPT` in
+`src/configuration/index.ts`, thinking off, no tools, `sharedSpaces` `["global"]`, and both memory
+policies on. Changing the defaults later changes no existing agent.
 
-The defaults apply only to new agents.
+### Configuration versions
 
-`setConfig` replaces the whole configuration and validates it strictly. Unknown fields, unknown
-models, and unregistered tools are rejected. It is refused while work is pending, keeps history and
-request IDs, and survives eviction.
+[`src/control/versions.ts`](../packages/agents/src/control/versions.ts) writes versions:
 
-`sharedSpaces` is stored separately under the `kodama:shared-spaces` storage key, because Pi's
-configuration has no place for it. Storing it refreshes the always-loaded memory and the skills
-list.
+- `updateConfig(actor, agentId, { requestId, settings, expectedVersion, comment })` writes version
+  `expectedVersion + 1`. One `batch()` inserts the version, moves `current_version`, and appends the
+  audit row. The version's primary key is the optimistic lock: of two updates from the same
+  version, exactly one succeeds, and the other fails with `version_conflict:` and leaves nothing
+  behind. Reusing `requestId` returns the first write.
+- `rollbackConfig(actor, agentId, { requestId, toVersion, expectedVersion })` writes the content of
+  `toVersion` as a new version; versions are never changed or removed.
+- `configHistory(actor, agentId, { before, limit })` lists versions newest first, with author,
+  comment, and time, and `getConfig(actor, agentId)` returns the desired version.
 
 ```ts
-using config = await env.AGENT_SERVICE.getConfig('researcher')
-using updated = await env.AGENT_SERVICE.setConfig('researcher', {
-  ...config,
-  model: { provider: 'xai', modelId: 'grok-4.3' },
-  systemPrompt: 'You are a careful research assistant.',
-  thinkingLevel: 'low',
-  tools: ['current_time'],
+const actor = { kind: 'agent', externalId: adminAgentId } as const
+const { version, settings } = await env.ADMIN.getConfig(actor, agentId)
+await env.ADMIN.updateConfig(actor, agentId, {
+  requestId: crypto.randomUUID(),
+  settings: { ...settings, model: { provider: 'xai', modelId: 'grok-4.3' }, thinkingLevel: 'low' },
+  expectedVersion: version,
+  comment: 'Switch to Grok',
 })
 ```
+
+### Applying versions
+
+Writing the version in D1 is the commitment; pushing it to the object is a notification that may
+be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply.ts)):
+
+1. `AdminService` writes the version, then calls `Agent.applyConfig({ agentId, version, settings })`
+   on `AGENTS.getByName(object_name)`. The call is idempotent by version number.
+2. An idle object applies the version at once. A busy one holds it under `kodama:pending-config`
+   and applies it when it next becomes idle, so a change made during a turn takes effect from the
+   next turn, without a restart or a deploy. The idle path already runs in the object's serial
+   queue and does not enter it again.
+3. Applying covers every part of the version: the always-loaded memory rebuilt for its shared
+   spaces, then Pi's model, prompt, thinking level, and tools, then one atomic write of the shared
+   spaces, the settings (memory policy, tool policy, budget, credentials), and the version number.
+   Only then is `applied_version` reported to the registry. If any part fails, the previous version
+   stays applied and reported, and the held version is retried.
+4. Missed versions converge: the object compares the registry's desired version with its own when
+   the harness opens, and the daily cron pushes every row where `current_version ≠ applied_version`
+   again and finishes agents stuck in `provisioning`
+   ([`src/admin/reconcile.ts`](../packages/agents/src/admin/reconcile.ts)).
+
+`listAgents` and `getAgent` return `desiredVersion`, `appliedVersion`, and `pending` separately.
+
+### Restrictions
+
+Configuration waits for idle; restrictions do not
+([`src/agent/restrictions.ts`](../packages/agents/src/agent/restrictions.ts)). The object holds a
+copy of its registry state under `kodama:status`, set with `Agent.setStatus(status)`, and checks it
+before every external call:
+
+- every model request, through the `Models` the harness uses: a refused request fails without
+  reaching the provider, and the turn settles `unanswered` with an `agent_restricted:` detail;
+- every tool call, through a `beforeTool` hook, which also applies `toolPolicy` and
+  `memoryPolicy.remember`;
+- every `sendTo`.
+
+So a restriction stops the next external call even in the middle of a turn. A state outside
+`provisioning` and `active` restricts, and with no copy set yet calls are allowed. Credential
+revocation, narrower permissions, and pause and delete add their checks to the same refusal.
 
 ### Models and credentials
 
@@ -215,8 +400,8 @@ To support another provider:
 Only environment-based authentication is supported. Interactive OAuth login and local credential
 files are not.
 
-The memory agent uses `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`. When they are empty, it uses
-the default model.
+The memory agent's model is set by its versions like any agent's. `MEMORY_MODEL_PROVIDER` and
+`MEMORY_MODEL_ID` only give the seed's version 1; when they are empty, it uses the default model.
 
 ### Tools
 
@@ -231,7 +416,8 @@ today is `current_time`. The memory tools come from the memory extension, not fr
 ## RPC contract
 
 [`AgentService`](../packages/agents/src/index.ts), the Worker's default export, validates agent IDs
-at the boundary and forwards to the agent's Durable Object:
+at the boundary, admits them from the registry (see [Registry and admission](#registry-and-admission)),
+and forwards to the agent's Durable Object:
 
 | Method                                         | Result                                       |
 | ---------------------------------------------- | -------------------------------------------- |
@@ -239,17 +425,18 @@ at the boundary and forwards to the agent's Durable Object:
 | `subscribe(agentId)`                           | Continuous agent-wide SSE observation        |
 | `sendMessage(agentId, { requestId, content })` | Durable acceptance with `submissionId`       |
 | `submission(agentId, requestId)`               | Submission status, or `undefined`            |
-| `getConfig(agentId)`                           | Persisted agent configuration                |
-| `setConfig(agentId, config)`                   | Replace configuration while idle             |
 | `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
 | `cancel(agentId)`                              | Stop current work; resolves once idle        |
 
-`AgentService` cannot reach the memory agent: its name is not a valid public agent ID. The Agent
-object has a few more methods for other Durable Objects:
+`AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
+few more methods, for other Durable Objects and for `AdminService`:
 
 | Method                          | Caller       | Effect                                                         |
 | ------------------------------- | ------------ | -------------------------------------------------------------- |
 | `sendTo(agentId, message)`      | an agent     | deliver to another agent; returns once the target admits input |
+| `applyConfig(pushed)`           | AdminService | apply a configuration version now, or hold it until idle       |
+| `setStatus(status)`             | AdminService | set the object's copy of its registry state                    |
+| `getConfig()`                   | tests, tools | the applied configuration as Pi holds it                       |
 | `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
 | `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
 | `prune({ force })`              | maintenance  | archive and delete old entries                                 |
@@ -258,7 +445,8 @@ object has a few more methods for other Durable Objects:
 
 ### IDs, limits, and retries
 
-- Agent IDs are 1–64 letters, digits, `_`, or `-`. Request IDs use the same characters, up to 128.
+- Agent IDs are lowercase UUIDs from the registry. Request IDs are 1–128 letters, digits, `_`, or
+  `-`.
 - Messages must be nonblank and at most 16,000 characters. Invalid input throws a `TypeError`
   ([`src/validation.ts`](../packages/agents/src/validation.ts)).
 - Request IDs are scoped to the receiving agent's root conversation. To retry a delivery, reuse the
@@ -279,7 +467,7 @@ object has a few more methods for other Durable Objects:
   [memory.md](memory.md#pruning)).
 
 ```ts
-await env.AGENT_SERVICE.sendMessage('assistant', {
+await env.AGENT_SERVICE.sendMessage(agentId, {
   requestId: crypto.randomUUID(),
   content: 'Prioritize the failing tests.',
   whenBusy: 'steer',
@@ -302,13 +490,14 @@ Other Pi submission states are kept in the typed result.
 
 `cancel(agentId)` stops the current run, including an in-flight model request or a retry wait, and
 withdraws queued input. Those submissions settle as `unanswered`, and open `send()` streams close
-with that receipt. History and configuration are kept, so `setConfig` and new messages work right
-after.
+with that receipt. History and configuration are kept, so a held configuration version applies and
+new messages work right after.
 
 ### Agent to agent
 
-`Agent.sendTo(targetId, message)` calls `this.env.AGENTS.getByName(targetId).sendMessage(message)`.
-It acknowledges durable admission and does not wait for the target's model. It is a transport
+`Agent.sendTo(targetId, message)` checks this agent's restrictions, admits the target from the
+registry, and calls `sendMessage(message)` on its object. It acknowledges durable admission and
+does not wait for the target's model. It is a transport
 primitive, not a multi-agent workflow or a model-invoked tool.
 
 ## Events
@@ -395,8 +584,9 @@ Each object's SQLite holds two sets of tables:
   pruning runs. Their migrations are generated into `drizzle/durable-object/migrations` and
   applied by `src/storage/local.ts` before the harness opens.
 
-Small values such as alarm times, prune limits, and shared spaces use the object's key-value
-storage under `kodama:` keys.
+Small values use the object's key-value storage under `kodama:` keys: alarm times, prune limits,
+shared spaces, the applied configuration (`kodama:config-version`, `kodama:applied-settings`,
+`kodama:agent-id`), a held version (`kodama:pending-config`), and the state copy (`kodama:status`).
 
 ## Development
 
@@ -412,21 +602,23 @@ nr dev:agents
 `nr dev:agents` runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
 Objects. It exposes RPC, not a browser page.
 
-| Command                                       | Effect                                                                   |
-| --------------------------------------------- | ------------------------------------------------------------------------ |
-| `nr check`                                    | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
-| `nr test`                                     | workspace tests                                                          |
-| `nr format`                                   | format the repository                                                    |
-| `nr build` (in `packages/agents`)             | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
-| `nr cf:types` (in `packages/agents`)          | regenerate runtime types                                                 |
-| `nr db:generate` (in `packages/agents`)       | write a D1 migration after `drizzle/d1/schema.ts` changes                |
-| `nr db:generate:local` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes |
+| Command                                         | Effect                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `nr check`                                      | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
+| `nr test`                                       | workspace tests                                                          |
+| `nr format`                                     | format the repository                                                    |
+| `nr build` (in `packages/agents`)               | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
+| `nr cf:types` (in `packages/agents`)            | regenerate runtime types                                                 |
+| `nr db:generate` (in `packages/agents`)         | write a D1 migration after `drizzle/d1/schema.ts` changes                |
+| `nr db:generate:local` (in `packages/agents`)   | write a local migration after `drizzle/durable-object/schema.ts` changes |
+| `nr db:generate:control` (in `packages/agents`) | write a control migration after `drizzle/control/schema.ts` changes      |
 
 ### Local agent CLI
 
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
+nr agent seed
 nr agent send assistant "Hello!"
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
@@ -439,7 +631,9 @@ nr agent --help
 
 The CLI works like this:
 
-- The same agent ID keeps its conversation in local Durable Object storage.
+- `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the administrator agent,
+  slug `assistant`; a `send` to a slug runs the seed first if needed.
+- The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
@@ -456,26 +650,32 @@ server if another configuration evaluation replaces it.
 
 Tests use Vitest with the Cloudflare plugin, so they run inside workerd with real RPC, Pi Durable,
 SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked, and no API key is
-needed. `vitest.config.ts` reads the generated D1 migrations for the setup. It also passes the
+needed. `vitest.config.ts` reads the generated migrations of both D1 databases for the setup. It also passes the
 columns from the drizzle-kit snapshots, so a test fails when a schema and its migrations differ.
 
 Tests sit next to the module they test, as `<module>.test.ts` in the same folder. Shared helpers
 are in `src/helper/`, which production code never imports, and `vitest.setup.ts` applies the D1
 migrations before the tests.
 
-| Path                                        | Contents                                                      |
-| ------------------------------------------- | ------------------------------------------------------------- |
-| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection |
-| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers    |
-| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests          |
-| `src/helper/memory.ts`                      | the memory database, records, and the memory agent            |
-| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
-| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
-| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery          |
-| `src/configuration/index.test.ts`           | the schema, and configuration over RPC and across eviction    |
-| `src/models/index.test.ts`                  | provider credentials                                          |
-| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |
-| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                  |
+| Path                                        | Contents                                                       |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `src/helper/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection  |
+| `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers     |
+| `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests           |
+| `src/helper/memory.ts`                      | the memory database, records, and the memory agent             |
+| `src/helper/control.ts`                     | the seed, the owner, registry rows, and configuration changes  |
+| `src/admin/agents.test.ts`                  | creation, renames, listing, versions, conflicts, rollback      |
+| `src/admin/seed.test.ts`                    | the seed, the administrator agent, the memory agent's versions |
+| `src/control/registry.test.ts`              | admission without object storage, and resolving references     |
+| `src/control/d1-assumptions.test.ts`        | the D1 behaviors the control database relies on                |
+| `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions  |
+| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                             |
+| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                 |
+| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery           |
+| `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction      |
+| `src/models/index.test.ts`                  | provider credentials                                           |
+| `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling          |
+| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                   |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name a new test file after the
 module it tests, describe the observable behavior it checks, and run `nr check` before submitting.
@@ -485,15 +685,20 @@ module it tests, describe the observable behavior it checks, and run `nr check` 
 From `packages/agents`:
 
 1. Log in with `nr cf auth login`.
-2. Create the D1 database `kodama-memory` and the R2 bucket `kodama-archive` that
-   `cloudflare.config.ts` binds.
-3. Apply the D1 migrations with `nr cf d1 migrations apply --dir drizzle/d1/migrations`.
+2. Create the D1 databases `kodama-memory` and `kodama-control` and the R2 bucket
+   `kodama-archive` that `cloudflare.config.ts` binds.
+3. Apply the migrations with `nr cf d1 migrations apply kodama-memory --dir drizzle/d1/migrations`
+   and `nr cf d1 migrations apply kodama-control --dir drizzle/control/migrations`, then check
+   that `nr cf d1 execute kodama-control --command "PRAGMA foreign_keys"` returns 1.
 4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.
+6. Call `AdminService.seed()` once from the trusted Worker that binds it; it is idempotent.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
-memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). Its cron trigger (`17 3 * * *`, UTC) runs the daily memory consolidation. `workersDev` is disabled.
+memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the
+named entrypoint `AdminService`. Its cron trigger (`17 3 * * *`, UTC) reconciles configuration
+versions, then runs the daily memory consolidation. `workersDev` is disabled.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin; Wrangler is only
 a transitive dependency.
 
@@ -507,7 +712,8 @@ import agents from '@kodama/agents/config'
 import { bindings } from 'cf/config'
 
 const agentBinding = bindings.worker({ worker: agents.worker })
-// env: { AGENT_SERVICE: agentBinding }
+const adminBinding = bindings.worker({ worker: agents.worker, exportName: 'AdminService' })
+// env: { AGENT_SERVICE: agentBinding, ADMIN: adminBinding } — and no D1 binding
 ```
 
 ```ts
@@ -530,6 +736,10 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
 
 - The agent Worker has no public HTTP interface. Only server Workers call its service-binding RPC.
   A UI Worker must authenticate users and authorize their access to agent IDs.
+- Only the agents Worker binds D1. The UI Worker never binds a D1 database; it reaches the
+  registry and configuration through `AdminService`, which authorizes every call but `seed`.
+- `AgentService` admits only registered working agents, so an unknown or mistyped ID never creates
+  an object.
 - Provider credentials are Worker secrets, outside agent settings and RPC results. Never commit
   `.dev.vars`, credentials, or generated `.cloudflare/` state.
 - Untrusted RPC input is validated with valibot at the boundary.

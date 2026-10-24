@@ -256,17 +256,20 @@ Its tools and daily consolidation are memory parts (`src/memory/tools/`, `src/me
 
 - It inherits every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
   `getConfig`, so its work can be watched like any agent's.
-- The `:` in its name is not allowed in a public agent ID, so `AgentService` and `sendTo` reject
-  it. Jobs come only from working agents, pruning, and the `scheduled` handler, through `enqueue`,
+- It is a registry row with `kind = 'dedicated'` and the fixed UUID
+  `00000000-0000-7000-8000-00000000000a`, mapped to the object name `kodama:memory`.
+  `AgentService` and `sendTo` admit only working agents, so they reject it. Jobs come only from working agents, pruning, and the `scheduled` handler, through `enqueue`,
   `jobStatus`, and `consolidate`; `Agent` declares them and rejects, and `MemoryAgent` overrides
   them.
-- `sendMessage`, `send`, `sendTo`, and `setConfig` throw, because input that bypassed the queue
+- `sendMessage`, `send`, and `sendTo` throw, because input that bypassed the queue
   would break "one job at a time". `cancel` stops the running job, which the runner retries like a
   failure.
-- Its model is `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`. When they are empty, it uses the
-  same default model as every other agent (`DEFAULT_MODEL_*`). The model and the memory-keeping
-  system prompt (`src/agent/dedicated/memory/config.ts`) are stored again on every open if they changed, so a
-  changed variable applies to the next job.
+- Its model, prompt, and thinking level come from its configuration versions, like any agent's
+  (see [agents.md](agents.md#configuration-versions)); its versions select no tools. The seed
+  writes version 1 from `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`, or the default model
+  (`DEFAULT_MODEL_*`) when they are empty, with the memory-keeping prompt
+  (`src/agent/dedicated/memory/config.ts`). Changing the variables later changes nothing; write a
+  new version instead.
 - It keeps no memory of its own and extracts nothing. Its own Pi session is pruned like any
   agent's, without an archive.
 
@@ -453,7 +456,8 @@ The copy is refreshed while the agent is idle:
 
 - when the object starts;
 - when `memoryChanged` arrives (or at the next idle moment, if it arrives during a run);
-- when `setConfig` stores the configuration, because `sharedSpaces` decides what the copy holds;
+- when a configuration version is applied, because `sharedSpaces` decides what the copy holds; a
+  failed refresh fails the apply, so the version stays pending;
 - before admitting input, if the last revision check is older than 60 seconds. One query reads
   `scope_revisions` for the agent's scope and shared spaces, and any newer revision re-renders the
   copy first.
@@ -690,29 +694,29 @@ tool tells the memory agent why. Shared records are never rewritten in place.
 
 ## Settings
 
-| Setting                            | Value                                       | Where                                  |
-| ---------------------------------- | ------------------------------------------- | -------------------------------------- |
-| memory agent model                 | `MEMORY_MODEL_PROVIDER` / `MEMORY_MODEL_ID` | `cloudflare.config.ts`                 |
-| `sharedSpaces`                     | `["global"]`, at most 8                     | agent configuration                    |
-| idle delay before `extract`        | 10 minutes                                  | `src/agent/memory.ts`                  |
-| always-loaded budget               | 2,200 characters (agent), 1,000 (shared)    | `working/always-loaded.ts`             |
-| revision check before input        | every 60 seconds at most                    | `working/always-loaded.ts`             |
-| `remember` calls per user entry    | 3                                           | `working/tools.ts`                     |
-| `remember` content                 | at most 2,000 characters                    | `jobs.ts`                              |
-| event half-life                    | 30 days                                     | `store/search.ts`                      |
-| job retries                        | 1 minute, 10 minutes, 1 hour                | `src/agent/dedicated/memory/runner.ts` |
-| consolidation job size             | one scope, 200 records; 200 scopes a day    | `consolidation.ts`                     |
-| ledger and claim retention         | 90 days                                     | `consolidation.ts`                     |
-| settled job retention              | 30 days                                     | `consolidation.ts`                     |
-| pruning threshold / hard limit     | 1 GiB / 8 GiB                               | `prune/runs.ts`                        |
-| entries per pruning run            | at most 16 MiB                              | `prune/runs.ts`                        |
-| pruning retry after a failed check | 10 minutes                                  | `prune/runs.ts`                        |
-| archive chunk / tool result text   | 2,000 / 2,000 characters                    | `archive/segment.ts`, `transcript.ts`  |
-| `history_search` index read        | 4 MiB per call, 5 matches                   | `archive/history.ts`                   |
-| skill body / description           | 50,000 / 1,024 characters                   | `skills.ts`                            |
-| skills listed per agent            | 50                                          | `skills.ts`                            |
-| skill archived when unused         | 30 days                                     | `skills.ts`                            |
-| agents needed for a shared record  | 2                                           | `shared.ts`                            |
+| Setting                            | Value                                                                                  | Where                                        |
+| ---------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| memory agent model                 | its configuration versions; version 1 from `MEMORY_MODEL_PROVIDER` / `MEMORY_MODEL_ID` | the control database, `cloudflare.config.ts` |
+| `sharedSpaces`                     | `["global"]`, at most 8                                                                | configuration versions                       |
+| idle delay before `extract`        | 10 minutes                                                                             | `src/agent/memory.ts`                        |
+| always-loaded budget               | 2,200 characters (agent), 1,000 (shared)                                               | `working/always-loaded.ts`                   |
+| revision check before input        | every 60 seconds at most                                                               | `working/always-loaded.ts`                   |
+| `remember` calls per user entry    | 3                                                                                      | `working/tools.ts`                           |
+| `remember` content                 | at most 2,000 characters                                                               | `jobs.ts`                                    |
+| event half-life                    | 30 days                                                                                | `store/search.ts`                            |
+| job retries                        | 1 minute, 10 minutes, 1 hour                                                           | `src/agent/dedicated/memory/runner.ts`       |
+| consolidation job size             | one scope, 200 records; 200 scopes a day                                               | `consolidation.ts`                           |
+| ledger and claim retention         | 90 days                                                                                | `consolidation.ts`                           |
+| settled job retention              | 30 days                                                                                | `consolidation.ts`                           |
+| pruning threshold / hard limit     | 1 GiB / 8 GiB                                                                          | `prune/runs.ts`                              |
+| entries per pruning run            | at most 16 MiB                                                                         | `prune/runs.ts`                              |
+| pruning retry after a failed check | 10 minutes                                                                             | `prune/runs.ts`                              |
+| archive chunk / tool result text   | 2,000 / 2,000 characters                                                               | `archive/segment.ts`, `transcript.ts`        |
+| `history_search` index read        | 4 MiB per call, 5 matches                                                              | `archive/history.ts`                         |
+| skill body / description           | 50,000 / 1,024 characters                                                              | `skills.ts`                                  |
+| skills listed per agent            | 50                                                                                     | `skills.ts`                                  |
+| skill archived when unused         | 30 days                                                                                | `skills.ts`                                  |
+| agents needed for a shared record  | 2                                                                                      | `shared.ts`                                  |
 
 ## Testing
 
