@@ -43,9 +43,10 @@ packages/agents/
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
     lib/                    generic helpers that import nothing else from src/
-    agent/                  the Agent Durable Object, its runtime, and its parts
-      dedicated/            AgentObject, which picks a dedicated subclass by the object's name
-        memory/             MemoryAgent, the memory agent: its class, configuration, queue, runner
+    runtime/                the Agent Durable Object and the shared runtime for all agents
+    system-agents/          internal agents that support Kodama, under reserved object names
+      memory/               MemoryAgent: its class, configuration, queue, and runner
+    agent-object.ts         AgentObject, which selects a working or system agent by the object's name
     configuration/          per-agent configuration: validation and persistence
     models/                 Pi provider catalog and Worker secret resolution
     tools/                  tool implementations and their registry
@@ -56,7 +57,7 @@ packages/agents/
 
 ### The Agent Durable Object
 
-[`src/agent/agent.ts`](../packages/agents/src/agent/agent.ts) is the `Agent` class, a working
+[`src/runtime/agent.ts`](../packages/agents/src/runtime/agent.ts) is the `Agent` class, a working
 agent and the base class of every dedicated agent (see [Dedicated agents](#dedicated-agents)).
 Classes exist only because a Durable Object must be one. `Agent` serves RPC and holds the object's in-memory state in private
 fields: the open harness, the tasks the recovery alarm watches, the pruning pass in progress, and a
@@ -76,12 +77,17 @@ agent reads are in `src/memory/transcript.ts`.
 
 ### Dedicated agents
 
-A dedicated agent is a subclass of `Agent` that lives in the same `AGENTS` namespace under a
-reserved name. There is no Durable Object class or binding per dedicated agent, so adding one
-changes no Worker configuration:
+System agents support Kodama's internal functions, such as managing long-term memory. They live
+under `src/system-agents/`, separately from the shared execution machinery in `src/runtime/`
+and the memory capabilities in `src/memory/`. Working agents are registry rows and configuration,
+not one source folder per agent.
+
+A system agent is a dedicated subclass of `Agent` that lives in the same `AGENTS` namespace under a
+reserved name. The registry still calls this kind `dedicated`. There is no Durable Object class or
+binding per dedicated agent, so adding one changes no Worker configuration:
 
 - The Worker exports one Durable Object class, `AgentObject` from
-  [`src/agent/dedicated/index.ts`](../packages/agents/src/agent/dedicated/index.ts), as `Agent`.
+  [`src/agent-object.ts`](../packages/agents/src/agent-object.ts), as `Agent`.
   Its constructor looks the object's name up in `DEDICATED_AGENTS` and returns an instance of that
   subclass; any other name gets a working `Agent`.
 - A subclass changes behavior only through `Agent`'s protected hooks: harness options, default
@@ -93,14 +99,14 @@ changes no Worker configuration:
   registry row with `kind = 'dedicated'` and a fixed UUID mapped to its reserved `object_name`;
   `AgentService` and `sendTo` admit only working agents, so they never reach a dedicated agent.
 
-Each dedicated agent has a folder under `src/agent/dedicated/` with only what it adds to an agent.
+Each system agent has a folder under `src/system-agents/` with only what it adds to an agent.
 The one today is the memory agent, `MemoryAgent`, named `kodama:memory`
 ([memory.md](memory.md#memory-agent)): its class (`agent.ts`), its configuration and prompts
 (`config.ts`), its job queue (`queue.ts`), and the runner that drains it (`runner.ts`). The tools
 it uses and daily consolidation are memory parts in `src/memory/`.
 
-To add a dedicated agent, create its folder with a subclass, reserve a name with `:`, and add the
-pair to `DEDICATED_AGENTS`.
+To add a system agent, create its folder with a subclass, reserve a name with `:`, and add the
+pair to `DEDICATED_AGENTS` in `src/agent-object.ts`.
 
 ### Opening an agent
 
@@ -131,11 +137,11 @@ imports say where it sits.
 | management         | `src/management/`, except `service/`                 | lib, contracts, settings, storage       |
 | memory store       | `src/memory/store/`                                  | lib, storage                            |
 | memory             | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
-| agent              | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
-| Agent class        | `src/agent/agent.ts`                                 | all of the above                        |
-| memory agent       | `src/agent/dedicated/`                               | all of the above, including Agent class |
+| runtime            | `src/runtime/`, except `agent.ts`                    | all of the above                        |
+| Agent class        | `src/runtime/agent.ts`                               | all of the above                        |
+| system agents      | `src/system-agents/`                                 | all of the above, including Agent class |
 | management service | `src/management/service/`                            | all of the above                        |
-| entrypoint         | `src/index.ts`                                       | all of the above                        |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                | all of the above                        |
 
 Some consequences:
 
@@ -149,15 +155,15 @@ Some consequences:
 - The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
   memory agent. What they need from the memory agent is its input contract in
   `src/memory/jobs.ts`: the job kinds and the object's name.
-- `Agent` never imports a dedicated agent. `MemoryAgent` extends it and overrides its hooks, and
-  `src/agent/dedicated/index.ts` maps reserved names to subclasses, so `src/agent/dedicated/` sits
-  above `agent.ts` and the rest of the agent runtime.
+- `src/runtime/` never imports system agents. `MemoryAgent` extends `Agent` and overrides its
+  hooks, so `src/system-agents/` sits above `src/runtime/`. At the composition boundary,
+  `src/agent-object.ts` imports both and maps reserved names to subclasses.
 - Tests may import anything, including the helpers in `src/helper/`. Production code never
   imports `src/helper/`.
 
 ## Harness
 
-[`src/agent/harness.ts`](../packages/agents/src/agent/harness.ts) composes the Pi runtime. Working agents and the
+[`src/runtime/harness.ts`](../packages/agents/src/runtime/harness.ts) composes the Pi runtime. Working agents and the
 memory agent share these settings:
 
 | Setting                 | Value                                                                   |
@@ -350,7 +356,7 @@ await env.MANAGEMENT.updateConfig(actor, agentId, {
 ### Applying versions
 
 Writing the version in D1 is the commitment; pushing it to the object is a notification that may
-be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply.ts)):
+be lost ([`src/runtime/config-apply.ts`](../packages/agents/src/runtime/config-apply.ts)):
 
 1. `ManagementService` writes the version, then calls `Agent.applyConfig({ agentId, version, settings })`
    on `AGENTS.getByName(object_name)`. The call is idempotent by version number.
@@ -376,7 +382,7 @@ be lost ([`src/agent/config-apply.ts`](../packages/agents/src/agent/config-apply
 ### Restrictions
 
 Configuration waits for idle; restrictions do not
-([`src/agent/restrictions.ts`](../packages/agents/src/agent/restrictions.ts)). The object holds a
+([`src/runtime/restrictions.ts`](../packages/agents/src/runtime/restrictions.ts)). The object holds a
 copy of its registry state under `kodama:status`, set with `Agent.setStatus(status)`, and checks it
 before every external call:
 
@@ -511,7 +517,7 @@ primitive, not a multi-agent workflow or a model-invoked tool.
 
 ## Events
 
-[`src/agent/events.ts`](../packages/agents/src/agent/events.ts) turns Pi's observation API into SSE byte
+[`src/runtime/events.ts`](../packages/agents/src/runtime/events.ts) turns Pi's observation API into SSE byte
 streams over Cloudflare RPC. The JSON payloads are typed as `AgentSendEvent` and `AgentEvent` in
 `@kodama/agents/protocol`. `AgentEvent` is Pi's experimental event contract, pinned by the package
 version.
@@ -552,7 +558,7 @@ Delivery works like this:
 
 ## Alarms and recovery
 
-A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/alarms.ts) stores one due
+A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/runtime/alarms.ts) stores one due
 time per purpose and sets the platform alarm to the earliest. It reads and writes the times with the
 synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
 
@@ -677,10 +683,10 @@ migrations before the tests.
 | `src/management/service/seed.test.ts`       | the seed, the first agent, the memory agent's versions        |
 | `src/management/registry.test.ts`           | admission without object storage, and resolving references    |
 | `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on            |
-| `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions |
-| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
-| `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                |
-| `src/agent/alarms.test.ts`                  | alarm purposes; failures, cancellation, and recovery          |
+| `src/runtime/config-apply.test.ts`          | applying at idle, convergence, partial failures, restrictions |
+| `src/runtime/agent.test.ts`                 | the Agent RPC and input validation                            |
+| `src/runtime/events.test.ts`                | `send` and `subscribe` streams                                |
+| `src/runtime/alarms.test.ts`                | alarm purposes; failures, cancellation, and recovery          |
 | `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction     |
 | `src/models/index.test.ts`                  | provider credentials                                          |
 | `cli/handler.test.ts`, `cli/stream.test.ts` | the development adapter and the CLI's stream handling         |

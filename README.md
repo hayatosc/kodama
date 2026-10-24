@@ -19,8 +19,9 @@ packages/
     src/management/service/
                           ManagementService: registry, configuration versions, seed, reconciliation
     src/lib/              Generic helpers that import nothing else from src/
-    src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
-    src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
+    src/runtime/          Agent Durable Object and shared runtime: RPC, Pi harness, SSE, alarms
+    src/system-agents/    Internal agents that support Kodama; memory/ manages long-term memory
+    src/agent-object.ts   Selects the working or system agent in the single AGENTS namespace
     src/configuration/    Configuration versions: settings, validation, and the applied parts
     src/models/           Pi provider catalog and Worker credential resolution
     src/tools/            Tool implementations and registration

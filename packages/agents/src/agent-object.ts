@@ -1,15 +1,15 @@
 /**
- * Dedicated agents: `Agent` subclasses that live in the same `AGENTS` namespace under reserved
- * names, so a new one needs a line here, not a Durable Object class or binding of its own.
+ * Select the working or system agent for an object in the single `AGENTS` namespace.
+ * System agents use reserved names, not a Durable Object class or binding of their own.
  *
  * @see docs/agents.md — Dedicated agents
  *
  * @module
  */
-import type { AgentEnv } from '../../env.ts'
-import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
-import { Agent } from '../agent.ts'
-import { MemoryAgent } from './memory/agent.ts'
+import type { AgentEnv } from './env.ts'
+import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
+import { Agent } from './runtime/agent.ts'
+import { MemoryAgent } from './system-agents/memory/agent.ts'
 
 /** The class each reserved name is constructed as. Reserved names are not public agent IDs. */
 const DEDICATED_AGENTS: ReadonlyMap<string, typeof Agent> = new Map([

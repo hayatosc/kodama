@@ -29,7 +29,7 @@ export { ManagementService } from './management/service/index.ts'
  * The one Durable Object class, bound as `AGENTS`: a working agent, or the dedicated agent registered
  * under the object's name, such as the memory agent.
  */
-export { AgentObject as Agent } from './agent/dedicated/index.ts'
+export { AgentObject as Agent } from './agent-object.ts'
 
 /**
  * Service-binding RPC entrypoint for the UI server and other trusted Workers.

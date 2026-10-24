@@ -91,10 +91,10 @@ const context = BACKGROUND_CONTEXT
  *
  * @remarks
  * The class serves RPC and holds the object's in-memory state in private fields; the work is done
- * by plain functions in `src/agent/` and `src/memory/`.
+ * by plain functions in `src/runtime/` and `src/memory/`.
  *
- * Dedicated agents such as `MemoryAgent` (`dedicated/memory/agent.ts`) extend it, live in the same
- * `AGENTS` namespace under reserved names (see `dedicated/index.ts`), and override the protected
+ * System agents such as `MemoryAgent` (`src/system-agents/memory/agent.ts`) extend it, live in the
+ * same `AGENTS` namespace under reserved names (see `src/agent-object.ts`), and override the protected
  * hooks: {@link Agent.harnessOptions}, {@link Agent.defaultConfig}, {@link Agent.prepare},
  * {@link Agent.onIdle}, {@link Agent.onAlarm}, {@link Agent.archivesPrunedEntries},
  * {@link Agent.configChange}, and {@link Agent.rebuildMemory}. A method

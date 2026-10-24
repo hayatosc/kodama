@@ -6,7 +6,7 @@
 import AgentService from '../src/index.ts'
 import { handleCli } from './handler.ts'
 
-export { AgentObject as Agent } from '../src/agent/dedicated/index.ts'
+export { AgentObject as Agent } from '../src/agent-object.ts'
 export { ManagementService } from '../src/management/service/index.ts'
 
 /** The agent service, answering the CLI's HTTP requests. */

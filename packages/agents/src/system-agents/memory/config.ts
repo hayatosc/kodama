@@ -13,23 +13,23 @@ import type {
   HarnessOptions,
   ToolRegistration,
 } from '@earendil-works/pi-durable'
-import { SETTINGS_SCHEMA_VERSION } from '../../../configuration/index.ts'
-import type { AgentEnv } from '../../../env.ts'
-import type { DefaultModelEnv } from '../../../configuration/index.ts'
+import { SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
+import type { AgentEnv } from '../../env.ts'
+import type { DefaultModelEnv } from '../../configuration/index.ts'
 
 /** The variables that name the memory agent's initial model. */
 export type MemoryModelEnv = DefaultModelEnv &
   Pick<AgentEnv, 'MEMORY_MODEL_PROVIDER' | 'MEMORY_MODEL_ID'>
-import { harnessSettings } from '../../harness.ts'
-import { guardedModels } from '../../restrictions.ts'
-import type { Refusal } from '../../restrictions.ts'
-import { createAgentModels } from '../../../models/index.ts'
-import type { AgentConfig, AgentSettings } from '../../../protocol.ts'
-import type { RunningJob, MemoryToolDeps } from '../../../memory/tools/common.ts'
-import { archiveTools, extractionTools } from '../../../memory/tools/entries.ts'
-import { recordTools, sharedTools } from '../../../memory/tools/records.ts'
-import { skillTools } from '../../../memory/tools/skills.ts'
-import type { MemoryJob } from '../../../memory/jobs.ts'
+import { harnessSettings } from '../../runtime/harness.ts'
+import { guardedModels } from '../../runtime/restrictions.ts'
+import type { Refusal } from '../../runtime/restrictions.ts'
+import { createAgentModels } from '../../models/index.ts'
+import type { AgentConfig, AgentSettings } from '../../protocol.ts'
+import type { RunningJob, MemoryToolDeps } from '../../memory/tools/common.ts'
+import { archiveTools, extractionTools } from '../../memory/tools/entries.ts'
+import { recordTools, sharedTools } from '../../memory/tools/records.ts'
+import { skillTools } from '../../memory/tools/skills.ts'
+import type { MemoryJob } from '../../memory/jobs.ts'
 
 /**
  * The memory agent's initial model: `MEMORY_MODEL_*`, or the default model when they are empty. Only

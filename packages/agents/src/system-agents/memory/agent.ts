@@ -6,19 +6,19 @@
  * @module
  */
 import type { AgentChange, Harness, HarnessOptions } from '@earendil-works/pi-durable'
-import type { AlarmPurpose } from '../../alarms.ts'
-import { setAlarm } from '../../alarms.ts'
-import { Agent } from '../../agent.ts'
-import { coalescingRunner } from '../../../lib/serial.ts'
-import type { JobStatus } from '../../../memory/jobs.ts'
+import type { AlarmPurpose } from '../../runtime/alarms.ts'
+import { setAlarm } from '../../runtime/alarms.ts'
+import { Agent } from '../../runtime/agent.ts'
+import { coalescingRunner } from '../../lib/serial.ts'
+import type { JobStatus } from '../../memory/jobs.ts'
 import type {
   AgentConfig,
   AgentSettings,
   SendMessageRequest,
   SendMessageResponse,
-} from '../../../protocol.ts'
-import { appliedSettings } from '../../config-apply.ts'
-import { toolGuardExtension } from '../../restrictions.ts'
+} from '../../protocol.ts'
+import { appliedSettings } from '../../runtime/config-apply.ts'
+import { toolGuardExtension } from '../../runtime/restrictions.ts'
 import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
 import { jobStatus, runningJob } from './queue.ts'
 import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS } from './runner.ts'
@@ -29,7 +29,7 @@ import type { MemoryAgentContext } from './runner.ts'
  * instead of taking chat input.
  *
  * @remarks
- * It lives in the `AGENTS` namespace under `MEMORY_AGENT_NAME`, which `dedicated/index.ts` maps to
+ * It lives in the `AGENTS` namespace under `MEMORY_AGENT_NAME`, which `src/agent-object.ts` maps to
  * this class; that name is not a valid public agent ID, so `AgentService` cannot reach it. Everything else an `Agent` serves, such as `subscribe`, `snapshot`, `getConfig`,
  * and `cancel`, works as usual, so its work can be watched like any agent's. It keeps no memory
  * of its own, and its pruned history is deleted without an archive.

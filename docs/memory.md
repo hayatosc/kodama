@@ -57,7 +57,7 @@ and, while pruning, the archive catalog of their own entries.
 | `jobs.ts`          | the memory agent's input contract: job kinds, their validation, and the object's name     |
 | `transcript.ts`    | the text of Pi entries that extraction and archives read, and paged entry reads           |
 
-The memory agent itself, the `MemoryAgent` class, is in `src/agent/dedicated/memory/` (see [Memory agent](#memory-agent)).
+The memory agent itself, the `MemoryAgent` class, is in `src/system-agents/memory/` (see [Memory agent](#memory-agent)). It is an internal agent that manages memory; `src/memory/` holds the memory capabilities it and working agents use.
 
 The schemas live next to their migrations under
 [`packages/agents/drizzle/`](../packages/agents/drizzle/), one folder per database (see
@@ -238,7 +238,7 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
 ## Memory agent
 
 The memory agent is `MemoryAgent`, a subclass of `Agent`
-([`src/agent/dedicated/memory/agent.ts`](../packages/agents/src/agent/dedicated/memory/agent.ts)).
+([`src/system-agents/memory/agent.ts`](../packages/agents/src/system-agents/memory/agent.ts)).
 It is a dedicated agent (see [agents.md](agents.md#dedicated-agents)): the object named
 `kodama:memory` (`MEMORY_AGENT_NAME` in `jobs.ts`) in the `AGENTS` namespace is constructed as a
 `MemoryAgent`, with no Durable Object class or binding of its own. It overrides `Agent`'s hooks to get its own
@@ -268,7 +268,7 @@ Its tools and daily consolidation are memory parts (`src/memory/tools/`, `src/me
   (see [agents.md](agents.md#configuration-versions)); its versions select no tools. The seed
   writes version 1 from `MEMORY_MODEL_PROVIDER` and `MEMORY_MODEL_ID`, or the default model
   (`DEFAULT_MODEL_*`) when they are empty, with the memory-keeping prompt
-  (`src/agent/dedicated/memory/config.ts`). Changing the variables later changes nothing; write a
+  (`src/system-agents/memory/config.ts`). Changing the variables later changes nothing; write a
   new version instead.
 - It keeps no memory of its own and extracts nothing. Its own Pi session is pruned like any
   agent's, without an archive.
@@ -301,7 +301,7 @@ job changes the space only through `shared_write` and its checks.
 
 `enqueue(job)` validates the job with valibot and inserts it into `kodama_memory_jobs`, a table in
 the memory agent's own SQLite outside Pi's tables
-([`src/agent/dedicated/memory/queue.ts`](../packages/agents/src/agent/dedicated/memory/queue.ts)):
+([`src/system-agents/memory/queue.ts`](../packages/agents/src/system-agents/memory/queue.ts)):
 
 | Column                        | Meaning                                                       |
 | ----------------------------- | ------------------------------------------------------------- |
@@ -477,7 +477,7 @@ everything.
 
 ## Alarms
 
-A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/alarms.ts) stores a due
+A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/runtime/alarms.ts) stores a due
 time per purpose under `kodama:alarm:<purpose>` and sets the platform alarm to the earliest one.
 
 | Purpose    | Object       | Set by                                                        |
@@ -698,13 +698,13 @@ tool tells the memory agent why. Shared records are never rewritten in place.
 | ---------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | memory agent model                 | its configuration versions; version 1 from `MEMORY_MODEL_PROVIDER` / `MEMORY_MODEL_ID` | the management database, `cloudflare.config.ts` |
 | `sharedSpaces`                     | `["global"]`, at most 8                                                                | configuration versions                          |
-| idle delay before `extract`        | 10 minutes                                                                             | `src/agent/memory.ts`                           |
+| idle delay before `extract`        | 10 minutes                                                                             | `src/runtime/memory.ts`                         |
 | always-loaded budget               | 2,200 characters (agent), 1,000 (shared)                                               | `working/always-loaded.ts`                      |
 | revision check before input        | every 60 seconds at most                                                               | `working/always-loaded.ts`                      |
 | `remember` calls per user entry    | 3                                                                                      | `working/tools.ts`                              |
 | `remember` content                 | at most 2,000 characters                                                               | `jobs.ts`                                       |
 | event half-life                    | 30 days                                                                                | `store/search.ts`                               |
-| job retries                        | 1 minute, 10 minutes, 1 hour                                                           | `src/agent/dedicated/memory/runner.ts`          |
+| job retries                        | 1 minute, 10 minutes, 1 hour                                                           | `src/system-agents/memory/runner.ts`            |
 | consolidation job size             | one scope, 200 records; 200 scopes a day                                               | `consolidation.ts`                              |
 | ledger and claim retention         | 90 days                                                                                | `consolidation.ts`                              |
 | settled job retention              | 30 days                                                                                | `consolidation.ts`                              |
@@ -725,20 +725,20 @@ Memory is tested in workerd with a mocked model, like the rest of the agent (see
 setup lives in `src/helper/memory.ts`. Paths below are relative to
 `src/memory/` unless they start with `src/`.
 
-| Test file                                   | Covers                                                               |
-| ------------------------------------------- | -------------------------------------------------------------------- |
-| `store/records.test.ts`                     | operations: replays, conflicts, freshness, revision claims; search   |
-| `src/agent/dedicated/memory/runner.test.ts` | jobs, `remember`, the role's RPC limits, the default model           |
-| `consolidation.test.ts`                     | merging duplicates and dropping old ledger rows                      |
-| `src/agent/memory.test.ts`                  | extraction, the always-loaded copy, revision checks                  |
-| `src/agent/alarms.test.ts`                  | purposes coexist in one alarm                                        |
-| `prune/prune.test.ts`                       | pruning states, stops at each step, delete checks, the hard limit    |
-| `archive/history.test.ts`                   | the `record_archive` summary of a segment, found by `history_search` |
-| `skills.test.ts`                            | writes and conflicts, `skill_read`, curation, the consolidate job    |
-| `shared.test.ts`                            | shared spaces, overrides, required records, checked shared writes    |
-| `evaluation.test.ts`                        | probes after compaction, pruning, and eviction                       |
-| `src/storage/pi-assumptions.test.ts`        | behavior of Pi Durable and D1 that this design relies on             |
-| `drizzle/schema.test.ts`                    | the schemas match their generated migrations                         |
+| Test file                                 | Covers                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| `store/records.test.ts`                   | operations: replays, conflicts, freshness, revision claims; search   |
+| `src/system-agents/memory/runner.test.ts` | jobs, `remember`, the role's RPC limits, the default model           |
+| `consolidation.test.ts`                   | merging duplicates and dropping old ledger rows                      |
+| `src/runtime/memory.test.ts`              | extraction, the always-loaded copy, revision checks                  |
+| `src/runtime/alarms.test.ts`              | purposes coexist in one alarm                                        |
+| `prune/prune.test.ts`                     | pruning states, stops at each step, delete checks, the hard limit    |
+| `archive/history.test.ts`                 | the `record_archive` summary of a segment, found by `history_search` |
+| `skills.test.ts`                          | writes and conflicts, `skill_read`, curation, the consolidate job    |
+| `shared.test.ts`                          | shared spaces, overrides, required records, checked shared writes    |
+| `evaluation.test.ts`                      | probes after compaction, pruning, and eviction                       |
+| `src/storage/pi-assumptions.test.ts`      | behavior of Pi Durable and D1 that this design relies on             |
+| `drizzle/schema.test.ts`                  | the schemas match their generated migrations                         |
 
 ### Evaluation
 

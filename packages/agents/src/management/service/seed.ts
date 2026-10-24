@@ -8,7 +8,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
-import { memoryAgentSettings } from '../../agent/dedicated/memory/config.ts'
+import { memoryAgentSettings } from '../../system-agents/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
 import { auditStatement } from '../audit.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
