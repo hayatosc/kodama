@@ -5,7 +5,8 @@
  * @module
  */
 import * as v from 'valibot'
-import type { SendMessageRequest } from './protocol.ts'
+import { UUID_PATTERN } from './lib/uuid.ts'
+import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -33,8 +34,78 @@ export function idSchema(name: string, maxLength: number) {
   return v.pipe(v.string(message), v.maxLength(maxLength, message), v.regex(ID_PATTERN, message))
 }
 
-/** A public agent ID: 1–64 letters, digits, `_`, or `-`. */
-export const AgentIdSchema = idSchema('agentId', 64)
+const agentIdMessage = 'agentId must be a lowercase UUID'
+
+/** A public agent ID: a lowercase v4 or v7 UUID. Reserved names such as `kodama:memory` fail. */
+export const AgentIdSchema = v.pipe(v.string(agentIdMessage), v.regex(UUID_PATTERN, agentIdMessage))
+
+const slugMessage = 'slug must contain 1–48 lowercase letters, digits, or hyphens'
+
+/** An agent's alias: 1–48 lowercase letters, digits, or hyphens, and not UUID-shaped. */
+export const SlugSchema = v.pipe(
+  v.string(slugMessage),
+  v.regex(/^[a-z0-9-]{1,48}$/, slugMessage),
+  v.check((slug) => !UUID_PATTERN.test(slug), 'slug cannot be a UUID'),
+)
+
+const refMessage = 'Expected an agent UUID, slug, or UUID prefix'
+
+/** What a person types to name an agent: a UUID, a slug, or a UUID prefix of 4 or more. */
+export const AgentRefSchema = v.pipe(
+  v.string(refMessage),
+  v.toLowerCase(),
+  v.regex(/^[a-z0-9-]{1,48}$/, refMessage),
+)
+
+const displayNameMessage = 'displayName must contain 1–100 characters and cannot be blank'
+
+/** A display name: nonblank, at most 100 characters. */
+export const DisplayNameSchema = v.pipe(
+  v.string(displayNameMessage),
+  v.check((name) => name.trim().length > 0, displayNameMessage),
+  v.maxLength(100, displayNameMessage),
+)
+
+/** The caller of `ManagementService`. */
+export const ManagementActorSchema = v.strictObject(
+  {
+    kind: v.picklist(['user', 'service', 'agent'], 'actor.kind must be user, service, or agent'),
+    externalId: v.pipe(v.string(), v.minLength(1), v.maxLength(320)),
+  },
+  'Expected an actor with kind and externalId',
+) satisfies v.GenericSchema<unknown, ManagementActor>
+
+/** A rename: at least one of the display name and the slug. */
+export const RenameAgentSchema = v.pipe(
+  v.strictObject(
+    {
+      displayName: v.optional(DisplayNameSchema),
+      slug: v.optional(v.nullable(SlugSchema)),
+    },
+    'Expected displayName or slug',
+  ),
+  v.check(
+    (change) => change.displayName !== undefined || change.slug !== undefined,
+    'Expected displayName or slug',
+  ),
+) satisfies v.GenericSchema<unknown, RenameAgentRequest>
+
+/** A version number: a positive integer. */
+export const VersionSchema = v.pipe(
+  v.number('version must be a positive integer'),
+  v.integer('version must be a positive integer'),
+  v.minValue(1, 'version must be a positive integer'),
+)
+
+/** The version an update builds on: 0 for an agent with no version yet. */
+export const ExpectedVersionSchema = v.pipe(
+  v.number('expectedVersion must be a non-negative integer'),
+  v.integer('expectedVersion must be a non-negative integer'),
+  v.minValue(0, 'expectedVersion must be a non-negative integer'),
+)
+
+/** An optional comment of a version. */
+export const CommentSchema = v.optional(v.pipe(v.string(), v.maxLength(500)))
 /** A request ID: 1–128 letters, digits, `_`, or `-`. */
 export const RequestIdSchema = idSchema('requestId', 128)
 
@@ -62,6 +133,24 @@ export const SendMessageRequestSchema = v.object(
  */
 export function parseAgentId(value: unknown): string {
   return parseInput(AgentIdSchema, value)
+}
+
+/**
+ * Parse a UUID, slug, or UUID prefix that names an agent.
+ *
+ * @throws {@link TypeError} When `value` cannot name an agent.
+ */
+export function parseAgentRef(value: unknown): string {
+  return parseInput(AgentRefSchema, value)
+}
+
+/**
+ * Parse the caller of `ManagementService`.
+ *
+ * @throws {@link TypeError} When `value` is not an actor.
+ */
+export function parseManagementActor(value: unknown): ManagementActor {
+  return parseInput(ManagementActorSchema, value)
 }
 
 /**

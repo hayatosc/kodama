@@ -13,8 +13,8 @@ import {
   memoryTerms,
   revisionClaims,
   scopeRevisions,
-} from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
+} from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { storedTerms } from '../../lib/search-text.ts'
 
 /**
@@ -50,15 +50,6 @@ const operationResultSchema = v.variant('status', [
 export type Statement = BatchItem<'sqlite'>
 /** The statements of one batch; a batch has at least one. */
 export type Statements = [Statement, ...Statement[]]
-
-/** Messages of an error and its causes; Drizzle wraps the D1 error in `cause`. */
-export function errorText(error: unknown): string {
-  const parts: string[] = []
-  for (let current: unknown = error; current instanceof Error; current = current.cause) {
-    parts.push(current.message)
-  }
-  return parts.join('\n')
-}
 
 /** D1 binds at most 100 parameters per statement; a term row takes two. */
 const TERMS_PER_STATEMENT = 50

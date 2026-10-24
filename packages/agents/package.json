@@ -17,8 +17,9 @@
     "cf:types": "cf workers types",
     "typecheck": "cf workers types && tsc --noEmit",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate",
-    "db:generate:local": "drizzle-kit generate --config drizzle.local.config.ts"
+    "db:generate:memory": "drizzle-kit generate --config drizzle.memory.config.ts",
+    "db:generate:durable-object": "drizzle-kit generate --config drizzle.durable-object.config.ts",
+    "db:generate:management": "drizzle-kit generate --config drizzle.management.config.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.2.0",

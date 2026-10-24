@@ -5,7 +5,7 @@
  */
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { memoryRecords, memoryTerms } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
 import { db, parameterLimitedDb, record, write } from '../../helper/memory.ts'
 import { readableScopes } from './db.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'

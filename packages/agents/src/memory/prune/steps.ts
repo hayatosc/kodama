@@ -8,17 +8,20 @@
  */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { and, asc, eq, gt, lt } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
-import { piEntries } from '../../storage/pi-tables.ts'
+import {
+  createRun,
+  measureRange,
+  prunedThrough,
+  runEntries,
+  setState,
+} from '../../storage/pruning.ts'
+import type { Run } from '../../storage/pruning.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from '../archive/segment.ts'
 import { extractionCheckpoint, memoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/d1/schema.ts'
-import type { PruneLimits, Run } from './runs.ts'
+import { catalogSegment } from '../store/archive.ts'
+import type { PruneLimits } from './runs.ts'
 import type { PruneDeps } from './prune.ts'
-import { prunedThrough, setState } from './runs.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -28,48 +31,6 @@ async function enqueueQuietly(deps: PruneDeps, job: unknown): Promise<void> {
     await deps.memoryAgent().enqueue(job)
   } catch (error) {
     console.error('Memory job enqueue failed during pruning', error)
-  }
-}
-
-const MEASURE_PAGE = 200
-
-/**
- * The entries after `after` and before `head` whose records fit `runBytes` (at least one), read a
- * page at a time so only about one run's records are in memory.
- */
-function measureRange(
-  storage: DurableObjectStorage,
-  after: number,
-  head: number,
-  runBytes: number,
-): { first: number; last: number } | undefined {
-  const pi = drizzle(storage)
-  const encoder = new TextEncoder()
-  let first: number | undefined
-  let last = after
-  let bytes = 0
-  for (;;) {
-    const page = pi
-      .select({ id: piEntries.id, record: piEntries.record })
-      .from(piEntries)
-      .where(
-        and(
-          eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-          gt(piEntries.id, last),
-          lt(piEntries.id, head),
-        ),
-      )
-      .orderBy(asc(piEntries.id))
-      .limit(MEASURE_PAGE)
-      .all()
-    for (const row of page) {
-      const size = encoder.encode(row.record).byteLength
-      if (first !== undefined && bytes + size > runBytes) return { first, last }
-      first ??= row.id
-      bytes += size
-      last = row.id
-    }
-    if (page.length < MEASURE_PAGE) return first === undefined ? undefined : { first, last }
   }
 }
 
@@ -93,18 +54,7 @@ export async function prepare(
   if (range === undefined) return undefined
   const { first, last } = range
   const now = deps.now?.() ?? Date.now()
-  const run = local
-    .insert(pruneRuns)
-    .values({
-      firstEntry: first,
-      lastEntry: last,
-      head,
-      state: 'prepared',
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning()
-    .get()
+  const run = createRun(local, first, last, head, now)
   if (deps.archive) {
     const checkpoint = await extractionCheckpoint(memoryDb(deps.env.MEMORY_DB), deps.agentId())
     if (checkpoint < last) {
@@ -126,18 +76,7 @@ export async function exportRun(
   now: number,
 ): Promise<Run> {
   if (!deps.archive) return setState(local, run, { state: 'indexed' }, now)
-  const rows = drizzle(deps.storage)
-    .select({ id: piEntries.id, record: piEntries.record })
-    .from(piEntries)
-    .where(
-      and(
-        eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-        gt(piEntries.id, run.firstEntry - 1),
-        lt(piEntries.id, run.lastEntry + 1),
-      ),
-    )
-    .orderBy(asc(piEntries.id))
-    .all()
+  const rows = runEntries(deps.storage, run)
   const agentId = deps.agentId()
   const files = await buildSegment(agentId, rows, now)
   await exportSegment(
@@ -174,24 +113,19 @@ export async function catalog(
   const agentId = deps.agentId()
   const id = segmentId(agentId, run.firstEntry, run.lastEntry)
   const db = memoryDb(deps.env.MEMORY_DB)
-  const existing = await db.select().from(archiveSegments).where(eq(archiveSegments.id, id)).get()
-  if (existing === undefined) {
-    await db.insert(archiveSegments).values({
-      id,
-      agentId,
-      firstEntry: run.firstEntry,
-      lastEntry: run.lastEntry,
-      entryCount: run.entryCount ?? 0,
-      r2Prefix: segmentPrefix(agentId, run.firstEntry, run.lastEntry),
-      sha256: run.sha256 ?? '',
-      bytes: run.bytes ?? 0,
-      firstAt: run.firstAt ?? now,
-      lastAt: run.lastAt ?? now,
-      createdAt: now,
-    })
-    const stored = await db.select().from(archiveSegments).where(eq(archiveSegments.id, id)).get()
-    if (stored === undefined) throw new Error(`Archive catalog row ${id} was not stored`)
-  }
+  await catalogSegment(db, {
+    id,
+    agentId,
+    firstEntry: run.firstEntry,
+    lastEntry: run.lastEntry,
+    entryCount: run.entryCount ?? 0,
+    r2Prefix: segmentPrefix(agentId, run.firstEntry, run.lastEntry),
+    sha256: run.sha256 ?? '',
+    bytes: run.bytes ?? 0,
+    firstAt: run.firstAt ?? now,
+    lastAt: run.lastAt ?? now,
+    createdAt: now,
+  })
   const indexed = setState(local, run, { state: 'indexed' }, now)
   await enqueueQuietly(deps, { kind: 'record_archive', sourceAgentId: agentId, segmentId: id })
   return indexed

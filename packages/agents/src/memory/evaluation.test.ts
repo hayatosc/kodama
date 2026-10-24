@@ -15,6 +15,7 @@ import type { ToolCall } from '../helper/model.ts'
 import { toolCallResponse } from '../helper/model.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId } from '../helper/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 
@@ -28,7 +29,7 @@ function latestMemorySection(body: string): string {
 
 describe('evaluation', () => {
   it('keeps recall, history, updates, abstention, and request receipts after pruning', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const codename = `marigold${agentId.slice(0, 6)}`
     let pending: ToolCall | undefined
     const bodies = mockModel({

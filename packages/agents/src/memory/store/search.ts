@@ -9,8 +9,8 @@ import { and, eq, gte, inArray, lt, ne, notExists, or } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { agentScope } from './db.ts'
 import type { MemoryDb, MemoryRecord } from './db.ts'
-import { memoryRecords, memoryTerms } from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { searchTermSets } from '../../lib/search-text.ts'
 
 /** What to search, and where. */

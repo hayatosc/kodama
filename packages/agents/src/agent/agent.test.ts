@@ -1,6 +1,7 @@
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
+import { newAgentId } from '../helper/management.ts'
 import { parseMessage } from '../validation.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -10,7 +11,7 @@ useMockModel()
 
 describe('agent RPC', () => {
   it('generates an answer through Worker and Durable Object RPC and persists it across eviction', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const message = { requestId: 'first', content: 'Hello' }
     const accepted = await exports.default.sendMessage(agentId, message)
     expect(accepted).toMatchObject({ agentId, requestId: 'first' })
@@ -39,7 +40,7 @@ describe('agent RPC', () => {
   })
 
   it('isolates agents and deduplicates concurrent sends', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const message = { requestId: 'same', content: 'Remember this' }
     const [first, second] = await Promise.all([
       exports.default.sendMessage(agentId, message),
@@ -47,7 +48,7 @@ describe('agent RPC', () => {
     ])
     expect(first.submissionId).toBe(second.submissionId)
     await waitForAnswer(agentId, 'same')
-    const otherId = crypto.randomUUID()
+    const otherId = await newAgentId()
     expect((await exports.default.snapshot(otherId)).snapshot.messages).toEqual([])
     expect(await exports.default.submission(otherId, 'same')).toBeUndefined()
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
@@ -73,7 +74,7 @@ describe('agent RPC', () => {
 
   it('delivers from one agent to another through Durable Object RPC', async () => {
     const senderId = crypto.randomUUID()
-    const receiverId = crypto.randomUUID()
+    const receiverId = await newAgentId()
     const sender = env.AGENTS.getByName(senderId)
     await sender.sendTo(receiverId, {
       requestId: 'delegated',
@@ -86,4 +87,16 @@ describe('agent RPC', () => {
       'Hello from another agent',
     )
   })
+})
+
+it('serves no configuration through AgentService; ManagementService owns it', async () => {
+  const agentId = await newAgentId()
+  const call = (method: 'getConfig' | 'setConfig') =>
+    // @ts-expect-error AgentService has no configuration methods.
+    Promise.resolve(exports.default[method](agentId, {})).then(
+      () => 'served',
+      (error: unknown) => String(error),
+    )
+  expect(await call('getConfig')).not.toBe('served')
+  expect(await call('setConfig')).not.toBe('served')
 })

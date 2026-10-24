@@ -1,0 +1,1 @@
+ALTER TABLE `kodama_memory_jobs` DROP COLUMN `submission_id`;

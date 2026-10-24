@@ -1,6 +1,6 @@
 /**
  * Tables kodama keeps in each agent's own Durable Object SQLite, next to Pi Durable's tables.
- * `pnpm db:generate:local` writes the migrations in ./migrations, which src/storage/local.ts applies
+ * `nr db:generate:durable-object` writes the migrations in ./migrations, which src/storage/local.ts applies
  * when the object starts. Times are Unix epoch milliseconds.
  *
  * @module
@@ -26,8 +26,6 @@ export const memoryJobs = sqliteTable(
     outcome: text('outcome', { enum: JOB_OUTCOMES }),
     attempts: integer('attempts').notNull().default(0),
     notBefore: integer('not_before').notNull(),
-    /** The Pi submission of a model job, once submitted. */
-    submissionId: integer('submission_id'),
     createdAt: integer('created_at').notNull(),
     settledAt: integer('settled_at'),
   },

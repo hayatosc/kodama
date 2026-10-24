@@ -18,10 +18,14 @@ import {
 } from '../helper/model.ts'
 import { activeContents, db } from '../helper/memory.ts'
 import { waitForAnswer } from '../helper/rpc.ts'
-import { alarmAt, setAlarm } from './alarms.ts'
+import { alarmAt, setAlarm } from '../runtime/alarms.ts'
 import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId, updateSettings } from '../helper/management.ts'
+import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
+import { memoryJobs } from '../../drizzle/durable-object/schema.ts'
+import { drizzle } from 'drizzle-orm/durable-sqlite'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -29,7 +33,7 @@ describe('extraction', () => {
   it.each([false, true])(
     'extracts idle entries after eviction=%s and advances its checkpoint',
     async (evict) => {
-      const agentId = crypto.randomUUID()
+      const agentId = await newAgentId()
       const decision = `We decided to deploy with wrangler ${agentId.slice(0, 8)}`
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
         const body = requestBody(init)
@@ -77,6 +81,42 @@ describe('extraction', () => {
     },
   )
 
+  it('does not hand entries over when a version disabling extraction applies after the alarm is set', async () => {
+    const agentId = await newAgentId()
+    const memoryRequests: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = requestBody(init)
+      if (isMemoryAgentRequest(body)) memoryRequests.push(body)
+      return textResponse('Noted.')
+    })
+    await exports.default.sendMessage(agentId, { requestId: 'private', content: 'Keep this out' })
+    await waitForAnswer(agentId, 'private')
+    const stub = env.AGENTS.getByName(agentId)
+    // The idle agent has its extraction alarm set.
+    await expect
+      .poll(() => runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')))
+      .toBeDefined()
+
+    const written = await updateSettings(agentId, {
+      memoryPolicy: { extract: false, remember: true },
+    })
+    expect(written.apply.appliedVersion).toBe(1)
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.put('kodama:alarm:extract', Date.now() - 1),
+    )
+    await runDurableObjectAlarm(stub)
+
+    const jobs = await runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), (_i, state) =>
+      drizzle(state.storage).select().from(memoryJobs).all(),
+    )
+    expect(jobs.filter((job) => job.payloadJson.includes(agentId))).toEqual([])
+    expect(memoryRequests).toEqual([])
+    expect(await extractionCheckpoint(db, agentId)).toBe(0)
+    expect(
+      await runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')),
+    ).toBeUndefined()
+  })
+
   it('does not schedule extraction for an agent with no activity', async () => {
     const stub = env.AGENTS.getByName(crypto.randomUUID())
     expect(
@@ -98,7 +138,7 @@ describe('extraction', () => {
   })
 
   it('starts a new ten-minute idle delay after new activity finishes', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     const response = Promise.withResolvers<void>()
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
@@ -128,7 +168,7 @@ describe('extraction', () => {
 
 describe('always-loaded memory', () => {
   it('picks up a change whose notice was lost once the revision check interval has passed', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const stub = env.AGENTS.getByName(agentId)
     let clock = Date.UTC(2026, 9, 1)
 

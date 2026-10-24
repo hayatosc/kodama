@@ -14,8 +14,11 @@ const agentWorker = defineWorker({
   compatibilityDate: '2026-10-01',
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
+    // Agent management for the UI Worker and the development CLI (src/management/service/index.ts).
+    ManagementService: exports.worker(),
   },
-  // Daily memory consolidation (src/memory/consolidation.ts).
+  // Daily reconciliation (src/management/service/reconcile.ts), then memory consolidation
+  // (src/memory/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,
   observability: { enabled: true },
@@ -29,11 +32,14 @@ export const agentConfig = defineWorker({
       worker: agentWorker,
       exportName: 'Agent',
     }),
+    /** The management database: the agent registry, configuration versions, members, and audit. */
+    MANAGEMENT_DB: bindings.d1({ name: 'kodama-management' }),
+    /** Long-term memory. */
     MEMORY_DB: bindings.d1({ name: 'kodama-memory' }),
     ARCHIVE: bindings.r2({ name: 'kodama-archive' }),
     DEFAULT_MODEL_PROVIDER: bindings.text('openai'),
     DEFAULT_MODEL_ID: bindings.text('gpt-6-luna'),
-    // The memory agent's model; empty values use the default model above.
+    // The memory agent's initial model, read by the seed; empty values use the default model above.
     MEMORY_MODEL_PROVIDER: bindings.text(''),
     MEMORY_MODEL_ID: bindings.text(''),
     OPENAI_API_KEY: bindings.secret(),

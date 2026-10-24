@@ -9,11 +9,10 @@
 import type { EntryRecord, EntryId, Harness } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { and, asc, eq, gt } from 'drizzle-orm'
 import { readArchivedText } from './archive/reader.ts'
-import { prunedThrough } from './prune/runs.ts'
+import { prunedThrough } from '../storage/pruning.ts'
 import type { MemoryDb } from './store/db.ts'
-import { archiveSegments } from '../../drizzle/d1/schema.ts'
+import { nextArchivedSegment } from './store/archive.ts'
 import type { LocalDb } from '../storage/local.ts'
 
 /** Characters of tool output kept in text; the archive keeps the full entry. */
@@ -144,13 +143,7 @@ async function readArchived(
   limit: number,
   pruned: number,
 ): Promise<EntryPage> {
-  const segment = await sources.db
-    .select()
-    .from(archiveSegments)
-    .where(and(eq(archiveSegments.agentId, sources.agentId), gt(archiveSegments.lastEntry, after)))
-    .orderBy(asc(archiveSegments.firstEntry))
-    .limit(1)
-    .get()
+  const segment = await nextArchivedSegment(sources.db, sources.agentId, after)
   // Without an archive (the memory agent's own history), the pruned range has no text left.
   if (segment === undefined || segment.firstEntry > pruned) {
     return { entries: [], through: pruned, end: false }

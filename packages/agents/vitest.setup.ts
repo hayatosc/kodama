@@ -1,5 +1,5 @@
 /**
- * Applies the D1 migrations before the tests.
+ * Applies the D1 migrations of both databases before the tests.
  *
  * @module
  */
@@ -15,8 +15,11 @@ declare global {
       /** Columns per table in the newest drizzle-kit snapshots, read by vitest.config.ts. */
       TEST_MIGRATED_COLUMNS: Record<string, string[]>
       TEST_LOCAL_MIGRATED_COLUMNS: Record<string, string[]>
+      TEST_MANAGEMENT_MIGRATIONS: D1Migration[]
+      TEST_MANAGEMENT_MIGRATED_COLUMNS: Record<string, string[]>
     }
   }
 }
 
 await applyD1Migrations(env.MEMORY_DB, env.TEST_MIGRATIONS)
+await applyD1Migrations(env.MANAGEMENT_DB, env.TEST_MANAGEMENT_MIGRATIONS)

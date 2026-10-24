@@ -20,7 +20,7 @@ export type AgentSendEvent =
 /** JSON payload of each named SSE event. Pi may emit a replacement snapshot after overflow. */
 export type { AgentEvent } from '@earendil-works/pi-durable'
 
-/** Complete, non-secret configuration. Updates replace all fields for one agent. */
+/** The part of a configuration version that Pi and the memory copy use. */
 export interface AgentConfig {
   model: { provider: string; modelId: string }
   systemPrompt: string
@@ -28,6 +28,142 @@ export interface AgentConfig {
   tools: string[]
   /** Shared memory spaces the agent reads, earliest first; defaults to `["global"]`. */
   sharedSpaces: string[]
+}
+
+/** What the agent does with its long-term memory. */
+export interface MemoryPolicy {
+  /** Hand new entries to the memory agent after an idle period. */
+  extract: boolean
+  /** Offer the `remember` tool. */
+  remember: boolean
+}
+
+/** Spending limits; stored here, enforced by the budget work (issue #4). */
+export interface Budget {
+  /** USD per UTC day, at API prices. */
+  dailyUsd?: number
+  /** USD per UTC month, at API prices. */
+  monthlyUsd?: number
+  /** Tokens one turn may use. */
+  turnTokens?: number
+  /** What admission does over a limit. */
+  onExceed: 'refuse' | 'downgrade'
+}
+
+/** Credential references by Pi provider ID; stored here, resolved by issue #2. */
+export interface CredentialRefs {
+  /** The credential each provider uses. */
+  primary: Record<string, string>
+  /** What a provider uses while its primary needs re-authentication; `null` stops it. */
+  fallback: Record<string, string | null>
+}
+
+/** One immutable configuration version of an agent. */
+export interface AgentSettings extends AgentConfig {
+  /** The shape of this object; 1 is the only one. */
+  schemaVersion: 1
+  description?: string
+  labels?: string[]
+  memoryPolicy: MemoryPolicy
+  budget?: Budget
+  credentials?: CredentialRefs
+  /** Per registered tool; a tool missing here is allowed. */
+  toolPolicy?: Record<string, 'allow' | 'deny'>
+}
+
+/** Who calls `ManagementService`, as the calling Worker authenticated them. */
+export interface ManagementActor {
+  kind: 'user' | 'service' | 'agent'
+  /** The Access email, service token ID, or agent ID; resolved to a principal. */
+  externalId: string
+}
+
+/** Lifecycle states of an agent. */
+export type AgentStatus =
+  | 'provisioning'
+  | 'active'
+  | 'pausing'
+  | 'paused'
+  | 'archived'
+  | 'deleting'
+  | 'deleted'
+
+/** One registry row as `ManagementService` returns it. */
+export interface AgentSummary {
+  agentId: string
+  kind: 'working' | 'dedicated'
+  displayName: string
+  slug?: string
+  status: AgentStatus
+  /** The version requested in the registry. */
+  desiredVersion: number
+  /** The version the agent's object has fully applied. */
+  appliedVersion: number
+  /** Whether the desired version is not applied yet. */
+  pending: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** Create a working agent; the server assigns its ID. Reusing `requestId` returns the first. */
+export interface CreateAgentRequest {
+  requestId: string
+  displayName: string
+  slug?: string
+  /** Version 1; the current defaults when left out. */
+  settings?: AgentSettings
+}
+
+/** Change the display name or slug; `slug: null` removes it. */
+export interface RenameAgentRequest {
+  displayName?: string
+  slug?: string | null
+}
+
+/** Write `settings` as version `expectedVersion + 1`. Reusing `requestId` returns the first. */
+export interface UpdateConfigRequest {
+  requestId: string
+  settings: AgentSettings
+  expectedVersion: number
+  comment?: string
+}
+
+/** Write the settings of `toVersion` as version `expectedVersion + 1`. */
+export interface RollbackConfigRequest {
+  requestId: string
+  toVersion: number
+  expectedVersion: number
+  comment?: string
+}
+
+/** A stored configuration version. */
+export interface ConfigVersion {
+  version: number
+  settings: AgentSettings
+  /** The principal that wrote it; missing for the system (the seed). */
+  authorId?: string
+  comment?: string
+  createdAt: number
+}
+
+/** What an agent's object did with a pushed version. */
+export interface ApplyResult {
+  /** `pending` waits for idle; `stale` means this or a newer version was applied already. */
+  state: 'applied' | 'pending' | 'stale' | 'failed'
+  /** The version the object has applied after the call. */
+  appliedVersion: number
+}
+
+/** The result of writing a version. */
+export interface ConfigWriteResult {
+  version: number
+  apply: ApplyResult
+}
+
+/** What the seed made sure exists. */
+export interface SeedResult {
+  installId: string
+  memoryAgentId: string
 }
 
 /** Reuse requestId when retrying the same message; a new turn needs a new ID. */
