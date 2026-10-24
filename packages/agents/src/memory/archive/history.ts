@@ -8,7 +8,7 @@
 import { and, desc, eq, lt, lte, or } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/d1/schema.ts'
+import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { searchWords } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
 import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'

@@ -2,10 +2,10 @@ import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agents } from '../../drizzle/control/schema.ts'
+import { agents } from '../../drizzle/management/schema.ts'
 import { reconcileAgents } from '../admin/reconcile.ts'
-import { controlDb } from '../control/db.ts'
-import { admin, control, newAgentId, owner, updateSettings } from '../helper/control.ts'
+import { managementDb } from '../management/db.ts'
+import { admin, management, newAgentId, owner, updateSettings } from '../helper/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
 import { modelResponse, waitForAnswer } from '../helper/rpc.ts'
 import { createAgentModels } from '../models/index.ts'
@@ -17,14 +17,14 @@ import '@earendil-works/pi-ai/api/openai-responses'
 afterEach(() => vi.restoreAllMocks())
 
 async function versions(agentId: string) {
-  const row = await control.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   return { desired: row?.currentVersion, applied: row?.appliedVersion }
 }
 
 function reconcile() {
   return reconcileAgents({
     env,
-    db: controlDb(env.CONTROL_DB),
+    db: managementDb(env.MANAGEMENT_DB),
     models: createAgentModels(env),
     principal: null,
     now: Date.now(),

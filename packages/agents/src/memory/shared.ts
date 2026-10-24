@@ -8,8 +8,8 @@
  * @module
  */
 import { and, eq, inArray } from 'drizzle-orm'
-import type { Scope } from '../../drizzle/d1/schema.ts'
-import { memoryRecords } from '../../drizzle/d1/schema.ts'
+import type { Scope } from '../../drizzle/memory/schema.ts'
+import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import type { MemoryDb, RecordKind } from './store/db.ts'
 import { applyOperation, applyPlan } from './store/records.ts'
 import type { NewRecord } from './store/records.ts'

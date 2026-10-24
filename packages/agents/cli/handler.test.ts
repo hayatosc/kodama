@@ -1,6 +1,6 @@
 import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
-import { newAgentId } from '../src/helper/control.ts'
+import { newAgentId } from '../src/helper/management.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.

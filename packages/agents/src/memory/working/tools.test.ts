@@ -4,7 +4,7 @@
  * @module
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { newAgentId, updateSettings } from '../../helper/control.ts'
+import { newAgentId, updateSettings } from '../../helper/management.ts'
 import { mockModel, say } from '../../helper/conversation.ts'
 import { record, write } from '../../helper/memory.ts'
 import { toolCallResponse } from '../../helper/model.ts'

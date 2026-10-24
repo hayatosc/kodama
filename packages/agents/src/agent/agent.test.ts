@@ -1,7 +1,7 @@
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { newAgentId } from '../helper/control.ts'
+import { newAgentId } from '../helper/management.ts'
 import { parseMessage } from '../validation.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.

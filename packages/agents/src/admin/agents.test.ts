@@ -6,12 +6,12 @@ import {
   agentMembers,
   agents,
   auditLog,
-} from '../../drizzle/control/schema.ts'
-import { admin, control, owner, seedOnce } from '../helper/control.ts'
+} from '../../drizzle/management/schema.ts'
+import { admin, management, owner, seedOnce } from '../helper/management.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 import { write, db } from '../helper/memory.ts'
 import { agentScope } from '../memory/store/db.ts'
-import { memoryRecords } from '../../drizzle/d1/schema.ts'
+import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_ID } from './seed.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -49,19 +49,19 @@ describe('createAgent', () => {
       appliedVersion: 1,
       pending: false,
     })
-    const versions = await control
+    const versions = await management
       .select()
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.agentId, created.agentId))
     expect(versions.map((row) => row.version)).toEqual([1])
-    const members = await control
+    const members = await management
       .select()
       .from(agentMembers)
       .where(eq(agentMembers.agentId, created.agentId))
     expect(members).toEqual([
       { agentId: created.agentId, principalId: actor.externalId, role: 'owner' },
     ])
-    const audit = await control
+    const audit = await management
       .select({ action: auditLog.action })
       .from(auditLog)
       .where(eq(auditLog.targetId, created.agentId))
@@ -170,14 +170,17 @@ describe('configuration versions', () => {
     expect(lost).toHaveLength(1)
     expect(lost[0]).toMatchObject({ error: expect.stringMatching(/version_conflict/) })
 
-    const versions = await control
+    const versions = await management
       .select()
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.agentId, agentId))
     expect(versions.map((row) => row.version)).toEqual([1, 2])
-    const configAudits = await control.select().from(auditLog).where(eq(auditLog.targetId, agentId))
+    const configAudits = await management
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.targetId, agentId))
     expect(configAudits.filter((row) => row.action === 'agent.config')).toHaveLength(1)
-    const row = await control.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
     expect(row?.currentVersion).toBe(2)
   })
 

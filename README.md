@@ -2,7 +2,7 @@
 
 Pi Durable agents on Cloudflare Durable Objects, managed with the `cf` CLI.
 
-Each agent has a server-issued UUID, its `agentId`, in a registry in the control D1 database,
+Each agent has a server-issued UUID, its `agentId`, in a registry in the management D1 database,
 and addresses **one agent = one Durable Object**. The object owns its SQLite-backed Pi session,
 conversation history, inbox, recovery alarm, and applied configuration version. The seed creates
 the first agent, a general-purpose assistant that is also the installation's administrator. Agent orchestration
@@ -15,7 +15,7 @@ packages/
     drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint (AgentService)
     src/admin/            AdminService: registry, configuration versions, seed, reconciliation
-    src/control/          The control database: registry, admission, versions, lifecycle
+    src/management/          The management database: registry, admission, versions, lifecycle
     src/lib/              Generic helpers that import nothing else from src/
     src/agent/            Agent Durable Object: RPC, Pi runtime, SSE events, alarms
     src/agent/dedicated/  Agent subclasses under reserved names; memory/ is the memory agent
@@ -52,7 +52,7 @@ nr dev:agents
 calls use a Worker service binding or DO binding; local CLI access is described below.
 The initial model uses `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` in
 `cloudflare.config.ts`. Defaults apply only to new agents. Each agent's configuration is a
-sequence of versions in the control database, changed through `AdminService`.
+sequence of versions in the management database, changed through `AdminService`.
 
 ```sh
 nr check
@@ -205,7 +205,7 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 ## Deployment
 
 From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
-`kodama-control` and apply their migrations, configure each provider's Worker secret (for
+`kodama-management` and apply their migrations, configure each provider's Worker secret (for
 example, `nr cf workers secrets update OPENAI_API_KEY`), deploy with `nr deploy`, and call
 `AdminService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
 Use `nr cf workers secrets update --help` for the pinned CLI's input options.
@@ -234,7 +234,7 @@ await env.ADMIN.updateConfig(actor, agentId, {
 })
 ```
 
-Configuration is a sequence of immutable versions in the control database, read and written only
+Configuration is a sequence of immutable versions in the management database, read and written only
 through `AdminService`. A new version takes effect from the agent's next turn, without a restart
 or a deploy, even if the agent is busy when it is written; `getAgent` shows the desired and
 applied versions separately until they converge. Two updates from the same version conflict:

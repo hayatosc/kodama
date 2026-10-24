@@ -5,14 +5,14 @@
  */
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { agents } from '../../drizzle/control/schema.ts'
+import { agents } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from '../configuration/index.ts'
-import { controlDb } from '../control/db.ts'
+import { managementDb } from '../management/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { AdminActor, AgentSettings, ConfigWriteResult, SeedResult } from '../protocol.ts'
 
-/** The control database of the tests. */
-export const control = controlDb(env.CONTROL_DB)
+/** The management database of the tests. */
+export const management = managementDb(env.MANAGEMENT_DB)
 
 /** The administration entrypoint. */
 export const admin = () => exports.AdminService
@@ -37,7 +37,7 @@ export async function owner(): Promise<AdminActor> {
  */
 export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
   const now = Date.now()
-  await control.insert(agents).values({
+  await management.insert(agents).values({
     agentId,
     objectName: agentId,
     kind: 'working',
@@ -52,7 +52,7 @@ export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
 
 /** The agent's desired settings, or the defaults before its first version. */
 export async function desiredSettings(agentId: string): Promise<AgentSettings> {
-  const row = await control.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   if (row === undefined || row.currentVersion === 0) return defaultAgentSettings(env)
   return (await admin().getConfig(await owner(), agentId)).settings
 }
@@ -62,7 +62,7 @@ export async function updateSettings(
   agentId: string,
   change: Partial<AgentSettings>,
 ): Promise<ConfigWriteResult> {
-  const row = await control.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   return admin().updateConfig(await owner(), agentId, {
     requestId: crypto.randomUUID(),
     settings: { ...(await desiredSettings(agentId)), ...change },

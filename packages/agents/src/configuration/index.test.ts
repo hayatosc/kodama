@@ -5,8 +5,8 @@ import { parseInput } from '../validation.ts'
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
-import { control, desiredSettings, newAgentId, updateSettings } from '../helper/control.ts'
-import { agentConfigVersions } from '../../drizzle/control/schema.ts'
+import { management, desiredSettings, newAgentId, updateSettings } from '../helper/management.ts'
+import { agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { eq } from 'drizzle-orm'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -120,7 +120,7 @@ describe('agent configuration', () => {
     ]) {
       await expect(updateSettings(agentId, invalid)).rejects.toThrow()
     }
-    const versions = await control
+    const versions = await management
       .select()
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.agentId, agentId))

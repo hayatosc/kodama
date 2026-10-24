@@ -13,8 +13,8 @@ import {
   memoryTerms,
   revisionClaims,
   scopeRevisions,
-} from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
+} from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { storedTerms } from '../../lib/search-text.ts'
 
 /**

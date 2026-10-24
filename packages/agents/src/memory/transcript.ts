@@ -13,7 +13,7 @@ import { and, asc, eq, gt } from 'drizzle-orm'
 import { readArchivedText } from './archive/reader.ts'
 import { prunedThrough } from './prune/runs.ts'
 import type { MemoryDb } from './store/db.ts'
-import { archiveSegments } from '../../drizzle/d1/schema.ts'
+import { archiveSegments } from '../../drizzle/memory/schema.ts'
 import type { LocalDb } from '../storage/local.ts'
 
 /** Characters of tool output kept in text; the archive keeps the full entry. */

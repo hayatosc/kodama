@@ -32,10 +32,10 @@ import {
   readSharedSpaces,
   readConfig,
 } from '../configuration/index.ts'
-import { controlDb } from '../control/db.ts'
-import { AGENT_STATUSES } from '../../drizzle/control/schema.ts'
-import { admitAgent } from '../control/registry.ts'
-import { reportApplied } from '../control/versions.ts'
+import { managementDb } from '../management/db.ts'
+import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
+import { admitAgent } from '../management/registry.ts'
+import { reportApplied } from '../management/versions.ts'
 import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './config-apply.ts'
 import type { ApplyDeps, PushedConfig } from './config-apply.ts'
 import {
@@ -153,7 +153,7 @@ export class Agent extends DurableObject<AgentEnv> {
   async #catchUp(harness: Harness): Promise<void> {
     try {
       await pullIfBehind(this.#applyDeps(harness), {
-        db: controlDb(this.env.CONTROL_DB),
+        db: managementDb(this.env.MANAGEMENT_DB),
         objectName: this.#agentId(),
         parse: (value) => parseSettings(createAgentModels(this.env), value),
       })
@@ -191,7 +191,7 @@ export class Agent extends DurableObject<AgentEnv> {
       change: (settings) => this.configChange(settings),
       rebuildMemory: (settings) => this.rebuildMemory(settings),
       report: async (agentId, version) => {
-        await reportApplied(controlDb(this.env.CONTROL_DB), agentId, version)
+        await reportApplied(managementDb(this.env.MANAGEMENT_DB), agentId, version)
       },
     }
   }
@@ -466,7 +466,7 @@ export class Agent extends DurableObject<AgentEnv> {
     parseAgentId(agentId)
     const message = parseMessage(request)
     assertAllowed(this.#refusal)
-    const objectName = await admitAgent(controlDb(this.env.CONTROL_DB), agentId, 'chat')
+    const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
   }

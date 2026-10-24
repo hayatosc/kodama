@@ -11,9 +11,9 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { AgentChange, Harness } from '@earendil-works/pi-durable'
 import { SHARED_SPACES_KEY } from '../configuration/index.ts'
-import type { ControlDb } from '../control/db.ts'
-import { agentRowByObjectName } from '../control/registry.ts'
-import { versionRow } from '../control/versions.ts'
+import type { ManagementDb } from '../management/db.ts'
+import { agentRowByObjectName } from '../management/registry.ts'
+import { versionRow } from '../management/versions.ts'
 import type { AgentSettings, ApplyResult } from '../protocol.ts'
 import { isIdle } from './harness.ts'
 
@@ -136,7 +136,7 @@ async function applyAll(deps: ApplyDeps, { agentId, version, settings }: PushedC
 
 /** What catching up with the registry needs, besides applying. */
 export interface PullDeps {
-  db: ControlDb
+  db: ManagementDb
   objectName: string
   /** Validate stored settings as they are applied. */
   parse: (value: unknown) => AgentSettings

@@ -22,7 +22,7 @@ import { alarmAt, setAlarm } from './alarms.ts'
 import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../helper/control.ts'
+import { newAgentId } from '../helper/management.ts'
 
 afterEach(() => vi.restoreAllMocks())
 

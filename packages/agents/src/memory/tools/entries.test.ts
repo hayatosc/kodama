@@ -5,7 +5,7 @@
  */
 import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { newAgentId } from '../../helper/control.ts'
+import { newAgentId } from '../../helper/management.ts'
 import { db, memoryAgent, activeContents } from '../../helper/memory.ts'
 import { waitForAnswer } from '../../helper/rpc.ts'
 import {

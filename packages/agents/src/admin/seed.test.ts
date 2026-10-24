@@ -2,8 +2,8 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { agents, principals, systemSettings } from '../../drizzle/control/schema.ts'
-import { admin, control } from '../helper/control.ts'
+import { agents, principals, systemSettings } from '../../drizzle/management/schema.ts'
+import { admin, management } from '../helper/management.ts'
 import { memoryAgent } from '../helper/memory.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 import { ADMIN_AGENT_PROMPT, MEMORY_AGENT_ID } from './seed.ts'
@@ -24,7 +24,7 @@ describe('seed', () => {
     expect(again).toEqual(first)
     expect(first.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
-    const memory = await control
+    const memory = await management
       .select()
       .from(agents)
       .where(eq(agents.agentId, MEMORY_AGENT_ID))
@@ -41,7 +41,7 @@ describe('seed', () => {
     )
     expect(marker).toBe('kept')
 
-    const adminRow = await control
+    const adminRow = await management
       .select()
       .from(agents)
       .where(eq(agents.agentId, first.adminAgentId))
@@ -56,13 +56,13 @@ describe('seed', () => {
       ownerId: first.adminAgentId,
     })
     expect(
-      await control
+      await management
         .select()
         .from(principals)
         .where(eq(principals.principalId, first.adminAgentId))
         .get(),
     ).toMatchObject({ kind: 'agent', externalId: first.adminAgentId, systemRole: 'owner' })
-    const settings = await control.select().from(systemSettings)
+    const settings = await management.select().from(systemSettings)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
       {
         install_id: first.installId,

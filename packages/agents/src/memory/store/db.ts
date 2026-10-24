@@ -5,12 +5,12 @@
  *
  * @module
  */
-import * as schema from '../../../drizzle/d1/schema.ts'
+import * as schema from '../../../drizzle/memory/schema.ts'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
-import { extractionCheckpoints } from '../../../drizzle/d1/schema.ts'
-import type { memoryRecords, Scope } from '../../../drizzle/d1/schema.ts'
+import { extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
+import type { memoryRecords, Scope } from '../../../drizzle/memory/schema.ts'
 
 /** Every table of the D1 schema, for Drizzle's relational queries. */
 export { schema }

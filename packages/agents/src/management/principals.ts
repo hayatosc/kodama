@@ -7,16 +7,16 @@
  * @module
  */
 import { and, eq } from 'drizzle-orm'
-import { principals } from '../../drizzle/control/schema.ts'
+import { principals } from '../../drizzle/management/schema.ts'
 import type { AdminActor } from '../protocol.ts'
-import type { ControlDb, PrincipalRow } from './db.ts'
+import type { ManagementDb, PrincipalRow } from './db.ts'
 
 /**
  * The installation owner acting as `actor`.
  *
  * @throws {@link Error} Starting `forbidden:`, when `actor` is not an enabled principal with the owner role.
  */
-export async function requireOwner(db: ControlDb, actor: AdminActor): Promise<PrincipalRow> {
+export async function requireOwner(db: ManagementDb, actor: AdminActor): Promise<PrincipalRow> {
   const principal = await db
     .select()
     .from(principals)

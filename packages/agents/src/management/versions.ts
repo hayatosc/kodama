@@ -7,11 +7,11 @@
  * @module
  */
 import { and, desc, eq, lt } from 'drizzle-orm'
-import { agentConfigVersions, agents } from '../../drizzle/control/schema.ts'
+import { agentConfigVersions, agents } from '../../drizzle/management/schema.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { auditStatement } from './audit.ts'
-import type { ControlDb, VersionRow } from './db.ts'
+import type { ManagementDb, VersionRow } from './db.ts'
 
 /** Who writes a version, when, and its retry key. */
 export interface VersionWrite {
@@ -27,7 +27,7 @@ export interface VersionWrite {
  * its whole batch rolls back and leaves nothing behind.
  */
 export function writeVersionStatements(
-  db: ControlDb,
+  db: ManagementDb,
   write: VersionWrite,
   agentId: string,
   expected: number,
@@ -63,7 +63,7 @@ export function writeVersionStatements(
 
 /** One stored version, if it exists. */
 export function versionRow(
-  db: ControlDb,
+  db: ManagementDb,
   agentId: string,
   version: number,
 ): Promise<VersionRow | undefined> {
@@ -76,7 +76,7 @@ export function versionRow(
 
 /** An agent's versions, newest first, before version `before` when given. */
 export function versionRows(
-  db: ControlDb,
+  db: ManagementDb,
   agentId: string,
   page: { before?: number; limit: number },
 ): Promise<VersionRow[]> {
@@ -93,7 +93,7 @@ export function versionRows(
 }
 
 /** Record that the agent's object applied `version`; never moves backwards or past desired. */
-export function reportApplied(db: ControlDb, agentId: string, version: number) {
+export function reportApplied(db: ManagementDb, agentId: string, version: number) {
   return db
     .update(agents)
     .set({ appliedVersion: version })

@@ -13,7 +13,7 @@ import { visibleSkills } from '../skills.ts'
 import type { VisibleSkill } from '../skills.ts'
 import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords, scopeRevisions } from '../../../drizzle/memory/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 

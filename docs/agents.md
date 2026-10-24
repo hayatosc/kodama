@@ -2,7 +2,7 @@
 
 Kodama runs [Pi Durable](https://earendil.com/posts/pi-durable-on-cloudflare/) agents on
 Cloudflare Durable Objects. Each agent has a server-issued UUID, its `agentId`, in a registry in the
-control database (see [Control database](#control-database)), and each agent is one SQLite-backed
+management database (see [Management database](#management-database)), and each agent is one SQLite-backed
 Durable Object that owns these parts:
 
 - its Pi session: conversation history, inbox, and configuration;
@@ -23,21 +23,22 @@ planned and not implemented.
 ```text
 packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
-  drizzle.d1.config.ts      drizzle-kit config for the long-term memory D1 schema (drizzle/d1/)
-  drizzle.control.config.ts drizzle-kit config for the control D1 schema (drizzle/control/)
+  drizzle.memory.config.ts  drizzle-kit config for the long-term memory D1 schema (drizzle/memory/)
+  drizzle.management.config.ts
+                            drizzle-kit config for the management D1 schema (drizzle/management/)
   drizzle.durable-object.config.ts
                             drizzle-kit config for kodama's tables in each Durable Object
                             (drizzle/durable-object/)
   drizzle/
-    d1/                     long-term memory D1 schema (schema.ts) and its migrations (migrations/)
-    control/                control D1 schema: registry, versions, principals, audit; its migrations
+    memory/                 long-term memory D1 schema (schema.ts) and its migrations (migrations/)
+    management/             management D1 schema: registry, versions, principals, audit; migrations
     durable-object/         schema of kodama's tables in each object, and their migrations
     schema.test.ts          each schema matches its generated migrations
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
     admin/                  AdminService: registry, configuration versions, seed, reconciliation
-    control/                the control database: registry, admission, versions, lifecycle, audit
+    management/             the management database: registry, admission, versions, lifecycle, audit
     env.ts                  the Worker's bindings, as a type
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
@@ -127,7 +128,7 @@ imports say where it sits.
 | contracts    | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                     |
 | settings     | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                          |
 | storage      | `drizzle/`, `src/storage/`                           | lib                                     |
-| control      | `src/control/`                                       | lib, contracts, settings, storage       |
+| management   | `src/management/`                                    | lib, contracts, settings, storage       |
 | memory store | `src/memory/store/`                                  | lib, storage                            |
 | memory       | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
 | agent        | `src/agent/`, except `agent.ts` and `dedicated/`     | all of the above                        |
@@ -141,7 +142,7 @@ Some consequences:
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
   words (`search-text.ts`), UUIDs (`uuid.ts`), error text (`errors.ts`), and the two ordering
   helpers the `Agent` class uses (`serial.ts`).
-- `src/control/` knows the control database and nothing of objects; the agent runtime uses it to
+- `src/management/` knows the management database and nothing of objects; the agent runtime uses it to
   report applied versions and to admit `sendTo`. Only `src/admin/` and the entrypoint push to
   objects, because the seed needs the memory agent's configuration.
 - The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
@@ -170,11 +171,11 @@ the `kodama-memory` extension with its memory tools and prompt sections, whateve
 (see [memory.md](memory.md#working-agents)). No execution environment is configured, so a working
 agent sees no files and runs no commands.
 
-## Control database
+## Management database
 
-Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `drizzle/d1/`) holds long-term
-memory ([memory.md](memory.md)). `kodama-control` (`CONTROL_DB`, schema in
-[`drizzle/control/schema.ts`](../packages/agents/drizzle/control/schema.ts)) holds the source of
+Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `drizzle/memory/`) holds long-term
+memory ([memory.md](memory.md)). `kodama-management` (`MANAGEMENT_DB`, schema in
+[`drizzle/management/schema.ts`](../packages/agents/drizzle/management/schema.ts)) holds the source of
 truth for agents:
 
 | Table                   | Contents                                                                        |
@@ -188,7 +189,7 @@ truth for agents:
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
 RPC. Foreign keys are declared and enforced by D1, and every change is one `batch()`, so a violation
-rolls the whole change back (`src/control/d1-assumptions.test.ts` checks these behaviors). Registry
+rolls the whole change back (`src/management/d1-assumptions.test.ts` checks these behaviors). Registry
 rows are never deleted, so an agent ID is never reused.
 
 ### Registry and admission
@@ -202,7 +203,7 @@ rows are never deleted, so an agent ID is never reused.
   `AGENTS.getByName(object_name)` read from the registry.
 
 `AgentService` admits a call right before it reaches the object
-([`src/control/registry.ts`](../packages/agents/src/control/registry.ts)). It rejects an ID that is
+([`src/management/registry.ts`](../packages/agents/src/management/registry.ts)). It rejects an ID that is
 not a UUID, a UUID not in the registry, and a dedicated agent's UUID with a `TypeError`, before
 any harness or storage is opened, so an unknown ID never creates an object. A known agent whose
 state does not allow the call is refused with `agent_unavailable:`. `sendTo` admits its target the
@@ -213,7 +214,7 @@ prefix is an error that lists the candidates.
 
 ### Lifecycle
 
-[`src/control/lifecycle.ts`](../packages/agents/src/control/lifecycle.ts) defines the states and
+[`src/management/lifecycle.ts`](../packages/agents/src/management/lifecycle.ts) defines the states and
 their moves. The registry's `status` is the source, and each object holds a copy (see
 [Restrictions](#restrictions)).
 
@@ -276,7 +277,7 @@ and the audit row in one batch, then initializes the object and sets it `active`
 
 ## Configuration
 
-An agent's configuration is a sequence of immutable versions in the control database. The registry
+An agent's configuration is a sequence of immutable versions in the management database. The registry
 asks for one, the desired version (`agents.current_version`), and the agent's object applies it and
 keeps a copy ([`src/configuration/`](../packages/agents/src/configuration/)). Configuration is read
 and written only through [AdminService](#adminservice); `AgentService` has no configuration methods.
@@ -320,7 +321,7 @@ policies on. Changing the defaults later changes no existing agent.
 
 ### Configuration versions
 
-[`src/control/versions.ts`](../packages/agents/src/control/versions.ts) writes versions:
+[`src/management/versions.ts`](../packages/agents/src/management/versions.ts) writes versions:
 
 - `updateConfig(actor, agentId, { requestId, settings, expectedVersion, comment })` writes version
   `expectedVersion + 1`. One `batch()` inserts the version, moves `current_version`, and appends the
@@ -604,16 +605,16 @@ nr dev:agents
 `nr dev:agents` runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
 Objects. It exposes RPC, not a browser page.
 
-| Command                                                | Effect                                                                   |
-| ------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `nr check`                                             | TypeScript, type-aware Oxlint, Oxfmt check, and tests                    |
-| `nr test`                                              | workspace tests                                                          |
-| `nr format`                                            | format the repository                                                    |
-| `nr build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                      |
-| `nr cf:types` (in `packages/agents`)                   | regenerate runtime types                                                 |
-| `nr db:generate:d1` (in `packages/agents`)             | write a D1 migration after `drizzle/d1/schema.ts` changes                |
-| `nr db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes |
-| `nr db:generate:control` (in `packages/agents`)        | write a control migration after `drizzle/control/schema.ts` changes      |
+| Command                                                | Effect                                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `nr check`                                             | TypeScript, type-aware Oxlint, Oxfmt check, and tests                     |
+| `nr test`                                              | workspace tests                                                           |
+| `nr format`                                            | format the repository                                                     |
+| `nr build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
+| `nr cf:types` (in `packages/agents`)                   | regenerate runtime types                                                  |
+| `nr db:generate:memory` (in `packages/agents`)         | write a D1 migration after `drizzle/memory/schema.ts` changes             |
+| `nr db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes  |
+| `nr db:generate:management` (in `packages/agents`)     | write a management migration after `drizzle/management/schema.ts` changes |
 
 ### Local agent CLI
 
@@ -665,11 +666,11 @@ migrations before the tests.
 | `src/helper/rpc.ts`                         | a scripted default model, `waitForAnswer`, and SSE readers     |
 | `src/helper/conversation.ts`                | a long conversation that compacts, for pruning tests           |
 | `src/helper/memory.ts`                      | the memory database, records, and the memory agent             |
-| `src/helper/control.ts`                     | the seed, the owner, registry rows, and configuration changes  |
+| `src/helper/management.ts`                  | the seed, the owner, registry rows, and configuration changes  |
 | `src/admin/agents.test.ts`                  | creation, renames, listing, versions, conflicts, rollback      |
 | `src/admin/seed.test.ts`                    | the seed, the administrator agent, the memory agent's versions |
-| `src/control/registry.test.ts`              | admission without object storage, and resolving references     |
-| `src/control/d1-assumptions.test.ts`        | the D1 behaviors the control database relies on                |
+| `src/management/registry.test.ts`           | admission without object storage, and resolving references     |
+| `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on             |
 | `src/agent/config-apply.test.ts`            | applying at idle, convergence, partial failures, restrictions  |
 | `src/agent/agent.test.ts`                   | the Agent RPC and input validation                             |
 | `src/agent/events.test.ts`                  | `send` and `subscribe` streams                                 |
@@ -687,11 +688,11 @@ module it tests, describe the observable behavior it checks, and run `nr check` 
 From `packages/agents`:
 
 1. Log in with `nr cf auth login`.
-2. Create the D1 databases `kodama-memory` and `kodama-control` and the R2 bucket
+2. Create the D1 databases `kodama-memory` and `kodama-management` and the R2 bucket
    `kodama-archive` that `cloudflare.config.ts` binds.
-3. Apply the migrations with `nr cf d1 migrations apply kodama-memory --dir drizzle/d1/migrations`
-   and `nr cf d1 migrations apply kodama-control --dir drizzle/control/migrations`, then check
-   that `nr cf d1 execute kodama-control --command "PRAGMA foreign_keys"` returns 1.
+3. Apply the migrations with `nr cf d1 migrations apply kodama-memory --dir drizzle/memory/migrations`
+   and `nr cf d1 migrations apply kodama-management --dir drizzle/management/migrations`, then check
+   that `nr cf d1 execute kodama-management --command "PRAGMA foreign_keys"` returns 1.
 4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
    `nr cf workers secrets update --help` for the pinned CLI's options.
 5. Deploy with `nr deploy`.

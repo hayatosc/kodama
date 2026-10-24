@@ -8,10 +8,10 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as v from 'valibot'
-import { AGENT_KINDS, AGENT_STATUSES } from '../../drizzle/control/schema.ts'
-import { controlDb } from '../control/db.ts'
-import type { PrincipalRow } from '../control/db.ts'
-import { requireOwner } from '../control/principals.ts'
+import { AGENT_KINDS, AGENT_STATUSES } from '../../drizzle/management/schema.ts'
+import { managementDb } from '../management/db.ts'
+import type { PrincipalRow } from '../management/db.ts'
+import { requireOwner } from '../management/principals.ts'
 import type { AgentEnv } from '../env.ts'
 import { createAgentModels } from '../models/index.ts'
 import type {
@@ -102,7 +102,7 @@ export class AdminService extends WorkerEntrypoint<AgentEnv> {
   #systemCall(): AdminCall {
     return {
       env: this.env,
-      db: controlDb(this.env.CONTROL_DB),
+      db: managementDb(this.env.MANAGEMENT_DB),
       models: createAgentModels(this.env),
       principal: null,
       now: Date.now(),

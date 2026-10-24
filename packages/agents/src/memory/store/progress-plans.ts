@@ -7,7 +7,7 @@
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
-import { archiveSegments, extractionCheckpoints } from '../../../drizzle/d1/schema.ts'
+import { archiveSegments, extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
 import { claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
 

@@ -8,7 +8,7 @@
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
 import type { NewRecord, Operation, RecordEvidence } from './records.ts'
-import { memoryRecords } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords } from '../../../drizzle/memory/schema.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
   bumpScope,

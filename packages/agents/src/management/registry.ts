@@ -6,10 +6,10 @@
  * @module
  */
 import { and, desc, eq, like } from 'drizzle-orm'
-import { agents } from '../../drizzle/control/schema.ts'
+import { agents } from '../../drizzle/management/schema.ts'
 import { isUuid } from '../lib/uuid.ts'
 import type { AgentStatus, AgentSummary } from '../protocol.ts'
-import type { AgentRow, ControlDb } from './db.ts'
+import type { AgentRow, ManagementDb } from './db.ts'
 import { ADMITTED_STATUSES } from './lifecycle.ts'
 import type { AgentUse } from './lifecycle.ts'
 
@@ -18,14 +18,14 @@ import type { AgentUse } from './lifecycle.ts'
  *
  * @throws {@link TypeError} When the registry has no such agent.
  */
-export async function agentRow(db: ControlDb, agentId: string): Promise<AgentRow> {
+export async function agentRow(db: ManagementDb, agentId: string): Promise<AgentRow> {
   const row = await db.select().from(agents).where(eq(agents.agentId, agentId)).get()
   if (row === undefined) throw new TypeError(`Unknown agent: ${agentId}`)
   return row
 }
 
 /** The registry row of the object named `objectName`, if it has one. */
-export function agentRowByObjectName(db: ControlDb, objectName: string) {
+export function agentRowByObjectName(db: ManagementDb, objectName: string) {
   return db.select().from(agents).where(eq(agents.objectName, objectName)).get()
 }
 
@@ -52,7 +52,11 @@ export function summaryOf(row: AgentRow): AgentSummary {
  * @throws {@link TypeError} When the registry has no working agent with this ID.
  * @throws {@link Error} Starting `agent_unavailable:`, when the agent's state does not allow `use`.
  */
-export async function admitAgent(db: ControlDb, agentId: string, use: AgentUse): Promise<string> {
+export async function admitAgent(
+  db: ManagementDb,
+  agentId: string,
+  use: AgentUse,
+): Promise<string> {
   const row = await db
     .select({ objectName: agents.objectName, kind: agents.kind, status: agents.status })
     .from(agents)
@@ -76,7 +80,7 @@ const MAX_CANDIDATES = 10
  * @throws {@link TypeError} When nothing matches, or a prefix matches several agents (the message
  * lists them).
  */
-export async function resolveAgentRef(db: ControlDb, ref: string): Promise<AgentRow> {
+export async function resolveAgentRef(db: ManagementDb, ref: string): Promise<AgentRow> {
   if (isUuid(ref)) return agentRow(db, ref)
   const bySlug = await db.select().from(agents).where(eq(agents.slug, ref)).get()
   if (bySlug !== undefined) return bySlug
@@ -100,7 +104,7 @@ export async function resolveAgentRef(db: ControlDb, ref: string): Promise<Agent
 
 /** Registry rows, newest first, optionally of one kind or state. */
 export function listAgentRows(
-  db: ControlDb,
+  db: ManagementDb,
   filter: { kind?: AgentRow['kind']; status?: AgentStatus },
 ): Promise<AgentRow[]> {
   const conditions = [

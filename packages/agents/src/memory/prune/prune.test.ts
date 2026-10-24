@@ -6,7 +6,7 @@ import { STORAGE_MAINTENANCE_ERROR } from '../../agent/memory.ts'
 import { searchHistory } from '../archive/history.ts'
 import { PRUNE_LIMITS_KEY, prunedThrough } from './runs.ts'
 import { memoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/d1/schema.ts'
+import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../../storage/local.ts'
@@ -22,7 +22,7 @@ import {
 } from '../../helper/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../helper/control.ts'
+import { newAgentId } from '../../helper/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())

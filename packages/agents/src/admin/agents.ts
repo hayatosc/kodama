@@ -8,17 +8,17 @@
  */
 import { and, eq } from 'drizzle-orm'
 import type { Models } from '@earendil-works/pi-ai/models'
-import { agentConfigVersions, agentMembers, agents } from '../../drizzle/control/schema.ts'
+import { agentConfigVersions, agentMembers, agents } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings, parseSettings } from '../configuration/index.ts'
-import { auditByOpId, auditStatement } from '../control/audit.ts'
-import type { AgentRow, ControlDb, PrincipalRow, VersionRow } from '../control/db.ts'
-import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../control/registry.ts'
+import { auditByOpId, auditStatement } from '../management/audit.ts'
+import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../management/db.ts'
+import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../management/registry.ts'
 import {
   reportApplied,
   versionRow,
   versionRows,
   writeVersionStatements,
-} from '../control/versions.ts'
+} from '../management/versions.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
 import type { MemoryModelEnv } from '../agent/dedicated/memory/config.ts'
 import type { AgentEnv } from '../env.ts'
@@ -38,12 +38,12 @@ import type {
 } from '../protocol.ts'
 
 /** The bindings and variables the administration flows use. */
-export type AdminEnv = Pick<AgentEnv, 'AGENTS' | 'CONTROL_DB'> & MemoryModelEnv
+export type AdminEnv = Pick<AgentEnv, 'AGENTS' | 'MANAGEMENT_DB'> & MemoryModelEnv
 
 /** What every administration flow receives. */
 export interface AdminCall {
   env: AdminEnv
-  db: ControlDb
+  db: ManagementDb
   models: Models
   /** The authorized caller; `null` for the system (reconciliation). */
   principal: PrincipalRow | null
@@ -83,7 +83,7 @@ async function storedSettings(call: AdminCall, agentId: string, version: number)
  */
 export async function pushVersion(
   env: AdminEnv,
-  db: ControlDb,
+  db: ManagementDb,
   row: Pick<AgentRow, 'agentId' | 'objectName' | 'appliedVersion'>,
   version: number,
   settings: AgentSettings,

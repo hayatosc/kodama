@@ -8,7 +8,7 @@
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { errorText } from '../../lib/errors.ts'
 import { appliedResult } from './statements.ts'
 import type { OperationContext, OperationResult, Plan } from './statements.ts'

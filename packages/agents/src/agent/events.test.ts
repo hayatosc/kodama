@@ -1,6 +1,6 @@
 import { exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
-import { newAgentId } from '../helper/control.ts'
+import { newAgentId } from '../helper/management.ts'
 import {
   decodeEvents,
   modelResponse,

@@ -7,7 +7,7 @@
  * @module
  */
 import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
-import { skills } from '../../drizzle/d1/schema.ts'
+import { skills } from '../../drizzle/memory/schema.ts'
 import type { MemoryDb } from './store/db.ts'
 import { applyPlan } from './store/records.ts'
 import { agentScope } from './store/db.ts'

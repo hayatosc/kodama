@@ -12,7 +12,7 @@ import { eq } from 'drizzle-orm'
 import { readArchivedText } from '../archive/reader.ts'
 import { writeSummary } from '../archive/segment.ts'
 import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/d1/schema.ts'
+import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 
 /** The tools of an extract job: `read_entries` and `finish_extraction`. */
 export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {

@@ -6,7 +6,7 @@
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from './store/records.ts'
-import { memoryLedger } from '../../drizzle/d1/schema.ts'
+import { memoryLedger } from '../../drizzle/memory/schema.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
 import { activeContents, db, memoryAgent, parameterLimitedDb } from '../helper/memory.ts'
 import { consolidateDaily } from './consolidation.ts'

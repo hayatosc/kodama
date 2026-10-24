@@ -11,7 +11,7 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
 import { defineExtension, hook, ToolTask } from '@earendil-works/pi-durable'
 import type { Extension } from '@earendil-works/pi-durable'
-import { CALLING_STATUSES } from '../control/lifecycle.ts'
+import { CALLING_STATUSES } from '../management/lifecycle.ts'
 import type { AgentSettings, AgentStatus } from '../protocol.ts'
 
 /** The storage key of the object's copy of its registry state. */

@@ -16,8 +16,8 @@ import {
   memoryRecords,
   memoryTerms,
   revisionClaims,
-} from '../../drizzle/d1/schema.ts'
-import type { Scope } from '../../drizzle/d1/schema.ts'
+} from '../../drizzle/memory/schema.ts'
+import type { Scope } from '../../drizzle/memory/schema.ts'
 import { SEARCH_VERSION } from '../lib/search-text.ts'
 import type { MemoryJob } from './jobs.ts'
 

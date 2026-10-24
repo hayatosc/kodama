@@ -1,5 +1,5 @@
 /**
- * The D1 schema of the control database: one file for the one database. `nr db:generate:control`
+ * The D1 schema of the management database: one file for the one database. `nr db:generate:management`
  * turns this file into the migrations in ./migrations.
  *
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so
@@ -7,7 +7,7 @@
  * inserts, so a constraint violation fails its statement and rolls back the whole `batch()`; only
  * the idempotent seed uses `ON CONFLICT DO NOTHING`.
  *
- * @see docs/agents.md — Control database
+ * @see docs/agents.md — Management database
  *
  * @module
  */
@@ -36,7 +36,7 @@ export const principals = sqliteTable('principals', {
 
 /** A working agent, or a dedicated agent under a reserved object name. */
 export const AGENT_KINDS = ['working', 'dedicated'] as const
-/** Lifecycle states; `AGENT_TRANSITIONS` in src/control/lifecycle.ts lists the allowed moves. */
+/** Lifecycle states; `AGENT_TRANSITIONS` in src/management/lifecycle.ts lists the allowed moves. */
 export const AGENT_STATUSES = [
   'provisioning',
   'active',
@@ -47,7 +47,7 @@ export const AGENT_STATUSES = [
   'deleted',
 ] as const
 /** The last step a purge finished; a stopped purge resumes after it. */
-export const PURGE_STATES = ['control', 'memory', 'archive', 'object', 'done'] as const
+export const PURGE_STATES = ['management', 'memory', 'archive', 'object', 'done'] as const
 
 /**
  * The agent registry: one row per agent, never deleted. `agent_id` is the outward identity;

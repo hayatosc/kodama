@@ -15,9 +15,9 @@ import type {
   SubmissionResponse,
 } from './protocol.ts'
 import { reconcileAgents } from './admin/reconcile.ts'
-import { controlDb } from './control/db.ts'
-import type { AgentUse } from './control/lifecycle.ts'
-import { admitAgent } from './control/registry.ts'
+import { managementDb } from './management/db.ts'
+import type { AgentUse } from './management/lifecycle.ts'
+import { admitAgent } from './management/registry.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './models/index.ts'
 import { parseAgentId } from './validation.ts'
@@ -54,7 +54,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     try {
       const result = await reconcileAgents({
         env: this.env,
-        db: controlDb(this.env.CONTROL_DB),
+        db: managementDb(this.env.MANAGEMENT_DB),
         models: createAgentModels(this.env),
         principal: null,
         now: controller.scheduledTime,
@@ -74,7 +74,11 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link Error} Starting `agent_unavailable:`, when the agent's state does not allow `use`.
    */
   async #agent(agentId: string, use: AgentUse) {
-    const objectName = await admitAgent(controlDb(this.env.CONTROL_DB), parseAgentId(agentId), use)
+    const objectName = await admitAgent(
+      managementDb(this.env.MANAGEMENT_DB),
+      parseAgentId(agentId),
+      use,
+    )
     return this.env.AGENTS.getByName(objectName)
   }
 

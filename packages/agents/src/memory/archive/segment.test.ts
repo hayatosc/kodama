@@ -5,7 +5,7 @@
  */
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import { archiveSegments } from '../../../drizzle/d1/schema.ts'
+import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { db } from '../../helper/memory.ts'
 import { searchHistory } from './history.ts'
 import { indexSchema, readJson, readSegment } from './reader.ts'

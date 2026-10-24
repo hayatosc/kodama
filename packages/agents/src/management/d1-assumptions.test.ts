@@ -1,11 +1,11 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { agentConfigVersions, agentMembers, agents } from '../../drizzle/control/schema.ts'
+import { agentConfigVersions, agentMembers, agents } from '../../drizzle/management/schema.ts'
 import { errorText } from '../lib/errors.ts'
-import { controlDb } from './db.ts'
+import { managementDb } from './db.ts'
 
-const db = controlDb(env.CONTROL_DB)
+const db = managementDb(env.MANAGEMENT_DB)
 
 function registryRow(agentId: string) {
   return {
@@ -24,9 +24,9 @@ function versionRow(agentId: string, version: number) {
   return { agentId, version, settingsJson: '{}', schemaVersion: 1, createdAt: 0 }
 }
 
-// The control database keeps references consistent with foreign keys and one batch() per change;
+// The management database keeps references consistent with foreign keys and one batch() per change;
 // these are the D1 behaviors that relies on. Run them again on D1 emulator or Drizzle upgrades.
-describe('D1 behavior the control database relies on', () => {
+describe('D1 behavior the management database relies on', () => {
   it('enforces foreign keys by default', async () => {
     const error = await db
       .insert(agentConfigVersions)

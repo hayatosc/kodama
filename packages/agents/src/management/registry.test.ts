@@ -2,8 +2,8 @@ import { listDurableObjectIds } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { agents } from '../../drizzle/control/schema.ts'
-import { control, newAgentId, seedOnce } from '../helper/control.ts'
+import { agents } from '../../drizzle/management/schema.ts'
+import { management, newAgentId, seedOnce } from '../helper/management.ts'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { resolveAgentRef } from './registry.ts'
@@ -55,7 +55,10 @@ describe('AgentService admission', () => {
 
   it('refuses chat to an agent that is not active, without reaching its object', async () => {
     const agentId = await newAgentId()
-    await control.update(agents).set({ status: 'provisioning' }).where(eq(agents.agentId, agentId))
+    await management
+      .update(agents)
+      .set({ status: 'provisioning' })
+      .where(eq(agents.agentId, agentId))
     const send = exports.default.sendMessage(agentId, { requestId: 'r', content: 'Hello' })
     expect(await rejection(send)).toMatch(/agent_unavailable/)
     expect(await hasStorage(agentId)).toBe(false)
@@ -66,9 +69,9 @@ describe('resolveAgentRef', () => {
   it('resolves a UUID, a slug, and a unique UUID prefix to the registry row', async () => {
     const agentId = await newAgentId()
     const slug = `ref-${crypto.randomUUID().slice(0, 8)}`
-    await control.update(agents).set({ slug }).where(eq(agents.agentId, agentId))
+    await management.update(agents).set({ slug }).where(eq(agents.agentId, agentId))
     for (const ref of [agentId, slug, agentId.slice(0, 24)]) {
-      expect((await resolveAgentRef(control, ref)).agentId).toBe(agentId)
+      expect((await resolveAgentRef(management, ref)).agentId).toBe(agentId)
     }
   })
 
@@ -78,11 +81,11 @@ describe('resolveAgentRef', () => {
     const second = await newAgentId(uuidv7(now))
     const shared = first.slice(0, 13)
     expect(second.startsWith(shared)).toBe(true)
-    const ambiguous = await rejection(resolveAgentRef(control, shared))
+    const ambiguous = await rejection(resolveAgentRef(management, shared))
     expect(ambiguous).toMatch(/Ambiguous agent prefix/)
     expect(ambiguous).toContain(first)
     expect(ambiguous).toContain(second)
-    expect(await rejection(resolveAgentRef(control, 'no-such-slug'))).toMatch(/Unknown agent/)
-    expect(await rejection(resolveAgentRef(control, 'ab'))).toMatch(/Unknown agent/)
+    expect(await rejection(resolveAgentRef(management, 'no-such-slug'))).toMatch(/Unknown agent/)
+    expect(await rejection(resolveAgentRef(management, 'ab'))).toMatch(/Unknown agent/)
   })
 })

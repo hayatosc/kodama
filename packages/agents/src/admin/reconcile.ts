@@ -7,7 +7,7 @@
  * @module
  */
 import { eq, ne, or } from 'drizzle-orm'
-import { agents } from '../../drizzle/control/schema.ts'
+import { agents } from '../../drizzle/management/schema.ts'
 import { finishProvisioning, pushDesired } from './agents.ts'
 import type { AdminCall } from './agents.ts'
 

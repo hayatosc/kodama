@@ -13,11 +13,11 @@ import {
   agents,
   principals,
   systemSettings,
-} from '../../drizzle/control/schema.ts'
+} from '../../drizzle/management/schema.ts'
 import { memoryAgentSettings } from '../agent/dedicated/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
-import { auditStatement } from '../control/audit.ts'
-import type { ControlDb } from '../control/db.ts'
+import { auditStatement } from '../management/audit.ts'
+import type { ManagementDb } from '../management/db.ts'
 import type { DefaultModelEnv } from '../configuration/index.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
@@ -62,7 +62,7 @@ export function adminAgentSettings(env: DefaultModelEnv): AgentSettings {
 }
 
 /** The stored value of a system setting, if set. */
-async function setting(db: ControlDb, key: 'install_id' | 'admin_agent_id') {
+async function setting(db: ManagementDb, key: 'install_id' | 'admin_agent_id') {
   const row = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).get()
   return row === undefined ? undefined : String(JSON.parse(row.valueJson))
 }
