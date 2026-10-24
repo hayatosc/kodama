@@ -1,16 +1,20 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { agents, principals, systemSettings } from '../../drizzle/management/schema.ts'
 import { admin, management } from '../helper/management.ts'
-import { memoryAgent } from '../helper/memory.ts'
+import { activeContents, memoryAgent } from '../helper/memory.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
+import { piEntries } from '../storage/pi-tables.ts'
+import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../helper/rpc.ts'
 import { ADMIN_AGENT_PROMPT, MEMORY_AGENT_ID } from './seed.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
+afterEach(() => vi.restoreAllMocks())
 
 describe('seed', () => {
   it('registers the memory agent on its existing object, and the administrator agent as the owner', async () => {
@@ -111,5 +115,40 @@ describe('seed', () => {
       modelId: 'grok-4.3',
     })
     expect(env.MEMORY_MODEL_PROVIDER).toBe('')
+  })
+
+  it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
+    const { adminAgentId } = await admin().seed()
+    const actor = { kind: 'agent', externalId: adminAgentId } as const
+    const current = await admin().getConfig(actor, MEMORY_AGENT_ID)
+    const result = await admin().updateConfig(actor, MEMORY_AGENT_ID, {
+      requestId: crypto.randomUUID(),
+      settings: { ...current.settings, toolPolicy: { memory_write: 'deny' } },
+      expectedVersion: current.version,
+    })
+    expect(result.apply.appliedVersion).toBe(current.version + 1)
+
+    const sourceAgentId = crypto.randomUUID()
+    const fact = `Denied fact ${sourceAgentId.slice(0, 8)}`
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) =>
+      toolResults(requestBody(init)) === 0
+        ? toolCallResponse({ name: 'memory_write', arguments: { kind: 'fact', content: fact } })
+        : textResponse('Could not write.'),
+    )
+    const job = await memoryAgent().enqueue({
+      kind: 'remember',
+      sourceAgentId,
+      origin: 'user_request',
+      content: fact,
+      sourceEntries: { from: 1, to: 1 },
+    })
+    await expect
+      .poll(async () => (await memoryAgent().jobStatus(job.jobId))?.status, { timeout: 10_000 })
+      .toBe('settled')
+    expect(await activeContents(sourceAgentId)).toEqual([])
+    const blocked = await runInDurableObject(memoryAgent(), (_instance, state) =>
+      drizzle(state.storage).select({ record: piEntries.record }).from(piEntries).all(),
+    )
+    expect(JSON.stringify(blocked)).toContain("denied by the agent's tool policy")
   })
 })

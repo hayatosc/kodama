@@ -17,6 +17,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
 } from '../../../protocol.ts'
+import { appliedSettings } from '../../config-apply.ts'
 import { toolGuardExtension } from '../../restrictions.ts'
 import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
 import { jobStatus, runningJob } from './queue.ts'
@@ -57,7 +58,8 @@ export class MemoryAgent extends Agent {
       async () => runningJob(await this.local()),
       this.ctx.storage,
       {
-        extension: toolGuardExtension(refusal, async () => undefined),
+        // Its versions' toolPolicy applies to its own tools, like a working agent's.
+        extension: toolGuardExtension(refusal, () => appliedSettings(this.ctx.storage)),
         refusal,
       },
     )
