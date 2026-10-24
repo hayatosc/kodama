@@ -16,7 +16,7 @@ import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
 import { modelResponse, waitForAnswer } from '../helper/rpc.ts'
 import { createAgentModels } from '../models/index.ts'
 import { currentTimeTool } from '../tools/current-time.ts'
-import { Agent } from './agent.ts'
+import { Agent } from '../agent/agent.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 

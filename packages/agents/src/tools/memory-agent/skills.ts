@@ -6,43 +6,18 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
-import { sha256Hex } from '../../lib/hash.ts'
-import {
-  listSkills,
-  MAX_SKILL_BODY,
-  MAX_SKILL_DESCRIPTION,
-  readSkill,
-  setSkillStatus,
-  writeSkill,
-} from '../skills.ts'
-import type { OperationContext } from '../store/statements.ts'
-import { describe, text, toolDb } from './common.ts'
-import type { MemoryToolDeps } from './common.ts'
+import { MAX_SKILL_BODY, MAX_SKILL_DESCRIPTION } from '../../memory/skills.ts'
+import { listSkills, readSkill, setSkillStatus, writeSkill } from '../../memory/store/skills.ts'
+import { memoryDb } from '../../memory/store/db.ts'
+import { skillJobContext } from '../../memory/job-operations.ts'
+import { describe, text } from './common.ts'
+import type { MemoryJobDeps } from '../../memory/job-context.ts'
 
 const NAME = Type.String({ pattern: '^[a-z0-9-]{1,64}$' })
 
 /** The skill tools; each refuses to run outside a consolidate job of an agent scope. */
-export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
-  /** The agent whose skills the running job may change, and the operation of one tool call. */
-  const skillJob = async (
-    api?: ToolExecutionApi,
-  ): Promise<{ agentId: string; context: OperationContext }> => {
-    const running = await deps.runningJob()
-    if (running?.job.kind !== 'consolidate' || !running.job.scope.startsWith('agent:')) {
-      throw new Error('Skills change only in a consolidate job of an agent scope')
-    }
-    const { jobId } = running
-    return {
-      agentId: running.job.scope.slice('agent:'.length),
-      context: {
-        opId: await sha256Hex(`${jobId}:${api?.callId ?? ''}`),
-        jobId,
-        runId: jobId,
-        actor: 'memory-agent',
-        now: deps.now?.() ?? Date.now(),
-      },
-    }
-  }
+export function skillTools(deps: MemoryJobDeps): ToolRegistration[] {
+  const db = memoryDb(deps.env.MEMORY_DB)
 
   return [
     defineTool({
@@ -51,8 +26,8 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
       parameters: Type.Object({}),
       replay: 'safe',
       execute: async () => {
-        const { agentId } = await skillJob()
-        const rows = await listSkills(toolDb(deps), agentId)
+        const { agentId } = await skillJobContext(deps)
+        const rows = await listSkills(db, agentId)
         const lines = rows.map(
           (row) =>
             `- ${row.name} status=${row.status} revision=${row.revision}: ${row.description}`,
@@ -66,8 +41,8 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
       parameters: Type.Object({ name: NAME }),
       replay: 'safe',
       execute: async ({ name }) => {
-        const { agentId } = await skillJob()
-        const skill = await readSkill(toolDb(deps), agentId, name)
+        const { agentId } = await skillJobContext(deps)
+        const skill = await readSkill(db, agentId, name)
         if (skill === undefined) throw new Error(`No skill ${name}`)
         return text(`revision=${skill.revision}\nevidence: ${skill.evidence}\n\n${skill.body}`)
       },
@@ -89,8 +64,8 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
       }),
       replay: 'safe',
       execute: async (args, api: ToolExecutionApi) => {
-        const { agentId, context } = await skillJob(api)
-        return text(describe(await writeSkill(toolDb(deps), context, { agentId, ...args })))
+        const { agentId, context } = await skillJobContext(deps, api.callId)
+        return text(describe(await writeSkill(db, context, { agentId, ...args })))
       },
     }),
     defineTool({
@@ -104,12 +79,10 @@ export function skillTools(deps: MemoryToolDeps): ToolRegistration[] {
       }),
       replay: 'safe',
       execute: async ({ name, revision, restore }, api: ToolExecutionApi) => {
-        const { agentId, context } = await skillJob(api)
+        const { agentId, context } = await skillJobContext(deps, api.callId)
         const status = restore === true ? 'active' : 'archived'
         return text(
-          describe(
-            await setSkillStatus(toolDb(deps), context, { agentId, name, revision, status }),
-          ),
+          describe(await setSkillStatus(db, context, { agentId, name, revision, status })),
         )
       },
     }),

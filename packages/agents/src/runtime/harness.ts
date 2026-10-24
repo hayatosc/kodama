@@ -1,5 +1,5 @@
 /**
- * The Pi harness of an agent: its options and settings, opening it, and the exclusive section in
+ * Shared Pi harness settings, opening it, and the exclusive section in
  * which pruning closes and reopens it.
  *
  * @see docs/agents.md — Harness
@@ -7,16 +7,9 @@
  * @module
  */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { configure, createRegistry, defineExtension, Harness } from '@earendil-works/pi-durable'
+import { Harness } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
-import { agentChange, defaultAgentConfig } from '../configuration/index.ts'
-import type { DefaultModelEnv } from '../configuration/index.ts'
-import { createAgentModels } from '../models/index.ts'
-import type { ModelProviderEnv } from '../models/index.ts'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
-import { agentTools } from '../tools/index.ts'
-import { guardedModels } from './restrictions.ts'
-import type { Refusal } from './restrictions.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -48,34 +41,6 @@ export function harnessSettings(extensions: readonly Extension[]): HarnessOption
     contextRetentionMs: 0,
     stream: { timeoutMs: MODEL_REQUEST_TIMEOUT_MS },
     retry: RETRY_POLICY,
-  }
-}
-
-/**
- * A working agent's harness options. The agent's stored tool choice selects which registered
- * tools are enabled.
- *
- * @param always - Extensions that stay enabled whatever tools the agent selects, such as its memory
- * and the restriction checks.
- * @param refusal - Checked before every model request; a refused request fails at once.
- */
-export function createAgentOptions(
-  env: DefaultModelEnv & ModelProviderEnv,
-  always: readonly Extension[] = [],
-  refusal: Refusal = () => undefined,
-): HarnessOptions {
-  const extension = defineExtension({ name: 'kodama', tools: agentTools })
-  const registry = createRegistry()
-  registry.install(extension)
-  for (const extra of always) registry.install(extra)
-  return {
-    models: guardedModels(createAgentModels(env), refusal),
-    registry,
-    settings: harnessSettings([extension, ...always]),
-    conversationCreated: (tx, conversation) =>
-      conversation.owner === undefined && conversation.parent === undefined
-        ? configure(tx, conversation.id, agentChange(defaultAgentConfig(env)))
-        : undefined,
   }
 }
 

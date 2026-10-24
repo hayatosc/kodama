@@ -6,16 +6,16 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { text, writingTool, toolDb, extractionReadThrough, EXTRACTION_READ_KEY } from './common.ts'
-import type { MemoryToolDeps } from './common.ts'
-import { eq } from 'drizzle-orm'
-import { readArchivedText } from '../archive/reader.ts'
-import { writeSummary } from '../archive/segment.ts'
-import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/memory/schema.ts'
+import { text, writingTool } from './common.ts'
+import type { MemoryJobDeps } from '../../memory/job-context.ts'
+import {
+  readExtractionEntries,
+  readJobArchive,
+  writeJobArchiveSummary,
+} from '../../memory/job-entries.ts'
 
 /** The tools of an extract job: `read_entries` and `finish_extraction`. */
-export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
+export function extractionTools(deps: MemoryJobDeps): ToolRegistration[] {
   const readEntries = defineTool({
     name: 'read_entries',
     description: 'Read the source agent entries of an extract job, oldest first.',
@@ -25,27 +25,7 @@ export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
     }),
     replay: 'safe',
     execute: async ({ after, limit }) => {
-      const running = await deps.runningJob()
-      if (running?.job.kind !== 'extract') throw new Error('read_entries needs an extract job')
-      const { job } = running
-      const through = await extractionReadThrough(deps, running)
-      if (after !== undefined && after > through) {
-        throw new Error(`Start within the job's read range through ${through}`)
-      }
-      const page = await deps.env.AGENTS.getByName(job.sourceAgentId).readEntries({
-        after: Math.max(after ?? job.afterEntry, job.afterEntry),
-        limit: limit ?? 50,
-      })
-      await deps.storage.transaction(async (txn) => {
-        const current = await txn.get<{ jobId: string; through: number }>(EXTRACTION_READ_KEY)
-        await txn.put(EXTRACTION_READ_KEY, {
-          jobId: running.jobId,
-          through: Math.max(
-            current?.jobId === running.jobId ? current.through : through,
-            page.through,
-          ),
-        })
-      })
+      const page = await readExtractionEntries(deps, after, limit)
       const lines = page.entries.map((entry) => `#${entry.id} ${entry.role}: ${entry.text}`)
       lines.push(
         page.end ? `(end of entries, through #${page.through})` : `(more after #${page.through})`,
@@ -71,21 +51,7 @@ export function extractionTools(deps: MemoryToolDeps): ToolRegistration[] {
 }
 
 /** The tools of a record_archive job: reading the archived segment and writing its summary. */
-export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
-  const db = (): MemoryDb => toolDb(deps)
-  const archivedSegment = async () => {
-    const running = await deps.runningJob()
-    if (running?.job.kind !== 'record_archive')
-      throw new Error('This tool needs a record_archive job')
-    const segment = await db()
-      .select()
-      .from(archiveSegments)
-      .where(eq(archiveSegments.id, running.job.segmentId))
-      .get()
-    if (segment === undefined)
-      throw new Error(`Archived segment ${running.job.segmentId} is missing`)
-    return segment
-  }
+export function archiveTools(deps: MemoryJobDeps): ToolRegistration[] {
   const readArchive = defineTool({
     name: 'read_archive',
     description: 'Read the entries of the archived segment of a record_archive job, oldest first.',
@@ -95,17 +61,11 @@ export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
     }),
     replay: 'safe',
     execute: async ({ after, limit }) => {
-      const segment = await archivedSegment()
-      const page = await readArchivedText(
-        deps.env.ARCHIVE,
-        segment.r2Prefix,
-        after ?? 0,
-        limit ?? 50,
-      )
+      const { page, lastEntry } = await readJobArchive(deps, after, limit)
       const lines = page.entries.map((entry) => `#${entry.id} ${entry.role}: ${entry.text}`)
       lines.push(
-        page.through === undefined || page.through >= segment.lastEntry
-          ? `(end of segment, through #${segment.lastEntry})`
+        page.through === undefined || page.through >= lastEntry
+          ? `(end of segment, through #${lastEntry})`
           : `(more after #${page.through})`,
       )
       return text(lines.join('\n'))
@@ -119,9 +79,7 @@ export function archiveTools(deps: MemoryToolDeps): ToolRegistration[] {
     prepare: async (args, job) => {
       if (job.kind !== 'record_archive')
         throw new Error('write_archive_summary needs a record_archive job')
-      const summary = args.summary.trim()
-      const segment = await archivedSegment()
-      await writeSummary(deps.env.ARCHIVE, segment.r2Prefix, summary)
+      await writeJobArchiveSummary(deps, args.summary)
     },
     operation: (_args, job) => {
       if (job.kind !== 'record_archive')

@@ -7,13 +7,11 @@
  *
  * @module
  */
-import { and, eq, inArray } from 'drizzle-orm'
 import type { Scope } from '../../drizzle/memory/schema.ts'
-import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import type { MemoryDb, RecordKind } from './store/db.ts'
-import { applyOperation, applyPlan } from './store/records.ts'
+import { applyOperation, recordSharedRejection } from './store/records.ts'
+import { activeRecordRevision, activeRecordsById } from './store/queries.ts'
 import type { NewRecord } from './store/records.ts'
-import { insertOp, recordLedger } from './store/statements.ts'
 import type { OperationContext, OperationResult } from './store/statements.ts'
 
 /** The source agent of shared records, which belong to no single agent. */
@@ -58,10 +56,7 @@ async function rejection(
   write: SharedWrite,
 ): Promise<string | undefined> {
   if (write.sourceIds.length === 0) return 'cite the records the write rests on'
-  const sources = await db
-    .select()
-    .from(memoryRecords)
-    .where(and(inArray(memoryRecords.id, [...write.sourceIds]), eq(memoryRecords.status, 'active')))
+  const sources = await activeRecordsById(db, write.sourceIds)
   if (sources.length !== new Set(write.sourceIds).size)
     return 'every source must be an active record'
   const agents = new Set(sources.filter((r) => r.scope.startsWith('agent:')).map((r) => r.scope))
@@ -93,16 +88,7 @@ export async function writeShared(
   const write = { ...input, content: input.content.trim() }
   const reason = await rejection(db, scope, write)
   if (reason !== undefined) {
-    await applyPlan(db, context, async () => {
-      const result: OperationResult = { status: 'declined' }
-      return {
-        result,
-        statements: [
-          insertOp(db, context, 'shared_rejected', result),
-          recordLedger(db, context, 'shared_rejected', scope, { content: write.content, reason }),
-        ],
-      }
-    })
+    await recordSharedRejection(db, context, scope, write.content, reason)
     return { status: 'rejected', reason }
   }
   const record: NewRecord = {
@@ -116,11 +102,7 @@ export async function writeShared(
     observedAt: context.now,
   }
   if (write.replaces === undefined) return applyOperation(db, context, { type: 'write', record })
-  const old = await db
-    .select({ scope: memoryRecords.scope, revision: memoryRecords.revision })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.id, write.replaces), eq(memoryRecords.status, 'active')))
-    .get()
+  const old = await activeRecordRevision(db, write.replaces)
   if (old?.scope !== scope) {
     return { status: 'rejected', reason: `no active record ${write.replaces} in ${scope}` }
   }

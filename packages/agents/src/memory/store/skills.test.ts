@@ -6,21 +6,21 @@
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { skills } from '../../drizzle/memory/schema.ts'
-import { MEMORY_AGENT_NAME } from './jobs.ts'
+import { skills } from '../../../drizzle/memory/schema.ts'
+import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { curateSkills, readSkill, setSkillStatus, visibleSkills, writeSkill } from './skills.ts'
-import type { SkillWrite } from './skills.ts'
+import type { SkillWrite } from '../skills.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
   textResponse,
   toolCallResponse,
   toolResults,
-} from '../helper/model.ts'
-import { context, db } from '../helper/memory.ts'
+} from '../../helper/model.ts'
+import { context, db } from '../../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../helper/management.ts'
+import { newAgentId } from '../../helper/management.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 

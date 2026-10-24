@@ -18,7 +18,7 @@ import {
 } from '../helper/model.ts'
 import { activeContents, db } from '../helper/memory.ts'
 import { waitForAnswer } from '../helper/rpc.ts'
-import { alarmAt, setAlarm } from './alarms.ts'
+import { alarmAt, setAlarm } from '../runtime/alarms.ts'
 import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'

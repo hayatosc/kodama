@@ -6,9 +6,11 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration, ToolExecutionApi } from '@earendil-works/pi-durable'
-import type { MemoryDb } from '../store/db.ts'
-import { searchMemory } from '../store/search.ts'
-import { consolidationRecords } from '../consolidation.ts'
+import { memoryDb } from '../../memory/store/db.ts'
+import { searchMemory } from '../../memory/store/search.ts'
+import { consolidationRecords } from '../../memory/store/maintenance.ts'
+import { recordFor, recordEvidence, searchScopes } from '../../memory/job-records.ts'
+import { executeSharedWrite } from '../../memory/job-operations.ts'
 import {
   CONTENT,
   ENTRY,
@@ -16,21 +18,16 @@ import {
   IMPORTANCE,
   KIND,
   OVERRIDES,
-  recordFor,
-  recordEvidence,
-  searchScopes,
   text,
-  toolDb,
   writingTool,
   describe,
 } from './common.ts'
-import type { MemoryToolDeps } from './common.ts'
-import { sha256Hex } from '../../lib/hash.ts'
-import { MIN_SOURCE_AGENTS, writeShared } from '../shared.ts'
+import type { MemoryJobDeps } from '../../memory/job-context.ts'
+import { MIN_SOURCE_AGENTS } from '../../memory/shared.ts'
 
 /** The record tools every job gets: search, write, supersede, invalidate, decline, and list. */
-export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
-  const db = (): MemoryDb => toolDb(deps)
+export function recordTools(deps: MemoryJobDeps): ToolRegistration[] {
+  const db = memoryDb(deps.env.MEMORY_DB)
   const search = defineTool({
     name: 'memory_search',
     description: 'Search active memory records related to the job; returns ids and revisions.',
@@ -39,7 +36,7 @@ export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
     execute: async ({ query }) => {
       const running = await deps.runningJob()
       if (running === undefined) throw new Error('No memory job is running')
-      const records = await searchMemory(db(), {
+      const records = await searchMemory(db, {
         query,
         scopes: searchScopes(running.job),
         now: deps.now?.() ?? Date.now(),
@@ -121,7 +118,7 @@ export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
       const running = await deps.runningJob()
       if (running?.job.kind !== 'consolidate')
         throw new Error('list_records needs a consolidate job')
-      const records = await consolidationRecords(db(), running.job.scope)
+      const records = await consolidationRecords(db, running.job.scope)
       const lines = records.map(
         (record) =>
           `- id=${record.id} revision=${record.revision} kind=${record.kind}` +
@@ -139,9 +136,9 @@ export function recordTools(deps: MemoryToolDeps): ToolRegistration[] {
 
 /**
  * `shared_write`, which writes a shared record only when its sources pass the checks of
- * {@link writeShared}.
+ * the memory workflow.
  */
-export function sharedTools(deps: MemoryToolDeps): ToolRegistration[] {
+export function sharedTools(deps: MemoryJobDeps): ToolRegistration[] {
   return [
     defineTool({
       name: 'shared_write',
@@ -164,21 +161,7 @@ export function sharedTools(deps: MemoryToolDeps): ToolRegistration[] {
       }),
       replay: 'safe',
       execute: async (args, api: ToolExecutionApi) => {
-        const running = await deps.runningJob()
-        if (running?.job.kind !== 'consolidate') {
-          throw new Error('shared_write needs a consolidate job')
-        }
-        const result = await writeShared(
-          toolDb(deps),
-          {
-            opId: await sha256Hex(`${running.jobId}:${api.callId}`),
-            jobId: running.jobId,
-            runId: running.jobId,
-            actor: 'memory-agent',
-            now: deps.now?.() ?? Date.now(),
-          },
-          args,
-        )
+        const result = await executeSharedWrite(deps, api.callId, args)
         return text(result.status === 'rejected' ? `rejected: ${result.reason}` : describe(result))
       },
     }),

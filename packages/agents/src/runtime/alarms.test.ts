@@ -5,7 +5,7 @@ import { setAlarm, takeDueAlarms } from './alarms.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
-import { createAgentOptions } from './harness.ts'
+import { createAgentOptions } from '../agent/config.ts'
 import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from '../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'

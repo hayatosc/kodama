@@ -11,9 +11,8 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, Submission, SubmissionDraft } from '@earendil-works/pi-durable'
-import { eq } from 'drizzle-orm'
 import * as v from 'valibot'
-import { memoryLedger, memoryOps } from '../../../drizzle/memory/schema.ts'
+import { jobResults, recordJobFailure } from '../../memory/store/job-results.ts'
 import type { AgentEnv } from '../../env.ts'
 import { consolidateDaily } from '../../memory/consolidation.ts'
 import { parseMemoryJob } from '../../memory/jobs.ts'
@@ -28,13 +27,12 @@ import {
   forgetSettledJobs,
   nextDueAt,
   nextJob,
-  recordSubmission,
   retryJob,
   settleJob,
   startJob,
   storeJob,
-} from './queue.ts'
-import type { JobRow } from './queue.ts'
+} from '../../storage/memory-jobs.ts'
+import type { JobRow } from '../../storage/memory-jobs.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -118,7 +116,7 @@ async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
   let outcome: JobOutcome | 'retry'
   try {
     outcome = await runModelJob(
-      { harness: await ctx.harness(), admit: ctx.admit, local, db: memoryDb(ctx.env.MEMORY_DB) },
+      { harness: await ctx.harness(), admit: ctx.admit, db: memoryDb(ctx.env.MEMORY_DB) },
       row,
       job,
     )
@@ -136,17 +134,7 @@ async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
 async function settle(ctx: MemoryAgentContext, row: JobRow, outcome: JobOutcome): Promise<void> {
   settleJob(await ctx.local(), row.jobId, outcome)
   if (outcome !== 'failed') return
-  await memoryDb(ctx.env.MEMORY_DB)
-    .insert(memoryLedger)
-    .values({
-      at: Date.now(),
-      runId: row.jobId,
-      actor: 'memory-agent',
-      action: 'job_failed',
-      target: 'record',
-      targetId: row.jobId,
-      detailJson: JSON.stringify({ kind: row.kind, attempts: row.attempts }),
-    })
+  await recordJobFailure(memoryDb(ctx.env.MEMORY_DB), row, Date.now())
 }
 
 /** Tell the source agent its memory may have changed; a lost notice only delays its refresh. */
@@ -163,7 +151,6 @@ async function notifySource(ctx: MemoryAgentContext, job: MemoryJob): Promise<vo
 export interface ModelJobDeps {
   harness: Harness
   admit: (draft: SubmissionDraft) => Promise<Submission>
-  local: LocalDb
   db: MemoryDb
 }
 
@@ -212,13 +199,8 @@ export async function runModelJob(
       content: jobPrompt(job),
       whenBusy: 'followUp',
     })
-    recordSubmission(deps.local, row.jobId, submission.id)
   }
   const settled = await submission.wait(context)
   if (settled.status !== 'done') return 'retry'
-  const ops = await deps.db
-    .select({ resultJson: memoryOps.resultJson })
-    .from(memoryOps)
-    .where(eq(memoryOps.jobId, row.jobId))
-  return outcomeOf(ops.map((op) => op.resultJson))
+  return outcomeOf(await jobResults(deps.db, row.jobId))
 }

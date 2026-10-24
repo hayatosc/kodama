@@ -8,7 +8,7 @@
 import type { AgentChange, Harness, HarnessOptions } from '@earendil-works/pi-durable'
 import type { AlarmPurpose } from '../../runtime/alarms.ts'
 import { setAlarm } from '../../runtime/alarms.ts'
-import { Agent } from '../../runtime/agent.ts'
+import { Agent } from '../../agent/agent.ts'
 import { coalescingRunner } from '../../lib/serial.ts'
 import type { JobStatus } from '../../memory/jobs.ts'
 import type {
@@ -20,7 +20,7 @@ import type {
 import { appliedSettings } from '../../runtime/config-apply.ts'
 import { toolGuardExtension } from '../../runtime/restrictions.ts'
 import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
-import { jobStatus, runningJob } from './queue.ts'
+import { jobStatus, runningJob } from '../../storage/memory-jobs.ts'
 import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS } from './runner.ts'
 import type { MemoryAgentContext } from './runner.ts'
 

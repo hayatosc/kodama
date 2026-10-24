@@ -7,14 +7,12 @@
  * @module
  */
 import * as v from 'valibot'
-import { and, desc, eq, inArray } from 'drizzle-orm'
-import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
-import { visibleSkills } from '../skills.ts'
+import { visibleSkills } from '../store/skills.ts'
+import { memoryRevisions, promptRecords } from '../store/queries.ts'
+import { markMemoryChecked, saveMemoryCopy, storedMemoryCopy } from '../../storage/memory.ts'
 import type { VisibleSkill } from '../skills.ts'
 import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/memory/schema.ts'
-import type { LocalDb } from '../../storage/local.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
 /** Characters of the agent's own records in the prompt. */
@@ -63,27 +61,8 @@ export async function renderAlwaysLoaded(
   const scopes = readableScopes(agentId, sharedSpaces)
   // Capture revisions first: a write during rendering must remain visible to the next check,
   // rather than tagging old content with a newer revision and keeping it indefinitely.
-  const revisionRows = await db
-    .select()
-    .from(scopeRevisions)
-    .where(inArray(scopeRevisions.scope, scopes))
-  const revisions = Object.fromEntries(revisionRows.map((row) => [row.scope, row.revision]))
-  const records = await db
-    .select()
-    .from(memoryRecords)
-    .where(
-      and(
-        inArray(memoryRecords.scope, scopes),
-        eq(memoryRecords.status, 'active'),
-        inArray(memoryRecords.kind, ['fact', 'instruction']),
-      ),
-    )
-    .orderBy(
-      desc(memoryRecords.pinned),
-      desc(memoryRecords.importance),
-      // SQLite orders NULL first ascending, so never-used records come last descending.
-      desc(memoryRecords.lastUsedAt),
-    )
+  const revisions = await memoryRevisions(db, scopes)
+  const records = await promptRecords(db, scopes)
   const shared = records.filter((record) => record.scope !== own)
   const sharedById = new Map(shared.map((record) => [record.id, record]))
   const agentRecords = records.filter((record) => {
@@ -130,18 +109,14 @@ function parseRevisions(json: string): Revisions {
   )
 }
 
-function storedCopy(local: LocalDb) {
-  return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
-}
-
 /** The stored always-loaded text, which the `memory` section shows. */
 export async function storedMemoryText(memory: WorkingMemoryDeps): Promise<string> {
-  return storedCopy(await memory.local())?.text ?? ''
+  return storedMemoryCopy(await memory.local())?.text ?? ''
 }
 
 /** The skills listed in the `skills` section, from the same stored copy. */
 export async function storedSkills(memory: WorkingMemoryDeps): Promise<VisibleSkill[]> {
-  const row = storedCopy(await memory.local())
+  const row = storedMemoryCopy(await memory.local())
   return row === undefined ? [] : parseSkills(row.skillsJson)
 }
 
@@ -160,11 +135,7 @@ export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<vo
     checkedAt: memory.now?.() ?? Date.now(),
   }
   const local = await memory.local()
-  local
-    .insert(alwaysLoaded)
-    .values(row)
-    .onConflictDoUpdate({ target: alwaysLoaded.id, set: row })
-    .run()
+  saveMemoryCopy(local, row)
 }
 
 /**
@@ -173,18 +144,14 @@ export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<vo
  */
 export async function refreshAlwaysLoadedIfChanged(memory: WorkingMemoryDeps): Promise<void> {
   const local = await memory.local()
-  const stored = storedCopy(local)
+  const stored = storedMemoryCopy(local)
   const now = memory.now?.() ?? Date.now()
   if (stored === undefined) return refreshAlwaysLoaded(memory)
   if (now - stored.checkedAt < REVISION_CHECK_INTERVAL_MS) return
   const scopes = readableScopes(memory.agentId(), await memory.sharedSpaces())
-  const rows = await memoryDb(memory.env.MEMORY_DB)
-    .select()
-    .from(scopeRevisions)
-    .where(inArray(scopeRevisions.scope, scopes))
-  const current = Object.fromEntries(rows.map((row) => [row.scope, row.revision]))
+  const current = await memoryRevisions(memoryDb(memory.env.MEMORY_DB), scopes)
   if (!sameRevisions(current, parseRevisions(stored.revisionsJson))) {
     return refreshAlwaysLoaded(memory)
   }
-  local.update(alwaysLoaded).set({ checkedAt: now }).where(eq(alwaysLoaded.id, 1)).run()
+  markMemoryChecked(local, now)
 }

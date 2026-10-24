@@ -15,7 +15,7 @@ import {
   toolCallResponse,
   toolResults,
 } from '../../helper/model.ts'
-import { extractionCheckpoint } from '../store/db.ts'
+import { extractionCheckpoint } from '../../memory/store/db.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())

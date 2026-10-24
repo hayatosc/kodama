@@ -26,8 +26,6 @@ export const memoryJobs = sqliteTable(
     outcome: text('outcome', { enum: JOB_OUTCOMES }),
     attempts: integer('attempts').notNull().default(0),
     notBefore: integer('not_before').notNull(),
-    /** The Pi submission of a model job, once submitted. */
-    submissionId: integer('submission_id'),
     createdAt: integer('created_at').notNull(),
     settledAt: integer('settled_at'),
   },

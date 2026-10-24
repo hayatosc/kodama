@@ -19,14 +19,18 @@ packages/
     src/management/service/
                           ManagementService: registry, configuration versions, seed, reconciliation
     src/lib/              Generic helpers that import nothing else from src/
-    src/runtime/          Agent Durable Object and shared runtime: RPC, Pi harness, SSE, alarms
+    src/agent/            Agent RPC, working-agent options, and memory integration
+    src/runtime/          Shared execution: Pi harness, SSE, alarms, configuration, pruning
     src/system-agents/    Internal agents that support Kodama; memory/ manages long-term memory
     src/agent-object.ts   Selects the working or system agent in the single AGENTS namespace
     src/configuration/    Configuration versions: settings, validation, and the applied parts
     src/models/           Pi provider catalog and Worker credential resolution
-    src/tools/            Tool implementations and registration
-    src/memory/           Long-term memory: store, tools, pruning, archive, and skills
-    src/storage/          Kodama's tables in each Durable Object's SQLite
+    src/tools/            Model-facing tool schemas, descriptions, and result formatting
+      working-agent/      Memory tools available to working agents
+      memory-agent/       Dedicated memory-agent tools and their helpers
+    src/memory/           Memory workflows: job permissions, prompts, pruning, archive, skill rules
+    src/memory/store/     D1 queries and writes for memory, skills, and the archive catalog
+    src/storage/          Object SQLite: prompt cache, quotas, job queue, pruning, and migrations
     src/protocol.ts       Transport data types (safe to import as types in a UI)
     src/helper/           Shared test helpers; tests sit next to their modules as *.test.ts
   ui/                     Planned: web UI and its server Worker

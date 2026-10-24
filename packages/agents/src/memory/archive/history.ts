@@ -5,10 +5,9 @@
  *
  * @module
  */
-import { and, desc, eq, lt, lte, or } from 'drizzle-orm'
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/memory/schema.ts'
+import { historySegments } from '../store/archive.ts'
 import { searchWords } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
 import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'
@@ -109,28 +108,8 @@ export async function searchHistory(
     throw new TypeError('A history search cursor keeps its original before bound')
   }
   const before = cursor === undefined ? options.before : cursor.before
-  const segments = await db
-    .select()
-    .from(archiveSegments)
-    .where(
-      and(
-        eq(archiveSegments.agentId, agentId),
-        // Include a segment overlapping the time bound; filter its chunks below.
-        before === undefined ? undefined : lt(archiveSegments.firstAt, before),
-        cursor === undefined
-          ? undefined
-          : or(
-              lt(archiveSegments.lastAt, cursor.lastAt),
-              and(
-                eq(archiveSegments.lastAt, cursor.lastAt),
-                lte(archiveSegments.lastEntry, cursor.lastEntry),
-              ),
-            ),
-      ),
-    )
-    .orderBy(desc(archiveSegments.lastAt), desc(archiveSegments.lastEntry))
-    // One lookahead row distinguishes an exhausted catalog from a full page.
-    .limit(SEGMENTS_PER_SEARCH + 1)
+  // Include overlapping segments; one lookahead row distinguishes exhaustion from a full page.
+  const segments = await historySegments(db, agentId, SEGMENTS_PER_SEARCH + 1, before, cursor)
   const result: HistoryResult = {
     hits: [],
     summaries: [],

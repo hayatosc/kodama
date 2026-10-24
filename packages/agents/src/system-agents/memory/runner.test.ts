@@ -7,7 +7,7 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
-import { Agent } from '../../runtime/agent.ts'
+import { Agent } from '../../agent/agent.ts'
 import { MemoryAgent } from './agent.ts'
 import {
   isMemoryAgentRequest,
@@ -25,7 +25,7 @@ import {
 } from '../../helper/memory.ts'
 import { applyOperation } from '../../memory/store/records.ts'
 import { openLocalDb } from '../../storage/local.ts'
-import { settleJob } from './queue.ts'
+import { settleJob } from '../../storage/memory-jobs.ts'
 import { waitForAnswer } from '../../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'

@@ -43,7 +43,8 @@ packages/agents/
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
     lib/                    generic helpers that import nothing else from src/
-    runtime/                the Agent Durable Object and the shared runtime for all agents
+    agent/                  Agent RPC, working-agent options, and memory integration
+    runtime/                shared harness, alarms, streams, configuration, and pruning control
     system-agents/          internal agents that support Kodama, under reserved object names
       memory/               MemoryAgent: its class, configuration, queue, and runner
     agent-object.ts         AgentObject, which selects a working or system agent by the object's name
@@ -57,20 +58,29 @@ packages/agents/
 
 ### The Agent Durable Object
 
-[`src/runtime/agent.ts`](../packages/agents/src/runtime/agent.ts) is the `Agent` class, a working
+[`src/agent/agent.ts`](../packages/agents/src/agent/agent.ts) is the `Agent` class, a working
 agent and the base class of every dedicated agent (see [Dedicated agents](#dedicated-agents)).
 Classes exist only because a Durable Object must be one. `Agent` serves RPC and holds the object's in-memory state in private
 fields: the open harness, the tasks the recovery alarm watches, the pruning pass in progress, and a
 pending memory refresh. Everything else is a plain function that takes what it needs, in these
-files:
+files (paths relative to `src/`):
 
-| File         | Responsibility                                                                    |
-| ------------ | --------------------------------------------------------------------------------- |
-| `harness.ts` | Pi runtime composition, opening the harness, and the section that reopens it      |
-| `views.ts`   | `snapshot()` and `submission()` results, mapped from Pi state                     |
-| `memory.ts`  | the agent's use of long-term memory: refresh, extraction, pruning, the hard limit |
-| `events.ts`  | SSE streams for `send()` and `subscribe()`                                        |
-| `alarms.ts`  | one alarm per object, shared by several purposes, and the recovery alarm          |
+| File                        | Responsibility                                                     |
+| --------------------------- | ------------------------------------------------------------------ |
+| `agent/config.ts`           | Working-agent model and optional tool registration                 |
+| `agent/memory.ts`           | Working-agent memory refresh and extraction                        |
+| `agent/memory-extension.ts` | Working-agent memory tools and prompt hooks                        |
+| `runtime/harness.ts`        | Shared Pi settings, opening the harness, and its exclusive section |
+| `runtime/views.ts`          | `snapshot()` and `submission()` results, mapped from Pi state      |
+| `runtime/pruning.ts`        | Shared pruning scheduling and storage limits                       |
+| `runtime/events.ts`         | SSE streams for `send()` and `subscribe()`                         |
+| `runtime/alarms.ts`         | Shared alarm purposes and recovery                                 |
+| `runtime/config-apply.ts`   | Applying or holding configuration versions                         |
+| `runtime/restrictions.ts`   | Checks before external calls                                       |
+
+`Agent` is the working agent; there is no separate `WorkingAgent` class. Its memory integration
+lives beside it, not in the shared runtime. `MemoryAgent` inherits `Agent` and replaces the
+working-agent defaults through protected hooks.
 
 Reading and replacing the configuration is in `src/configuration/`, and the paged entries the memory
 agent reads are in `src/memory/transcript.ts`.
@@ -102,8 +112,9 @@ binding per dedicated agent, so adding one changes no Worker configuration:
 Each system agent has a folder under `src/system-agents/` with only what it adds to an agent.
 The one today is the memory agent, `MemoryAgent`, named `kodama:memory`
 ([memory.md](memory.md#memory-agent)): its class (`agent.ts`), its configuration and prompts
-(`config.ts`), its job queue (`queue.ts`), and the runner that drains it (`runner.ts`). The tools
-it uses and daily consolidation are memory parts in `src/memory/`.
+(`config.ts`), and the runner that drains its queue (`runner.ts`). The queue's SQLite operations
+live in `src/storage/memory-jobs.ts`; its dedicated model-facing tools live in `src/tools/memory-agent/`, and memory
+workflows, including daily consolidation, live in `src/memory/`.
 
 To add a system agent, create its folder with a subclass, reserve a name with `:`, and add the
 pair to `DEDICATED_AGENTS` in `src/agent-object.ts`.
@@ -128,20 +139,22 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                | May import                              |
-| ------------------ | ---------------------------------------------------- | --------------------------------------- |
-| lib                | `src/lib/`                                           | nothing in `src/`                       |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                     |
-| settings           | `src/configuration/`, `src/models/`, `src/tools/`    | lib, contracts                          |
-| storage            | `drizzle/`, `src/storage/`                           | lib                                     |
-| management         | `src/management/`, except `service/`                 | lib, contracts, settings, storage       |
-| memory store       | `src/memory/store/`                                  | lib, storage                            |
-| memory             | the rest of `src/memory/`                            | lib, contracts, storage, memory store   |
-| runtime            | `src/runtime/`, except `agent.ts`                    | all of the above                        |
-| Agent class        | `src/runtime/agent.ts`                               | all of the above                        |
-| system agents      | `src/system-agents/`                                 | all of the above, including Agent class |
-| management service | `src/management/service/`                            | all of the above                        |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                | all of the above                        |
+| Layer              | Paths                                                | May import                            |
+| ------------------ | ---------------------------------------------------- | ------------------------------------- |
+| lib                | `src/lib/`                                           | nothing in `src/`                     |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                   |
+| settings           | `src/configuration/`, `src/models/`                  | lib, contracts, tool registry         |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`         | lib                                   |
+| storage            | `drizzle/`, `src/storage/`                           | lib, memory contracts                 |
+| management         | `src/management/`, except `service/`                 | lib, contracts, settings, storage     |
+| memory store       | `src/memory/store/`                                  | lib, storage, memory contracts        |
+| memory             | the rest of `src/memory/`                            | lib, contracts, storage, memory store |
+| tool adapters      | `src/tools/`                                         | lib, contracts, memory, memory store  |
+| runtime            | `src/runtime/`                                       | all of the above                      |
+| agent              | `src/agent/`                                         | all of the above                      |
+| system agents      | `src/system-agents/`                                 | all of the above, including Agent     |
+| management service | `src/management/service/`                            | all of the above                      |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                | all of the above                      |
 
 Some consequences:
 
@@ -152,19 +165,33 @@ Some consequences:
   agent runtime uses it to report applied versions and to admit `sendTo`. Only
   `src/management/service/` and the entrypoint push to objects, because the seed needs the memory
   agent's configuration.
-- The memory parts (archive, skills, prune, shared, tools, working, consolidation) do not know the `Agent` class or the
-  memory agent. What they need from the memory agent is its input contract in
-  `src/memory/jobs.ts`: the job kinds and the object's name.
-- `src/runtime/` never imports system agents. `MemoryAgent` extends `Agent` and overrides its
-  hooks, so `src/system-agents/` sits above `src/runtime/`. At the composition boundary,
-  `src/agent-object.ts` imports both and maps reserved names to subclasses.
+- `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
+  formatting. `src/tools/working-agent/memory.ts` serves working agents;
+  `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's
+  adapters. They call memory workflows or store functions, never construct Drizzle queries.
+  `src/tools/index.ts` registers optional general tools; memory tools are wired by the working agent's
+  extension or the system agent's configuration, not by settings.
+- `src/memory/` owns job permissions, extraction, shared-write validation, prompt assembly, and
+  pruning orchestration. Its database queries live in `src/memory/store/` (D1) or `src/storage/`
+  (object SQLite). R2 encoding and IO remain explicit in `src/memory/archive/`.
+- Memory code never imports tool adapters, the `Agent` class, or a system agent. It uses the
+  input contract in `src/memory/jobs.ts`. Pure skill rules in `src/memory/skills.ts` are also
+  shared with persistence; neither contract imports workflow or storage implementations.
+  `RunningJob` is a type-only queue contract in `src/memory/job-context.ts`.
+- `src/agent/memory-extension.ts` wires memory tools and hooks into Pi. Workflows do not
+  register tools or depend on a tool execution API.
+- `src/runtime/` contains shared execution functions, not agent classes, tool registration, or
+  working-agent memory policy. It never imports `src/agent/` or system agents. `MemoryAgent`
+  extends `Agent` and overrides its hooks, so `src/system-agents/` sits above `src/agent/`.
+  At the composition boundary, `src/agent-object.ts` imports both and maps reserved names to subclasses.
 - Tests may import anything, including the helpers in `src/helper/`. Production code never
   imports `src/helper/`.
 
 ## Harness
 
-[`src/runtime/harness.ts`](../packages/agents/src/runtime/harness.ts) composes the Pi runtime. Working agents and the
-memory agent share these settings:
+[`src/runtime/harness.ts`](../packages/agents/src/runtime/harness.ts) opens Pi and provides shared execution settings.
+Working-agent model and tool composition lives in `src/agent/config.ts`; the memory agent's is in
+`src/system-agents/memory/config.ts`. Both use these settings:
 
 | Setting                 | Value                                                                   |
 | ----------------------- | ----------------------------------------------------------------------- |
@@ -574,7 +601,10 @@ runnable tasks. The alarm is armed before input is admitted, which covers the wi
 admission and Pi's scheduler. Admissions and recovery refreshes run in one serial queue
 (`src/lib/serial.ts`), so a refresh never clears an alarm that an admission just armed.
 
-On wake, the object reopens Pi's storage, reconstructs pending tasks, and resumes the scheduler.
+On wake, Kodama opens the harness and enables Pi's scheduler. Pi Durable reconstructs pending
+tasks and handles their checkpoints, provider retries, and submission deduplication. Its
+Cloudflare adapter only supplies SQLite storage; it does not schedule platform alarms or wake
+an evicted object. Kodama therefore retains the wakeup alarm, not a second task-recovery engine.
 When no task is left, recovery clears only its own time and runs the idle work: scheduling
 extraction and pruning, and any pending memory refresh. Reopening an idle object preserves an
 already scheduled extraction deadline, including one that is due. Admission persists pending
@@ -684,7 +714,7 @@ migrations before the tests.
 | `src/management/registry.test.ts`           | admission without object storage, and resolving references    |
 | `src/management/d1-assumptions.test.ts`     | the D1 behaviors the management database relies on            |
 | `src/runtime/config-apply.test.ts`          | applying at idle, convergence, partial failures, restrictions |
-| `src/runtime/agent.test.ts`                 | the Agent RPC and input validation                            |
+| `src/agent/agent.test.ts`                   | the Agent RPC and input validation                            |
 | `src/runtime/events.test.ts`                | `send` and `subscribe` streams                                |
 | `src/runtime/alarms.test.ts`                | alarm purposes; failures, cancellation, and recovery          |
 | `src/configuration/index.test.ts`           | the settings schema, and versions applied across eviction     |

@@ -1,65 +1,16 @@
 /**
- * What a working agent object does for its long-term memory: refreshing the always-loaded copy,
- * handing new entries to the memory agent, and pruning its own session.
+ * Session storage limits and pruning scheduling shared by working and system agents.
+ * The agent chooses whether pruning archives history or deletes scratch work directly.
  *
- * @see docs/memory.md — Working agents, Extract, Pruning
+ * @see docs/memory.md — Pruning
  *
  * @module
  */
-import type { Harness } from '@earendil-works/pi-durable'
-import { extractionCheckpoint, memoryDb } from '../memory/store/db.ts'
-import {
-  refreshAlwaysLoaded,
-  refreshAlwaysLoadedIfChanged,
-} from '../memory/working/always-loaded.ts'
-import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
-import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
-import { latestEntryId } from '../memory/transcript.ts'
 import { alarmAt, setAlarm, setAlarmNoLaterThan } from './alarms.ts'
 import { needsPrune, pruneLimits, PRUNE_RETRY_MS } from '../memory/prune/runs.ts'
 import { pruneOnce } from '../memory/prune/prune.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import type { LocalDb } from '../storage/local.ts'
-
-/** How long an agent stays idle before its new entries are extracted. */
-export const EXTRACT_IDLE_DELAY_MS = 10 * 60_000
-
-/**
- * Render the always-loaded copy again, or only when a scope revision changed.
- *
- * @remarks
- * Memory is an aid to the conversation, not a condition for it: a failure is logged and the
- * previous copy is kept.
- */
-export async function refreshMemory(
-  memory: WorkingMemoryDeps,
-  options: { onlyIfChanged?: boolean } = {},
-): Promise<void> {
-  try {
-    if (options.onlyIfChanged === true) await refreshAlwaysLoadedIfChanged(memory)
-    else await refreshAlwaysLoaded(memory)
-  } catch (error) {
-    console.error('Long-term memory refresh failed', error)
-  }
-}
-
-/**
- * Queue an `extract` job for the entries after the agent's extraction checkpoint, if there are any.
- */
-export async function extractNewEntries(
-  memory: WorkingMemoryDeps,
-  harness: Harness,
-): Promise<void> {
-  const agentId = memory.agentId()
-  const latest = await latestEntryId(harness)
-  const checkpoint = await extractionCheckpoint(memoryDb(memory.env.MEMORY_DB), agentId)
-  if (latest === undefined || latest <= checkpoint) return
-  await memory.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
-    kind: 'extract',
-    sourceAgentId: agentId,
-    afterEntry: checkpoint,
-  })
-}
 
 /** The retryable error that refuses input while the database is above the hard limit. */
 export const STORAGE_MAINTENANCE_ERROR =

@@ -10,11 +10,11 @@
  * @module
  */
 import { and, asc, eq, inArray, lte } from 'drizzle-orm'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
-import type { LocalDb } from '../../storage/local.ts'
-import { JOB_PRIORITY, jobId, parseMemoryJob } from '../../memory/jobs.ts'
-import type { JobOutcome, JobStatus, MemoryJob } from '../../memory/jobs.ts'
-import type { RunningJob } from '../../memory/tools/common.ts'
+import { memoryJobs } from '../../drizzle/durable-object/schema.ts'
+import type { LocalDb } from './local.ts'
+import { JOB_PRIORITY, jobId, parseMemoryJob } from '../memory/jobs.ts'
+import type { JobOutcome, JobStatus, MemoryJob } from '../memory/jobs.ts'
+import type { RunningJob } from '../memory/job-context.ts'
 
 /** One queued, running, or settled job. */
 export type JobRow = typeof memoryJobs.$inferSelect
@@ -69,7 +69,6 @@ export async function storeJob(
         status: 'queued',
         outcome: null,
         settledAt: null,
-        submissionId: null,
         notBefore: Date.now(),
       })
       .where(and(eq(memoryJobs.jobId, id), eq(memoryJobs.status, 'settled')))
@@ -116,7 +115,7 @@ export function startJob(local: LocalDb, row: JobRow): { row: JobRow; job: Memor
   if (row.status === 'queued') {
     local
       .update(memoryJobs)
-      .set({ status: 'running', attempts: row.attempts + 1, submissionId: null })
+      .set({ status: 'running', attempts: row.attempts + 1 })
       .where(eq(memoryJobs.jobId, row.jobId))
       .run()
   }
@@ -124,11 +123,6 @@ export function startJob(local: LocalDb, row: JobRow): { row: JobRow; job: Memor
   return current === undefined
     ? undefined
     : { row: current, job: parseMemoryJob(JSON.parse(current.payloadJson)) }
-}
-
-/** Remember the Pi submission an attempt made, so a resumed attempt waits for it. */
-export function recordSubmission(local: LocalDb, id: string, submissionId: number): void {
-  local.update(memoryJobs).set({ submissionId }).where(eq(memoryJobs.jobId, id)).run()
 }
 
 /** Queue the job again for its next attempt at `at`. */

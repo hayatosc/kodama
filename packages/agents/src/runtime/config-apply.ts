@@ -39,8 +39,8 @@ export interface ApplyDeps {
   harness: Harness
   /** How the settings become Pi's change; the memory agent has its own. */
   change: (settings: AgentSettings) => AgentChange
-  /** Rebuild the always-loaded memory for the settings; throws when it fails. */
-  rebuildMemory: (settings: AgentSettings) => Promise<void>
+  /** Prepare agent-specific state before applying settings; throws when it fails. */
+  prepareSettings: (settings: AgentSettings) => Promise<void>
   /** Record the applied version in the registry; a failure is left to reconciliation. */
   report: (agentId: string, version: number) => Promise<void>
 }
@@ -118,7 +118,7 @@ async function applyHeld(deps: ApplyDeps): Promise<ApplyResult> {
  * before the last write leaves the previous version recorded and the held one in place.
  */
 async function applyAll(deps: ApplyDeps, { agentId, version, settings }: PushedConfig) {
-  await deps.rebuildMemory(settings)
+  await deps.prepareSettings(settings)
   await deps.harness.commit(
     (tx) => configure(tx, ROOT_CONVERSATION_ID, deps.change(settings)),
     BACKGROUND_CONTEXT,

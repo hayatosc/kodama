@@ -5,12 +5,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runInDurableObject } from 'cloudflare:test'
-import { jobId } from '../jobs.ts'
-import { EXTRACTION_READ_KEY } from './common.ts'
+import { jobId } from '../../memory/jobs.ts'
+import { EXTRACTION_READ_KEY } from '../../storage/memory.ts'
 import { context, db, memoryAgent, record, write } from '../../helper/memory.ts'
-import { applyOperation } from '../store/records.ts'
+import { applyOperation } from '../../memory/store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
-import type { MemoryJob } from '../jobs.ts'
+import type { MemoryJob } from '../../memory/jobs.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())

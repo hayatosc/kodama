@@ -7,10 +7,15 @@
  */
 import { defineExtension, section } from '@earendil-works/pi-durable'
 import type { Extension } from '@earendil-works/pi-durable'
-import type { VisibleSkill } from '../skills.ts'
-import { storedMemoryText, storedSkills } from './always-loaded.ts'
-import type { WorkingMemoryDeps } from './deps.ts'
-import { historySearchTool, memorySearchTool, rememberTool, skillReadTool } from './tools.ts'
+import type { VisibleSkill } from '../memory/skills.ts'
+import { storedMemoryText, storedSkills } from '../memory/working/always-loaded.ts'
+import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
+import {
+  historySearchTool,
+  memorySearchTool,
+  rememberTool,
+  skillReadTool,
+} from '../tools/working-agent/memory.ts'
 
 function skillsText(skills: readonly VisibleSkill[]): string | undefined {
   if (skills.length === 0) return undefined

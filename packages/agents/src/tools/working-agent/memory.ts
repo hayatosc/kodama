@@ -8,18 +8,14 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { eq } from 'drizzle-orm'
-import { rememberTurns } from '../../../drizzle/durable-object/schema.ts'
-import { searchHistory } from '../archive/history.ts'
-import type { HistoryResult } from '../archive/history.ts'
-import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import { isSkillName, useSkill } from '../skills.ts'
-import { memoryDb, readableScopes } from '../store/db.ts'
-import { searchMemory } from '../store/search.ts'
-import type { WorkingMemoryDeps } from './deps.ts'
-
-/** `remember` calls a working agent may make in one turn. */
-export const REMEMBER_LIMIT_PER_TURN = 3
+import { searchHistory } from '../../memory/archive/history.ts'
+import type { HistoryResult } from '../../memory/archive/history.ts'
+import { isSkillName } from '../../memory/skills.ts'
+import { useSkill } from '../../memory/store/skills.ts'
+import { memoryDb, readableScopes } from '../../memory/store/db.ts'
+import { searchMemory } from '../../memory/store/search.ts'
+import { requestRemember } from '../../memory/working/remember.ts'
+import type { WorkingMemoryDeps } from '../../memory/working/deps.ts'
 
 /** `memory_search`: searches the agent's records and its shared spaces. */
 export function memorySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
@@ -117,7 +113,6 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
     }),
     replay: 'safe',
     execute: async ({ content, origin }, api, context) => {
-      const cleaned = content.trim()
       const userEntry = await api.commit(async (tx) => {
         const page = await tx.scanEntries(
           { conversationId: api.conversationId, order: 'descending' },
@@ -125,32 +120,7 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
         )
         return page.items.find((entry) => entry.kind === 'pi.user')?.id
       }, context)
-      if (userEntry === undefined) throw new Error('Not saved: no user message to attribute it to')
-
-      const local = await deps.local()
-      const turn = local
-        .select()
-        .from(rememberTurns)
-        .where(eq(rememberTurns.entryId, userEntry))
-        .get()
-      if ((turn?.count ?? 0) >= REMEMBER_LIMIT_PER_TURN) {
-        throw new Error(`Not saved: at most ${REMEMBER_LIMIT_PER_TURN} memories per turn`)
-      }
-      // Synchronous object SQLite: nothing runs between the read above and this write.
-      const count = (turn?.count ?? 0) + 1
-      local
-        .insert(rememberTurns)
-        .values({ entryId: userEntry, count })
-        .onConflictDoUpdate({ target: rememberTurns.entryId, set: { count } })
-        .run()
-
-      const status = await deps.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
-        kind: 'remember',
-        sourceAgentId: deps.agentId(),
-        origin,
-        content: cleaned,
-        sourceEntries: { from: userEntry, to: userEntry },
-      })
+      const status = await requestRemember(deps, userEntry, content, origin)
       return {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },

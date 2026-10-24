@@ -25,10 +25,10 @@ import { guardedModels } from '../../runtime/restrictions.ts'
 import type { Refusal } from '../../runtime/restrictions.ts'
 import { createAgentModels } from '../../models/index.ts'
 import type { AgentConfig, AgentSettings } from '../../protocol.ts'
-import type { RunningJob, MemoryToolDeps } from '../../memory/tools/common.ts'
-import { archiveTools, extractionTools } from '../../memory/tools/entries.ts'
-import { recordTools, sharedTools } from '../../memory/tools/records.ts'
-import { skillTools } from '../../memory/tools/skills.ts'
+import type { RunningJob, MemoryJobDeps } from '../../memory/job-context.ts'
+import { archiveTools, extractionTools } from '../../tools/memory-agent/entries.ts'
+import { recordTools, sharedTools } from '../../tools/memory-agent/records.ts'
+import { skillTools } from '../../tools/memory-agent/skills.ts'
 import type { MemoryJob } from '../../memory/jobs.ts'
 
 /**
@@ -106,7 +106,7 @@ export function memoryHarnessOptions(
 }
 
 /** The tools the memory agent's model may call. Working agents never get them. */
-export function createMemoryAgentTools(deps: MemoryToolDeps): ToolRegistration[] {
+export function createMemoryAgentTools(deps: MemoryJobDeps): ToolRegistration[] {
   return [
     ...sharedTools(deps),
     ...skillTools(deps),

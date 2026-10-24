@@ -22,8 +22,8 @@ import {
   takeDueAlarms,
   armRecovery,
   refreshRecovery,
-} from './alarms.ts'
-import type { AlarmPurpose } from './alarms.ts'
+} from '../runtime/alarms.ts'
+import type { AlarmPurpose } from '../runtime/alarms.ts'
 import {
   agentChange,
   defaultAgentConfig,
@@ -36,26 +36,32 @@ import { managementDb } from '../management/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
 import { admitAgent } from '../management/registry.ts'
 import { reportApplied } from '../management/versions.ts'
-import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './config-apply.ts'
-import type { ApplyDeps, PushedConfig } from './config-apply.ts'
+import {
+  applyOrHold,
+  applyPending,
+  appliedSettings,
+  pullIfBehind,
+} from '../runtime/config-apply.ts'
+import type { ApplyDeps, PushedConfig } from '../runtime/config-apply.ts'
 import {
   anyRefusal,
   assertAllowed,
   STATUS_KEY,
   statusRefusal,
   toolGuardExtension,
-} from './restrictions.ts'
-import type { Refusal } from './restrictions.ts'
+} from '../runtime/restrictions.ts'
+import type { Refusal } from '../runtime/restrictions.ts'
 import { refreshAlwaysLoaded } from '../memory/working/always-loaded.ts'
 import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
-import { sendEvents, subscribeEvents } from './events.ts'
-import { createAgentOptions, exclusiveSection, isIdle, openHarness } from './harness.ts'
+import { sendEvents, subscribeEvents } from '../runtime/events.ts'
+import { exclusiveSection, isIdle, openHarness } from '../runtime/harness.ts'
+import { createAgentOptions } from './config.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { JobStatus } from '../memory/jobs.ts'
-import { createWorkingMemoryExtension } from '../memory/working/extension.ts'
+import { createWorkingMemoryExtension } from './memory-extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
 import type {
@@ -74,15 +80,9 @@ import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../valid
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../configuration/index.ts'
-import {
-  pruneUntilUnder,
-  refuseWhenFull,
-  schedulePruneIfNeeded,
-  EXTRACT_IDLE_DELAY_MS,
-  extractNewEntries,
-  refreshMemory,
-} from './memory.ts'
-import { snapshotOf, submissionOf } from './views.ts'
+import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from '../runtime/pruning.ts'
+import { EXTRACT_IDLE_DELAY_MS, extractNewEntries, refreshMemory } from './memory.ts'
+import { snapshotOf, submissionOf } from '../runtime/views.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -91,7 +91,7 @@ const context = BACKGROUND_CONTEXT
  *
  * @remarks
  * The class serves RPC and holds the object's in-memory state in private fields; the work is done
- * by plain functions in `src/runtime/` and `src/memory/`.
+ * by plain functions in `src/agent/`, `src/runtime/`, and `src/memory/`.
  *
  * System agents such as `MemoryAgent` (`src/system-agents/memory/agent.ts`) extend it, live in the
  * same `AGENTS` namespace under reserved names (see `src/agent-object.ts`), and override the protected
@@ -189,7 +189,7 @@ export class Agent extends DurableObject<AgentEnv> {
       storage: this.ctx.storage,
       harness,
       change: (settings) => this.configChange(settings),
-      rebuildMemory: (settings) => this.rebuildMemory(settings),
+      prepareSettings: (settings) => this.rebuildMemory(settings),
       report: async (agentId, version) => {
         await reportApplied(managementDb(this.env.MANAGEMENT_DB), agentId, version)
       },

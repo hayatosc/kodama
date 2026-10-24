@@ -9,8 +9,9 @@
 import type { Harness } from '@earendil-works/pi-durable'
 import type { AgentEnv } from '../../env.ts'
 import type { LocalDb } from '../../storage/local.ts'
-import { deleteRows, safeToDelete } from './delete.ts'
-import { pruneLimits, unfinishedRun } from './runs.ts'
+import { safeToDelete } from './delete.ts'
+import { pruneLimits } from './runs.ts'
+import { deleteRows, unfinishedRun } from '../../storage/pruning.ts'
 import { catalog, exportRun, prepare } from './steps.ts'
 
 /**
