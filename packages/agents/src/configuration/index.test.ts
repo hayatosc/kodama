@@ -81,7 +81,7 @@ describe('agent configuration', () => {
       tools: ['current_time'],
     })
     // Either this push applies it, or the object, opening for the push, caught up first.
-    expect(written).toMatchObject({ version: 1, apply: { appliedVersion: 1 } })
+    expect(written).toMatchObject({ version: 2, apply: { appliedVersion: 2 } })
     const other = await newAgentId()
     expect(await env.AGENTS.getByName(other).getConfig()).toMatchObject({
       model: original.model,
@@ -125,7 +125,7 @@ describe('agent configuration', () => {
       .select()
       .from(agentConfigVersions)
       .where(eq(agentConfigVersions.agentId, agentId))
-    expect(versions).toEqual([])
+    expect(versions.map((row) => row.version)).toEqual([1])
     expect(await env.AGENTS.getByName(agentId).getConfig()).toEqual(before)
   })
 })

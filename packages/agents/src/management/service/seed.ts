@@ -7,6 +7,11 @@
  * @module
  */
 import { eq } from 'drizzle-orm'
+import { agentRowByObjectName } from '../registry.ts'
+import { isConstraintError } from '../../lib/errors.ts'
+import { parseSettings } from '../../configuration/index.ts'
+import { validateCredentialRefs } from '../../credentials/validation.ts'
+import { referenceStatements, initialGrantStatements } from '../../credentials/references.ts'
 import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
 import { memoryAgentSettings } from '../../system-agents/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
@@ -62,7 +67,10 @@ export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
  * The memory agent's rows are inserted only if missing. The system creates the first agent through
  * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
-export async function seed(call: ManagementCall): Promise<SeedResult> {
+export async function seed(
+  call: ManagementCall,
+  credentials?: AgentSettings['credentials'],
+): Promise<SeedResult> {
   const { db, env, now } = call
   await db
     .insert(systemSettings)
@@ -76,48 +84,59 @@ export async function seed(call: ManagementCall): Promise<SeedResult> {
   if (row === undefined) throw new Error('The seed could not store the installation ID')
   const installId = String(JSON.parse(row.valueJson))
 
-  await db.batch([
-    db
-      .insert(agents)
-      .values({
-        agentId: MEMORY_AGENT_ID,
-        objectName: MEMORY_AGENT_NAME,
-        kind: 'dedicated',
-        displayName: 'Memory agent',
-        status: 'active',
-        currentVersion: 1,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing(),
-    db
-      .insert(agentConfigVersions)
-      .values({
-        agentId: MEMORY_AGENT_ID,
-        version: 1,
-        settingsJson: JSON.stringify(memoryAgentSettings(env)),
-        schemaVersion: SETTINGS_SCHEMA_VERSION,
-        authorId: null,
-        comment: 'seed',
-        createdAt: now,
-      })
-      .onConflictDoNothing(),
-    auditStatement(db, {
-      opId: `system.seed:${installId}`,
-      at: now,
-      actorId: null,
-      action: 'system.seed',
-      targetKind: 'system',
-      targetId: installId,
-      detail: { memoryAgentId: MEMORY_AGENT_ID },
-    }).onConflictDoNothing(),
-  ])
-
+  const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
+  const initialSettings = parseSettings(call.models, {
+    ...memoryAgentSettings(env),
+    ...(credentials ? { credentials } : {}),
+  })
+  if (!existingMemory) {
+    await validateCredentialRefs(db, initialSettings)
+    try {
+      await db.batch([
+        db.insert(agents).values({
+          agentId: MEMORY_AGENT_ID,
+          objectName: MEMORY_AGENT_NAME,
+          kind: 'dedicated',
+          displayName: 'Memory agent',
+          status: 'active',
+          currentVersion: 1,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        db.insert(agentConfigVersions).values({
+          agentId: MEMORY_AGENT_ID,
+          version: 1,
+          settingsJson: JSON.stringify({
+            ...memoryAgentSettings(env),
+            ...(credentials ? { credentials } : {}),
+          }),
+          schemaVersion: SETTINGS_SCHEMA_VERSION,
+          authorId: null,
+          comment: 'seed',
+          createdAt: now,
+        }),
+        ...referenceStatements(db, MEMORY_AGENT_ID, 1, initialSettings),
+        ...initialGrantStatements(db, MEMORY_AGENT_ID, initialSettings, now),
+        auditStatement(db, {
+          opId: `system.seed:${installId}`,
+          at: now,
+          actorId: null,
+          action: 'system.seed',
+          targetKind: 'system',
+          targetId: installId,
+          detail: { memoryAgentId: MEMORY_AGENT_ID },
+        }),
+      ])
+    } catch (error) {
+      if (!isConstraintError(error) || !(await agentRowByObjectName(db, MEMORY_AGENT_NAME)))
+        throw error
+    }
+  }
   await createAgent(call, {
     requestId: 'seed',
     displayName: 'Kodama',
     slug: FIRST_AGENT_SLUG,
-    settings: firstAgentSettings(env),
+    settings: { ...firstAgentSettings(env), ...(credentials ? { credentials } : {}) },
   })
   // The memory agent keeps its existing object; this applies its desired version once.
   await pushDesired(call, MEMORY_AGENT_ID)

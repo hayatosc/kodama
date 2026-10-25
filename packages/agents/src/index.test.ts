@@ -32,7 +32,7 @@ function runCron(now: number): Promise<void> {
 
 /** An agent whose version 1 is in the registry but never reached its object. */
 async function agentWithLostVersion(systemPrompt: string): Promise<string> {
-  const agentId = await newAgentId()
+  const agentId = await newAgentId(undefined, false)
   await management.batch([
     management.insert(agentConfigVersions).values({
       agentId,

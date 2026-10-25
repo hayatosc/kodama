@@ -101,7 +101,7 @@ describe('extraction', () => {
     const written = await updateSettings(agentId, {
       memoryPolicy: { extract: false, remember: true },
     })
-    expect(written.apply.appliedVersion).toBe(1)
+    expect(written.apply.appliedVersion).toBe(2)
     await runInDurableObject(stub, (_instance, state) =>
       state.storage.put('kodama:alarm:extract', Date.now() - 1),
     )

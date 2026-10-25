@@ -4,6 +4,7 @@
  * @module
  */
 import { builtinModels } from '@earendil-works/pi-ai/providers/all'
+import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
 import type { AgentEnv } from '../env.ts'
 
@@ -36,9 +37,11 @@ export function resolveProviderCredentials(env: ModelProviderEnv): Map<string, s
 }
 
 /** Pi's built-in providers and model catalogs, authenticated from Worker secrets only. */
-export function createAgentModels(env: ModelProviderEnv): Models {
-  const credentials = resolveProviderCredentials(env)
+export function createAgentModels(env: ModelProviderEnv, store?: CredentialStore): Models {
+  const credentials =
+    store === undefined ? resolveProviderCredentials(env) : new Map<string, string>()
   return builtinModels({
+    ...(store ? { credentials: store } : {}),
     authContext: {
       env: async (name) => credentials.get(name),
       fileExists: async () => false,

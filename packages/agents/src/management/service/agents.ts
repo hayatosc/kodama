@@ -11,6 +11,7 @@ import * as v from 'valibot'
 import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai/models'
 import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
+import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { defaultAgentSettings, parseSettings } from '../../configuration/index.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
@@ -22,7 +23,6 @@ import type { MemoryModelEnv } from '../../system-agents/memory/config.ts'
 import type { AgentEnv } from '../../env.ts'
 import { errorText, isConstraintError } from '../../lib/errors.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import { referenceStatements } from '../../credentials/references.ts'
 import type {
   AgentSettings,
   AgentStatus,
@@ -172,6 +172,9 @@ export async function createAgent(
     request.settings === undefined
       ? defaultAgentSettings(call.env)
       : parseSettings(call.models, request.settings)
+  if (settings.credentials && call.principal && call.principal.systemRole !== 'owner') {
+    throw new Error('forbidden: credential assignment requires an installation owner')
+  }
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   const membership =
@@ -202,7 +205,8 @@ export async function createAgent(
         createdAt: call.now,
       }),
       ...membership,
-      ...referenceStatements(call.db, agentId, settings),
+      ...initialGrantStatements(call.db, agentId, settings, call.now),
+      ...referenceStatements(call.db, agentId, 1, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,
@@ -326,14 +330,14 @@ async function writeVersion(
   if (earlier !== undefined) return earlier
   const row = await agentRow(call.db, agentId)
   if (row.currentVersion !== write.expected) throw versionConflict(agentId, write.expected)
-  await validateCredentialRefs(call.db, write.settings)
+  await validateCredentialRefs(call.db, write.settings, agentId)
   const detail = {
     ...(write.comment === undefined ? {} : { comment: write.comment }),
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
   }
   try {
-    await call.db.batch([
-      ...writeVersionStatements(
+    await call.db.batch(
+      writeVersionStatements(
         call.db,
         { actorId: actorId(call), now: call.now, opId: write.opId },
         agentId,
@@ -341,8 +345,7 @@ async function writeVersion(
         write.settings,
         detail,
       ),
-      ...referenceStatements(call.db, agentId, write.settings),
-    ])
+    )
   } catch (error) {
     if (!isConstraintError(error)) throw error
     const replay = await replayed()

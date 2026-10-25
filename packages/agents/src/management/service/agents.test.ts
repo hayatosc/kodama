@@ -1,4 +1,6 @@
 /** Agent management commits registry, configuration and credential references together. @module */
+import { defaultAgentSettings } from '../../configuration/index.ts'
+import { testCredentialRefs } from '../../helper/credentials.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
@@ -41,6 +43,7 @@ async function create(displayName = 'Researcher', slug?: string) {
   return agentService().createAgent(await caller(), {
     requestId: uuidv7(),
     displayName,
+    settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
     ...(slug === undefined ? {} : { slug }),
   })
 }
@@ -396,7 +399,7 @@ describe('configuration versions', () => {
   })
 
   it('refuses to read the configuration of an agent with no version', async () => {
-    const agentId = await newAgentId()
+    const agentId = await newAgentId(undefined, false)
 
     const refused = agentService().getConfig(await caller(), agentId)
 
