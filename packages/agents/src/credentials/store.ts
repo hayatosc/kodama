@@ -25,6 +25,7 @@ export function createCredentialStore(
   settings: () => Promise<AgentSettings | undefined>,
   kek: () => string,
   now: () => number = Date.now,
+  remember: (secret: string) => void = () => {},
 ): { store: CredentialStore; invalidate: () => void } {
   const cache = new Map<string, { revision: number; expires: number; value: Credential }>()
   let generation = 0
@@ -77,7 +78,10 @@ export function createCredentialStore(
       },
       kek(),
     )
-    return parseCredential(row.kind, value)
+    const parsed = parseCredential(row.kind, value)
+    if (parsed.type === 'api_key') remember(parsed.key)
+    else { remember(parsed.access); remember(parsed.refresh) }
+    return parsed
   }
 
   async function acquire(provider: string, id: string, leaseId: string, signal?: AbortSignal) {

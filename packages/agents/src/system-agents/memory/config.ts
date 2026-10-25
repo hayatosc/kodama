@@ -22,6 +22,8 @@ export type MemoryModelEnv = DefaultModelEnv & {
   MEMORY_MODEL_PROVIDER: string
   MEMORY_MODEL_ID: string
 }
+import { redactedModels, redactionExtension } from '../../runtime/redaction.ts'
+import { redactSecrets } from '../../lib/redaction.ts'
 import { harnessSettings } from '../../runtime/harness.ts'
 import { guardedModels } from '../../runtime/restrictions.ts'
 import type { Refusal } from '../../runtime/restrictions.ts'
@@ -90,6 +92,7 @@ export function memoryHarnessOptions(
   storage: DurableObjectStorage,
   guard: { extension: Extension; refusal: Refusal },
   credentials?: CredentialStore,
+  redact: (text: string) => string = redactSecrets,
 ): HarnessOptions {
   const extension = defineExtension({
     name: 'kodama-memory-agent',
@@ -98,10 +101,12 @@ export function memoryHarnessOptions(
   const registry = createRegistry()
   registry.install(extension)
   registry.install(guard.extension)
+  const redaction = redactionExtension(redact)
+  registry.install(redaction)
   return {
-    models: guardedModels(createAgentModels(credentials), guard.refusal),
+    models: guardedModels(redactedModels(createAgentModels(credentials), redact), guard.refusal),
     registry,
-    settings: harnessSettings([extension, guard.extension]),
+    settings: harnessSettings([extension, guard.extension, redaction]),
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
         ? configure(tx, conversation.id, memoryAgentChange(memoryAgentConfig(env)))

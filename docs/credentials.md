@@ -48,6 +48,30 @@ Inspect secret-free audit and coverage results. Redaction is defense in depth, n
 revocation. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
 mitigation will be pursued for that scenario, including a separate vault or split-key design.
 
+## Leak-prevention boundaries
+
+Configurations reject unknown fields and credential-shaped text. User input and provider output
+are redacted before Pi persistence; tool results are redacted before committing their entries.
+The object remembers decrypted values for at most the five-minute cache TTL and also recognizes
+`sk-…`, `xai-…` and JWT shapes. Memory-record and skill writes apply the same pattern filter even
+when called outside the model tool path. Credential operation exceptions return fixed messages,
+and background logs retain error categories rather than raw messages, causes, stacks or SQL
+bindings. Audit and revocation receipts contain metadata only.
+
+A provider response is buffered until complete before emitting sanitized content. This intentionally
+trades token-by-token streaming for preventing split credential values from leaking through SSE.
+Lifecycle and completion events remain available. Redaction cannot recognize arbitrary secrets
+that have never been registered or do not match a known pattern; never use conversations or memory
+to transport keys, including encoded or transformed keys.
+
+For local development, set a stable development KEK and run
+`nr agent dev seed-credentials < /secure/path/provider-keys.json`. The JSON object maps provider
+IDs (`openai`, `anthropic`, `google`, `xai`) to keys. The command reads stdin, uses the authenticated
+localhost-only development adapter, registers encrypted rows, and assigns both agent kinds. Keep
+the file outside the repository with mode 0600 and remove it after registration. The adapter and
+its local owner bootstrap are absent from production; only private trusted RPC callers register
+production keys. No provider environment variables or credential files are used for model auth.
+
 ## Operational policy
 
 KEK loss does not require an elaborate backup-location or recovery-custody scheme. If the KEK is

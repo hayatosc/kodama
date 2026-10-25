@@ -8,6 +8,7 @@
  *
  * @module
  */
+import { safeFailure } from '../../lib/redaction.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, Submission, SubmissionDraft } from '@earendil-works/pi-durable'
@@ -122,7 +123,7 @@ async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
     )
     if (outcome !== 'retry') await notifySource(ctx, job)
   } catch (error) {
-    console.error('Memory job failed', row.jobId, error)
+    console.error('Memory job failed', row.jobId, safeFailure(error))
     outcome = 'retry'
   }
   if (outcome !== 'retry') return settle(ctx, row, outcome)
@@ -143,7 +144,7 @@ async function notifySource(ctx: MemoryAgentContext, job: MemoryJob): Promise<vo
   try {
     await ctx.env.AGENTS.getByName(job.sourceAgentId).memoryChanged()
   } catch (error) {
-    console.error('Memory change notice failed', job.sourceAgentId, error)
+    console.error('Memory change notice failed', job.sourceAgentId, safeFailure(error))
   }
 }
 

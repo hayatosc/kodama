@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { safeFailure } from '../../lib/redaction.ts'
 import { and, asc, eq, gt, lte, ne, or } from 'drizzle-orm'
 import { agents, systemSettings } from '../../../drizzle/management/schema.ts'
 import { finishProvisioning, pushDesired } from './agents.ts'
@@ -86,7 +87,7 @@ export async function reconcileAgents(call: ManagementCall): Promise<ReconcileRe
       if (after < row.currentVersion) behind++
     } catch (error) {
       behind++
-      console.error(`Reconciling agent ${row.agentId} failed`, error)
+      console.error(`Reconciling agent ${row.agentId} failed`, safeFailure(error))
     }
   }
   const last = rows.at(-1)

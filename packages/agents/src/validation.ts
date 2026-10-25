@@ -5,6 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { redactSecrets } from './lib/redaction.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
@@ -23,7 +24,7 @@ export function parseInput<const TSchema extends v.GenericSchema>(
 ): v.InferOutput<TSchema> {
   const result = v.safeParse(schema, value, { abortEarly: true })
   if (result.success) return result.output
-  throw new TypeError(result.issues[0].message)
+  throw new TypeError(redactSecrets(result.issues[0].message))
 }
 
 /**

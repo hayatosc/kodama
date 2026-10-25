@@ -83,12 +83,14 @@ it('streams generation, completion and reconnect state without polling', async (
       })(),
     ])
     const chatEvents = decodeEvents(chatBody)
-    expect(chatEvents.map((event) => event.type)).toContain('message_update')
+    // Provider output is buffered until secrets split across deltas can be redacted.
+    // Pi may coalesce same-tick updates, but must still expose the completed message.
+    expect(chatEvents.map((event) => event.type)).toContain('message_end')
     expect(chatEvents.at(-1)).toMatchObject({
       type: 'submission',
       data: { record: { status: 'done' } },
     })
-    expect(received).toContain('message_update')
+    expect(received).toContain('message_start')
     expect(received).toContain('message_end')
     await events.cancel()
     const reconnect = readEvents(await exports.default.subscribe(agentId))

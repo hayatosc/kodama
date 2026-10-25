@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { redactData } from '../../lib/redaction.ts'
 import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import type { MemoryDb } from './db.ts'
@@ -93,7 +94,7 @@ export function writeSkill(
   context: OperationContext,
   input: SkillWrite,
 ): Promise<OperationResult & { replayed: boolean }> {
-  const write = checkedSkill(input)
+  const write = checkedSkill(redactData(input))
   const key = skillKey(write.agentId, write.name)
   return applyPlan(db, context, async (): Promise<Plan> => {
     const current = await readSkill(db, write.agentId, write.name)

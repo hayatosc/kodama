@@ -45,10 +45,6 @@ export default defineConfig({
       miniflare: {
         bindings: {
           CREDENTIAL_KEK_V1: 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
-          OPENAI_API_KEY: 'test-key',
-          ANTHROPIC_API_KEY: '',
-          GEMINI_API_KEY: '',
-          XAI_API_KEY: 'xai-test-key',
           TEST_MIGRATIONS: migrations,
           TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/memory/migrations'),
           TEST_MANAGEMENT_MIGRATIONS: managementMigrations,

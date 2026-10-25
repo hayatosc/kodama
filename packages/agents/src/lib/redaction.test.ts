@@ -1,0 +1,35 @@
+/** Redaction recognizes key patterns and expires exact-value knowledge with the cache. @module */
+import { expect, it } from 'vitest'
+import { createRedactor, redactData, redactSecrets, safeFailure } from './redaction.ts'
+
+it('removes known values, API-key shapes and JWTs without changing ordinary prose', () => {
+  expect(
+    redactSecrets(
+      'known=opaque-provider-secret sk-test123456 xai-123456789 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature',
+      ['opaque-provider-secret'],
+    ),
+  ).toBe('known=[REDACTED] [REDACTED] [REDACTED] [REDACTED]')
+  expect(redactSecrets('A useful ordinary sentence.')).toBe('A useful ordinary sentence.')
+})
+
+it('redacts nested protocol values without mutating the input', () => {
+  const input = { content: [{ text: 'sk-secret123456' }], detail: 'xai-secret123456' }
+  expect(redactData(input)).toEqual({ content: [{ text: '[REDACTED]' }], detail: '[REDACTED]' })
+  expect(input.content[0]?.text).toBe('sk-secret123456')
+})
+
+it('does not expose exception messages, causes, or storage bindings in log details', () => {
+  expect(safeFailure(new Error('opaque-provider-secret', { cause: new Error('ciphertext') }))).toBe(
+    'Error',
+  )
+  expect(safeFailure(new TypeError('sk-sensitive123456'))).toBe('TypeError')
+})
+
+it('retains exact values for at most five minutes', () => {
+  let now = 0
+  const redactor = createRedactor(() => now)
+  redactor.remember('opaque-provider-secret')
+  expect(redactor.text('opaque-provider-secret')).toBe('[REDACTED]')
+  now = 300_000
+  expect(redactor.text('opaque-provider-secret')).toBe('opaque-provider-secret')
+})

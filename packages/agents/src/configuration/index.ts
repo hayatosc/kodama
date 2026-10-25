@@ -8,6 +8,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { redactData } from '../lib/redaction.ts'
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -183,7 +184,7 @@ export function defaultAgentSettings(env: DefaultModelEnv): AgentSettings {
  * @throws {@link TypeError} When `value` is not valid settings for `models`.
  */
 export function parseSettings(models: Models, value: unknown): AgentSettings {
-  return parseInput(agentSettingsSchema(models), value)
+  return redactData(parseInput(agentSettingsSchema(models), value))
 }
 
 /**

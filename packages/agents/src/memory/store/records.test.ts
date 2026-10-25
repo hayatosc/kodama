@@ -60,6 +60,12 @@ async function written(scope: Scope, agentId: string, content: string, entry: nu
 }
 
 describe('applying operations', () => {
+  it('redacts credential-shaped text before a memory record is stored', async () => {
+    const { scope, agentId } = agentScope()
+    await written(scope, agentId, 'Key sk-private123456 and xai-private123456', 1)
+    expect(await activeContents(scope)).toEqual(['Key [REDACTED] and [REDACTED]'])
+  })
+
   it('applies the same supersede once when it is repeated', async () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)

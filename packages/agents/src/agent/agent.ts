@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/redaction.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type {
@@ -71,6 +72,7 @@ import type {
 } from '../protocol.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
+import { redactData } from '../lib/redaction.ts'
 import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
@@ -159,7 +161,7 @@ export class Agent extends DurableObject<AgentEnv> {
         parse: (value) => parseSettings(createAgentModels(), value),
       })
     } catch (error) {
-      console.error('Catching up with the registry failed', error)
+      console.error('Catching up with the registry failed', safeFailure(error))
     }
   }
 
@@ -167,6 +169,9 @@ export class Agent extends DurableObject<AgentEnv> {
   protected refusal(): Refusal {
     return this.#refusal
   }
+
+  /** Redact exact credential values known to this object as well as recognizable key patterns. */
+  protected redactText = (text: string): string => this.#credentials.redact(text)
 
   /** The shared credential store used by working and dedicated agents. */
   protected credentialStore() {
@@ -230,6 +235,7 @@ export class Agent extends DurableObject<AgentEnv> {
       ],
       this.#refusal,
       this.credentialStore(),
+      this.redactText,
     )
   }
 
@@ -364,7 +370,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const submission = await this.#serial(async () => {
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
-      return conversation.submit(draft, context)
+      return conversation.submit(redactData(draft, this.redactText), context)
     })
     await this.#refreshRecovery(harness)
     return submission

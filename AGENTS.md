@@ -46,9 +46,9 @@ their sections by name, so keep the headings and the code in step when either ch
 Use Node.js >=22.19 and the pinned pnpm 12.14.0 through `ni`/`nr` wrappers.
 
 - `ni`: install workspace dependencies.
-- Copy `packages/agents/.dev.vars.example` to `packages/agents/.dev.vars` and populate provider credentials.
+- Copy `packages/agents/.dev.vars.example` to `packages/agents/.dev.vars` and set a development `CREDENTIAL_KEK_V1` (base64 of 32 random bytes).
 - `nr dev:agents`: start the local Worker; it exposes RPC, not a browser page.
-- `nr agent seed`, then `nr agent send assistant "Hello"`: create the starting rows, then send to the first agent by its slug through the development adapter to Durable Object RPC; see `nr agent --help` for history and cancellation.
+- `nr agent dev seed-credentials < /secure/path/provider-keys.json` registers provider keys into local D1 and assigns both agent kinds; then `nr agent seed` and `nr agent send assistant "Hello"`: create the starting rows, then send to the first agent by its slug through the development adapter to Durable Object RPC; see `nr agent --help` for history and cancellation.
 - `nr check`: run TypeScript, type-aware Oxlint, Oxfmt checks, and tests.
 - `nr test`: run workspace tests.
 - From `packages/agents`, `nr test:coverage` runs the tests with Istanbul coverage (text summary and `coverage/` HTML report).
@@ -74,4 +74,4 @@ There is no commit history yet. Use Conventional Commits, for example `feat(agen
 
 ## Security & Configuration
 
-Never commit `.dev.vars`, provider credentials, or generated `.cloudflare/` state. Keep credentials in individual Worker secrets such as `OPENAI_API_KEY`, outside agent settings and RPC results. Preserve the private RPC boundary; future UI Workers must authenticate users and authorize access to agent IDs. Only the agents Worker binds D1: the UI Worker never binds a D1 database and reaches the registry and configuration only through the default `AgentService`.
+Never commit `.dev.vars`, provider credentials, or generated `.cloudflare/` state. Keep provider credentials in the encrypted management D1 vault; only versioned `CREDENTIAL_KEK_V1`/`V2` belong in Worker secrets. Never add an environment or file credential fallback. Keep plaintext and ciphertext out of settings, RPC results, logs and memory; see `docs/credentials.md` for cache bounds and the KEK runbook. Preserve the private RPC boundary; future UI Workers must authenticate users and authorize access to agent IDs. Only the agents Worker binds D1: the UI Worker never binds a D1 database and reaches the registry and configuration only through the default `AgentService`.

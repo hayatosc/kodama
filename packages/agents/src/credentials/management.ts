@@ -22,6 +22,18 @@ import { parseAgentId } from '../validation.ts'
 import { invalidateCredential } from './invalidation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
+/** Keep storage diagnostics (which can contain ciphertext bindings) out of RPC exceptions. */
+export async function credentialRpc<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof TypeError) throw new TypeError('Invalid credential operation')
+    if (error instanceof Error && /^(forbidden:|credential_)/.test(error.message))
+      throw new Error(error.message)
+    throw new Error('credential_unavailable: operation failed')
+  }
+}
+
 /** Require the registered caller used by management, without credential-specific roles. */
 export function credentialActor(call: ManagementCall) {
   if (!call.principal || call.principal.disabledAt !== null)

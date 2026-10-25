@@ -12,6 +12,8 @@ import { agentChange, defaultAgentConfig } from '../configuration/index.ts'
 import type { DefaultModelEnv } from '../configuration/index.ts'
 import { createAgentModels } from '../models/index.ts'
 import { agentTools } from '../tools/index.ts'
+import { redactedModels, redactionExtension } from '../runtime/redaction.ts'
+import { redactSecrets } from '../lib/redaction.ts'
 import { harnessSettings } from '../runtime/harness.ts'
 import { guardedModels } from '../runtime/restrictions.ts'
 import type { Refusal } from '../runtime/restrictions.ts'
@@ -27,15 +29,17 @@ export function createAgentOptions(
   always: readonly Extension[] = [],
   refusal: Refusal = () => undefined,
   credentials?: CredentialStore,
+  redact: (text: string) => string = redactSecrets,
 ): HarnessOptions {
   const extension = defineExtension({ name: 'kodama', tools: agentTools })
   const registry = createRegistry()
   registry.install(extension)
-  for (const extra of always) registry.install(extra)
+  const extensions = [...always, redactionExtension(redact)]
+  for (const extra of extensions) registry.install(extra)
   return {
-    models: guardedModels(createAgentModels(credentials), refusal),
+    models: guardedModels(redactedModels(createAgentModels(credentials), redact), refusal),
     registry,
-    settings: harnessSettings([extension, ...always]),
+    settings: harnessSettings([extension, ...extensions]),
     conversationCreated: (tx, conversation) =>
       conversation.owner === undefined && conversation.parent === undefined
         ? configure(tx, conversation.id, agentChange(defaultAgentConfig(env)))

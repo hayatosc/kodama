@@ -136,7 +136,7 @@ describe('AgentService', () => {
 
     await runCron(now)
 
-    expect(errors).toHaveBeenCalledWith('Configuration reconciliation failed', expect.any(Error))
+    expect(errors).toHaveBeenCalledWith('Configuration reconciliation failed', 'Error')
     const job: MemoryJob = {
       kind: 'consolidate',
       scope: `agent:${owner}`,
