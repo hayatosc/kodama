@@ -4,11 +4,32 @@
  *
  * @module
  */
+import type { Credential } from '@earendil-works/pi-ai'
+import * as v from 'valibot'
 import { credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
+
+const oauthSchema = v.looseObject({
+  type: v.literal('oauth'),
+  access: v.pipe(v.string(), v.minLength(1)),
+  refresh: v.pipe(v.string(), v.minLength(1)),
+  expires: v.pipe(v.number(), v.finite()),
+})
+
+/** Parse the Pi value for either kind; malformed payload errors never contain the secret. */
+export function parseCredential(kind: CredentialIdentity['kind'], secret: string) {
+  if (kind === 'api_key') return { type: 'api_key', key: secret } satisfies Credential
+  try {
+    const parsed = v.safeParse(oauthSchema, JSON.parse(secret))
+    if (parsed.success) return parsed.output
+  } catch {
+    /* JSON parser diagnostics can echo secret input. */
+  }
+  throw new TypeError('credential_unavailable: invalid credential payload')
+}
 
 /** Safe outward metadata, intentionally constructed without spreading a stored row. */
 export function credentialMetadata(row: typeof credentials.$inferSelect) {
@@ -37,6 +58,7 @@ export async function credentialInsert(
   now: number,
 ) {
   if (secret.length < 8 || secret.length > 16384) throw new TypeError('Invalid credential length')
+  const value = parseCredential(identity.kind, secret)
   const envelope = await encryptCredential(identity, secret, kek)
   return {
     statement: db
@@ -46,7 +68,7 @@ export async function credentialInsert(
         ...envelope,
         status: 'active',
         fingerprint: await sha256Hex(secret),
-        last4: secret.slice(-4),
+        last4: (value.type === 'api_key' ? value.key : value.access).slice(-4),
         createdAt: now,
       })
       .returning(),
