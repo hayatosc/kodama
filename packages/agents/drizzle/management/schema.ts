@@ -105,6 +105,83 @@ export const agentConfigVersions = sqliteTable(
   (t) => [primaryKey({ columns: [t.agentId, t.version] })],
 )
 
+/** Encrypted provider secrets; only src/credentials/ may access these rows. */
+export const credentials = sqliteTable(
+  'credentials',
+  {
+    credentialId: text('credential_id').primaryKey(),
+    kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
+    provider: text('provider').notNull(),
+    ownerScope: text('owner_scope', { enum: ['installation', 'principal'] }).notNull(),
+    ownerId: text('owner_id').references(() => principals.principalId),
+    status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
+    revision: integer('revision').notNull(),
+    kekVersion: integer('kek_version').notNull(),
+    ciphertext: text('ciphertext'),
+    iv: text('iv'),
+    wrappedDek: text('wrapped_dek'),
+    wrapIv: text('wrap_iv'),
+    fingerprint: text('fingerprint').notNull(),
+    last4: text('last4').notNull(),
+    leaseId: text('lease_id'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    revokedAt: integer('revoked_at'),
+    revocationRecordedAt: integer('revocation_recorded_at'),
+  },
+  (t) => [
+    check(
+      'credentials_owner',
+      sql`(${t.ownerScope} = 'installation' and ${t.ownerId} is null and ${t.kind} = 'api_key') or (${t.ownerScope} = 'principal' and ${t.ownerId} is not null)`,
+    ),
+    check('credentials_versions', sql`${t.revision} >= 1 and ${t.kekVersion} >= 1`),
+    check(
+      'credentials_payload',
+      sql`(${t.status} = 'revoked' and ${t.ciphertext} is null and ${t.iv} is null and ${t.wrappedDek} is null and ${t.wrapIv} is null) or (${t.status} <> 'revoked' and ${t.ciphertext} is not null and ${t.iv} is not null and ${t.wrappedDek} is not null and ${t.wrapIv} is not null)`,
+    ),
+    check(
+      'credentials_lease',
+      sql`(${t.leaseId} is null and ${t.leaseExpiresAt} is null) or (${t.leaseId} is not null and ${t.leaseExpiresAt} is not null)`,
+    ),
+  ],
+)
+
+/** Permission to use a credential, independent of immutable configuration references. */
+export const credentialGrants = sqliteTable(
+  'credential_grants',
+  {
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credentials.credentialId),
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.credentialId, t.agentId] })],
+)
+
+/** Reverse index of current credential references, including explicit fallbacks. */
+export const agentCredentialRefs = sqliteTable(
+  'agent_credential_refs',
+  {
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credentials.credentialId),
+    provider: text('provider').notNull(),
+    slot: text('slot', { enum: ['primary', 'fallback'] }).notNull(),
+    version: integer('version').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.agentId, t.provider, t.slot] }),
+    index('agent_credential_refs_by_credential').on(t.credentialId),
+  ],
+)
+
 /** Roles on one agent. */
 export const MEMBER_ROLES = ['owner', 'operator', 'user', 'viewer'] as const
 

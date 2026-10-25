@@ -5,10 +5,18 @@
  *
  * @module
  */
-import * as schema from '../../drizzle/management/schema.ts'
+import {
+  agentConfigVersions,
+  agentMembers,
+  agents,
+  auditLog,
+  principals,
+  systemSettings,
+} from '../../drizzle/management/schema.ts'
 import { drizzle } from 'drizzle-orm/d1'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
-import type { agentConfigVersions, agents, principals } from '../../drizzle/management/schema.ts'
+
+const schema = { agentConfigVersions, agentMembers, agents, auditLog, principals, systemSettings }
 
 /** Drizzle handle of the management database. */
 export type ManagementDb = DrizzleD1Database<typeof schema>

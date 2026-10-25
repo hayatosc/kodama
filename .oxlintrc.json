@@ -2,6 +2,28 @@
   "plugins": ["typescript", "unicorn", "oxc"],
   "categories": { "correctness": "error" },
   "ignorePatterns": ["**/.cloudflare/**", "**/.wrangler/**"],
+  "overrides": [
+    {
+      "files": [
+        "packages/agents/src/*.ts",
+        "packages/agents/src/{agent,configuration,helper,lib,management,memory,models,runtime,storage,system-agents,tools}/**/*.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/drizzle/management/schema.ts"],
+                "importNames": ["credentials", "credentialGrants", "agentCredentialRefs"],
+                "message": "Credential tables may only be accessed from src/credentials/."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
   "rules": {
     "typescript/no-explicit-any": "error",
     "typescript/ban-ts-comment": [
