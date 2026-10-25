@@ -8,8 +8,9 @@
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
-import { appliedResult, errorText } from './statements.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
+import { errorText } from '../../lib/errors.ts'
+import { appliedResult, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan } from './statements.ts'
 
 /** A record to write. The code that builds it from a job sets the scope, origin, and evidence. */
@@ -82,6 +83,26 @@ export function applyOperation(
   op: Operation,
 ): Promise<OperationResult & { replayed: boolean }> {
   return applyPlan(db, context, () => plan(db, context, op))
+}
+
+/** Record a rejected shared write in the ledger without changing any records. */
+export function recordSharedRejection(
+  db: MemoryDb,
+  context: OperationContext,
+  scope: Scope,
+  content: string,
+  reason: string,
+) {
+  return applyPlan(db, context, async () => {
+    const result: OperationResult = { status: 'declined' }
+    return {
+      result,
+      statements: [
+        insertOp(db, context, 'shared_rejected', result),
+        recordLedger(db, context, 'shared_rejected', scope, { content, reason }),
+      ],
+    }
+  })
 }
 
 /**

@@ -1,19 +1,19 @@
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { applyOperation } from './records.ts'
 import { memoryDb } from './db.ts'
-import { searchMemory } from './search.ts'
 import type { NewRecord } from './records.ts'
 import type { OperationContext } from './statements.ts'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/d1/schema.ts'
-import type { Scope } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords, scopeRevisions } from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)
 
 function agentScope(): { scope: Scope; agentId: string } {
-  const agentId = crypto.randomUUID()
+  const agentId = uuidv7()
   return { scope: `agent:${agentId}`, agentId }
 }
 
@@ -51,7 +51,7 @@ async function revision(id: string): Promise<number | undefined> {
 }
 
 async function written(scope: Scope, agentId: string, content: string, entry: number) {
-  const result = await applyOperation(db, context(crypto.randomUUID()), {
+  const result = await applyOperation(db, context(uuidv7()), {
     type: 'write',
     record: fact(scope, agentId, content, entry),
   })
@@ -81,14 +81,14 @@ describe('applying operations', () => {
   it('returns conflict and changes nothing when the target revision is outdated', async () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)
-    await applyOperation(db, context(crypto.randomUUID()), {
+    await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
       record: fact(scope, agentId, 'uses pnpm', 150),
     })
 
-    const late = await applyOperation(db, context(crypto.randomUUID()), {
+    const late = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -105,10 +105,10 @@ describe('applying operations', () => {
 
     const result = await applyOperation(
       db,
-      context(crypto.randomUUID(), {
+      context(uuidv7(), {
         // Another writer supersedes the record between the read and the batch.
         beforeBatch: async () => {
-          await applyOperation(db, context(crypto.randomUUID()), {
+          await applyOperation(db, context(uuidv7()), {
             type: 'supersede',
             oldId,
             oldRevision: 1,
@@ -128,7 +128,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     const correction = await written(scope, agentId, 'uses pnpm', 150)
 
-    const oldExtraction = await applyOperation(db, context(crypto.randomUUID()), {
+    const oldExtraction = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId: correction,
       oldRevision: 1,
@@ -143,7 +143,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)
 
-    const result = await applyOperation(db, context(crypto.randomUUID()), {
+    const result = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -158,7 +158,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     await written(scope, agentId, 'uses pnpm', 150)
 
-    const again = await applyOperation(db, context(crypto.randomUUID()), {
+    const again = await applyOperation(db, context(uuidv7()), {
       type: 'write',
       record: fact(scope, agentId, 'uses pnpm', 150),
     })
@@ -177,7 +177,7 @@ describe('applying operations', () => {
           .get()
       )?.revision
 
-    await applyOperation(db, context(crypto.randomUUID()), {
+    await applyOperation(db, context(uuidv7()), {
       type: 'write',
       record: { ...fact(scope, agentId, 'deployed on Friday', 10), kind: 'event' },
     })
@@ -190,57 +190,81 @@ describe('applying operations', () => {
   })
 })
 
-describe('searching memory', () => {
-  const documents = [
-    'このリポジトリでは pnpm を使う',
-    'Worker をデプロイする手順',
-    'パッケージマネージャーは bun に変更した',
-    'コードレビューの観点を決めた',
-    'サーバーレスで動かす',
-    'ベストプラクティスに従う',
-  ]
-
+describe('checking operations', () => {
   it.each([
-    ['使う', 'このリポジトリでは pnpm を使う'],
-    ['リポジトリ', 'このリポジトリでは pnpm を使う'],
-    ['リポ', 'このリポジトリでは pnpm を使う'],
-    ['ＰＮＰＭ 使う', 'このリポジトリでは pnpm を使う'],
-    ['デプ', 'Worker をデプロイする手順'],
-    ['マネージャー', 'パッケージマネージャーは bun に変更した'],
-    ['レビュー', 'コードレビューの観点を決めた'],
-    ['サーバレス', 'サーバーレスで動かす'],
-    ['サーバーレス', 'サーバーレスで動かす'],
-    ['ベストプラクティス', 'ベストプラクティスに従う'],
-  ])('finds the record for the Japanese query %s', async (query, expected) => {
+    ['empty content', { content: '' }, /1–2000 characters/],
+    ['content over 2,000 characters', { content: 'x'.repeat(2_001) }, /1–2000 characters/],
+    ['importance above 1', { importance: 1.5 }, /importance/],
+    ['an override from a shared record', { scope: 'shared:global', overrides: 'x' }, /overrides/],
+    ['a required agent record', { required: true }, /required/],
+    [
+      'a required shared event',
+      { scope: 'shared:global', kind: 'event', required: true },
+      /required/,
+    ],
+  ] as const)('refuses a write with %s', async (_case, change, message) => {
     const { scope, agentId } = agentScope()
-    for (const [index, content] of documents.entries()) {
-      await written(scope, agentId, content, index)
-    }
-
-    const found = await searchMemory(db, { query, scopes: [scope], now: NOW })
-
-    expect(found.map((record) => record.content)).toContain(expected)
+    await expect(
+      applyOperation(db, context(uuidv7()), {
+        type: 'write',
+        record: { ...fact(scope, agentId, 'uses pnpm', 1), ...change },
+      }),
+    ).rejects.toThrow(message)
   })
 
-  it('searches only the given scopes and counts the returned records as used', async () => {
-    const mine = agentScope()
-    const other = agentScope()
-    const id = await written(mine.scope, mine.agentId, 'このリポジトリでは pnpm を使う', 1)
-    await written(other.scope, other.agentId, 'このリポジトリでは pnpm を使う', 1)
+  it('does not supersede a record of another scope', async () => {
+    const { scope, agentId } = agentScope()
+    const oldId = await written(scope, agentId, 'uses npm', 100)
 
-    const found = await searchMemory(db, { query: 'pnpm', scopes: [mine.scope], now: NOW })
+    const result = await applyOperation(db, context(uuidv7()), {
+      type: 'supersede',
+      oldId,
+      oldRevision: 1,
+      record: fact(agentScope().scope, agentId, 'uses pnpm', 150),
+    })
 
-    expect(found.map((record) => record.id)).toEqual([id])
-    const used = await db
-      .select({ useCount: memoryRecords.useCount, lastUsedAt: memoryRecords.lastUsedAt })
+    expect(result).toMatchObject({ status: 'conflict', reason: 'other_scope' })
+  })
+
+  it('keeps the evidence of the record a consolidation rewrites', async () => {
+    const { scope, agentId } = agentScope()
+    const oldId = await written(scope, agentId, 'uses npm and pnpm', 120)
+    const { sourceEntries: _evidence, ...rewrite } = fact(scope, agentId, 'uses pnpm', 0)
+
+    const result = await applyOperation(db, context(uuidv7()), {
+      type: 'supersede',
+      oldId,
+      oldRevision: 1,
+      record: { ...rewrite, origin: 'consolidation' },
+    })
+
+    if (result.status !== 'applied') throw new Error(`supersede ${result.status}`)
+    const row = await db
+      .select()
       .from(memoryRecords)
-      .where(eq(memoryRecords.id, id))
+      .where(eq(memoryRecords.id, result.recordId))
       .get()
-    expect(used).toEqual({ useCount: 1, lastUsedAt: NOW })
+    expect(row).toMatchObject({ sourceEntryFrom: 120, sourceEntryTo: 120, content: 'uses pnpm' })
   })
 
-  it('returns nothing for a query without words', async () => {
-    const { scope } = agentScope()
-    expect(await searchMemory(db, { query: '、。', scopes: [scope], now: NOW })).toEqual([])
+  it('does not invalidate a record at a revision that is no longer current', async () => {
+    const { scope, agentId } = agentScope()
+    const id = await written(scope, agentId, 'uses npm', 100)
+
+    const result = await applyOperation(db, context(uuidv7()), {
+      type: 'invalidate',
+      id,
+      revision: 2,
+      reason: 'No longer true',
+      evidence: {
+        scope,
+        sourceAgentId: agentId,
+        origin: 'extraction',
+        sourceEntries: { from: 200, to: 200 },
+      },
+    })
+
+    expect(result).toMatchObject({ status: 'conflict', reason: 'target_changed' })
+    expect(await revision(id)).toBe(1)
   })
 })

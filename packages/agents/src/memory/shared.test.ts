@@ -1,22 +1,24 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject } from 'cloudflare:test'
-import { env, exports } from 'cloudflare:workers'
+import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { memoryRecords } from '../../drizzle/d1/schema.ts'
-import type { Scope } from '../../drizzle/d1/schema.ts'
-import { invalidateOverridesOfRequired } from './consolidation.ts'
+import { memoryRecords } from '../../drizzle/memory/schema.ts'
+import type { Scope } from '../../drizzle/memory/schema.ts'
+import { invalidateOverridesOfRequired } from './store/maintenance.ts'
 import { writeShared } from './shared.ts'
 import { context, db, record, renderedAlwaysLoaded, write } from '../helper/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
+import { newAgentId, updateSettings } from '../helper/management.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
 function newSpace(): string {
-  return `space-${crypto.randomUUID().slice(0, 8)}`
+  return `space-${uuidv7().slice(-12)}`
 }
 
-function fact(content: string, agentId: string = crypto.randomUUID()): Promise<string> {
+function fact(content: string, agentId: string = uuidv7()): Promise<string> {
   return write({ scope: `agent:${agentId}`, kind: 'fact', content, sourceAgentId: agentId })
 }
 
@@ -29,17 +31,17 @@ function activeIn(space: string) {
 
 describe('shared spaces', () => {
   it('stores the spaces an agent reads next to its configuration', async () => {
-    const agentId = crypto.randomUUID()
-    using original = await exports.default.getConfig(agentId)
+    const agentId = await newAgentId()
+    using original = await env.AGENTS.getByName(agentId).getConfig()
     expect(original.sharedSpaces).toEqual(['global'])
 
-    await exports.default.setConfig(agentId, { ...original, sharedSpaces: ['team-a', 'global'] })
+    await updateSettings(agentId, { sharedSpaces: ['team-a', 'global'] })
     await evictDurableObject(env.AGENTS.getByName(agentId))
 
-    using stored = await exports.default.getConfig(agentId)
+    using stored = await env.AGENTS.getByName(agentId).getConfig()
     expect(stored.sharedSpaces).toEqual(['team-a', 'global'])
     const invalid = await Promise.resolve(
-      exports.default.setConfig(agentId, { ...original, sharedSpaces: ['Team A'] }),
+      updateSettings(agentId, { sharedSpaces: ['Team A'] }),
     ).then(
       () => 'accepted',
       (error: unknown) => String(error),
@@ -52,8 +54,8 @@ describe('overrides', () => {
   it('lets an agent record replace a shared record for that agent, unless the shared one is required', async () => {
     const space = newSpace()
     const scope: Scope = `shared:${space}`
-    const agentId = crypto.randomUUID()
-    const other = crypto.randomUUID()
+    const agentId = await newAgentId()
+    const other = uuidv7()
     const shared = await write({
       scope,
       kind: 'instruction',
@@ -116,12 +118,12 @@ describe('shared writes', () => {
     expect((await activeIn(space)).map((row) => [row.content, row.origin])).toEqual([
       [content, 'shared'],
     ])
-    expect(await renderedAlwaysLoaded(crypto.randomUUID(), [space])).toContain(content)
+    expect(await renderedAlwaysLoaded(uuidv7(), [space])).toContain(content)
   })
 
   it('rejects what one agent keeps and a required rule without two agents', async () => {
     const space = newSpace()
-    const agentId = crypto.randomUUID()
+    const agentId = await newAgentId()
     const shared = await write({
       scope: `shared:${space}`,
       kind: 'instruction',

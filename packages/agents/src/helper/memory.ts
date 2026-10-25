@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
@@ -12,11 +13,20 @@ import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import { memoryDb, schema } from '../memory/store/db.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { NewRecord } from '../memory/store/records.ts'
-import { memoryRecords } from '../../drizzle/d1/schema.ts'
+import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.ts'
 import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../storage/local.ts'
+import type { MemoryJob } from '../memory/jobs.ts'
+import {
+  isMemoryAgentRequest,
+  requestBody,
+  textResponse,
+  toolCallResponse,
+  toolResults,
+} from './model.ts'
+import type { ToolCall } from './model.ts'
 
 /** The memory database of the tests. */
 export const db = memoryDb(env.MEMORY_DB)
@@ -59,7 +69,7 @@ export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
 /** A fresh operation, as if from its own job. */
 export function context(now = Date.now()): OperationContext {
-  const opId = crypto.randomUUID()
+  const opId = uuidv7()
   return { opId, jobId: opId, runId: opId, actor: 'test', now }
 }
 
@@ -108,4 +118,45 @@ export function renderedAlwaysLoaded(agentId: string, spaces: string[]): Promise
     await refreshAlwaysLoaded(memory)
     return storedMemoryText(memory)
   })
+}
+
+/** The text of every tool result a Responses request body carries, in order. */
+function toolOutputs(body: string): string[] {
+  const parsed: unknown = JSON.parse(body)
+  if (typeof parsed !== 'object' || parsed === null || !('input' in parsed)) return []
+  const input: unknown = parsed.input
+  if (!Array.isArray(input)) return []
+  const texts: string[] = []
+  for (const item of input) {
+    if (typeof item !== 'object' || item === null) continue
+    if (!('type' in item) || item.type !== 'function_call_output' || !('output' in item)) continue
+    const output: unknown = item.output
+    if (typeof output === 'string') texts.push(output)
+    else texts.push(JSON.stringify(output))
+  }
+  return texts
+}
+
+/**
+ * Run a memory job whose model makes `calls` one per step, then finishes.
+ *
+ * @returns The job's status and the output of each tool call, in order.
+ */
+export async function runScriptedJob(job: MemoryJob, calls: readonly ToolCall[]) {
+  let last = ''
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+    const body = requestBody(init)
+    if (!isMemoryAgentRequest(body)) return textResponse('OK')
+    last = body
+    const call = calls[toolResults(body)]
+    return call === undefined ? textResponse('Finished.') : toolCallResponse(call)
+  })
+  const { jobId } = await memoryAgent().enqueue(job)
+  let status = await memoryAgent().jobStatus(jobId)
+  for (const deadline = Date.now() + 10_000; status?.status !== 'settled';) {
+    if (Date.now() > deadline) throw new Error(`Job ${jobId} did not settle`)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    status = await memoryAgent().jobStatus(jobId)
+  }
+  return { status, outputs: toolOutputs(last) }
 }

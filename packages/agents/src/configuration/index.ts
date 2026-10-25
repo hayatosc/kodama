@@ -1,6 +1,7 @@
 /**
- * Per-agent configuration: defaults, validation, and where each part is stored. Pi keeps the model,
- * prompt, thinking level, and tools; the shared spaces sit beside them in Durable Object storage.
+ * Per-agent configuration: the settings of a version, their defaults and validation, and where an
+ * object keeps the applied parts. Pi keeps the model, prompt, thinking level, and tools; the shared
+ * spaces sit beside them in Durable Object storage.
  *
  * @see docs/agents.md — Configuration
  *
@@ -13,7 +14,8 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
 import type { AgentEnv } from '../env.ts'
-import type { AgentConfig } from '../protocol.ts'
+import type { AgentConfig, AgentSettings, MemoryPolicy } from '../protocol.ts'
+import { UUID_PATTERN } from '../lib/uuid.ts'
 import { agentTools, isRegisteredTool, resolveTools } from '../tools/index.ts'
 import { parseInput } from '../validation.ts'
 
@@ -55,11 +57,23 @@ export const sharedSpacesSchema = v.pipe(
   v.check((spaces) => new Set(spaces).size === spaces.length, spaceMessage),
 )
 
-/** Complete configuration accepted over RPC; unknown fields are rejected rather than ignored. */
-export function agentConfigSchema(models: Models) {
-  const modelMessage = 'Expected an agent configuration with a provider and modelId'
+const modelMessage = 'Expected a model with a provider and modelId'
+const settingsMessage = 'Expected agent settings with schemaVersion 1'
+const PROVIDER_ID = /^[a-z0-9][a-z0-9:._-]{0,63}$/
+const TOOL_NAME = /^[a-z0-9_]{1,64}$/
+const LABEL = /^[a-z0-9-]{1,32}$/
+const MAX_LABELS = 16
+const DESCRIPTION_MAX_LENGTH = 1_000
+
+/** Every field of one configuration version, validated strictly; unknown fields are rejected. */
+export function agentSettingsSchema(models: Models) {
+  const credentialId = v.pipe(v.string(), v.regex(UUID_PATTERN, 'Credential IDs must be UUIDs'))
+  const providerKey = v.pipe(v.string(), v.regex(PROVIDER_ID, 'Invalid provider ID'))
+  const positive = (name: string) =>
+    v.pipe(v.number(`${name} must be a positive number`), v.gtValue(0, `${name} must be positive`))
   return v.strictObject(
     {
+      schemaVersion: v.literal(SETTINGS_SCHEMA_VERSION, 'schemaVersion must be 1'),
       model: v.pipe(
         v.strictObject({ provider: v.string(), modelId: v.string() }, modelMessage),
         v.check(
@@ -86,10 +100,100 @@ export function agentConfigSchema(models: Models) {
           (issue) => `Unknown tool: ${issue.input.find((name) => !isRegisteredTool(name))}`,
         ),
       ),
-      sharedSpaces: v.optional(sharedSpacesSchema, () => [...DEFAULT_SHARED_SPACES]),
+      sharedSpaces: sharedSpacesSchema,
+      description: v.optional(
+        v.pipe(
+          v.string(),
+          v.maxLength(
+            DESCRIPTION_MAX_LENGTH,
+            `description has at most ${DESCRIPTION_MAX_LENGTH} characters`,
+          ),
+        ),
+      ),
+      labels: v.optional(
+        v.pipe(
+          v.array(
+            v.pipe(
+              v.string(),
+              v.regex(LABEL, 'Labels are 1–32 lowercase letters, digits, or hyphens'),
+            ),
+          ),
+          v.maxLength(MAX_LABELS, `labels has at most ${MAX_LABELS} labels`),
+          v.check((labels) => new Set(labels).size === labels.length, 'labels must be unique'),
+        ),
+      ),
+      memoryPolicy: v.strictObject(
+        { extract: v.boolean(), remember: v.boolean() },
+        'memoryPolicy must have extract and remember',
+      ),
+      budget: v.optional(
+        v.strictObject(
+          {
+            dailyUsd: v.optional(positive('budget.dailyUsd')),
+            monthlyUsd: v.optional(positive('budget.monthlyUsd')),
+            turnTokens: v.optional(
+              v.pipe(
+                positive('budget.turnTokens'),
+                v.integer('budget.turnTokens must be an integer'),
+              ),
+            ),
+            onExceed: v.picklist(
+              ['refuse', 'downgrade'],
+              'budget.onExceed must be refuse or downgrade',
+            ),
+          },
+          'budget must have onExceed',
+        ),
+      ),
+      credentials: v.optional(
+        v.pipe(
+          v.strictObject(
+            {
+              primary: v.record(providerKey, credentialId),
+              fallback: v.record(providerKey, v.nullable(credentialId)),
+            },
+            'credentials must have primary and fallback',
+          ),
+          v.check(
+            ({ primary, fallback }) =>
+              Object.keys(fallback).every((provider) => provider in primary),
+            'credentials.fallback may only name providers in credentials.primary',
+          ),
+        ),
+      ),
+      toolPolicy: v.optional(
+        v.record(
+          v.pipe(v.string(), v.regex(TOOL_NAME, 'toolPolicy keys must be tool names')),
+          v.picklist(['allow', 'deny'], 'toolPolicy values must be allow or deny'),
+        ),
+      ),
     },
-    modelMessage,
-  ) satisfies v.GenericSchema<unknown, AgentConfig>
+    settingsMessage,
+  ) satisfies v.GenericSchema<unknown, AgentSettings>
+}
+
+/** The only shape of `AgentSettings` so far. */
+export const SETTINGS_SCHEMA_VERSION = 1
+
+/** A new agent extracts and offers `remember`. */
+export const DEFAULT_MEMORY_POLICY: MemoryPolicy = { extract: true, remember: true }
+
+/** Version 1 of an agent created without settings: {@link defaultAgentConfig} and the defaults. */
+export function defaultAgentSettings(env: DefaultModelEnv): AgentSettings {
+  return {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    ...defaultAgentConfig(env),
+    memoryPolicy: { ...DEFAULT_MEMORY_POLICY },
+  }
+}
+
+/**
+ * Validate settings from a caller or from storage.
+ *
+ * @throws {@link TypeError} When `value` is not valid settings for `models`.
+ */
+export function parseSettings(models: Models, value: unknown): AgentSettings {
+  return parseInput(agentSettingsSchema(models), value)
 }
 
 /**
@@ -174,18 +278,8 @@ export async function readSharedSpaces(
   return stored.success ? stored.output : [...defaults]
 }
 
-/** Store the shared spaces an agent reads. */
-export function writeSharedSpaces(
-  storage: DurableObjectStorage,
-  spaces: readonly string[],
-): Promise<void> {
-  return storage.put(SHARED_SPACES_KEY, [...spaces])
-}
-
 /** The prompt of an agent nobody configured. */
 export const DEFAULT_SYSTEM_PROMPT = 'You are Kodama, a helpful and concise assistant.'
-
-const context = BACKGROUND_CONTEXT
 
 /** Where an agent's configuration lives, and the defaults for what is missing. */
 export interface ConfigStore {
@@ -198,28 +292,4 @@ export interface ConfigStore {
 export async function readConfig(store: ConfigStore): Promise<AgentConfig> {
   const spaces = await readSharedSpaces(store.storage, store.defaults.sharedSpaces)
   return readAgentConfig(store.harness, spaces)
-}
-
-/**
- * Validate and store a complete configuration while no task runs; history and request receipts are
- * kept.
- *
- * @returns The stored configuration.
- * @throws {@link TypeError} When `value` is not a valid configuration.
- * @throws {@link Error} When a task is running.
- */
-export async function replaceConfig(
-  store: ConfigStore,
-  models: Models,
-  value: AgentConfig,
-): Promise<AgentConfig> {
-  const config = parseInput(agentConfigSchema(models), value)
-  const { tasks } = await store.harness.inspect(context)
-  if (tasks.length > 0) throw new Error('Agent is busy; retry configuration after it becomes idle')
-  await store.harness.commit(
-    (tx) => configure(tx, ROOT_CONVERSATION_ID, agentChange(config)),
-    context,
-  )
-  await writeSharedSpaces(store.storage, config.sharedSpaces)
-  return config
 }

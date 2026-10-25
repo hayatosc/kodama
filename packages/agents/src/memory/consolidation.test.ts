@@ -3,10 +3,11 @@
  *
  * @module
  */
+import { uuidv7 } from '../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from './store/records.ts'
-import { memoryLedger } from '../../drizzle/d1/schema.ts'
+import { memoryLedger } from '../../drizzle/memory/schema.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
 import { activeContents, db, memoryAgent, parameterLimitedDb } from '../helper/memory.ts'
 import { consolidateDaily } from './consolidation.ts'
@@ -25,7 +26,7 @@ describe('consolidation', () => {
   ])(
     'drains up to 20 bounded batches of $expired expired rows and continues maintenance',
     async ({ expired, remaining }) => {
-      const runId = crypto.randomUUID()
+      const runId = uuidv7()
       const now = Date.now()
       const inserts = Array.from({ length: Math.ceil(expired / 10) }, (_, index) =>
         db.insert(memoryLedger).values(
@@ -102,12 +103,12 @@ describe('consolidation', () => {
   })
 
   it('merges duplicates of a changed scope and drops ledger rows past the rollback window', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = uuidv7()
     const now = Date.now()
     for (const content of ['The CI runs on Linux', 'CI runs on Linux machines']) {
       await applyOperation(
         db,
-        { opId: crypto.randomUUID(), jobId: 'seed', runId: 'seed', actor: 'test', now },
+        { opId: uuidv7(), jobId: 'seed', runId: 'seed', actor: 'test', now },
         {
           type: 'write',
           record: {

@@ -1,17 +1,25 @@
 /**
- * Search ranking and usage across D1's per-statement parameter boundary.
+ * Search finds records by Japanese and English words, only in the given scopes, and keeps ranking
+ * and usage across D1's per-statement parameter boundary.
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { memoryRecords, memoryTerms } from '../../../drizzle/d1/schema.ts'
+import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { db, parameterLimitedDb, record, write } from '../../helper/memory.ts'
 import { readableScopes } from './db.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import { searchMemory } from './search.ts'
 
 const NOW = 1_800_000_000_000
+
+function agentScope(): { scope: Scope; agentId: string } {
+  const agentId = uuidv7()
+  return { scope: `agent:${agentId}`, agentId }
+}
 
 async function seedCandidates(agentId: string, size: number): Promise<void> {
   for (let offset = 0; offset < size; offset += 20) {
@@ -43,8 +51,8 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
 
 describe('working-agent search precedence', () => {
   it('excludes prohibited overrides before ranking, limiting, and counting use', async () => {
-    const agentId = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -88,9 +96,9 @@ describe('working-agent search precedence', () => {
   })
 
   it('resolves overrides outside query matches without suppressing another agent’s view', async () => {
-    const agentId = crypto.randomUUID()
-    const other = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const other = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -123,8 +131,8 @@ describe('working-agent search precedence', () => {
   })
 
   it('does not let unreadable or inactive required targets suppress personal memory', async () => {
-    const agentId = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -165,7 +173,7 @@ describe('search parameter limits', () => {
   ])(
     'ranks all $size candidates before limiting and counts only returned records',
     async ({ size, expected }) => {
-      const agentId = crypto.randomUUID()
+      const agentId = uuidv7()
       await seedCandidates(agentId, size)
 
       const found = await searchMemory(parameterLimitedDb, {
@@ -190,4 +198,64 @@ describe('search parameter limits', () => {
       expect(unused).toHaveLength(size - 3)
     },
   )
+})
+
+describe('searching memory', () => {
+  const documents = [
+    'このリポジトリでは pnpm を使う',
+    'Worker をデプロイする手順',
+    'パッケージマネージャーは bun に変更した',
+    'コードレビューの観点を決めた',
+    'サーバーレスで動かす',
+    'ベストプラクティスに従う',
+  ]
+
+  it.each([
+    ['使う', 'このリポジトリでは pnpm を使う'],
+    ['リポジトリ', 'このリポジトリでは pnpm を使う'],
+    ['リポ', 'このリポジトリでは pnpm を使う'],
+    ['ＰＮＰＭ 使う', 'このリポジトリでは pnpm を使う'],
+    ['デプ', 'Worker をデプロイする手順'],
+    ['マネージャー', 'パッケージマネージャーは bun に変更した'],
+    ['レビュー', 'コードレビューの観点を決めた'],
+    ['サーバレス', 'サーバーレスで動かす'],
+    ['サーバーレス', 'サーバーレスで動かす'],
+    ['ベストプラクティス', 'ベストプラクティスに従う'],
+  ])('finds the record for the Japanese query %s', async (query, expected) => {
+    const { scope, agentId } = agentScope()
+    for (const content of documents)
+      await write({ scope, kind: 'fact', content, sourceAgentId: agentId })
+
+    const found = await searchMemory(db, { query, scopes: [scope], now: NOW })
+
+    expect(found.map((record) => record.content)).toContain(expected)
+  })
+
+  it('searches only the given scopes and counts the returned records as used', async () => {
+    const mine = agentScope()
+    const other = agentScope()
+    const content = 'このリポジトリでは pnpm を使う'
+    const id = await write({
+      scope: mine.scope,
+      kind: 'fact',
+      content,
+      sourceAgentId: mine.agentId,
+    })
+    await write({ scope: other.scope, kind: 'fact', content, sourceAgentId: other.agentId })
+
+    const found = await searchMemory(db, { query: 'pnpm', scopes: [mine.scope], now: NOW })
+
+    expect(found.map((record) => record.id)).toEqual([id])
+    const used = await db
+      .select({ useCount: memoryRecords.useCount, lastUsedAt: memoryRecords.lastUsedAt })
+      .from(memoryRecords)
+      .where(eq(memoryRecords.id, id))
+      .get()
+    expect(used).toEqual({ useCount: 1, lastUsedAt: NOW })
+  })
+
+  it('returns nothing for a query without words', async () => {
+    const { scope } = agentScope()
+    expect(await searchMemory(db, { query: '、。', scopes: [scope], now: NOW })).toEqual([])
+  })
 })

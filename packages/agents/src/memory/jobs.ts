@@ -9,7 +9,7 @@
  */
 import * as v from 'valibot'
 import { AgentIdSchema } from '../validation.ts'
-import type { Scope } from '../../drizzle/d1/schema.ts'
+import type { Scope } from '../../drizzle/memory/schema.ts'
 import { isScope } from './store/db.ts'
 import { sha256Hex } from '../lib/hash.ts'
 
