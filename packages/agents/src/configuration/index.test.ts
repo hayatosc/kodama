@@ -12,7 +12,7 @@ import { eq } from 'drizzle-orm'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
-const schema = agentSettingsSchema(createAgentModels({}))
+const schema = agentSettingsSchema(createAgentModels())
 const valid = defaultAgentSettings({
   DEFAULT_MODEL_PROVIDER: 'openai',
   DEFAULT_MODEL_ID: 'gpt-6-luna',

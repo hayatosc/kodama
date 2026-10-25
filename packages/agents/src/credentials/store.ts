@@ -42,29 +42,27 @@ export function createCredentialStore(
 
   async function selected(provider: string) {
     const refs = (await settings())?.credentials
-    for (const id of [refs?.primary[provider], refs?.fallback[provider]]) {
-      if (!id) continue
-      const row = await db
-        .select({ credential: credentials })
-        .from(credentials)
-        .innerJoin(
-          credentialGrants,
-          and(
-            eq(credentialGrants.credentialId, credentials.credentialId),
-            eq(credentialGrants.agentId, await agentId()),
-          ),
-        )
-        .where(
-          and(
-            eq(credentials.credentialId, id),
-            eq(credentials.provider, provider),
-            or(eq(credentials.status, 'active'), eq(credentials.status, 'retiring')),
-          ),
-        )
-        .get()
-      if (row) return row.credential
-    }
-    return undefined
+    const id = refs?.primary[provider]
+    if (!id) return undefined
+    const row = await db
+      .select({ credential: credentials })
+      .from(credentials)
+      .innerJoin(
+        credentialGrants,
+        and(
+          eq(credentialGrants.credentialId, credentials.credentialId),
+          eq(credentialGrants.agentId, await agentId()),
+        ),
+      )
+      .where(
+        and(
+          eq(credentials.credentialId, id),
+          eq(credentials.provider, provider),
+          or(eq(credentials.status, 'active'), eq(credentials.status, 'retiring')),
+        ),
+      )
+      .get()
+    return row?.credential
   }
 
   async function plaintext(row: typeof credentials.$inferSelect): Promise<Credential> {
@@ -89,22 +87,33 @@ export function createCredentialStore(
       kek(),
     )
     if (row.kind === 'api_key') return { type: 'api_key', key: value }
-    const parsed = v.safeParse(oauthSchema, JSON.parse(value))
-    if (!parsed.success) throw new Error('credential_unavailable: invalid subscription')
-    return parsed.output
+    try {
+      const parsed = v.safeParse(oauthSchema, JSON.parse(value))
+      if (!parsed.success) throw new Error()
+      return parsed.output
+    } catch {
+      throw new Error('credential_unavailable: invalid credential payload')
+    }
   }
 
   const store: CredentialStore = {
     async read(provider, options) {
       options?.signal?.throwIfAborted()
       const row = await selected(provider)
-      if (!row) return undefined
+      if (!row)
+        throw new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
       const cached = cache.get(row.credentialId)
-      if (cached && cached.revision === row.revision && cached.expires > now())
-        return structuredClone(cached.value)
       const before = generation
-      const value = await plaintext(row)
-      if (before === generation)
+      const value =
+        cached && cached.revision === row.revision && cached.expires > now()
+          ? cached.value
+          : await plaintext(row)
+      if (value.type === 'oauth' && value.expires <= now())
+        throw new Error(`credential_unavailable: ${provider}: credential expired`)
+      if (
+        before === generation &&
+        (!cached || cached.revision !== row.revision || cached.expires <= now())
+      )
         cache.set(row.credentialId, {
           revision: row.revision,
           expires: now() + CREDENTIAL_CACHE_TTL,

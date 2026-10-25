@@ -156,7 +156,7 @@ export class Agent extends DurableObject<AgentEnv> {
       await pullIfBehind(this.#applyDeps(harness), {
         db: managementDb(this.env.MANAGEMENT_DB),
         objectName: this.#agentId(),
-        parse: (value) => parseSettings(createAgentModels(this.env), value),
+        parse: (value) => parseSettings(createAgentModels(), value),
       })
     } catch (error) {
       console.error('Catching up with the registry failed', error)
@@ -382,9 +382,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const message = parseMessage(request)
     await refuseWhenFull(this.ctx.storage)
     const config = await readConfig(await this.#config())
-    if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
-      throw new Error(`Credentials are not configured for provider: ${config.model.provider}`)
-    }
+    await this.credentialStore().read(config.model.provider)
     if (await isIdle(await this.#harness)) {
       await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
     }
@@ -424,7 +422,7 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws {@link TypeError} When the settings are invalid.
    */
   async applyConfig(pushed: PushedConfig): Promise<ApplyResult> {
-    const settings = parseSettings(createAgentModels(this.env), pushed.settings)
+    const settings = parseSettings(createAgentModels(), pushed.settings)
     const agentId = parseAgentId(pushed.agentId)
     const harness = await this.#harness
     const deps = this.#applyDeps(harness)

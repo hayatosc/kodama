@@ -20,8 +20,7 @@ import {
 import { waitForAnswer } from './rpc.ts'
 
 const contextWindow =
-  createAgentModels(env).getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
-    ?.contextWindow ?? 0
+  createAgentModels().getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)?.contextWindow ?? 0
 /** Reported usage at which Pi compacts before the next answer (its default: the context window). */
 export const BLOCKING_USAGE = contextWindow
 /** Reported usage at which Pi starts compacting in the background (its default). */
