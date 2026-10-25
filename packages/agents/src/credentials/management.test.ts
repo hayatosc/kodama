@@ -7,7 +7,6 @@ import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../models/index.ts'
-import { credentialInsert } from './vault.ts'
 import { credentialCoverage, putCredential, revokeCredential } from './management.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
@@ -58,31 +57,25 @@ it('allows non-owner callers and does not echo invalid secret inputs', async () 
 it('uses the same caller rules for principal-owned subscriptions and API keys', async () => {
   const first = await caller()
   const second = await caller()
-  const id = uuidv7()
-  const { statement } = await credentialInsert(
-    db,
-    {
-      credentialId: id,
-      kind: 'oauth_subscription',
-      provider: 'openai',
-      ownerScope: 'principal',
-      ownerId: first.call.principal.principalId,
-      revision: 1,
-    },
-    JSON.stringify({
+  const registered = await putCredential(first.call, env, {
+    requestId: uuidv7(),
+    kind: 'oauth_subscription',
+    provider: 'openai',
+    ownerScope: 'principal',
+    secret: JSON.stringify({
       type: 'oauth',
       access: 'access-token',
       refresh: 'refresh-token',
       expires: Date.now() + 60_000,
     }),
-    env.CREDENTIAL_KEK_V1,
-    Date.now(),
-  )
-  await db.batch([statement])
-  expect((await credentialCoverage(second.call, id)).credential).toMatchObject({
-    credentialId: id,
-    kind: 'oauth_subscription',
   })
+  expect(JSON.stringify(registered)).not.toContain('access-token')
+  expect((await credentialCoverage(second.call, registered.credentialId)).credential).toMatchObject(
+    {
+      credentialId: registered.credentialId,
+      kind: 'oauth_subscription',
+    },
+  )
 })
 
 it('fails closed on R2 failure and completes the same revocation on retry', async () => {
