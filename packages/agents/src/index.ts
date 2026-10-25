@@ -269,7 +269,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return credentialFlows.putCredential(await this.#call(actor), this.env, request)
   }
 
-  /** List credential metadata for an installation owner. */
+  /** List credential metadata under the common management caller contract. */
   async listCredentials(actor: ManagementActor) {
     return credentialFlows.listCredentials(await this.#call(actor))
   }
@@ -285,18 +285,13 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   }
 
   /** Select a credential in one agent or all current agents, writing configuration versions. */
-  async assignCredential(
-    actor: ManagementActor,
-    credentialId: string,
-    target: string,
-    slot: 'primary' | 'fallback' = 'primary',
-  ) {
-    return assignCredential(await this.#call(actor), credentialId, target, slot)
+  async assignCredential(actor: ManagementActor, credentialId: string, target: string) {
+    return assignCredential(await this.#call(actor), credentialId, target)
   }
 
   /** Remove one agent's permission and selection without revoking other agents' access. */
   async unassignCredential(actor: ManagementActor, credentialId: string, agentId: string) {
-    return assignCredential(await this.#call(actor), credentialId, agentId, 'primary', true)
+    return assignCredential(await this.#call(actor), credentialId, agentId, true)
   }
 
   /** Disable a credential; success requires its R2 revocation record to be durable. */

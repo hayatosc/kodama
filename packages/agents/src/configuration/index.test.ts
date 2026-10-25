@@ -29,7 +29,7 @@ describe('agent settings schema', () => {
       labels: ['research', 'team-a'],
       memoryPolicy: { extract: false, remember: true },
       budget: { dailyUsd: 5, monthlyUsd: 50, turnTokens: 200_000, onExceed: 'refuse' },
-      credentials: { primary: { openai: credentialId }, fallback: { openai: null } },
+      credentials: { primary: { openai: credentialId } },
       toolPolicy: { current_time: 'allow', remember: 'deny' },
     }
     expect(parseInput(schema, settings)).toEqual(settings)
@@ -47,11 +47,11 @@ describe('agent settings schema', () => {
       [{ ...valid, budget: { dailyUsd: 5 } }, 'onExceed'],
       [{ ...valid, budget: { dailyUsd: -1, onExceed: 'refuse' } }, 'positive'],
       // One accepted shape: a flat provider map is not translated.
-      [{ ...valid, credentials: { openai: credentialId } }, 'primary and fallback'],
-      [{ ...valid, credentials: { primary: { openai: 'key' }, fallback: {} } }, 'UUIDs'],
+      [{ ...valid, credentials: { openai: credentialId } }, 'only primary references'],
+      [{ ...valid, credentials: { primary: { openai: 'key' } } }, 'UUIDs'],
       [
         { ...valid, credentials: { primary: {}, fallback: { openai: credentialId } } },
-        'fallback may only name',
+        'only primary references',
       ],
       [{ ...valid, toolPolicy: { current_time: 'ask' } }, 'allow or deny'],
       [{ ...valid, labels: ['Team A'] }, 'Labels'],

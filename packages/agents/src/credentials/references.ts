@@ -11,10 +11,8 @@ export function referenceStatements(
   version: number,
   settings: AgentSettings,
 ) {
-  const rows = (['primary', 'fallback'] as const).flatMap((slot) =>
-    Object.entries(settings.credentials?.[slot] ?? {}).flatMap(([provider, credentialId]) =>
-      credentialId ? [{ agentId, version, provider, slot, credentialId }] : [],
-    ),
+  const rows = Object.entries(settings.credentials?.primary ?? {}).map(
+    ([provider, credentialId]) => ({ agentId, version, provider, credentialId }),
   )
   return [
     db.delete(agentCredentialRefs).where(eq(agentCredentialRefs.agentId, agentId)),

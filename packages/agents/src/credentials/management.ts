@@ -1,5 +1,5 @@
 /**
- * Owner-only credential administration. RPC inputs and results never expose stored envelopes.
+ * Credential management with the same caller rules as other management RPC. RPC inputs and results never expose stored envelopes.
  * Revocation remains incomplete until its durable R2 tombstone exists.
  *
  * @module
@@ -19,15 +19,10 @@ import { sha256Hex } from '../lib/hash.ts'
 import { parseAgentId } from '../validation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
-/** Refuse credential administration without an active installation owner. */
-export function requireCredentialOwner(call: ManagementCall) {
-  if (
-    !call.principal ||
-    call.principal.disabledAt !== null ||
-    call.principal.systemRole !== 'owner'
-  ) {
-    throw new Error('forbidden: credential administration requires an owner')
-  }
+/** Require the registered caller used by management, without credential-specific roles. */
+export function credentialActor(call: ManagementCall) {
+  if (!call.principal || call.principal.disabledAt !== null)
+    throw new Error('forbidden: a registered active caller is required')
   return call.principal
 }
 
@@ -44,7 +39,7 @@ export async function putCredential(
   env: Pick<AgentEnv, 'CREDENTIAL_KEK_V1'>,
   request: unknown,
 ) {
-  const principal = requireCredentialOwner(call)
+  const principal = credentialActor(call)
   const parsed = v.safeParse(putSchema, request)
   if (!parsed.success) throw new TypeError('Invalid credential registration')
   const input = parsed.output
@@ -99,21 +94,19 @@ export async function putCredential(
 
 /** List metadata only; envelopes are never part of this result. */
 export async function listCredentials(call: ManagementCall) {
-  requireCredentialOwner(call)
+  credentialActor(call)
   return (await call.db.select().from(credentials)).map(credentialMetadata)
 }
 
 /** Read one credential after authorization, rejecting unknown IDs. */
 export async function credentialRow(call: ManagementCall, id: string) {
-  const principal = requireCredentialOwner(call)
+  credentialActor(call)
   const row = await call.db
     .select()
     .from(credentials)
     .where(eq(credentials.credentialId, parseAgentId(id)))
     .get()
   if (!row) throw new TypeError('Unknown credential')
-  if (row.kind === 'oauth_subscription' && row.ownerId !== principal.principalId)
-    throw new Error('forbidden: subscription owner required')
   return row
 }
 
@@ -137,7 +130,7 @@ export async function credentialCoverage(call: ManagementCall, credentialId: str
 
 /** Grant permission without changing a version; assignment is a separate atomic operation. */
 export async function grantCredential(call: ManagementCall, credentialId: string, agentId: string) {
-  const principal = requireCredentialOwner(call)
+  const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   parseAgentId(agentId)
   if (row.status !== 'active' && row.status !== 'retiring')
@@ -176,7 +169,7 @@ export async function revokeCredential(
   env: Pick<AgentEnv, 'CREDENTIAL_BACKUPS'>,
   credentialId: string,
 ) {
-  const principal = requireCredentialOwner(call)
+  const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   const coverage = await credentialCoverage(call, credentialId)
   if (row.status !== 'revoked')
