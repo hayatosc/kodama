@@ -4,11 +4,10 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
 import { credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import { sha256Hex } from '../lib/hash.ts'
-import { encryptCredential, decryptCredential } from './encryption.ts'
+import { encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
 
 /** Safe outward metadata, intentionally constructed without spreading a stored row. */
@@ -51,40 +50,5 @@ export async function credentialInsert(
         createdAt: now,
       })
       .returning(),
-  }
-}
-
-/** Retrieve only usable ciphertext and fail closed without leaking database or crypto errors. */
-export async function readCredential(db: ManagementDb, credentialId: string, kek: string) {
-  try {
-    const row = await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, credentialId))
-      .get()
-    if (
-      !row ||
-      (row.status !== 'active' && row.status !== 'retiring') ||
-      row.ciphertext === null ||
-      row.iv === null ||
-      row.wrappedDek === null ||
-      row.wrapIv === null ||
-      row.kekVersion !== 1
-    ) {
-      throw new Error('unavailable')
-    }
-    return await decryptCredential(
-      row,
-      {
-        ciphertext: row.ciphertext,
-        iv: row.iv,
-        wrappedDek: row.wrappedDek,
-        wrapIv: row.wrapIv,
-        kekVersion: row.kekVersion,
-      },
-      kek,
-    )
-  } catch {
-    throw new Error('credential_unavailable: credential cannot be read')
   }
 }
