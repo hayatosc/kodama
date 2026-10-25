@@ -11,12 +11,7 @@ export function initialGrantStatements(
   settings: AgentSettings,
   now: number,
 ) {
-  return [
-    ...new Set([
-      ...Object.values(settings.credentials?.primary ?? {}),
-      ...Object.values(settings.credentials?.fallback ?? {}).filter((id) => id !== null),
-    ]),
-  ].map((credentialId) =>
+  return [...new Set(Object.values(settings.credentials?.primary ?? {}))].map((credentialId) =>
     db
       .insert(credentialGrants)
       .values({ credentialId, agentId, createdAt: now })

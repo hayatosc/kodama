@@ -4,7 +4,6 @@
  *
  * @module
  */
-import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -13,6 +12,8 @@ import type { HarnessOptions } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAgentOptions } from '../agent/config.ts'
+import { testCredentialStore } from '../helper/credentials.ts'
+import { newAgentId } from '../helper/management.ts'
 import { createAgentModels } from '../models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -61,9 +62,10 @@ async function withHarness<T>(
   settings: HarnessOptions['settings'],
   run: (harness: Harness) => Promise<T>,
 ): Promise<T> {
-  const stub = env.AGENTS.getByName(uuidv7())
+  const agentId = await newAgentId()
+  const stub = env.AGENTS.getByName(agentId)
   return runInDurableObject(stub, async (_instance, state) => {
-    const options = createAgentOptions(env)
+    const options = createAgentOptions(env, [], undefined, await testCredentialStore(agentId))
     const storage = await openDurableObjectSqliteStorage(state.storage)
     const harness = await Harness.open(
       storage,
@@ -101,7 +103,7 @@ it('reports a running background compaction as a live task while the conversatio
     await summaryGate
     return modelResponse('SUMMARY')
   })
-  const model = createAgentModels(env).getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
+  const model = createAgentModels().getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)
   if (model === undefined) throw new Error('Default model is missing from the catalog')
   // Background compaction starts above contextWindow - reserveTokens - backgroundTokens = 1,000.
   const compaction = {

@@ -31,7 +31,7 @@ function reconcile() {
   return reconcileAgents({
     env,
     db: managementDb(env.MANAGEMENT_DB),
-    models: createAgentModels(env),
+    models: createAgentModels(),
     principal: null,
     now: Date.now(),
   })

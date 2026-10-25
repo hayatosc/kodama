@@ -6,6 +6,7 @@ import { credentials, credentialGrants } from '../../drizzle/management/schema.t
 import { managementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { defaultAgentSettings } from '../configuration/index.ts'
+import { credentialCall } from '../helper/credentials.ts'
 import { newAgentId } from '../helper/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert } from './vault.ts'
@@ -14,22 +15,28 @@ import { createCredentialStore, CREDENTIAL_CACHE_TTL } from './store.ts'
 const db = managementDb(env.MANAGEMENT_DB)
 const kek = () => env.CREDENTIAL_KEK_V1
 
-async function fixture() {
+async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
   const agentId = await newAgentId()
+  const { principal } = await credentialCall()
   const primary = uuidv7()
-  const fallback = uuidv7()
+  const alternative = uuidv7()
   for (const [credentialId, secret] of [
-    [primary, 'sk-primary-test-key'],
-    [fallback, 'sk-fallback-test-key'],
+    [
+      primary,
+      kind === 'api_key'
+        ? 'sk-primary-test-key'
+        : JSON.stringify({ type: 'oauth', access: 'access', refresh: 'refresh', expires: 2000 }),
+    ],
+    [alternative, 'sk-alternative-test-key'],
   ] as const) {
     const { statement } = await credentialInsert(
       db,
       {
         credentialId,
-        kind: 'api_key',
+        kind: credentialId === primary ? kind : 'api_key',
         provider: 'openai',
-        ownerScope: 'installation',
-        ownerId: null,
+        ownerScope: 'principal',
+        ownerId: principal.principalId,
         revision: 1,
       },
       secret,
@@ -43,7 +50,7 @@ async function fixture() {
   }
   const settings: AgentSettings = {
     ...defaultAgentSettings(env),
-    credentials: { primary: { openai: primary }, fallback: { openai: fallback } },
+    credentials: { primary: { openai: primary } },
   }
   let now = 1000
   const handle = createCredentialStore(
@@ -57,7 +64,6 @@ async function fixture() {
     ...handle,
     settings,
     primary,
-    fallback,
     advance: () => {
       now += CREDENTIAL_CACHE_TTL + 1
     },
@@ -65,19 +71,35 @@ async function fixture() {
 }
 
 it('uses only explicit references and checks status even with a warm cache and no invalidation push', async () => {
-  const { store, primary, fallback, settings } = await fixture()
+  const { store, primary, settings } = await fixture()
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
-  expect(await store.read('anthropic')).toBeUndefined()
+  await expect(store.read('anthropic')).rejects.toThrow('credential_unavailable')
   await db
     .update(credentials)
     .set({ status: 'needs_reauth' })
     .where(eq(credentials.credentialId, primary))
-  expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-fallback-test-key' })
-  await db.delete(credentialGrants).where(eq(credentialGrants.credentialId, fallback))
-  expect(await store.read('openai')).toBeUndefined()
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  await db
+    .update(credentials)
+    .set({ status: 'active' })
+    .where(eq(credentials.credentialId, primary))
+  await db.delete(credentialGrants).where(eq(credentialGrants.credentialId, primary))
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
   expect(await store.list()).toEqual([])
-  if (settings.credentials) delete settings.credentials.fallback.openai
-  expect(await store.read('openai')).toBeUndefined()
+  await db
+    .update(credentials)
+    .set({ status: 'revoked', ciphertext: null, iv: null, wrappedDek: null, wrapIv: null })
+    .where(eq(credentials.credentialId, primary))
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  if (settings.credentials) delete settings.credentials.primary.openai
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+})
+
+it('rejects an expired subscription even when another granted key exists', async () => {
+  const { store, advance } = await fixture('oauth_subscription')
+  expect(await store.read('openai')).toMatchObject({ type: 'oauth', access: 'access' })
+  advance()
+  await expect(store.read('openai')).rejects.toThrow('credential expired')
 })
 
 it('expires and explicitly invalidates the decrypted cache', async () => {

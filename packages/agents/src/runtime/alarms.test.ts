@@ -6,6 +6,7 @@ import { setAlarm, takeDueAlarms } from './alarms.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
+import { testCredentialStore } from '../helper/credentials.ts'
 import { createAgentOptions } from '../agent/config.ts'
 import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from '../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -148,7 +149,11 @@ describe('agent failures, cancellation, and recovery', () => {
     })
     await runInDurableObject(stub, async (_instance, state) => {
       const storage = await openDurableObjectSqliteStorage(state.storage)
-      const harness = await Harness.open(storage, createAgentOptions(env), BACKGROUND_CONTEXT)
+      const harness = await Harness.open(
+        storage,
+        createAgentOptions(env, [], undefined, await testCredentialStore(agentId)),
+        BACKGROUND_CONTEXT,
+      )
       try {
         const root = await harness.root(BACKGROUND_CONTEXT)
         await root.submit(

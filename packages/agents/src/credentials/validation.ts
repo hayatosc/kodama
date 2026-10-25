@@ -4,42 +4,33 @@ import { credentials, credentialGrants } from '../../drizzle/management/schema.t
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 
-/** Reject unknown, revoked, mismatched, or ungranted references without disclosing stored data. */
+/** All credential kinds use the same status, provider and grant rules; ownership is metadata. */
 export async function validateCredentialRefs(
   db: ManagementDb,
   settings: AgentSettings,
   agentId?: string,
 ) {
-  for (const refs of [settings.credentials?.primary, settings.credentials?.fallback]) {
-    for (const [provider, credentialId] of Object.entries(refs ?? {})) {
-      if (credentialId === null) continue
-      const row = await db
+  for (const [provider, credentialId] of Object.entries(settings.credentials?.primary ?? {})) {
+    const row = await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, credentialId))
+      .get()
+    if (!row || !['active', 'retiring'].includes(row.status) || row.provider !== provider)
+      throw new TypeError('credential_unavailable: invalid credential reference')
+    if (agentId) {
+      const grant = await db
         .select()
-        .from(credentials)
-        .where(eq(credentials.credentialId, credentialId))
+        .from(credentialGrants)
+        .where(
+          and(
+            eq(credentialGrants.agentId, agentId),
+            eq(credentialGrants.credentialId, credentialId),
+          ),
+        )
         .get()
-      if (
-        !row ||
-        row.status !== 'active' ||
-        row.provider !== provider ||
-        row.ownerScope !== 'installation'
-      ) {
-        throw new TypeError('credential_unavailable: invalid credential reference')
-      }
-      if (agentId) {
-        const grant = await db
-          .select()
-          .from(credentialGrants)
-          .where(
-            and(
-              eq(credentialGrants.agentId, agentId),
-              eq(credentialGrants.credentialId, credentialId),
-            ),
-          )
-          .get()
-        if (!grant)
-          throw new TypeError('credential_unavailable: credential is not granted to the agent')
-      }
+      if (!grant)
+        throw new TypeError('credential_unavailable: credential is not granted to the agent')
     }
   }
 }

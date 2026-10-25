@@ -83,7 +83,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       const result = await reconcileAgents({
         env: this.env,
         db: managementDb(this.env.MANAGEMENT_DB),
-        models: createAgentModels(this.env),
+        models: createAgentModels(),
         principal: null,
         now: controller.scheduledTime,
       })
@@ -115,7 +115,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return {
       env: this.env,
       db: managementDb(this.env.MANAGEMENT_DB),
-      models: createAgentModels(this.env),
+      models: createAgentModels(),
       principal: null,
       now: Date.now(),
     }

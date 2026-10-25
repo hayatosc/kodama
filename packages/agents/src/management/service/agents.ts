@@ -172,9 +172,6 @@ export async function createAgent(
     request.settings === undefined
       ? defaultAgentSettings(call.env)
       : parseSettings(call.models, request.settings)
-  if (settings.credentials && call.principal && call.principal.systemRole !== 'owner') {
-    throw new Error('forbidden: credential assignment requires an installation owner')
-  }
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   const membership =

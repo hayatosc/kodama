@@ -26,7 +26,7 @@ async function caller() {
     call: {
       db,
       env,
-      models: createAgentModels(env),
+      models: createAgentModels(),
       now: Date.now(),
       principal,
     },

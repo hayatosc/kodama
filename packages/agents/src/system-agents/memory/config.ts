@@ -97,7 +97,7 @@ export function memoryHarnessOptions(
   registry.install(extension)
   registry.install(guard.extension)
   return {
-    models: guardedModels(createAgentModels(env, credentials), guard.refusal),
+    models: guardedModels(createAgentModels(credentials), guard.refusal),
     registry,
     settings: harnessSettings([extension, guard.extension]),
     conversationCreated: (tx, conversation) =>

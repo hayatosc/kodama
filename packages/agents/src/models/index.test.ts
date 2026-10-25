@@ -1,22 +1,26 @@
-import { describe, expect, it } from 'vitest'
-import { resolveProviderCredentials } from './index.ts'
+/** Provider authentication never reads ambient keys and uses only the explicit store. @module */
+import { afterEach, expect, it, vi } from 'vitest'
+import { createAgentModels } from './index.ts'
 
-describe('provider credentials', () => {
-  it('loads individual keys and ignores unused providers', () => {
-    expect(
-      Object.fromEntries(
-        resolveProviderCredentials({
-          OPENAI_API_KEY: 'openai-test',
-          XAI_API_KEY: 'xai-test',
-          GEMINI_API_KEY: '',
-        }),
-      ),
-    ).toEqual({ OPENAI_API_KEY: 'openai-test', XAI_API_KEY: 'xai-test' })
-    expect(resolveProviderCredentials({}).size).toBe(0)
-  })
+afterEach(() => vi.unstubAllEnvs())
 
-  it('does not expose unrelated Worker secrets to model providers', () => {
-    const env = { OPENAI_API_KEY: 'test-key', CLI_TOKEN: 'private-token' }
-    expect(resolveProviderCredentials(env).has('CLI_TOKEN')).toBe(false)
+it('cannot authenticate from provider environment keys', async () => {
+  vi.stubEnv('OPENAI_API_KEY', 'sk-ambient-key')
+  vi.stubEnv('XAI_API_KEY', 'xai-ambient-key')
+  expect(await createAgentModels().checkAuth('openai')).toBeUndefined()
+  expect(await createAgentModels().checkAuth('xai')).toBeUndefined()
+})
+
+it('authenticates through an explicit credential store', async () => {
+  const models = createAgentModels({
+    read: async () => ({ type: 'api_key', key: 'sk-explicit-key' }),
+    list: async () => [{ providerId: 'openai', type: 'api_key' }],
+    modify: async () => {
+      throw new Error('Not supported')
+    },
+    delete: async () => {
+      throw new Error('Not supported')
+    },
   })
+  expect(await models.checkAuth('openai')).toEqual({ type: 'api_key', source: 'stored credential' })
 })
