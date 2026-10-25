@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { safeFailure } from '../lib/redaction.ts'
+import { safeFailure } from '../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'

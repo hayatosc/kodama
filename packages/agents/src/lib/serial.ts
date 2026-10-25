@@ -4,7 +4,7 @@
  * @module
  */
 
-import { safeFailure } from './redaction.ts'
+import { safeFailure } from './errors.ts'
 
 /** Run each operation after the previous one settles, whether it succeeded or failed. */
 export function serialQueue(): <T>(operation: () => Promise<T>) => Promise<T> {

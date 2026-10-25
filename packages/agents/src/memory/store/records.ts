@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { redactData, redactSecrets } from '../../lib/redaction.ts'
+import { redactData, redactSecrets } from '../../credentials/redaction.ts'
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'

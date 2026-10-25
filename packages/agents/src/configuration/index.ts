@@ -8,7 +8,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { redactData } from '../lib/redaction.ts'
+import { redactData } from '../credentials/redaction.ts'
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'

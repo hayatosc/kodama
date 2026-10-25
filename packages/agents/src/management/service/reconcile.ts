@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { safeFailure } from '../../lib/redaction.ts'
+import { safeFailure } from '../../lib/errors.ts'
 import { and, asc, eq, gt, lte, ne, or } from 'drizzle-orm'
 import { agents, systemSettings } from '../../../drizzle/management/schema.ts'
 import { finishProvisioning, pushDesired } from './agents.ts'

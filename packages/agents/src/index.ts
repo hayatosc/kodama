@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { safeFailure } from './lib/redaction.ts'
+import { safeFailure } from './lib/errors.ts'
 import type { CredentialRefs } from './protocol.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'

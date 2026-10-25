@@ -8,7 +8,7 @@
  *
  * @module
  */
-import { safeFailure } from '../../lib/redaction.ts'
+import { safeFailure } from '../../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, Submission, SubmissionDraft } from '@earendil-works/pi-durable'

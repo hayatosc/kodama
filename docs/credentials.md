@@ -69,7 +69,7 @@ For local development, set a stable development KEK and run
 IDs (`openai`, `anthropic`, `google`, `xai`) to keys. The command reads stdin, uses the authenticated
 localhost-only development adapter, registers encrypted rows, and assigns both agent kinds. Keep
 the file outside the repository with mode 0600 and remove it after registration. The adapter and
-its local owner bootstrap are absent from production; only private trusted RPC callers register
+its local registration adapter are absent from production; only private trusted RPC callers register
 production keys. No provider environment variables or credential files are used for model auth.
 
 ## Operational policy

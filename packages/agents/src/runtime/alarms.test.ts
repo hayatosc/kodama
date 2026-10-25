@@ -11,9 +11,6 @@ import { createAgentOptions } from '../agent/config.ts'
 import { decodeEvents, modelResponse, useMockModel, waitForAnswer } from '../helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-// Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
-import '@earendil-works/pi-ai/api/openai-responses'
-import { testCredentialStore } from '../helper/credentials.ts'
 import { newAgentId, updateSettings } from '../helper/management.ts'
 
 afterEach(() => vi.restoreAllMocks())

@@ -80,7 +80,10 @@ export function createCredentialStore(
     )
     const parsed = parseCredential(row.kind, value)
     if (parsed.type === 'api_key') remember(parsed.key)
-    else { remember(parsed.access); remember(parsed.refresh) }
+    else {
+      remember(parsed.access)
+      remember(parsed.refresh)
+    }
     return parsed
   }
 
@@ -172,6 +175,11 @@ export function createCredentialStore(
         const value = parseCredential(leased.kind, secret)
         const fingerprint = await credentialFingerprint(secret, kek())
         const token = value.type === 'api_key' ? value.key : value.access
+        if (value.type === 'api_key') remember(value.key)
+        else {
+          remember(value.access)
+          remember(value.refresh)
+        }
         const revision = leased.revision + 1
         const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
         // Record the attempted refresh in the same batch; a losing CAS must not be reported

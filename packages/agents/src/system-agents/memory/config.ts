@@ -22,8 +22,8 @@ export type MemoryModelEnv = DefaultModelEnv & {
   MEMORY_MODEL_PROVIDER: string
   MEMORY_MODEL_ID: string
 }
-import { redactedModels, redactionExtension } from '../../runtime/redaction.ts'
-import { redactSecrets } from '../../lib/redaction.ts'
+import { redactedModels, redactionExtension } from '../../credentials/output.ts'
+import { redactSecrets } from '../../credentials/redaction.ts'
 import { harnessSettings } from '../../runtime/harness.ts'
 import { guardedModels } from '../../runtime/restrictions.ts'
 import type { Refusal } from '../../runtime/restrictions.ts'

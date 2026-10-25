@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { safeFailure } from '../lib/redaction.ts'
+import { safeFailure } from '../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, TaskId } from '@earendil-works/pi-durable'
 

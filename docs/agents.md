@@ -438,13 +438,14 @@ and model catalogs. Provider and model IDs come from the installed Pi catalog, s
 updates the catalog.
 
 Provider credentials live only in the management D1 vault, envelope-encrypted with a per-row
-DEK wrapped by `CREDENTIAL_KEK_V1` (and V2 during rollover). Configuration carries credential UUIDs,
-never values. Owner-only `AgentService` methods register, assign, revoke and rotate them; see
+DEK wrapped by the single `CREDENTIAL_KEK_V1`. Configuration carries credential UUIDs,
+never values. `AgentService` methods register, assign, revoke and replace both credential kinds;
+any registered agent may call them, with its identity recorded in audit. See
 [credentials.md](credentials.md) for authorization, auditing, cache bounds and the KEK runbook.
 
 Working agents and the memory agent use the same D1 `CredentialStore`. Resolution uses the
-version's primary reference, then its explicit fallback, and requires a usable grant. Missing
-credentials fail with `credential_unavailable`. Creation and configuration updates validate
+version's sole provider reference and requires a usable grant. Missing, expired, revoked or
+unassigned credentials stop the request with `credential_unavailable`. Creation and configuration updates validate
 assignments; `sendMessage` checks authentication before admitting input. No environment variable,
 local credential file, shared default or implicit provider fallback is consulted.
 
@@ -779,10 +780,10 @@ From `packages/agents`:
 4. Set `CREDENTIAL_KEK_V1` to a base64-encoded random 32-byte key. Follow the backup and rollout
    prerequisites in [credentials.md](credentials.md); provider keys are never Worker secrets.
 5. Deploy with `nr deploy`.
-6. Through a trusted owner caller, register the provider key with `putCredential`, then call
-   `AgentService.seed({ primary: { openai: credentialId }, fallback: {} })`; it is idempotent.
-   Supply references for each configured default/memory provider. The trusted deployment caller
-   must provision its owner principal; the local owner bootstrap is not deployed.
+6. Through the trusted RPC boundary, register the credential with `putCredential`, then call
+   `AgentService.seed({ primary: { openai: credentialId } })`; it is idempotent.
+   Supply references for each configured default/memory provider. No owner role is required;
+   the local registration adapter is not deployed.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the

@@ -1,7 +1,7 @@
 /** Development bootstrap registers encrypted keys and assigns working and memory agents. @module */
 import { env, exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
-import { seedLocalCredentials } from './credentials.ts'
+import { seedLocalCredentials } from './bootstrap.ts'
 
 it('bootstraps idempotently without returning the key', async () => {
   const request = () =>

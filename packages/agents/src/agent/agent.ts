@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { safeFailure } from '../lib/redaction.ts'
+import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type {
@@ -72,7 +72,7 @@ import type {
 } from '../protocol.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
-import { redactData } from '../lib/redaction.ts'
+import { redactData } from '../credentials/redaction.ts'
 import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'

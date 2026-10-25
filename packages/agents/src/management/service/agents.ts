@@ -21,7 +21,7 @@ import { reportApplied, versionRow, versionRows, writeVersionStatements } from '
 import { SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
 import type { MemoryModelEnv } from '../../system-agents/memory/config.ts'
 import type { AgentEnv } from '../../env.ts'
-import { safeFailure } from '../../lib/redaction.ts'
+import { safeFailure } from '../../lib/errors.ts'
 import { errorText, isConstraintError } from '../../lib/errors.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type {

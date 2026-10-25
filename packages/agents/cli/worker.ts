@@ -4,7 +4,7 @@
  * @module
  */
 import AgentService from '../src/index.ts'
-import { seedLocalCredentials } from './credentials.ts'
+import { seedLocalCredentials } from '../src/credentials/bootstrap.ts'
 import { handleCli } from './handler.ts'
 
 export { AgentObject as Agent } from '../src/agent-object.ts'

@@ -5,7 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { redactSecrets } from './lib/redaction.ts'
+import { redactSecrets } from './credentials/redaction.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'

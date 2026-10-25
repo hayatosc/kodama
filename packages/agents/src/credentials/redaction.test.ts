@@ -1,6 +1,6 @@
 /** Redaction recognizes key patterns and expires exact-value knowledge with the cache. @module */
 import { expect, it } from 'vitest'
-import { createRedactor, redactData, redactSecrets, safeFailure } from './redaction.ts'
+import { createRedactor, redactData, redactSecrets } from './redaction.ts'
 
 it('removes known values, API-key shapes and JWTs without changing ordinary prose', () => {
   expect(
@@ -16,13 +16,6 @@ it('redacts nested protocol values without mutating the input', () => {
   const input = { content: [{ text: 'sk-secret123456' }], detail: 'xai-secret123456' }
   expect(redactData(input)).toEqual({ content: [{ text: '[REDACTED]' }], detail: '[REDACTED]' })
   expect(input.content[0]?.text).toBe('sk-secret123456')
-})
-
-it('does not expose exception messages, causes, or storage bindings in log details', () => {
-  expect(safeFailure(new Error('opaque-provider-secret', { cause: new Error('ciphertext') }))).toBe(
-    'Error',
-  )
-  expect(safeFailure(new TypeError('sk-sensitive123456'))).toBe('TypeError')
 })
 
 it('retains exact values for at most five minutes', () => {

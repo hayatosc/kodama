@@ -1,14 +1,5 @@
 /** Secret-safe text at persistence, provider and transport boundaries. @module */
 
-/** Log only an error category; messages, causes and stacks can contain storage bindings or keys. */
-export function safeFailure(error: unknown): string {
-  return error instanceof TypeError
-    ? 'TypeError'
-    : error instanceof Error
-      ? 'Error'
-      : 'Unknown failure'
-}
-
 /** Redact recognizable API keys and JWTs even before a credential has been decrypted. */
 export function redactSecrets(text: string, known: Iterable<string> = []): string {
   let safe = text

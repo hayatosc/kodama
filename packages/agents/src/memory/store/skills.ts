@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { redactData } from '../../lib/redaction.ts'
+import { redactData } from '../../credentials/redaction.ts'
 import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import type { MemoryDb } from './db.ts'

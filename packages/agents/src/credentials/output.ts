@@ -3,7 +3,7 @@ import { defineExtension, hook, ToolTask } from '@earendil-works/pi-durable'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai/models'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream'
-import { redactData, redactSecrets } from '../lib/redaction.ts'
+import { redactData, redactSecrets } from './redaction.ts'
 
 /** Sanitize tool results before Pi commits them, including exception-derived content. */
 export function redactionExtension(redact: (text: string) => string) {
