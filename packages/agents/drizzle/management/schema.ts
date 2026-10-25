@@ -173,11 +173,10 @@ export const agentCredentialRefs = sqliteTable(
       .notNull()
       .references(() => credentials.credentialId),
     provider: text('provider').notNull(),
-    slot: text('slot', { enum: ['primary', 'fallback'] }).notNull(),
     version: integer('version').notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.agentId, t.provider, t.slot] }),
+    primaryKey({ columns: [t.agentId, t.provider] }),
     index('agent_credential_refs_by_credential').on(t.credentialId),
   ],
 )
