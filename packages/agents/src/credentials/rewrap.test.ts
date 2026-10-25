@@ -1,25 +1,26 @@
-/** KEK replacement is resumable and never changes provider ciphertext or revives revocations. @module */
+/** Single-binding replacement fences writes and resumes without exposing provider plaintext. @module */
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { afterEach, expect, it } from 'vitest'
 import { credentials, systemSettings } from '../../drizzle/management/schema.ts'
-import { credentialOwnerCall } from '../helper/credentials.ts'
+import { credentialCall } from '../helper/credentials.ts'
 import { putCredential, revokeCredential } from './management.ts'
 import { rewrapCredentials } from './rewrap.ts'
-import { readCredential } from './vault.ts'
+import { decryptCredential } from './encryption.ts'
+import { KEK_VERSION_KEY, KEK_FINGERPRINT_KEY } from './keys.ts'
+
+const next = { CREDENTIAL_KEK_V1: btoa('2'.repeat(32)) }
+const request = { previousKek: env.CREDENTIAL_KEK_V1, previousVersion: 1 }
 
 afterEach(async () => {
-  const call = await credentialOwnerCall()
+  const call = await credentialCall()
   await call.db
-    .update(systemSettings)
-    .set({ valueJson: '1' })
-    .where(eq(systemSettings.key, 'credential_kek_version'))
+    .delete(systemSettings)
+    .where(inArray(systemSettings.key, [KEK_VERSION_KEY, KEK_FINGERPRINT_KEY]))
 })
 
-const keys = { ...env, CREDENTIAL_KEK_V2: btoa('2'.repeat(32)) }
-
-it('rewraps live and revoked records, keeps ciphertext stable and writes new rows with V2', async () => {
-  const call = await credentialOwnerCall()
+it('rewraps live and revoked records with one binding and fences old Workers', async () => {
+  const call = await credentialCall()
   const live = await putCredential(call, env, {
     requestId: 'live',
     provider: 'openai',
@@ -36,7 +37,14 @@ it('rewraps live and revoked records, keeps ciphertext stable and writes new row
     .from(credentials)
     .where(eq(credentials.credentialId, live.credentialId))
     .get()
-  expect(await rewrapCredentials(call, keys)).toEqual({
+  await expect(
+    putCredential(call, next, {
+      requestId: 'early',
+      provider: 'openai',
+      secret: 'early-test-secret',
+    }),
+  ).rejects.toThrow('KEK replacement is required')
+  expect(await rewrapCredentials(call, next, request)).toEqual({
     version: 2,
     rewrapped: 2,
     remaining: 0,
@@ -50,9 +58,21 @@ it('rewraps live and revoked records, keeps ciphertext stable and writes new row
   expect(after?.ciphertext).toBe(before?.ciphertext)
   expect(after?.iv).toBe(before?.iv)
   expect(after?.wrappedDek).not.toBe(before?.wrappedDek)
-  expect(await readCredential(call.db, live.credentialId, keys.CREDENTIAL_KEK_V2)).toBe(
-    'live-test-secret',
-  )
+  if (!after?.ciphertext || !after.iv || !after.wrappedDek || !after.wrapIv)
+    throw new Error('Missing envelope')
+  expect(
+    await decryptCredential(
+      after,
+      {
+        ciphertext: after.ciphertext,
+        iv: after.iv,
+        wrappedDek: after.wrappedDek,
+        wrapIv: after.wrapIv,
+        kekVersion: after.kekVersion,
+      },
+      next.CREDENTIAL_KEK_V1,
+    ),
+  ).toBe('live-test-secret')
   expect(
     (
       await call.db
@@ -62,14 +82,21 @@ it('rewraps live and revoked records, keeps ciphertext stable and writes new row
         .get()
     )?.ciphertext,
   ).toBeNull()
-  expect(await rewrapCredentials(call, keys)).toEqual({
+  expect(await rewrapCredentials(call, next, request)).toEqual({
     version: 2,
     rewrapped: 0,
     remaining: 0,
     complete: true,
   })
-  const next = await putCredential(call, keys, {
-    requestId: 'next',
+  await expect(
+    putCredential(call, env, {
+      requestId: 'outdated',
+      provider: 'openai',
+      secret: 'old-worker-secret',
+    }),
+  ).rejects.toThrow('KEK replacement is required')
+  const created = await putCredential(call, next, {
+    requestId: 'new',
     provider: 'openai',
     secret: 'next-test-secret',
   })
@@ -78,14 +105,14 @@ it('rewraps live and revoked records, keeps ciphertext stable and writes new row
       await call.db
         .select()
         .from(credentials)
-        .where(eq(credentials.credentialId, next.credentialId))
+        .where(eq(credentials.credentialId, created.credentialId))
         .get()
     )?.kekVersion,
   ).toBe(2)
 })
 
-it('retains both KEKs and reports incomplete work while a row has a live modify lease', async () => {
-  const call = await credentialOwnerCall()
+it('reports incomplete work until a modification lease expires', async () => {
+  const call = await credentialCall()
   const row = await putCredential(call, env, {
     requestId: 'leased',
     provider: 'openai',
@@ -95,10 +122,10 @@ it('retains both KEKs and reports incomplete work while a row has a live modify 
     .update(credentials)
     .set({ leaseId: 'other-writer', leaseExpiresAt: Date.now() + 60_000 })
     .where(eq(credentials.credentialId, row.credentialId))
-  expect((await rewrapCredentials(call, keys)).complete).toBe(false)
+  expect((await rewrapCredentials(call, next, request)).complete).toBe(false)
   await call.db
     .update(credentials)
     .set({ leaseExpiresAt: 0 })
     .where(eq(credentials.credentialId, row.credentialId))
-  expect((await rewrapCredentials(call, keys)).complete).toBe(true)
+  expect((await rewrapCredentials(call, next, request)).complete).toBe(true)
 })

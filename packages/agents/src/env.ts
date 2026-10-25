@@ -18,5 +18,4 @@ export type AgentEnv = InferEnv<typeof agentConfig> & {
   /** May be removed after every envelope has been rewrapped to V2. */
   CREDENTIAL_KEK_V1?: string
   /** Present only during/after the documented V1-to-V2 KEK replacement. */
-  CREDENTIAL_KEK_V2?: string
 }

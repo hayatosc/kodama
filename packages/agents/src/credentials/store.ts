@@ -25,7 +25,7 @@ export function createCredentialStore(
   db: ManagementDb,
   agentId: () => Promise<string>,
   settings: () => Promise<AgentSettings | undefined>,
-  kek: (version: number) => string,
+  kek: () => string,
   now: () => number = Date.now,
 ): { store: CredentialStore; invalidate: () => void } {
   const cache = new Map<string, { revision: number; expires: number; value: Credential }>()
@@ -77,7 +77,7 @@ export function createCredentialStore(
         wrappedDek: row.wrappedDek,
         wrapIv: row.wrapIv,
       },
-      kek(row.kekVersion),
+      kek(),
     )
     return parseCredential(row.kind, value)
   }
@@ -157,7 +157,7 @@ export function createCredentialStore(
         const envelope = await encryptCredential(
           { ...leased, revision },
           secret,
-          kek(leased.kekVersion),
+          kek(),
           leased.kekVersion,
         )
         // Record the attempted refresh in the same batch; a losing CAS must not be reported

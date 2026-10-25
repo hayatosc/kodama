@@ -179,6 +179,7 @@ export const SYSTEM_SETTING_KEYS = [
   'install_id',
   'reconcile_cursor',
   'credential_kek_version',
+  'credential_kek_fingerprint',
 ] as const
 
 /**

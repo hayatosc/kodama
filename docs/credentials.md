@@ -1,67 +1,63 @@
 # Credential operations
 
-Provider credentials belong to the management D1 vault, not Worker Secrets. Only envelope keys
-(KEKs) belong in Worker Secrets. Credential RPC methods on the default `AgentService` require an
-active installation owner. Results contain metadata, fingerprints and last four characters only.
-Never paste keys into an agent conversation, a configuration, a shell argument or a log.
+Provider credentials belong to the management D1 vault. The only Worker encryption secret is
+`CREDENTIAL_KEK_V1`. The default `AgentService` uses the common registered-caller contract, including
+registered agents; credential ownership is metadata, not an extra administration role. Results
+contain metadata, fingerprints and last four characters only. Never paste secrets into a conversation,
+configuration, shell argument or log. There is no public management HTTP endpoint.
 
-## Provider-key rotation
+## Credential replacement
 
-1. Create a replacement key at the provider. Keep the old key valid during the transition.
-2. Call `rotateCredential(actor, oldCredentialId, { requestId, secret })` through a trusted private
-   service binding. Reuse the same request ID and secret on retries. There is no public admin HTTP
-   endpoint; the development adapter is local only.
-3. The D1 batch inserts the new active credential, marks the old credential retiring, copies grants
-   for referencing agents, and advances all their configuration versions and reverse indexes with
-   an audit event. It then invalidates caches and pushes the new versions to the objects.
-4. Retry the same operation until `complete` is true. A failed push is not reported as complete.
-   Requests already running may finish with the old key. Check `credentialCoverage` and
-   `lastUsedAt` before removing the old provider key.
-5. Revoke the old key at the provider, then call `revokeCredential`. Keep its metadata row and R2
-   revocation receipt; never physically delete it. R2 failure leaves revocation incomplete and safe
-   to retry. `credentialCoverage` previews affected agents before revocation.
+1. Obtain replacement credentials from the provider; keep the previous credential valid during the
+   transition. OAuth login and refresh-provider integration are separate work.
+2. Call `rotateCredential(actor, credentialId, { requestId, secret })` through a trusted private
+   service binding. Reuse the request ID and payload on retries. Both credential kinds follow the
+   same encrypted storage, grant, configuration-version and audit flow.
+3. The D1 transaction inserts the replacement, retires the previous row, copies the applicable grants
+   and advances referencing configurations. Cache invalidation and configuration pushes follow.
+4. Retry until `complete` is true. Inspect `credentialCoverage` and `lastUsedAt` before revoking the
+   previous credential at its provider and calling `revokeCredential`. Its cleared metadata and
+   encrypted R2 receipt remain. R2 failure is retryable and does not undo the D1 revocation.
 
-Unassignment removes only one agent's grant and references. Revocation affects every grant.
-Normally no new request uses a revoked/unassigned key after invalidation returns. If an object is
-unreachable, the decrypted cache expires after at most **five minutes**. In-flight requests are not
-interrupted. Explicit primary/fallback references are the only permitted fallback.
+Unassignment removes an agent's grant and reference. Revocation affects all grants. Every read checks
+current status and grants, even with a warm plaintext cache. Missing, revoked, unassigned and expired
+credentials stop with `credential_unavailable`; no alternate credential or environment key is tried.
+An already-running provider request is not interrupted. Decrypted cache entries expire within five
+minutes and are invalidated after management changes.
 
-## KEK replacement (V1 to V2)
+## Single-KEK replacement
 
-1. Back up the current KEK outside Cloudflare under controlled access. Never store a KEK beside the
-   D1 backup or in a repository. Keep the previous deployment available for incident investigation,
-   but do not roll back to a runtime that cannot read V2 envelopes.
-2. Generate a new random 32-byte KEK, base64 encode it, and temporarily add the `CREDENTIAL_KEK_V2`
-   secret binding to `cloudflare.config.ts`. Install its value as a Worker Secret without printing
-   it. Deploy with both V1 and V2 present. Do not replace either secret's value in place.
-3. Call `rewrapCredentials(actor)` repeatedly through a trusted service binding. Each call first
-   persists write-key version 2, then handles at most 100 old rows. All registrations now use V2;
-   a writer that selected V1 before the transition cannot commit an old-key envelope afterward.
-4. Every live row is leased before its DEK is rewrapped; the provider ciphertext and revision remain
-   unchanged. OAuth refresh and maintenance cannot both write the same leased revision. Revoked
-   rows remain cleared and revoked. Expired leases permit recovery after an interrupted run.
-5. Retain both KEKs until `complete` is true and `remaining` is zero. A missing/wrong KEK fails closed.
-   Retry failed/incomplete batches with both original secrets unchanged. New credentials and existing
-   V2 credentials remain usable while the remaining V1 rows are processed.
-6. Confirm all rows report `kekVersion = 2`, exercise assigned working and memory agents, and back up
-   the new KEK outside Cloudflare. Remove the V1 binding and secret only then, regenerating binding
-   types with the deployment configuration. Preserve the old KEK offline for old backup recovery.
-   A restored old database must not be served until its revocation receipts are replayed (the restore
-   reconciliation workflow belongs to the follow-up backup issue).
+This explicit maintenance operation can temporarily make credentials unavailable. It does not install
+an alternate runtime key or retain old-key resolution paths.
 
-The normal installation has only `CREDENTIAL_KEK_V1`. The optional V2 environment type supports
-this explicit maintenance procedure; it does not generate a key or silently fall back to V1.
+1. Preserve the previous KEK securely according to the still-pending owner-approved backup rules.
+   Generate a random 32-byte replacement and base64 encode it using standard tooling.
+2. Replace the value of the **same** `CREDENTIAL_KEK_V1` Worker Secret and deploy. Do not introduce
+   a V2 binding. Until replacement starts, the durable key fingerprint rejects writes by the new
+   deployment; old envelopes cannot be decrypted with its new key.
+3. Through a trusted private service binding, call
+   `rewrapCredentials(actor, { previousKek, previousVersion })`. The old key is write-only maintenance
+   input, never stored, returned, logged, or used for normal credential resolution. The first generation
+   is 1. Keep these exact inputs for retries.
+4. The operation atomically advances the durable generation and fingerprint, fencing outdated
+   writers. Each call leases and rewraps at most 100 old DEKs without decrypting provider payloads.
+   New writes use the single installed key. Unprocessed credentials remain unavailable, not rerouted.
+5. Retry until `remaining` is zero and `complete` is true. Revoked rows stay revoked with cleared
+   ciphertext. Expired leases permit resuming an interrupted batch. Verify assigned working and
+   memory agents. Future replacements repeat the same operation with the next generation; the
+   Worker binding name never changes.
+
+Do not serve a restored old database before replaying revocation receipts. Backup restoration is
+follow-up work, not an alternate credential-resolution path.
 
 ## Leak response
 
-Revoke a leaked provider key **at the provider first**, then revoke it in Kodama and verify the R2
-receipt. Inspect the secret-free audit and coverage results. Rotate affected provider keys and, if a
-KEK may have leaked, all secrets it could decrypt as well as the KEK. Redaction is defense in depth,
-not a substitute for revocation. Treat previously exported backups and logs as potentially affected.
+Revoke a leaked credential at the provider first, then revoke it in Kodama and verify the receipt.
+Inspect secret-free audit and coverage results. If the KEK leaked, replace it and all provider secrets
+it could decrypt. Redaction is defense in depth, not a substitute for revocation.
 
 ## Operational decisions still pending
 
-The owner has **not yet decided** provider spending limits, the location/custodian of the offline KEK
-backup, recovery access approval, or rotation cadence. These are deployment prerequisites, not
-assumptions supplied by this implementation. Record the decisions and rehearse recovery before
-production use. Kodama has not been deployed; there is no migration from provider Worker Secrets.
+The owner has **not decided** the KEK backup location, custodian/access rules, per-key usage limits,
+or rotation frequency. This implementation does not choose them. Resolve these before deployment.
+Kodama is not deployed; no legacy credential formats or provider-secret migration paths are supported.

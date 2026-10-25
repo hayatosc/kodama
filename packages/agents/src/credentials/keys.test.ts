@@ -3,13 +3,13 @@ import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { credentials, systemSettings } from '../../drizzle/management/schema.ts'
-import { credentialOwnerCall } from '../helper/credentials.ts'
+import { credentialCall } from '../helper/credentials.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert } from './vault.ts'
 import { activeKek, guardKekVersion, KEK_VERSION_KEY, kekFor } from './keys.ts'
 
 it('rolls back an old-key insert when maintenance wins the race', async () => {
-  const call = await credentialOwnerCall()
+  const call = await credentialCall()
   const selected = await activeKek(call.db, env)
   const id = uuidv7()
   const { statement } = await credentialInsert(
@@ -39,8 +39,6 @@ it('rolls back an old-key insert when maintenance wins the race', async () => {
   ).toHaveLength(0)
 })
 
-it('fails closed on a missing or invalid key version', () => {
-  expect(() => kekFor(env, 2)).toThrow('credential_unavailable')
-  expect(() => kekFor(env, 3)).toThrow('credential_unavailable')
-  expect(() => kekFor({ CREDENTIAL_KEK_V1: 'invalid' }, 1)).toThrow('credential_unavailable')
+it('fails closed on an invalid single key', () => {
+  expect(() => kekFor({ CREDENTIAL_KEK_V1: 'invalid' })).toThrow('credential_unavailable')
 })

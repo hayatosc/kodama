@@ -277,9 +277,9 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return rotateCredential(await this.#call(actor), this.env, credentialId, request)
   }
 
-  /** Rewrap one bounded batch using the temporarily installed V2 KEK. */
-  async rewrapCredentials(actor: ManagementActor) {
-    return rewrapCredentials(await this.#call(actor), this.env)
+  /** Rewrap a bounded batch after replacing the single Worker key; prior key input is write-only. */
+  async rewrapCredentials(actor: ManagementActor, request: unknown) {
+    return rewrapCredentials(await this.#call(actor), this.env, request)
   }
 
   /** List credential metadata under the common management caller contract. */

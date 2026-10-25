@@ -1,38 +1,67 @@
-/** Resumable, lease-protected V1-to-V2 rewrapping without decrypting provider secrets. @module */
+/** Explicit KEK replacement without decrypting provider secrets or resolving old keys. @module */
 import { and, eq, gt, isNull, lt, or, count } from 'drizzle-orm'
 import { credentials, systemSettings } from '../../drizzle/management/schema.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { requireCredentialOwner } from './management.ts'
+import * as v from 'valibot'
+import { sha256Hex } from '../lib/hash.ts'
+import { credentialActor } from './management.ts'
 import { rewrapCredential } from './encryption.ts'
-import { KEK_VERSION_KEY, kekFor } from './keys.ts'
+import { KEK_VERSION_KEY, KEK_FINGERPRINT_KEY, guardKekVersion, kekFor } from './keys.ts'
 import type { KekEnv } from './keys.ts'
 import { invalidateCredential } from './invalidation.ts'
 
-/** Switch new writes first, then rewrap at most 100 rows. Retry until remaining is zero. */
-export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
-  const principal = requireCredentialOwner(call)
-  const nextKek = kekFor(env, 2)
+const inputSchema = v.strictObject({
+  previousKek: v.string(),
+  previousVersion: v.pipe(v.number(), v.integer(), v.minValue(1)),
+})
+
+/** The previous key is write-only maintenance input; the Worker binds only the new key. */
+export async function rewrapCredentials(call: ManagementCall, env: KekEnv, request: unknown) {
+  const principal = credentialActor(call)
+  const parsed = v.safeParse(inputSchema, request)
+  if (!parsed.success) throw new TypeError('Invalid KEK replacement')
+  const { previousKek, previousVersion } = parsed.output
+  const version = previousVersion + 1
+  const nextKek = kekFor(env)
+  const fingerprint = JSON.stringify(await sha256Hex(nextKek))
+  const rowsBefore = await call.db.select().from(systemSettings)
+  const currentVersion = Number(rowsBefore.find((row) => row.key === KEK_VERSION_KEY)?.valueJson)
+  const currentFingerprint = rowsBefore.find((row) => row.key === KEK_FINGERPRINT_KEY)?.valueJson
+  if (
+    nextKek === previousKek ||
+    !(
+      (currentVersion === previousVersion &&
+        currentFingerprint === JSON.stringify(await sha256Hex(previousKek))) ||
+      (currentVersion === version && currentFingerprint === fingerprint)
+    )
+  )
+    throw new Error('credential_unavailable: invalid KEK replacement generation')
   await call.db.batch([
+    guardKekVersion(call.db, currentVersion),
+    call.db
+      .update(systemSettings)
+      .set({ valueJson: fingerprint })
+      .where(eq(systemSettings.key, KEK_FINGERPRINT_KEY)),
     call.db
       .insert(systemSettings)
-      .values({ key: KEK_VERSION_KEY, valueJson: '2' })
-      .onConflictDoUpdate({ target: systemSettings.key, set: { valueJson: '2' } }),
+      .values({ key: KEK_VERSION_KEY, valueJson: String(version) })
+      .onConflictDoUpdate({ target: systemSettings.key, set: { valueJson: String(version) } }),
     auditStatement(call.db, {
-      opId: 'credential.kek.start:2',
+      opId: `credential.kek.start:${version}`,
       at: call.now,
       actorId: principal.principalId,
       action: 'credential.kek.start',
       targetKind: 'system',
-      targetId: '2',
-      detail: { previousVersion: 1, version: 2 },
+      targetId: String(version),
+      detail: { previousVersion, version },
     }).onConflictDoNothing(),
   ])
   const rows = await call.db
     .select()
     .from(credentials)
-    .where(eq(credentials.kekVersion, 1))
+    .where(eq(credentials.kekVersion, previousVersion))
     .limit(100)
   let rewrapped = 0
   for (const row of rows) {
@@ -43,7 +72,7 @@ export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
       .where(
         and(
           eq(credentials.credentialId, row.credentialId),
-          eq(credentials.kekVersion, 1),
+          eq(credentials.kekVersion, previousVersion),
           or(isNull(credentials.leaseId), lt(credentials.leaseExpiresAt, Date.now())),
         ),
       )
@@ -53,7 +82,7 @@ export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
     try {
       const envelope =
         leased.status === 'revoked'
-          ? { kekVersion: 2 }
+          ? { kekVersion: version }
           : await rewrapCredential(
               leased,
               {
@@ -63,9 +92,9 @@ export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
                 wrapIv: leased.wrapIv ?? '',
                 kekVersion: leased.kekVersion,
               },
-              kekFor(env, 1),
+              previousKek,
               nextKek,
-              2,
+              version,
             )
       const [updated] = await call.db.batch([
         call.db
@@ -92,14 +121,14 @@ export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
             kind: row.kind,
             provider: row.provider,
             fingerprint: row.fingerprint,
-            version: 2,
+            version,
           },
         }),
       ])
       if (updated.length) rewrapped += 1
       await invalidateCredential(call, row.credentialId)
     } catch {
-      throw new Error('credential_unavailable: KEK rewrap failed; retain both KEKs and retry')
+      throw new Error('credential_unavailable: KEK rewrap failed; retry the same replacement')
     } finally {
       await call.db
         .update(credentials)
@@ -112,18 +141,18 @@ export async function rewrapCredentials(call: ManagementCall, env: KekEnv) {
   const result = await call.db
     .select({ remaining: count() })
     .from(credentials)
-    .where(eq(credentials.kekVersion, 1))
+    .where(eq(credentials.kekVersion, previousVersion))
     .get()
   const remaining = result?.remaining ?? 0
   if (!remaining)
     await auditStatement(call.db, {
-      opId: 'credential.kek.complete:2',
+      opId: `credential.kek.complete:${version}`,
       at: Date.now(),
       actorId: principal.principalId,
       action: 'credential.kek.complete',
       targetKind: 'system',
-      targetId: '2',
-      detail: { version: 2 },
+      targetId: String(version),
+      detail: { version },
     }).onConflictDoNothing()
-  return { version: 2, rewrapped, remaining, complete: remaining === 0 }
+  return { version, rewrapped, remaining, complete: remaining === 0 }
 }

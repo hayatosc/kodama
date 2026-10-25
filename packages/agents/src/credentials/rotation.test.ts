@@ -3,14 +3,14 @@ import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { agents, agentCredentialRefs, credentials } from '../../drizzle/management/schema.ts'
-import { credentialOwnerCall } from '../helper/credentials.ts'
+import { credentialCall } from '../helper/credentials.ts'
 import { putCredential } from './management.ts'
 import { assignCredential } from './assignments.ts'
 import { rotateCredential } from './rotation.ts'
 
 it('moves all agents to a new key while preserving the old row for in-flight calls', async () => {
   await exports.default.seed()
-  const call = await credentialOwnerCall()
+  const call = await credentialCall()
   const old = await putCredential(call, env, {
     requestId: 'old',
     provider: 'openai',

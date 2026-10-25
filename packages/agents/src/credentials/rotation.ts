@@ -14,7 +14,7 @@ import { versionRow, writeVersionStatements } from '../management/versions.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
-import { credentialRow, requireCredentialOwner } from './management.ts'
+import { credentialRow, credentialActor } from './management.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 import type { KekEnv } from './keys.ts'
 import { activeKek, guardKekVersion } from './keys.ts'
@@ -25,19 +25,17 @@ const inputSchema = v.object({
   secret: v.pipe(v.string(), v.minLength(8), v.maxLength(16384)),
 })
 
-/** Rotate an API key without changing its scope; retries resume pushes, not registration. */
+/** Replace either credential kind without changing its scope; retries resume configuration pushes. */
 export async function rotateCredential(
   call: ManagementCall,
   env: KekEnv,
   oldId: string,
   request: unknown,
 ) {
-  const principal = requireCredentialOwner(call)
+  const principal = credentialActor(call)
   const parsed = v.safeParse(inputSchema, request)
   if (!parsed.success) throw new TypeError('Invalid credential rotation')
   const old = await credentialRow(call, oldId)
-  if (old.kind !== 'api_key')
-    throw new TypeError('Subscription rotation requires re-authentication')
   const opId = `credential.rotate:${oldId}:${parsed.output.requestId}`
   const previous = await auditByOpId(call.db, opId)
   let credentialId = previous?.targetId
@@ -71,11 +69,8 @@ export async function rotateCredential(
         const version = await versionRow(call.db, agent.agentId, agent.currentVersion)
         if (!version) throw new Error('Agent has no configuration')
         const settings = parseSettings(call.models, JSON.parse(version.settingsJson))
-        if (settings.credentials)
-          for (const slot of ['primary', 'fallback'] as const) {
-            if (settings.credentials[slot][old.provider] === oldId)
-              settings.credentials[slot][old.provider] = nextId
-          }
+        if (settings.credentials?.primary[old.provider] === oldId)
+          settings.credentials.primary[old.provider] = nextId
         return writeVersionStatements(
           call.db,
           { actorId: principal.principalId, now: call.now, opId: uuidv7() },
