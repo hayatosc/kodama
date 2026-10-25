@@ -64,8 +64,8 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     ...handle,
     settings,
     primary,
-    advance: () => {
-      now += CREDENTIAL_CACHE_TTL + 1
+    advance: (milliseconds = CREDENTIAL_CACHE_TTL + 1) => {
+      now += milliseconds
     },
   }
 }
@@ -98,7 +98,7 @@ it('uses only explicit references and checks status even with a warm cache and n
 it('rejects an expired subscription even when another granted key exists', async () => {
   const { store, advance } = await fixture('oauth_subscription')
   expect(await store.read('openai')).toMatchObject({ type: 'oauth', access: 'access' })
-  advance()
+  advance(1001)
   await expect(store.read('openai')).rejects.toThrow('credential expired')
 })
 

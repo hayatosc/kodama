@@ -6,24 +6,18 @@
  */
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm'
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai'
-import * as v from 'valibot'
 import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { auditStatement } from '../management/audit.ts'
+import { parseCredential } from './vault.ts'
 import { decryptCredential, encryptCredential } from './encryption.ts'
 
 /** Maximum lifetime of decrypted values; grants and status are checked on every read as well. */
 export const CREDENTIAL_CACHE_TTL = 5 * 60 * 1000
 const LEASE_MS = 30_000
-const oauthSchema = v.object({
-  type: v.literal('oauth'),
-  access: v.string(),
-  refresh: v.string(),
-  expires: v.number(),
-})
 
 /** Build one object-local store. The settings getter must return the applied version, not desired. */
 export function createCredentialStore(
@@ -86,14 +80,7 @@ export function createCredentialStore(
       },
       kek(),
     )
-    if (row.kind === 'api_key') return { type: 'api_key', key: value }
-    try {
-      const parsed = v.safeParse(oauthSchema, JSON.parse(value))
-      if (!parsed.success) throw new Error()
-      return parsed.output
-    } catch {
-      throw new Error('credential_unavailable: invalid credential payload')
-    }
+    return parseCredential(row.kind, value)
   }
 
   const store: CredentialStore = {
@@ -164,9 +151,9 @@ export function createCredentialStore(
         options?.signal?.throwIfAborted()
         if ((next.type === 'api_key') !== (leased.kind === 'api_key'))
           throw new Error('credential_unavailable: credential kind cannot change')
-        const secret =
-          next.type === 'api_key' ? next.key : JSON.stringify(v.parse(oauthSchema, next))
+        const secret = next.type === 'api_key' ? next.key : JSON.stringify(next)
         if (!secret) throw new Error('credential_unavailable: empty credential')
+        const value = parseCredential(leased.kind, secret)
         const revision = leased.revision + 1
         const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
         // Record the attempted refresh in the same batch; a losing CAS must not be reported
@@ -178,7 +165,7 @@ export function createCredentialStore(
               ...envelope,
               revision,
               fingerprint: await sha256Hex(secret),
-              last4: secret.slice(-4),
+              last4: (value.type === 'api_key' ? value.key : value.access).slice(-4),
             })
             .where(
               and(
