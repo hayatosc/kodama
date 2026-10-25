@@ -1,3 +1,4 @@
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
@@ -12,7 +13,7 @@ const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)
 
 function agentScope(): { scope: Scope; agentId: string } {
-  const agentId = crypto.randomUUID()
+  const agentId = uuidv7()
   return { scope: `agent:${agentId}`, agentId }
 }
 
@@ -50,7 +51,7 @@ async function revision(id: string): Promise<number | undefined> {
 }
 
 async function written(scope: Scope, agentId: string, content: string, entry: number) {
-  const result = await applyOperation(db, context(crypto.randomUUID()), {
+  const result = await applyOperation(db, context(uuidv7()), {
     type: 'write',
     record: fact(scope, agentId, content, entry),
   })
@@ -80,14 +81,14 @@ describe('applying operations', () => {
   it('returns conflict and changes nothing when the target revision is outdated', async () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)
-    await applyOperation(db, context(crypto.randomUUID()), {
+    await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
       record: fact(scope, agentId, 'uses pnpm', 150),
     })
 
-    const late = await applyOperation(db, context(crypto.randomUUID()), {
+    const late = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -104,10 +105,10 @@ describe('applying operations', () => {
 
     const result = await applyOperation(
       db,
-      context(crypto.randomUUID(), {
+      context(uuidv7(), {
         // Another writer supersedes the record between the read and the batch.
         beforeBatch: async () => {
-          await applyOperation(db, context(crypto.randomUUID()), {
+          await applyOperation(db, context(uuidv7()), {
             type: 'supersede',
             oldId,
             oldRevision: 1,
@@ -127,7 +128,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     const correction = await written(scope, agentId, 'uses pnpm', 150)
 
-    const oldExtraction = await applyOperation(db, context(crypto.randomUUID()), {
+    const oldExtraction = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId: correction,
       oldRevision: 1,
@@ -142,7 +143,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)
 
-    const result = await applyOperation(db, context(crypto.randomUUID()), {
+    const result = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -157,7 +158,7 @@ describe('applying operations', () => {
     const { scope, agentId } = agentScope()
     await written(scope, agentId, 'uses pnpm', 150)
 
-    const again = await applyOperation(db, context(crypto.randomUUID()), {
+    const again = await applyOperation(db, context(uuidv7()), {
       type: 'write',
       record: fact(scope, agentId, 'uses pnpm', 150),
     })
@@ -176,7 +177,7 @@ describe('applying operations', () => {
           .get()
       )?.revision
 
-    await applyOperation(db, context(crypto.randomUUID()), {
+    await applyOperation(db, context(uuidv7()), {
       type: 'write',
       record: { ...fact(scope, agentId, 'deployed on Friday', 10), kind: 'event' },
     })
@@ -204,7 +205,7 @@ describe('checking operations', () => {
   ] as const)('refuses a write with %s', async (_case, change, message) => {
     const { scope, agentId } = agentScope()
     await expect(
-      applyOperation(db, context(crypto.randomUUID()), {
+      applyOperation(db, context(uuidv7()), {
         type: 'write',
         record: { ...fact(scope, agentId, 'uses pnpm', 1), ...change },
       }),
@@ -215,7 +216,7 @@ describe('checking operations', () => {
     const { scope, agentId } = agentScope()
     const oldId = await written(scope, agentId, 'uses npm', 100)
 
-    const result = await applyOperation(db, context(crypto.randomUUID()), {
+    const result = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -230,7 +231,7 @@ describe('checking operations', () => {
     const oldId = await written(scope, agentId, 'uses npm and pnpm', 120)
     const { sourceEntries: _evidence, ...rewrite } = fact(scope, agentId, 'uses pnpm', 0)
 
-    const result = await applyOperation(db, context(crypto.randomUUID()), {
+    const result = await applyOperation(db, context(uuidv7()), {
       type: 'supersede',
       oldId,
       oldRevision: 1,
@@ -250,7 +251,7 @@ describe('checking operations', () => {
     const { scope, agentId } = agentScope()
     const id = await written(scope, agentId, 'uses npm', 100)
 
-    const result = await applyOperation(db, context(crypto.randomUUID()), {
+    const result = await applyOperation(db, context(uuidv7()), {
       type: 'invalidate',
       id,
       revision: 2,

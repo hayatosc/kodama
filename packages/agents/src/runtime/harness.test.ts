@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -60,7 +61,7 @@ async function withHarness<T>(
   settings: HarnessOptions['settings'],
   run: (harness: Harness) => Promise<T>,
 ): Promise<T> {
-  const stub = env.AGENTS.getByName(crypto.randomUUID())
+  const stub = env.AGENTS.getByName(uuidv7())
   return runInDurableObject(stub, async (_instance, state) => {
     const options = createAgentOptions(env)
     const storage = await openDurableObjectSqliteStorage(state.storage)

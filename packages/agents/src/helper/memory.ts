@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
@@ -68,7 +69,7 @@ export const memoryAgent = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
 
 /** A fresh operation, as if from its own job. */
 export function context(now = Date.now()): OperationContext {
-  const opId = crypto.randomUUID()
+  const opId = uuidv7()
   return { opId, jobId: opId, runId: opId, actor: 'test', now }
 }
 

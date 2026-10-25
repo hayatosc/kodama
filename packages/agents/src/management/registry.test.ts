@@ -26,10 +26,11 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 }
 
 describe('AgentService admission', () => {
-  it('rejects non-UUID, unregistered, and dedicated IDs before any object storage exists', async () => {
+  it('rejects non-v7, unregistered, and dedicated IDs before any object storage exists', async () => {
     const { memoryAgentId } = await seedOnce()
     const unknown = uuidv7()
     for (const [agentId, message] of [
+      ['550e8400-e29b-41d4-a716-446655440000', /agentId must be a lowercase UUID v7/],
       ['assistant', /agentId must be a lowercase UUID/],
       ['kodama:memory', /agentId must be a lowercase UUID/],
       [unknown.toUpperCase(), /agentId must be a lowercase UUID/],
@@ -68,7 +69,7 @@ describe('AgentService admission', () => {
 describe('resolveAgentRef', () => {
   it('resolves a UUID, a slug, and a unique UUID prefix to the registry row', async () => {
     const agentId = await newAgentId()
-    const slug = `ref-${crypto.randomUUID().slice(0, 8)}`
+    const slug = `ref-${uuidv7().slice(-12)}`
     await management.update(agents).set({ slug }).where(eq(agents.agentId, agentId))
     for (const ref of [agentId, slug, agentId.slice(0, 24)]) {
       expect((await resolveAgentRef(management, ref)).agentId).toBe(agentId)

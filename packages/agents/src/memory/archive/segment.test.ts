@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
@@ -12,7 +13,7 @@ import { indexSchema, readJson, readSegment } from './reader.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
 
 async function archive(content: string) {
-  const agentId = crypto.randomUUID()
+  const agentId = uuidv7()
   const record = {
     id: 1,
     kind: 'pi.user',
@@ -78,7 +79,7 @@ describe('archive word indexes', () => {
   })
 
   it('preserves prototype-named own keys as data when reading an index', async () => {
-    const key = `archive/${crypto.randomUUID()}.index.json`
+    const key = `archive/${uuidv7()}.index.json`
     await env.ARCHIVE.put(
       key,
       '{"format":1,"searchVersion":1,"chunks":[],"words":{"constructor":[0],"__proto__":[1],"prototype":[2]}}',
@@ -92,7 +93,7 @@ describe('archive word indexes', () => {
   })
 
   it('validates prototype-named values rather than silently discarding them', async () => {
-    const key = `archive/${crypto.randomUUID()}.index.json`
+    const key = `archive/${uuidv7()}.index.json`
     await env.ARCHIVE.put(
       key,
       '{"format":1,"searchVersion":1,"chunks":[],"words":{"constructor":"invalid"}}',

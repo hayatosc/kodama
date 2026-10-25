@@ -1,3 +1,4 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -118,14 +119,14 @@ describe('extraction', () => {
   })
 
   it('does not schedule extraction for an agent with no activity', async () => {
-    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    const stub = env.AGENTS.getByName(uuidv7())
     expect(
       await runInDurableObject(stub, (_instance, state) => alarmAt(state.storage, 'extract')),
     ).toBeUndefined()
   })
 
   it('preserves the pending idle deadline when an idle object reopens', async () => {
-    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    const stub = env.AGENTS.getByName(uuidv7())
     const due = Date.now() + 60_000
     await runInDurableObject(stub, async (_instance, state) => {
       await setAlarm(state.storage, 'extract', due)
@@ -184,7 +185,7 @@ describe('always-loaded memory', () => {
       await refreshAlwaysLoaded(memory)
       await applyOperation(
         db,
-        { opId: crypto.randomUUID(), jobId: 'job', runId: 'run', actor: 'test', now: clock },
+        { opId: uuidv7(), jobId: 'job', runId: 'run', actor: 'test', now: clock },
         {
           type: 'write',
           record: {

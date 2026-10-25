@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../memory/jobs.ts'
@@ -61,11 +62,11 @@ describe('memory_invalidate', () => {
       const id = await write({
         scope: 'shared:global',
         kind: 'instruction',
-        content: `Required rule ${crypto.randomUUID()}`,
+        content: `Required rule ${uuidv7()}`,
         required: true,
         sourceAgentId: 'memory',
       })
-      const response = await invalidate(job(kind, crypto.randomUUID()), id)
+      const response = await invalidate(job(kind, uuidv7()), id)
       expect((await record(id))?.status).toBe('active')
       expect(response).toContain('other_scope')
     },
@@ -74,7 +75,7 @@ describe('memory_invalidate', () => {
   it.each(['remember', 'extract'] as const)(
     "does not let a %s job invalidate another agent's record",
     async (kind) => {
-      const owner = crypto.randomUUID()
+      const owner = uuidv7()
       const id = await write({
         scope: `agent:${owner}`,
         kind: 'fact',
@@ -82,7 +83,7 @@ describe('memory_invalidate', () => {
         sourceAgentId: owner,
         sourceEntries: { from: 50, to: 50 },
       })
-      const response = await invalidate(job(kind, crypto.randomUUID()), id)
+      const response = await invalidate(job(kind, uuidv7()), id)
       expect((await record(id))?.status).toBe('active')
       expect(response).toContain('other_scope')
     },
@@ -91,7 +92,7 @@ describe('memory_invalidate', () => {
   it.each(['remember', 'extract'] as const)(
     'declines a %s invalidation older than the record',
     async (kind) => {
-      const owner = crypto.randomUUID()
+      const owner = uuidv7()
       const id = await write({
         scope: `agent:${owner}`,
         kind: 'fact',
@@ -107,12 +108,12 @@ describe('memory_invalidate', () => {
   )
 
   it('does not invalidate a same-scope record attributed to a different source agent', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const id = await write({
       scope: `agent:${owner}`,
       kind: 'fact',
       content: 'Uses pnpm',
-      sourceAgentId: crypto.randomUUID(),
+      sourceAgentId: uuidv7(),
       sourceEntries: { from: 50, to: 50 },
     })
     const response = await invalidate(job('extract', owner), id)
@@ -121,7 +122,7 @@ describe('memory_invalidate', () => {
   })
 
   it('requires strictly newer evidence, not the same entry', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const id = await write({
       scope: `agent:${owner}`,
       kind: 'fact',
@@ -135,7 +136,7 @@ describe('memory_invalidate', () => {
   })
 
   it('applies newer extraction evidence', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const id = await write({
       scope: `agent:${owner}`,
       kind: 'fact',
@@ -149,7 +150,7 @@ describe('memory_invalidate', () => {
   })
 
   it('replays an accepted invalidation without changing the record again', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const id = await write({
       scope: `agent:${owner}`,
       kind: 'fact',
@@ -184,7 +185,7 @@ describe('memory_invalidate', () => {
   })
 
   it('allows consolidation of its own scope without claiming newer evidence', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const id = await write({
       scope: `agent:${owner}`,
       kind: 'fact',
@@ -212,7 +213,7 @@ describe('consolidation tools', () => {
   })
 
   it('lists the active records of the scope with their flags', async () => {
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     const shared = await write({
       scope: 'shared:global',
       kind: 'instruction',
@@ -226,7 +227,7 @@ describe('consolidation tools', () => {
       sourceAgentId: owner,
       overrides: shared,
     })
-    const empty = crypto.randomUUID()
+    const empty = uuidv7()
 
     const listed = await runScriptedJob({ kind: 'consolidate', scope: `agent:${owner}`, day }, [
       { name: 'list_records', arguments: {} },
@@ -244,7 +245,7 @@ describe('consolidation tools', () => {
   })
 
   it('refuses list_records and shared_write outside a consolidate job', async () => {
-    const { outputs } = await runScriptedJob(remember(crypto.randomUUID()), [
+    const { outputs } = await runScriptedJob(remember(uuidv7()), [
       { name: 'list_records', arguments: {} },
       {
         name: 'shared_write',
@@ -257,8 +258,8 @@ describe('consolidation tools', () => {
   })
 
   it('applies a shared write that rests on two agents and rejects one that does not', async () => {
-    const space = `team-${crypto.randomUUID().slice(0, 8)}`
-    const [first, second] = [crypto.randomUUID(), crypto.randomUUID()]
+    const space = `team-${uuidv7().slice(-12)}`
+    const [first, second] = [uuidv7(), uuidv7()]
     const sourceIds = await Promise.all(
       [first, second].map((agentId) =>
         write({

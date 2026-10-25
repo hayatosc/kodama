@@ -1,3 +1,4 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject, evictDurableObject, runDurableObjectAlarm } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -17,7 +18,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('alarm schedule', () => {
   it('keeps one alarm at the earliest purpose and clears only the purpose it is told to', async () => {
-    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    const stub = env.AGENTS.getByName(uuidv7())
     const now = Date.now()
 
     const alarms = await runInDurableObject(stub, async (_instance, state) => {

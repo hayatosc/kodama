@@ -1,3 +1,4 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { agentSettingsSchema, defaultAgentSettings } from './index.ts'
 import { createAgentModels } from '../models/index.ts'
@@ -16,7 +17,7 @@ const valid = defaultAgentSettings({
   DEFAULT_MODEL_PROVIDER: 'openai',
   DEFAULT_MODEL_ID: 'gpt-6-luna',
 })
-const credentialId = crypto.randomUUID()
+const credentialId = uuidv7()
 
 describe('agent settings schema', () => {
   it('accepts complete settings with every optional field in its one shape', () => {

@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -46,7 +47,7 @@ describe('extraction redelivery', () => {
         calls += 1
         return textResponse('No checkpoint was written.')
       })
-      const job = { kind: 'extract', sourceAgentId: crypto.randomUUID(), afterEntry: 0 } as const
+      const job = { kind: 'extract', sourceAgentId: uuidv7(), afterEntry: 0 } as const
       const first = await memoryAgent().enqueue(job)
       await expect
         .poll(async () => (await memoryAgent().jobStatus(first.jobId))?.status, { timeout: 10_000 })
@@ -140,7 +141,7 @@ describe('remember', () => {
     )
     const job = {
       kind: 'remember',
-      sourceAgentId: crypto.randomUUID(),
+      sourceAgentId: uuidv7(),
       origin: 'agent_judgment',
       content: 'Prefers short answers',
       sourceEntries: { from: 3, to: 3 },
@@ -168,7 +169,7 @@ describe('remember', () => {
     })
     const jobs = candidates.map((content) => ({
       kind: 'remember',
-      sourceAgentId: crypto.randomUUID(),
+      sourceAgentId: uuidv7(),
       origin: 'agent_judgment',
       content,
       sourceEntries: { from: 1, to: 1 },
@@ -198,7 +199,7 @@ describe('retries', () => {
     )
     const { jobId } = await memoryAgent().enqueue({
       kind: 'remember',
-      sourceAgentId: crypto.randomUUID(),
+      sourceAgentId: uuidv7(),
       origin: 'agent_judgment',
       content: 'A job the model never answers',
       sourceEntries: { from: 1, to: 1 },

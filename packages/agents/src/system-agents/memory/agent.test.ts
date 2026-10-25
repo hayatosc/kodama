@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
@@ -55,7 +56,7 @@ describe('the memory agent', () => {
       instance instanceof Agent,
       instance instanceof MemoryAgent,
     ]
-    const working = env.AGENTS.getByName(crypto.randomUUID())
+    const working = env.AGENTS.getByName(uuidv7())
     expect(await runInDurableObject(memoryAgent(), kinds)).toEqual([true, true])
     expect(await runInDurableObject(working, kinds)).toEqual([true, false])
     expect(

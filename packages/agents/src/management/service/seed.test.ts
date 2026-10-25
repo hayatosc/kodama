@@ -1,3 +1,4 @@
+import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
@@ -95,7 +96,7 @@ describe('seed', () => {
     const { settings } = await agentService().getConfig(actor, agentId)
     const desired = (await agentService().getAgent(actor, agentId)).desiredVersion
     await agentService().updateConfig(actor, agentId, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...settings, systemPrompt: 'Changed later' },
       expectedVersion: desired,
     })
@@ -112,7 +113,7 @@ describe('seed', () => {
     await agentService().seed()
     const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
     const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...current.settings, model: { provider: 'xai', modelId: 'grok-4.3' } },
       expectedVersion: current.version,
     })
@@ -128,13 +129,13 @@ describe('seed', () => {
     await agentService().seed()
     const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
     const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...current.settings, toolPolicy: { memory_write: 'deny' } },
       expectedVersion: current.version,
     })
     expect(result.apply.appliedVersion).toBe(current.version + 1)
 
-    const sourceAgentId = crypto.randomUUID()
+    const sourceAgentId = uuidv7()
     const fact = `Denied fact ${sourceAgentId.slice(0, 8)}`
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) =>
       toolResults(requestBody(init)) === 0

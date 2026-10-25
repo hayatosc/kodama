@@ -1,3 +1,4 @@
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
@@ -36,13 +37,13 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 
 async function create(displayName = 'Researcher', slug?: string) {
   return agentService().createAgent(await caller(), {
-    requestId: crypto.randomUUID(),
+    requestId: uuidv7(),
     displayName,
     ...(slug === undefined ? {} : { slug }),
   })
 }
 
-const uniqueSlug = () => `agent-${crypto.randomUUID().slice(0, 8)}`
+const uniqueSlug = () => `agent-${uuidv7().slice(-12)}`
 
 describe('createAgent', () => {
   it('assigns a UUID v7, writes the registry, version 1, membership, and audit, and activates it', async () => {
@@ -80,20 +81,20 @@ describe('createAgent', () => {
 
   it('returns the first agent for a repeated requestId, and refuses a taken slug', async () => {
     const actor = await caller()
-    const request = { requestId: crypto.randomUUID(), displayName: 'Once', slug: uniqueSlug() }
+    const request = { requestId: uuidv7(), displayName: 'Once', slug: uniqueSlug() }
     const first = await agentService().createAgent(actor, request)
     const again = await agentService().createAgent(actor, request)
     expect(again.agentId).toBe(first.agentId)
     const taken = agentService().createAgent(actor, {
       ...request,
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
     })
     expect(await rejection(taken)).toMatch(/slug is taken/)
   })
 
   it('creates one agent for two concurrent deliveries of the same request', async () => {
     const actor = await caller()
-    const request = { requestId: crypto.randomUUID(), displayName: 'Twice', slug: uniqueSlug() }
+    const request = { requestId: uuidv7(), displayName: 'Twice', slug: uniqueSlug() }
 
     const [first, second] = await Promise.all([
       agentService().createAgent(actor, request),
@@ -108,9 +109,9 @@ describe('createAgent', () => {
   it('never accepts an ID from the caller', async () => {
     const actor = await caller()
     const request = {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       displayName: 'Chosen',
-      agentId: crypto.randomUUID(),
+      agentId: uuidv7(),
     }
     const withId = agentService().createAgent(actor, request)
     expect(await rejection(withId)).toMatch(/requestId and displayName/)
@@ -193,7 +194,7 @@ describe('configuration versions', () => {
     const update = (systemPrompt: string) =>
       Promise.resolve(
         agentService().updateConfig(actor, agentId, {
-          requestId: crypto.randomUUID(),
+          requestId: uuidv7(),
           settings: { ...settings, systemPrompt },
           expectedVersion: 1,
         }),
@@ -227,7 +228,7 @@ describe('configuration versions', () => {
     const { agentId } = await create()
     const { settings } = await agentService().getConfig(actor, agentId)
     const request = {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...settings, systemPrompt: 'Once' },
       expectedVersion: 1,
     }
@@ -241,7 +242,7 @@ describe('configuration versions', () => {
     const { agentId } = await create()
     const { settings } = await agentService().getConfig(actor, agentId)
     const request = {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...settings, systemPrompt: 'Concurrent' },
       expectedVersion: 1,
     }
@@ -269,13 +270,13 @@ describe('configuration versions', () => {
     const authorId = await principalIdOf(actor)
     const v1 = await agentService().getConfig(actor, agentId)
     await agentService().updateConfig(actor, agentId, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...v1.settings, systemPrompt: 'Changed' },
       expectedVersion: 1,
       comment: 'try a new prompt',
     })
     const rolled = await agentService().rollbackConfig(actor, agentId, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       toVersion: 1,
       expectedVersion: 2,
     })

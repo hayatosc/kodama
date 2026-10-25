@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -63,7 +64,7 @@ describe('skills in a working agent', () => {
     const agentId = await newAgentId()
     await create(agentId, 'deploy', 'Run wrangler deploy --env production.')
     await create(agentId, 'old', 'Archived.')
-    await create(crypto.randomUUID(), 'secret', 'Not yours.')
+    await create(uuidv7(), 'secret', 'Not yours.')
     await setSkillStatus(db, context(), { agentId, name: 'old', revision: 1, status: 'archived' })
     expect((await visibleSkills(db, agentId)).map((row) => row.name)).toEqual(['deploy'])
 

@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from './lib/uuid.ts'
 import { createExecutionContext, createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
@@ -80,7 +81,7 @@ describe('AgentService', () => {
         : textResponse('Declined.'),
     )
     const agentId = await agentWithLostVersion('Pushed by the cron')
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     await write({
       scope: `agent:${owner}`,
       kind: 'fact',
@@ -110,7 +111,7 @@ describe('AgentService', () => {
     vi.spyOn(env.MANAGEMENT_DB, 'prepare').mockImplementation(() => {
       throw new Error('management database is down')
     })
-    const owner = crypto.randomUUID()
+    const owner = uuidv7()
     await write({
       scope: `agent:${owner}`,
       kind: 'fact',

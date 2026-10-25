@@ -1,3 +1,4 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, expectTypeOf, it } from 'vitest'
@@ -57,7 +58,7 @@ describe('agent RPC', () => {
 
   it('rejects invalid input through service and direct object RPC', async () => {
     await expect(Promise.resolve(exports.default.snapshot('../invalid'))).rejects.toThrow('agentId')
-    const stub = env.AGENTS.getByName(crypto.randomUUID())
+    const stub = env.AGENTS.getByName(uuidv7())
     await expect(
       Promise.resolve(stub.sendMessage({ requestId: '', content: 'hello' })),
     ).rejects.toThrow('requestId')
@@ -74,7 +75,7 @@ describe('agent RPC', () => {
   })
 
   it('delivers from one agent to another through Durable Object RPC', async () => {
-    const senderId = crypto.randomUUID()
+    const senderId = uuidv7()
     const receiverId = await newAgentId()
     const sender = env.AGENTS.getByName(senderId)
     await sender.sendTo(receiverId, {

@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { db, runScriptedJob } from '../../helper/memory.ts'
 import { readSkill } from '../../memory/store/skills.ts'
@@ -20,7 +21,7 @@ const deploy = {
 
 describe('skill tools', () => {
   it('lists, writes, reads, archives, and restores the skills of the job agent', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = uuidv7()
     const { outputs } = await runScriptedJob(
       { kind: 'consolidate', scope: `agent:${agentId}`, day: '2026-10-01' },
       [
@@ -46,7 +47,7 @@ describe('skill tools', () => {
   })
 
   it('reports a conflict when archiving at a revision that was not read', async () => {
-    const agentId = crypto.randomUUID()
+    const agentId = uuidv7()
     const { outputs } = await runScriptedJob(
       { kind: 'consolidate', scope: `agent:${agentId}`, day: '2026-10-01' },
       [
@@ -61,7 +62,7 @@ describe('skill tools', () => {
 
   it('reports a skill that does not exist', async () => {
     const { outputs } = await runScriptedJob(
-      { kind: 'consolidate', scope: `agent:${crypto.randomUUID()}`, day: '2026-10-01' },
+      { kind: 'consolidate', scope: `agent:${uuidv7()}`, day: '2026-10-01' },
       [{ name: 'read_skill', arguments: { name: 'missing' } }],
     )
 
@@ -69,7 +70,7 @@ describe('skill tools', () => {
   })
 
   it('refuses every skill tool outside a consolidate job of an agent scope', async () => {
-    const sourceAgentId = crypto.randomUUID()
+    const sourceAgentId = uuidv7()
     const { outputs } = await runScriptedJob(
       {
         kind: 'remember',

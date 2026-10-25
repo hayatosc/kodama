@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { inArray } from 'drizzle-orm'
 import { expect, it } from 'vitest'
@@ -11,7 +12,7 @@ import { memoryDb } from './db.ts'
 
 it('rolls back every statement of a D1 batch when one statement fails', async () => {
   const db = memoryDb(env.MEMORY_DB)
-  const [a, b] = [crypto.randomUUID(), crypto.randomUUID()]
+  const [a, b] = [uuidv7(), uuidv7()]
   const op = (opId: string) =>
     db
       .insert(memoryOps)

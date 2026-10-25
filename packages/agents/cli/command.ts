@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { randomUUID } from 'node:crypto'
+import { uuidv7 } from '../src/lib/uuid.ts'
 import type { SendMessageRequest } from '../src/protocol.ts'
 import { parseAgentRef, parseMessage } from '../src/validation.ts'
 
@@ -57,7 +57,7 @@ export interface ParsedArgs {
  */
 export function toCommand(
   { values, positionals }: ParsedArgs,
-  newRequestId: () => string = randomUUID,
+  newRequestId: () => string = uuidv7,
 ): Command {
   if (values.help || positionals.length === 0) return { action: 'help' }
   const [action, rawAgentRef, content] = positionals

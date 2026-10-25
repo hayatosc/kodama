@@ -228,7 +228,9 @@ rows are never deleted, so an agent ID is never reused.
 ### Registry and admission
 
 - `agent_id` is a UUID v7 issued by the server, never reused, and never changed by a rename.
-  Public IDs are lowercase canonical UUIDs; v4 is accepted too.
+  Public IDs are lowercase canonical UUID v7 values; v4 is rejected. Generation delegates to
+  the `uuid` package's `v7({ msecs })` through `src/lib/uuid.ts`. IDs sort by their supplied Unix
+  millisecond timestamp; ordering within a single millisecond is not guaranteed.
 - `display_name` and `slug`, a unique alias that is never UUID-shaped, can change at any time.
 - `object_name` is the Durable Object name and the storage key of the memory scope, skills, and
   archive. It equals `agent_id`, except for dedicated agents; a check constraint allows the
@@ -371,10 +373,12 @@ policies on. Changing the defaults later changes no existing agent.
   comment, and time, and `getConfig(actor, agentId)` returns the desired version.
 
 ```ts
+import { v7 as uuidv7 } from 'uuid'
+
 const actor = { kind: 'user', externalId: 'you@example.com' } as const
 const { version, settings } = await env.AGENT_SERVICE.getConfig(actor, agentId)
 await env.AGENT_SERVICE.updateConfig(actor, agentId, {
-  requestId: crypto.randomUUID(),
+  requestId: uuidv7(),
   settings: { ...settings, model: { provider: 'xai', modelId: 'grok-4.3' }, thinkingLevel: 'low' },
   expectedVersion: version,
   comment: 'Switch to Grok',
@@ -510,8 +514,10 @@ few more methods, for other Durable Objects and for `AgentService`:
   [memory.md](memory.md#pruning)).
 
 ```ts
+import { v7 as uuidv7 } from 'uuid'
+
 await env.AGENT_SERVICE.sendMessage(agentId, {
-  requestId: crypto.randomUUID(),
+  requestId: uuidv7(),
   content: 'Prioritize the failing tests.',
   whenBusy: 'steer',
 })
@@ -788,9 +794,11 @@ const agentBinding = bindings.worker({ worker: agents.worker })
 ```
 
 ```ts
+import { v7 as uuidv7 } from 'uuid'
+
 // A server-side chat route, after authenticating the user and checking access to the agent:
 const stream = await env.AGENT_SERVICE.send(agentId, {
-  requestId: crypto.randomUUID(),
+  requestId: uuidv7(),
   content: 'Hello',
 })
 return new Response(stream, {

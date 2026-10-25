@@ -1,3 +1,4 @@
+import { uuidv7 } from '../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
@@ -213,7 +214,7 @@ describe('memory agent pruning', () => {
       for (const content of ['first candidate', 'second candidate']) {
         const status = await stub.enqueue({
           kind: 'remember',
-          sourceAgentId: crypto.randomUUID(),
+          sourceAgentId: uuidv7(),
           origin: 'agent_judgment',
           content,
           sourceEntries: { from: 1, to: 1 },
@@ -273,7 +274,7 @@ describe('evaluation after pruning', () => {
     }
     const written = await applyOperation(
       db,
-      { opId: crypto.randomUUID(), jobId: 'eval', runId: 'eval', actor: 'test', now },
+      { opId: uuidv7(), jobId: 'eval', runId: 'eval', actor: 'test', now },
       { type: 'write', record: decision },
     )
     const stub = env.AGENTS.getByName(agentId)
@@ -294,7 +295,7 @@ describe('evaluation after pruning', () => {
     if (written.status !== 'applied') throw new Error('The decision was not written')
     const superseded = await applyOperation(
       db,
-      { opId: crypto.randomUUID(), jobId: 'eval', runId: 'eval', actor: 'test', now: now + 1 },
+      { opId: uuidv7(), jobId: 'eval', runId: 'eval', actor: 'test', now: now + 1 },
       {
         type: 'supersede',
         oldId: written.recordId,

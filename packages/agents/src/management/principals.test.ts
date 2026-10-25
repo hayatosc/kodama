@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../lib/uuid.ts'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { auditLog, principals } from '../../drizzle/management/schema.ts'
@@ -23,7 +24,7 @@ function rejection(promise: Promise<unknown>): Promise<string> {
 
 async function create() {
   return agentService().createAgent(await caller(), {
-    requestId: crypto.randomUUID(),
+    requestId: uuidv7(),
     displayName: 'Caller',
   })
 }
@@ -33,12 +34,12 @@ describe('callers', () => {
     const { agentId: callerAgentId } = await create()
     const actor = { kind: 'agent', externalId: callerAgentId } as const
     const created = await agentService().createAgent(actor, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       displayName: 'Made by an agent',
     })
     const { settings } = await agentService().getConfig(actor, created.agentId)
     await agentService().updateConfig(actor, created.agentId, {
-      requestId: crypto.randomUUID(),
+      requestId: uuidv7(),
       settings: { ...settings, systemPrompt: 'Set by an agent' },
       expectedVersion: 1,
     })
@@ -64,7 +65,7 @@ describe('callers', () => {
   })
 
   it('accepts a person, a service, and an agent alike, and refuses a disabled principal', async () => {
-    const id = crypto.randomUUID()
+    const id = uuidv7()
     for (const kind of ['user', 'service', 'agent'] as const) {
       const actor = { kind, externalId: `${kind}-${id}` }
       expect(Array.isArray(await agentService().listAgents(actor))).toBe(true)

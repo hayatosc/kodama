@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { newAgentId, updateSettings } from '../../helper/management.ts'
 import { mockModel, say } from '../../helper/conversation.ts'
@@ -19,7 +20,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('working memory search', () => {
   it('hides prohibited overrides even when the required policy does not match the query', async () => {
     const agentId = await newAgentId()
-    const space = `space-${crypto.randomUUID().slice(0, 8)}`
+    const space = `space-${uuidv7().slice(-12)}`
     await updateSettings(agentId, { sharedSpaces: [space] })
     const target = await write({
       scope: `shared:${space}`,

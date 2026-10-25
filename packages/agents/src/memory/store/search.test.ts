@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
@@ -16,7 +17,7 @@ import { searchMemory } from './search.ts'
 const NOW = 1_800_000_000_000
 
 function agentScope(): { scope: Scope; agentId: string } {
-  const agentId = crypto.randomUUID()
+  const agentId = uuidv7()
   return { scope: `agent:${agentId}`, agentId }
 }
 
@@ -50,8 +51,8 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
 
 describe('working-agent search precedence', () => {
   it('excludes prohibited overrides before ranking, limiting, and counting use', async () => {
-    const agentId = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -95,9 +96,9 @@ describe('working-agent search precedence', () => {
   })
 
   it('resolves overrides outside query matches without suppressing another agent’s view', async () => {
-    const agentId = crypto.randomUUID()
-    const other = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const other = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -130,8 +131,8 @@ describe('working-agent search precedence', () => {
   })
 
   it('does not let unreadable or inactive required targets suppress personal memory', async () => {
-    const agentId = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const space = uuidv7()
     const target = await write({
       scope: `shared:${space}`,
       kind: 'instruction',
@@ -172,7 +173,7 @@ describe('search parameter limits', () => {
   ])(
     'ranks all $size candidates before limiting and counts only returned records',
     async ({ size, expected }) => {
-      const agentId = crypto.randomUUID()
+      const agentId = uuidv7()
       await seedCandidates(agentId, size)
 
       const found = await searchMemory(parameterLimitedDb, {

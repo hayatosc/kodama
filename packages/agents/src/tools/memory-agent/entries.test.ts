@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { newAgentId } from '../../helper/management.ts'
@@ -88,7 +89,7 @@ describe('job kinds', () => {
     const { outputs } = await runScriptedJob(
       {
         kind: 'remember',
-        sourceAgentId: crypto.randomUUID(),
+        sourceAgentId: uuidv7(),
         origin: 'user_request',
         content: 'Read my history',
         sourceEntries: { from: 1, to: 1 },
@@ -108,9 +109,9 @@ describe('job kinds', () => {
   })
 
   it('fails a record_archive job whose segment is not in the catalog', async () => {
-    const segmentId = `missing-${crypto.randomUUID()}`
+    const segmentId = `missing-${uuidv7()}`
     const { outputs } = await runScriptedJob(
-      { kind: 'record_archive', sourceAgentId: crypto.randomUUID(), segmentId },
+      { kind: 'record_archive', sourceAgentId: uuidv7(), segmentId },
       [{ name: 'read_archive', arguments: {} }],
     )
 

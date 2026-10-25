@@ -27,6 +27,7 @@
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",
     "drizzle-orm": "0.45.3",
+    "uuid": "^14.0.3",
     "valibot": "1.5.0"
   },
   "devDependencies": {

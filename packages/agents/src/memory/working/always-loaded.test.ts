@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,8 +21,8 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('always-loaded cache revisions', () => {
   it('detects a shared replacement committed between reading content and storing its revision', async () => {
-    const agentId = crypto.randomUUID()
-    const space = crypto.randomUUID()
+    const agentId = uuidv7()
+    const space = uuidv7()
     const oldId = await write({
       scope: `shared:${space}`,
       kind: 'instruction',

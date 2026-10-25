@@ -1,3 +1,4 @@
+import { uuidv7 } from '../../src/lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
@@ -32,7 +33,7 @@ it.each(tables.map((table) => [getTableConfig(table).name, table] as const))(
   'the applied local migrations let Drizzle read every column of %s',
   async (_name, table) => {
     const rows = await runInDurableObject(
-      env.AGENTS.getByName(crypto.randomUUID()),
+      env.AGENTS.getByName(uuidv7()),
       async (_instance, state) => {
         const local = await openLocalDb(state.storage)
         return local.select().from(table).limit(1).all()

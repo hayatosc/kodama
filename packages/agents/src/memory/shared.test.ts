@@ -1,3 +1,4 @@
+import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
@@ -14,10 +15,10 @@ import { newAgentId, updateSettings } from '../helper/management.ts'
 afterEach(() => vi.restoreAllMocks())
 
 function newSpace(): string {
-  return `space-${crypto.randomUUID().slice(0, 8)}`
+  return `space-${uuidv7().slice(-12)}`
 }
 
-function fact(content: string, agentId: string = crypto.randomUUID()): Promise<string> {
+function fact(content: string, agentId: string = uuidv7()): Promise<string> {
   return write({ scope: `agent:${agentId}`, kind: 'fact', content, sourceAgentId: agentId })
 }
 
@@ -54,7 +55,7 @@ describe('overrides', () => {
     const space = newSpace()
     const scope: Scope = `shared:${space}`
     const agentId = await newAgentId()
-    const other = crypto.randomUUID()
+    const other = uuidv7()
     const shared = await write({
       scope,
       kind: 'instruction',
@@ -117,7 +118,7 @@ describe('shared writes', () => {
     expect((await activeIn(space)).map((row) => [row.content, row.origin])).toEqual([
       [content, 'shared'],
     ])
-    expect(await renderedAlwaysLoaded(crypto.randomUUID(), [space])).toContain(content)
+    expect(await renderedAlwaysLoaded(uuidv7(), [space])).toContain(content)
   })
 
   it('rejects what one agent keeps and a required rule without two agents', async () => {

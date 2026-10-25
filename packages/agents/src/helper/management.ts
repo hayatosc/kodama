@@ -76,7 +76,7 @@ export async function updateSettings(
 ): Promise<ConfigWriteResult> {
   const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
   return agentService().updateConfig(await caller(), agentId, {
-    requestId: crypto.randomUUID(),
+    requestId: uuidv7(),
     settings: { ...(await desiredSettings(agentId)), ...change },
     expectedVersion: row?.currentVersion ?? 0,
   })

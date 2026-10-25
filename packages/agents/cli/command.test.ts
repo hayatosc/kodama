@@ -45,6 +45,18 @@ describe('toCommand', () => {
     })
   })
 
+  it('generates a canonical v7 request ID by default', () => {
+    const result = toCommand({ positionals: ['send', 'assistant', 'Hello'], values: {} })
+    expect(result).toMatchObject({
+      action: 'send',
+      message: {
+        requestId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+      },
+    })
+  })
+
   it.each([
     [['deploy'], /Expected seed, send, snapshot, or cancel/],
     [['seed', 'assistant'], /Unexpected arguments/],

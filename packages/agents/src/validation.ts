@@ -5,6 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
 import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
@@ -35,9 +36,9 @@ export function idSchema(name: string, maxLength: number) {
   return v.pipe(v.string(message), v.maxLength(maxLength, message), v.regex(ID_PATTERN, message))
 }
 
-const agentIdMessage = 'agentId must be a lowercase UUID'
+const agentIdMessage = 'agentId must be a lowercase UUID v7'
 
-/** A public agent ID: a lowercase v4 or v7 UUID. Reserved names such as `kodama:memory` fail. */
+/** A public agent ID: a lowercase v7 UUID. Reserved names such as `kodama:memory` fail. */
 export const AgentIdSchema = v.pipe(v.string(agentIdMessage), v.regex(UUID_PATTERN, agentIdMessage))
 
 const slugMessage = 'slug must contain 1–48 lowercase letters, digits, or hyphens'
@@ -46,7 +47,7 @@ const slugMessage = 'slug must contain 1–48 lowercase letters, digits, or hyph
 export const SlugSchema = v.pipe(
   v.string(slugMessage),
   v.regex(/^[a-z0-9-]{1,48}$/, slugMessage),
-  v.check((slug) => !UUID_PATTERN.test(slug), 'slug cannot be a UUID'),
+  v.check((slug) => !validate(slug), 'slug cannot be a UUID'),
 )
 
 const refMessage = 'Expected an agent UUID, slug, or UUID prefix'
