@@ -50,12 +50,10 @@ export interface Budget {
   onExceed: 'refuse' | 'downgrade'
 }
 
-/** Credential references by Pi provider ID; stored here, resolved by issue #2. */
+/** One explicit credential per Pi provider, with no alternate credential resolution. */
 export interface CredentialRefs {
   /** The credential each provider uses. */
   primary: Record<string, string>
-  /** What a provider uses while its primary needs re-authentication; `null` stops it. */
-  fallback: Record<string, string | null>
 }
 
 /** One immutable configuration version of an agent. */

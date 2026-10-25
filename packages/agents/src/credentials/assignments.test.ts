@@ -2,12 +2,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
-import {
-  agents,
-  credentialGrants,
-  agentCredentialRefs,
-  principals,
-} from '../../drizzle/management/schema.ts'
+import { agents, credentialGrants, agentCredentialRefs } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { uuidv7 } from '../lib/uuid.ts'
@@ -15,12 +10,11 @@ import { uuidv7 } from '../lib/uuid.ts'
 it('assigns all agents and unassigns one without revoking the shared key', async () => {
   const db = managementDb(env.MANAGEMENT_DB)
   await exports.default.seed()
-  const actor = { kind: 'user' as const, externalId: `${uuidv7()}@example.test` }
+  const registered = await db.select().from(agents).get()
+  if (!registered) throw new Error('Missing registered agent')
+  const actor = { kind: 'agent' as const, externalId: registered.agentId }
   const principal = await principalOf(db, actor, Date.now())
-  await db
-    .update(principals)
-    .set({ systemRole: 'owner' })
-    .where(eq(principals.principalId, principal.principalId))
+  expect(principal.systemRole).not.toBe('owner')
   const credential = await exports.default.putCredential(actor, {
     requestId: uuidv7(),
     provider: 'openai',

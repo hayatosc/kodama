@@ -146,19 +146,9 @@ export function agentSettingsSchema(models: Models) {
         ),
       ),
       credentials: v.optional(
-        v.pipe(
-          v.strictObject(
-            {
-              primary: v.record(providerKey, credentialId),
-              fallback: v.record(providerKey, v.nullable(credentialId)),
-            },
-            'credentials must have primary and fallback',
-          ),
-          v.check(
-            ({ primary, fallback }) =>
-              Object.keys(fallback).every((provider) => provider in primary),
-            'credentials.fallback may only name providers in credentials.primary',
-          ),
+        v.strictObject(
+          { primary: v.record(providerKey, credentialId) },
+          'credentials must contain only primary references',
         ),
       ),
       toolPolicy: v.optional(

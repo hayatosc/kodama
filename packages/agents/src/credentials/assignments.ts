@@ -7,7 +7,7 @@ import { versionRow, writeVersionStatements } from '../management/versions.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseAgentId } from '../validation.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { credentialRow, requireCredentialOwner } from './management.ts'
+import { credentialRow, credentialActor } from './management.ts'
 import { referenceStatements } from './references.ts'
 
 /** Assign or unassign one credential, for one agent or every current agent, as one D1 transaction. */
@@ -15,11 +15,9 @@ export async function assignCredential(
   call: ManagementCall,
   credentialId: string,
   target: string,
-  slot: 'primary' | 'fallback' = 'primary',
   remove = false,
 ) {
-  const principal = requireCredentialOwner(call)
-  if (slot !== 'primary' && slot !== 'fallback') throw new TypeError('Invalid credential slot')
+  const principal = credentialActor(call)
   const credential = await credentialRow(call, credentialId)
   if (!remove && credential.status !== 'active' && credential.status !== 'retiring')
     throw new Error('credential_unavailable: inactive credential')
@@ -33,19 +31,11 @@ export async function assignCredential(
       const row = await versionRow(call.db, agent.agentId, agent.currentVersion)
       if (!row) throw new Error('Agent has no configuration')
       const settings = parseSettings(call.models, JSON.parse(row.settingsJson))
-      const refs = settings.credentials ?? { primary: {}, fallback: {} }
-      const next = { primary: { ...refs.primary }, fallback: { ...refs.fallback } }
+      const next = { primary: { ...settings.credentials?.primary } }
       if (remove) {
-        for (const key of ['primary', 'fallback'] as const) {
-          if (next[key][credential.provider] === credentialId) delete next[key][credential.provider]
-        }
-      } else {
-        next[slot][credential.provider] = credentialId
-        if (slot === 'fallback' && !next.primary[credential.provider])
-          throw new TypeError('Assign a primary before its fallback')
-      }
-      // A fallback without a primary is not a valid provider assignment; never promote it silently.
-      if (!next.primary[credential.provider]) delete next.fallback[credential.provider]
+        if (next.primary[credential.provider] === credentialId)
+          delete next.primary[credential.provider]
+      } else next.primary[credential.provider] = credentialId
       const updated = { ...settings, credentials: next }
       const statements = writeVersionStatements(
         call.db,
