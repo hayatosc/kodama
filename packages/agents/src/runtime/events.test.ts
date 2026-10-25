@@ -20,9 +20,12 @@ useMockModel()
 it('streams an initial snapshot', async () => {
   const stream = await exports.default.subscribe(await newAgentId())
   const reader = stream.getReader()
-  const chunk = await reader.read()
-  expect(new TextDecoder().decode(chunk.value)).toContain('event: snapshot')
-  await reader.cancel()
+  try {
+    const chunk = await reader.read()
+    expect(new TextDecoder().decode(chunk.value)).toContain('event: snapshot')
+  } finally {
+    await reader.cancel()
+  }
 })
 
 it('streams generation, completion and reconnect state without polling', async () => {
@@ -69,12 +72,17 @@ it('streams generation, completion and reconnect state without polling', async (
       await exports.default.send(agentId, { requestId: 'sse', content: 'Hello' }),
     ).text()
     const received: string[] = []
-    let event = await events.next()
-    while (event.type !== 'submission' || !JSON.stringify(event.data).includes('"done"')) {
-      received.push(event.type)
-      event = await events.next()
-    }
-    const chatEvents = decodeEvents(await chat)
+    const [chatBody] = await Promise.all([
+      chat,
+      (async () => {
+        let event = await events.next()
+        while (event.type !== 'submission' || !JSON.stringify(event.data).includes('"done"')) {
+          received.push(event.type)
+          event = await events.next()
+        }
+      })(),
+    ])
+    const chatEvents = decodeEvents(chatBody)
     expect(chatEvents.map((event) => event.type)).toContain('message_update')
     expect(chatEvents.at(-1)).toMatchObject({
       type: 'submission',
@@ -204,12 +212,15 @@ it('returns no stream when admission fails, and later streams still open', async
     state.storage.put(PRUNE_LIMITS_KEY, { hardBytes: 0 }),
   )
 
-  const refused = await runInDurableObject(stub, (instance) =>
-    instance.send({ requestId: 'refused', content: 'Hello' }).then(
-      () => '',
-      (error: unknown) => String(error),
-    ),
-  )
+  const refused = await runInDurableObject(stub, async (instance) => {
+    try {
+      const stream = await instance.send({ requestId: 'refused', content: 'Hello' })
+      await stream.cancel()
+      return ''
+    } catch (error) {
+      return String(error)
+    }
+  })
 
   expect(refused).toContain(STORAGE_MAINTENANCE_ERROR)
   const events = readEvents(await exports.default.subscribe(agentId))

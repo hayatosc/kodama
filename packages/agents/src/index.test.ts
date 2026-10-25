@@ -47,6 +47,20 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
 }
 
 describe('AgentService', () => {
+  it('settles an awaited rejected RPC and remains callable', async () => {
+    await expect(
+      Promise.resolve(
+        exports.default.sendMessage('', {
+          requestId: '',
+          content: 'Hello',
+        }),
+      ),
+    ).rejects.toThrow()
+    const response = await exports.default.fetch('https://kodama.test/')
+    expect(response.status).toBe(404)
+    await response.body?.cancel()
+  })
+
   it('exports only the default RPC entrypoint and the Durable Object class', () => {
     expect(Object.keys(entrypoint).sort()).toEqual(['Agent', 'default'])
     for (const method of [

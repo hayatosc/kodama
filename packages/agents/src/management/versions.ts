@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { and, desc, eq, lt } from 'drizzle-orm'
+import { and, desc, eq, gte, lt } from 'drizzle-orm'
 import { agentConfigVersions, agents } from '../../drizzle/management/schema.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
 import type { AgentSettings } from '../protocol.ts'
@@ -97,5 +97,11 @@ export function reportApplied(db: ManagementDb, agentId: string, version: number
   return db
     .update(agents)
     .set({ appliedVersion: version })
-    .where(and(eq(agents.agentId, agentId), lt(agents.appliedVersion, version)))
+    .where(
+      and(
+        eq(agents.agentId, agentId),
+        lt(agents.appliedVersion, version),
+        gte(agents.currentVersion, version),
+      ),
+    )
 }

@@ -7,6 +7,8 @@
  * @module
  */
 import { and, eq } from 'drizzle-orm'
+import * as v from 'valibot'
+import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai/models'
 import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
 import { defaultAgentSettings, parseSettings } from '../../configuration/index.ts'
@@ -308,8 +310,10 @@ async function writeVersion(
   },
 ): Promise<ConfigWriteResult> {
   const replayed = async (): Promise<ConfigWriteResult | undefined> => {
-    if ((await auditByOpId(call.db, write.opId)) === undefined) return undefined
-    const version = write.expected + 1
+    const audit = await auditByOpId(call.db, write.opId)
+    if (audit === undefined) return undefined
+    const { version } = v.parse(v.object({ version: VersionSchema }), JSON.parse(audit.detailJson))
+    if (version !== write.expected + 1) throw versionConflict(agentId, write.expected)
     const row = await agentRow(call.db, agentId)
     const settings = await storedSettings(call, agentId, version)
     return { version, apply: await pushVersion(call.env, call.db, row, version, settings) }

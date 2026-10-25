@@ -237,6 +237,36 @@ describe('configuration versions', () => {
     expect((await agentService().getAgent(actor, agentId)).desiredVersion).toBe(2)
   })
 
+  it.each(['update', 'rollback'] as const)(
+    'rejects a %s replay whose expected version differs from the recorded write',
+    async (kind) => {
+      const actor = await caller()
+      const { agentId } = await create()
+      const { settings } = await agentService().getConfig(actor, agentId)
+      const requestId = uuidv7()
+      const send = (expectedVersion: number) =>
+        kind === 'update'
+          ? agentService().updateConfig(actor, agentId, { requestId, expectedVersion, settings })
+          : agentService().rollbackConfig(actor, agentId, {
+              requestId,
+              expectedVersion,
+              toVersion: 1,
+            })
+      expect((await send(1)).version).toBe(2)
+      for (const expected of [0, 2]) {
+        await expect(Promise.resolve(send(expected))).rejects.toThrow('version_conflict:')
+      }
+      expect((await send(1)).version).toBe(2)
+      expect(
+        (await agentService().configHistory(actor, agentId)).map((row) => row.version),
+      ).toEqual([2, 1])
+      expect(await agentService().getAgent(actor, agentId)).toMatchObject({
+        desiredVersion: 2,
+        appliedVersion: 2,
+      })
+    },
+  )
+
   it('answers two concurrent deliveries of one update with the same version', async () => {
     const actor = await caller()
     const { agentId } = await create()
