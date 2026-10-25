@@ -27,13 +27,14 @@ export function credentialActor(call: ManagementCall) {
 }
 
 const putSchema = v.object({
+  kind: v.optional(v.picklist(['api_key', 'oauth_subscription']), 'api_key'),
   requestId: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
   provider: v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]{0,63}$/)),
   secret: v.pipe(v.string(), v.minLength(8), v.maxLength(16384)),
   ownerScope: v.optional(v.picklist(['installation', 'principal']), 'installation'),
 })
 
-/** Register an API key atomically with its audit row; secret parsing errors contain no values. */
+/** Register either credential kind atomically with its audit row; secret parsing errors contain no values. */
 export async function putCredential(
   call: ManagementCall,
   env: Pick<AgentEnv, 'CREDENTIAL_KEK_V1'>,
@@ -48,6 +49,7 @@ export async function putCredential(
   if (previous) {
     const row = await credentialRow(call, previous.targetId)
     if (
+      row.kind !== input.kind ||
       row.provider !== input.provider ||
       row.ownerScope !== input.ownerScope ||
       row.fingerprint !== (await sha256Hex(input.secret))
@@ -60,7 +62,7 @@ export async function putCredential(
     call.db,
     {
       credentialId,
-      kind: 'api_key',
+      kind: input.kind,
       provider: input.provider,
       ownerScope: input.ownerScope,
       ownerId: input.ownerScope === 'principal' ? principal.principalId : null,
@@ -81,7 +83,7 @@ export async function putCredential(
       targetKind: 'system',
       targetId: credentialId,
       detail: {
-        kind: 'api_key',
+        kind: input.kind,
         provider: input.provider,
         fingerprint: await sha256Hex(input.secret),
       },
