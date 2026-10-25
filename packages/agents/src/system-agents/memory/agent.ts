@@ -63,6 +63,7 @@ export class MemoryAgent extends Agent {
         extension: toolGuardExtension(refusal, () => appliedSettings(this.ctx.storage)),
         refusal,
       },
+      this.credentialStore(),
     )
   }
 

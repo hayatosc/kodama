@@ -18,6 +18,7 @@ import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { parseAgentId } from '../validation.ts'
+import { invalidateCredential } from './invalidation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
 /** Require the registered caller used by management, without credential-specific roles. */
@@ -200,5 +201,6 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
         detail: { kind: row.kind, provider: row.provider, fingerprint: row.fingerprint },
       }),
     ])
+  await invalidateCredential(call, credentialId)
   return { credentialId, status: 'revoked' as const, affectedAgents: coverage.agents }
 }

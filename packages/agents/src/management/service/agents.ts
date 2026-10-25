@@ -11,6 +11,8 @@ import * as v from 'valibot'
 import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai/models'
 import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
+import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
+import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { defaultAgentSettings, parseSettings } from '../../configuration/index.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
 import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../db.ts'
@@ -170,6 +172,10 @@ export async function createAgent(
     request.settings === undefined
       ? defaultAgentSettings(call.env)
       : parseSettings(call.models, request.settings)
+  if (settings.credentials && call.principal && call.principal.systemRole !== 'owner') {
+    throw new Error('forbidden: credential assignment requires an installation owner')
+  }
+  await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   const membership =
     creator === null
@@ -199,6 +205,8 @@ export async function createAgent(
         createdAt: call.now,
       }),
       ...membership,
+      ...initialGrantStatements(call.db, agentId, settings, call.now),
+      ...referenceStatements(call.db, agentId, 1, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,
@@ -322,6 +330,7 @@ async function writeVersion(
   if (earlier !== undefined) return earlier
   const row = await agentRow(call.db, agentId)
   if (row.currentVersion !== write.expected) throw versionConflict(agentId, write.expected)
+  await validateCredentialRefs(call.db, write.settings, agentId)
   const detail = {
     ...(write.comment === undefined ? {} : { comment: write.comment }),
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),

@@ -57,7 +57,7 @@ describe('reconcileAgents', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const stuckIds = await stuckAgents(100)
     // A version written while its push was lost: the object has never heard of it.
-    const agentId = await newAgentId()
+    const agentId = await newAgentId(undefined, false)
     const settings = { ...defaultAgentSettings(env), systemPrompt: 'Reached at last' }
     await management.batch([
       management.insert(agentConfigVersions).values({
