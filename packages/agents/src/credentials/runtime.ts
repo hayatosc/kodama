@@ -3,6 +3,7 @@ import type { AgentEnv } from '../env.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { managementDb } from '../management/db.ts'
 import { agentRowByObjectName } from '../management/registry.ts'
+import { kekFor } from './keys.ts'
 import { createCredentialStore } from './store.ts'
 
 /** Resolve the registry identity lazily so dedicated object names never become grant IDs. */
@@ -20,7 +21,7 @@ export function agentCredentialStore(
       return row.agentId
     },
     settings,
-    () => env.CREDENTIAL_KEK_V1,
+    (version) => kekFor(env, version),
   )
   const read = handle.store.read.bind(handle.store)
   handle.store.read = async (provider, options) => {

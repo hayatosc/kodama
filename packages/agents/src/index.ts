@@ -6,6 +6,8 @@
  *
  * @module
  */
+import { rotateCredential } from './credentials/rotation.ts'
+import { rewrapCredentials } from './credentials/rewrap.ts'
 import type { CredentialRefs } from './protocol.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
@@ -268,6 +270,16 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   /** Register an encrypted API credential; returns metadata only. */
   async putCredential(actor: ManagementActor, request: unknown) {
     return credentialFlows.putCredential(await this.#call(actor), this.env, request)
+  }
+
+  /** Replace an API key and resume pushing its new configuration references. */
+  async rotateCredential(actor: ManagementActor, credentialId: string, request: unknown) {
+    return rotateCredential(await this.#call(actor), this.env, credentialId, request)
+  }
+
+  /** Rewrap one bounded batch using the temporarily installed V2 KEK. */
+  async rewrapCredentials(actor: ManagementActor) {
+    return rewrapCredentials(await this.#call(actor), this.env)
   }
 
   /** List credential metadata under the common management caller contract. */

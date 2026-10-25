@@ -78,7 +78,7 @@ describe('seed', () => {
     ).toEqual([])
     const settings = await management.select().from(systemSettings)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
-      { install_id: seeded.installId },
+      { install_id: seeded.installId, credential_kek_version: 1 },
     )
     expect(
       (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
