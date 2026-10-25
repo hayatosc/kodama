@@ -133,7 +133,7 @@ export const credentials = sqliteTable(
   (t) => [
     check(
       'credentials_owner',
-      sql`(${t.ownerScope} = 'installation' and ${t.ownerId} is null and ${t.kind} = 'api_key') or (${t.ownerScope} = 'principal' and ${t.ownerId} is not null)`,
+      sql`(${t.ownerScope} = 'installation' and ${t.ownerId} is null) or (${t.ownerScope} = 'principal' and ${t.ownerId} is not null)`,
     ),
     check('credentials_versions', sql`${t.revision} >= 1 and ${t.kekVersion} >= 1`),
     check(
