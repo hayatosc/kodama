@@ -30,8 +30,9 @@ minutes and are invalidated after management changes.
 This explicit maintenance operation can temporarily make credentials unavailable. It does not install
 an alternate runtime key or retain old-key resolution paths.
 
-1. Preserve the previous KEK securely according to the still-pending owner-approved backup rules.
-   Generate a random 32-byte replacement and base64 encode it using standard tooling.
+1. Keep the previous KEK available only for this replacement operation and its retries; this does
+   not require a permanent backup or recovery-custody scheme. Generate a random 32-byte replacement
+   and base64 encode it using standard tooling.
 2. Replace the value of the **same** `CREDENTIAL_KEK_V1` Worker Secret and deploy. Do not introduce
    a V2 binding. Until replacement starts, the durable key fingerprint rejects writes by the new
    deployment; old envelopes cannot be decrypted with its new key.
@@ -53,11 +54,15 @@ follow-up work, not an alternate credential-resolution path.
 ## Leak response
 
 Revoke a leaked credential at the provider first, then revoke it in Kodama and verify the receipt.
-Inspect secret-free audit and coverage results. If the KEK leaked, replace it and all provider secrets
-it could decrypt. Redaction is defense in depth, not a substitute for revocation.
+Inspect secret-free audit and coverage results. Redaction is defense in depth, not a substitute for
+revocation. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
+mitigation will be pursued for that scenario, including a separate vault or split-key design.
 
-## Operational decisions still pending
+## Operational policy
 
-The owner has **not decided** the KEK backup location, custodian/access rules, per-key usage limits,
-or rotation frequency. This implementation does not choose them. Resolve these before deployment.
+KEK loss does not require an elaborate backup-location or recovery-custody scheme. If the KEK is
+lost, re-register the provider credentials rather than plan recovery of the encrypted values.
+
+Only the KEK **rotation frequency** remains undecided. This document does not choose a schedule;
+backup location, custody/access rules and per-key usage limits are not outstanding policy decisions.
 Kodama is not deployed; no legacy credential formats or provider-secret migration paths are supported.
