@@ -10,6 +10,7 @@ import { credentialCall } from '../helper/credentials.ts'
 import { newAgentId } from '../helper/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert } from './vault.ts'
+import { revokeCredential } from './management.ts'
 import { createCredentialStore, CREDENTIAL_CACHE_TTL } from './store.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
@@ -69,6 +70,14 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     },
   }
 }
+
+it('rejects a warm cached credential immediately after D1 revocation without a journal', async () => {
+  const { store, primary } = await fixture()
+  expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
+  await revokeCredential(await credentialCall(), primary)
+  // This standalone store receives no object invalidation push; live D1 status is authoritative.
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+})
 
 it('uses only explicit references and checks status even with a warm cache and no invalidation push', async () => {
   const { store, primary, settings } = await fixture()
