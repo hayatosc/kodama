@@ -50,6 +50,17 @@ describe('createAgent', () => {
     const actor = await caller()
     const created = await create('Researcher', uniqueSlug())
     expect(created.agentId).toMatch(UUID_V7)
+    const registry = await management
+      .select()
+      .from(agents)
+      .where(eq(agents.agentId, created.agentId))
+      .get()
+    expect(registry).toMatchObject({
+      objectName: created.agentId,
+      kind: 'working',
+      currentVersion: 1,
+      appliedVersion: 1,
+    })
     expect(created).toMatchObject({
       kind: 'working',
       status: 'active',

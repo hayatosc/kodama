@@ -62,6 +62,15 @@ describe('pruning', () => {
       .where(eq(archiveSegments.agentId, agentId))
     expect(segments).toHaveLength(1)
     expect(segments[0]?.lastEntry).toBeLessThan(head ?? 0)
+    const segment = segments[0]
+    if (!segment) throw new Error('Missing archived segment')
+    expect(segment.firstEntry).toBeLessThanOrEqual(segment.lastEntry)
+    const runs = await runInDurableObject(stub, async (_i, state) => {
+      const local = await openLocalDb(state.storage)
+      return local.select().from(pruneRuns).all()
+    })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ firstEntry: segment.firstEntry, lastEntry: segment.lastEntry })
 
     // History search finds the exact word, and extraction reads the pruned range back from R2.
     const found = await searchHistory(db, env.ARCHIVE, agentId, codename)
