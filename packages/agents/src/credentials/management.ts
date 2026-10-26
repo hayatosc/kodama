@@ -141,8 +141,7 @@ export async function grantCredential(call: ManagementCall, credentialId: string
   const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   parseAgentId(agentId)
-  if (row.status !== 'active' && row.status !== 'retiring')
-    throw new Error('credential_unavailable: inactive credential')
+  if (row.status !== 'active') throw new Error('credential_unavailable: inactive credential')
   const existing = await call.db
     .select()
     .from(credentialGrants)
