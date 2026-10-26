@@ -19,7 +19,7 @@ export async function assignCredential(
 ) {
   const principal = credentialActor(call)
   const credential = await credentialRow(call, credentialId)
-  if (!remove && credential.status !== 'active' && credential.status !== 'retiring')
+  if (!remove && credential.status !== 'active')
     throw new Error('credential_unavailable: inactive credential')
   const targets = await call.db
     .select()
