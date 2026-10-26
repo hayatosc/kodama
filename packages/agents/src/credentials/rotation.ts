@@ -51,7 +51,6 @@ export async function rotateCredential(
         revision: 1,
         kind: old.kind,
         provider: old.provider,
-        ownerScope: old.ownerScope,
         ownerId: old.ownerId,
       },
       parsed.output.secret,
@@ -91,7 +90,7 @@ export async function rotateCredential(
       ...targets.map(({ agent }) =>
         call.db
           .insert(credentialGrants)
-          .values({ credentialId: nextId, agentId: agent.agentId, createdAt: call.now })
+          .values({ credentialId: nextId, agentId: agent.agentId })
           .onConflictDoNothing(),
       ),
       ...changes.flat(),

@@ -6,6 +6,11 @@ registered agents; credential ownership is metadata, not an extra administration
 contain metadata, fingerprints and last four characters only. Never paste secrets into a conversation,
 configuration, shell argument or log. There is no public management HTTP endpoint.
 
+Ownership is stored only as `owner_id`: NULL means installation, otherwise principal. Both outward
+`ownerScope` and encryption AAD derive that scope from the ID. Usage timestamps are not tracked;
+metadata retains `lastUsedAt: null`. Coverage reference versions come from the agent's current
+version, not a second stored copy in the reverse index.
+
 ## Credential replacement
 
 1. Obtain replacement credentials from the provider; keep the previous credential valid during the
@@ -15,7 +20,7 @@ configuration, shell argument or log. There is no public management HTTP endpoin
    same encrypted storage, grant, configuration-version and audit flow.
 3. The D1 transaction inserts the replacement, retires the previous row, copies the applicable grants
    and advances referencing configurations. Cache invalidation and configuration pushes follow.
-4. Retry until `complete` is true. Inspect `credentialCoverage` and `lastUsedAt` before revoking the
+4. Retry until `complete` is true. Inspect `credentialCoverage` before revoking the
    previous credential at its provider and calling `revokeCredential`. Revocation completes with
    the D1 transaction that marks the row revoked, clears its encrypted envelope and appends audit.
    Metadata remains; no separate revocation journal is written.

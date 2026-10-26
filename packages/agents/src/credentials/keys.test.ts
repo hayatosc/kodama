@@ -18,7 +18,6 @@ it('rolls back an old-key insert when maintenance wins the race', async () => {
       credentialId: id,
       kind: 'api_key',
       provider: 'openai',
-      ownerScope: 'installation',
       ownerId: null,
       revision: 1,
     },
