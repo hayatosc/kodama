@@ -128,7 +128,6 @@ export const credentials = sqliteTable(
     createdAt: integer('created_at').notNull(),
     lastUsedAt: integer('last_used_at'),
     revokedAt: integer('revoked_at'),
-    revocationRecordedAt: integer('revocation_recorded_at'),
   },
   (t) => [
     check(

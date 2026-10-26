@@ -12,22 +12,8 @@
     {
       "idx": 1,
       "version": "6",
-      "when": 1792897896436,
-      "tag": "0001_acoustic_zaladane",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792907976088,
-      "tag": "0002_wealthy_firebrand",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1792910571846,
-      "tag": "0003_reflective_dazzler",
+      "when": 1792998100251,
+      "tag": "0001_round_giant_man",
       "breakpoints": true
     }
   ]

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d6fafc68-42cd-4812-927a-ad27f6aa1050",
+  "id": "18397353-e697-469a-bab9-eed1a8a8ef52",
   "prevId": "cbbbad48-d20f-4106-9575-eca721be61cc",
   "tables": {
     "agent_config_versions": {
@@ -111,13 +111,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "slot": {
-          "name": "slot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "version": {
           "name": "version",
           "type": "integer",
@@ -154,9 +147,9 @@
         }
       },
       "compositePrimaryKeys": {
-        "agent_credential_refs_agent_id_provider_slot_pk": {
-          "columns": ["agent_id", "provider", "slot"],
-          "name": "agent_credential_refs_agent_id_provider_slot_pk"
+        "agent_credential_refs_agent_id_provider_pk": {
+          "columns": ["agent_id", "provider"],
+          "name": "agent_credential_refs_agent_id_provider_pk"
         }
       },
       "uniqueConstraints": {},
@@ -631,13 +624,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "revocation_recorded_at": {
-          "name": "revocation_recorded_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {},
@@ -657,7 +643,7 @@
       "checkConstraints": {
         "credentials_owner": {
           "name": "credentials_owner",
-          "value": "(\"credentials\".\"owner_scope\" = 'installation' and \"credentials\".\"owner_id\" is null and \"credentials\".\"kind\" = 'api_key') or (\"credentials\".\"owner_scope\" = 'principal' and \"credentials\".\"owner_id\" is not null)"
+          "value": "(\"credentials\".\"owner_scope\" = 'installation' and \"credentials\".\"owner_id\" is null) or (\"credentials\".\"owner_scope\" = 'principal' and \"credentials\".\"owner_id\" is not null)"
         },
         "credentials_versions": {
           "name": "credentials_versions",
