@@ -78,42 +78,58 @@ it('uses the same caller rules for principal-owned subscriptions and API keys', 
   )
 })
 
-it('revokes in D1 with one audit row and preserves the original state on retry', async () => {
-  const { call } = await caller()
-  const credential = await putCredential(call, env, {
-    requestId: uuidv7(),
-    provider: 'openai',
-    secret: 'sk-revocation-key-1234',
-  })
-  expect(await revokeCredential(call, credential.credentialId)).toEqual({
-    credentialId: credential.credentialId,
-    status: 'revoked',
-    affectedAgents: [],
-  })
-  const row = await db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.credentialId, credential.credentialId))
-    .get()
-  expect(row).toMatchObject({
-    status: 'revoked',
-    ciphertext: null,
-    iv: null,
-    wrappedDek: null,
-    wrapIv: null,
-    leaseId: null,
-    leaseExpiresAt: null,
-    revokedAt: call.now,
-  })
-  await revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId)
-  expect(
+it.each(['api_key', 'oauth_subscription'] as const)(
+  'revokes %s, clears its envelope and lease, and preserves state on retry',
+  async (kind) => {
+    const { call } = await caller()
+    const credential = await putCredential(call, env, {
+      requestId: uuidv7(),
+      provider: 'openai',
+      kind,
+      secret:
+        kind === 'api_key'
+          ? 'sk-revocation-key-1234'
+          : JSON.stringify({
+              type: 'oauth',
+              access: 'access-test',
+              refresh: 'refresh-test',
+              expires: Date.now() + 60000,
+            }),
+    })
     await db
+      .update(credentials)
+      .set({ leaseId: 'in-flight-refresh', leaseExpiresAt: call.now + 30000 })
+      .where(eq(credentials.credentialId, credential.credentialId))
+    expect(await revokeCredential(call, credential.credentialId)).toEqual({
+      credentialId: credential.credentialId,
+      status: 'revoked',
+      affectedAgents: [],
+    })
+    const row = await db
       .select()
       .from(credentials)
       .where(eq(credentials.credentialId, credential.credentialId))
-      .get(),
-  ).toEqual(row)
-  expect(
-    await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
-  ).toHaveLength(2)
-})
+      .get()
+    expect(row).toMatchObject({
+      status: 'revoked',
+      ciphertext: null,
+      iv: null,
+      wrappedDek: null,
+      wrapIv: null,
+      leaseId: null,
+      leaseExpiresAt: null,
+      revokedAt: call.now,
+    })
+    await revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId)
+    expect(
+      await db
+        .select()
+        .from(credentials)
+        .where(eq(credentials.credentialId, credential.credentialId))
+        .get(),
+    ).toEqual(row)
+    expect(
+      await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
+    ).toHaveLength(2)
+  },
+)
