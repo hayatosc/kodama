@@ -64,8 +64,7 @@ export function createCredentialStore(
       row.ciphertext === null ||
       row.iv === null ||
       row.wrappedDek === null ||
-      row.wrapIv === null ||
-      row.kekVersion !== 1
+      row.wrapIv === null
     ) {
       throw new Error('credential_unavailable: invalid envelope')
     }
@@ -76,7 +75,6 @@ export function createCredentialStore(
         iv: row.iv,
         wrappedDek: row.wrappedDek,
         wrapIv: row.wrapIv,
-        kekVersion: row.kekVersion,
       },
       kek(),
     )
