@@ -296,7 +296,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
 
   /** Disable a credential; success requires its R2 revocation record to be durable. */
   async revokeCredential(actor: ManagementActor, credentialId: string) {
-    return credentialFlows.revokeCredential(await this.#call(actor), this.env, credentialId)
+    return credentialFlows.revokeCredential(await this.#call(actor), credentialId)
   }
 
   /** An SSE stream of the agent's events, starting with a snapshot. */

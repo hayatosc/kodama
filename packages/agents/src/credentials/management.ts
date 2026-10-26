@@ -1,6 +1,6 @@
 /**
  * Credential management with the same caller rules as other management RPC. RPC inputs and results never expose stored envelopes.
- * Revocation remains incomplete until its durable R2 tombstone exists.
+ * Revocation commits its state and audit together in D1.
  *
  * @module
  */
@@ -165,12 +165,8 @@ export async function grantCredential(call: ManagementCall, credentialId: string
   return { credentialId, agentId }
 }
 
-/** Disable first, then persist a retryable tombstone; never report success before R2 acknowledges. */
-export async function revokeCredential(
-  call: ManagementCall,
-  env: Pick<AgentEnv, 'CREDENTIAL_BACKUPS'>,
-  credentialId: string,
-) {
+/** Revoke and clear the envelope atomically with audit; repeated calls preserve the first revocation. */
+export async function revokeCredential(call: ManagementCall, credentialId: string) {
   const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   const coverage = await credentialCoverage(call, credentialId)
@@ -199,20 +195,5 @@ export async function revokeCredential(
         detail: { kind: row.kind, provider: row.provider, fingerprint: row.fingerprint },
       }),
     ])
-  try {
-    await env.CREDENTIAL_BACKUPS.put(
-      `revocations/${credentialId}.json`,
-      JSON.stringify({
-        credentialId,
-        revokedAt: row.revokedAt ?? call.now,
-      }),
-    )
-  } catch {
-    throw new Error('credential_revocation_incomplete: retry to persist revocation record')
-  }
-  await call.db
-    .update(credentials)
-    .set({ revocationRecordedAt: call.now })
-    .where(eq(credentials.credentialId, credentialId))
   return { credentialId, status: 'revoked' as const, affectedAgents: coverage.agents }
 }

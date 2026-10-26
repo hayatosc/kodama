@@ -1,4 +1,4 @@
-/** Registered callers, write-only registration, and durable revocation receipts. @module */
+/** Registered callers, write-only registration, and atomic D1 revocation. @module */
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
@@ -78,36 +78,41 @@ it('uses the same caller rules for principal-owned subscriptions and API keys', 
   )
 })
 
-it('fails closed on R2 failure and completes the same revocation on retry', async () => {
+it('revokes in D1 with one audit row and preserves the original state on retry', async () => {
   const { call } = await caller()
   const credential = await putCredential(call, env, {
     requestId: uuidv7(),
     provider: 'openai',
     secret: 'sk-revocation-key-1234',
   })
-  const failedEnv = {
-    CREDENTIAL_BACKUPS: {
-      ...env.CREDENTIAL_BACKUPS,
-      put: async () => {
-        throw new Error('unavailable')
-      },
-    },
-  }
-  await expect(revokeCredential(call, failedEnv, credential.credentialId)).rejects.toThrow(
-    'credential_revocation_incomplete',
-  )
+  expect(await revokeCredential(call, credential.credentialId)).toEqual({
+    credentialId: credential.credentialId,
+    status: 'revoked',
+    affectedAgents: [],
+  })
   const row = await db
     .select()
     .from(credentials)
     .where(eq(credentials.credentialId, credential.credentialId))
     .get()
-  expect(row?.status).toBe('revoked')
-  expect(row?.ciphertext).toBeNull()
-  expect(row?.revocationRecordedAt).toBeNull()
-  await revokeCredential(call, env, credential.credentialId)
+  expect(row).toMatchObject({
+    status: 'revoked',
+    ciphertext: null,
+    iv: null,
+    wrappedDek: null,
+    wrapIv: null,
+    leaseId: null,
+    leaseExpiresAt: null,
+    revokedAt: call.now,
+  })
+  await revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId)
   expect(
-    await (await env.CREDENTIAL_BACKUPS.get(`revocations/${credential.credentialId}.json`))?.json(),
-  ).toEqual({ credentialId: credential.credentialId, revokedAt: call.now })
+    await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, credential.credentialId))
+      .get(),
+  ).toEqual(row)
   expect(
     await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
   ).toHaveLength(2)
