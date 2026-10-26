@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
-import { credentials } from '../../drizzle/management/schema.ts'
+import { credentials, principals } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert, credentialMetadata, parseCredential } from './vault.ts'
@@ -30,7 +30,6 @@ it.each(['api_key', 'oauth_subscription'] as const)(
         credentialId,
         kind,
         provider: 'openai',
-        ownerScope: 'installation',
         ownerId: null,
         revision: 1,
       },
@@ -81,20 +80,62 @@ it('preserves provider OAuth fields and rejects malformed payloads without echoi
   )
 })
 
-it('rejects ownerless principal credentials at the database boundary', async () => {
-  const { statement } = await credentialInsert(
-    db,
-    {
-      credentialId: uuidv7(),
-      kind: 'api_key',
-      provider: 'openai',
-      ownerScope: 'principal',
-      ownerId: null,
-      revision: 1,
-    },
-    'sk-invalid-owner-key',
-    kek,
-    Date.now(),
-  )
-  await expect(db.batch([statement])).rejects.toThrow()
-})
+it.each([false, true])(
+  'derives ownership metadata from owner_id (principal: %s)',
+  async (principal) => {
+    const ownerId = principal ? uuidv7() : null
+    if (ownerId)
+      await db.insert(principals).values({
+        principalId: ownerId,
+        kind: 'user',
+        externalId: ownerId,
+        displayName: 'Owner',
+        createdAt: 1,
+      })
+    const { statement } = await credentialInsert(
+      db,
+      {
+        credentialId: uuidv7(),
+        kind: 'api_key',
+        provider: 'openai',
+        ownerId,
+        revision: 1,
+      },
+      'sk-invalid-owner-key',
+      kek,
+      Date.now(),
+    )
+    const [rows] = await db.batch([statement])
+    const row = rows[0]
+    if (!row) throw new Error('Missing inserted credential')
+    expect(credentialMetadata(row)).toMatchObject({
+      ownerScope: principal ? 'principal' : 'installation',
+      ownerId,
+      lastUsedAt: null,
+    })
+    expect(row).not.toHaveProperty('ownerScope')
+    expect(row).not.toHaveProperty('lastUsedAt')
+    for (const lease of [
+      { leaseId: 'lease', leaseExpiresAt: null },
+      { leaseId: null, leaseExpiresAt: 123 },
+    ]) {
+      await expect(
+        db.update(credentials).set(lease).where(eq(credentials.credentialId, row.credentialId)),
+      ).rejects.toThrow()
+    }
+    await db
+      .update(credentials)
+      .set({ leaseId: 'lease', leaseExpiresAt: 123 })
+      .where(eq(credentials.credentialId, row.credentialId))
+    await db
+      .update(credentials)
+      .set({ leaseId: null, leaseExpiresAt: null })
+      .where(eq(credentials.credentialId, row.credentialId))
+    await expect(
+      db
+        .update(credentials)
+        .set({ status: 'revoked' })
+        .where(eq(credentials.credentialId, row.credentialId)),
+    ).rejects.toThrow()
+  },
+)

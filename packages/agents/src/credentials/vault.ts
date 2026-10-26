@@ -37,7 +37,7 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     credentialId: row.credentialId,
     kind: row.kind,
     provider: row.provider,
-    ownerScope: row.ownerScope,
+    ownerScope: row.ownerId === null ? ('installation' as const) : ('principal' as const),
     ownerId: row.ownerId,
     status: row.status,
     revision: row.revision,
@@ -45,7 +45,8 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     fingerprint: row.fingerprint,
     last4: row.last4,
     createdAt: row.createdAt,
-    lastUsedAt: row.lastUsedAt,
+    // Preserve the outward shape; usage timestamps were never recorded.
+    lastUsedAt: null,
   }
 }
 
