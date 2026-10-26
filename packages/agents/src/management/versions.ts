@@ -50,7 +50,7 @@ export function writeVersionStatements(
       .update(agents)
       .set({ currentVersion: version, updatedAt: write.now })
       .where(and(eq(agents.agentId, agentId), eq(agents.currentVersion, expected))),
-    ...referenceStatements(db, agentId, version, settings),
+    ...referenceStatements(db, agentId, settings),
     auditStatement(db, {
       opId: write.opId,
       at: write.now,

@@ -202,8 +202,8 @@ export async function createAgent(
         createdAt: call.now,
       }),
       ...membership,
-      ...initialGrantStatements(call.db, agentId, settings, call.now),
-      ...referenceStatements(call.db, agentId, 1, settings),
+      ...initialGrantStatements(call.db, agentId, settings),
+      ...referenceStatements(call.db, agentId, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,

@@ -5,17 +5,9 @@ import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 
 /** Initial grants for an authorized creation; include them in the registry creation batch. */
-export function initialGrantStatements(
-  db: ManagementDb,
-  agentId: string,
-  settings: AgentSettings,
-  now: number,
-) {
+export function initialGrantStatements(db: ManagementDb, agentId: string, settings: AgentSettings) {
   return [...new Set(Object.values(settings.credentials?.primary ?? {}))].map((credentialId) =>
-    db
-      .insert(credentialGrants)
-      .values({ credentialId, agentId, createdAt: now })
-      .onConflictDoNothing(),
+    db.insert(credentialGrants).values({ credentialId, agentId }).onConflictDoNothing(),
   )
 }
 

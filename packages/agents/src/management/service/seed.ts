@@ -115,8 +115,8 @@ export async function seed(
           comment: 'seed',
           createdAt: now,
         }),
-        ...referenceStatements(db, MEMORY_AGENT_ID, 1, initialSettings),
-        ...initialGrantStatements(db, MEMORY_AGENT_ID, initialSettings, now),
+        ...referenceStatements(db, MEMORY_AGENT_ID, initialSettings),
+        ...initialGrantStatements(db, MEMORY_AGENT_ID, initialSettings),
         auditStatement(db, {
           opId: `system.seed:${installId}`,
           at: now,
