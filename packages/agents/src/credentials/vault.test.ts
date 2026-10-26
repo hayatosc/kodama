@@ -41,6 +41,11 @@ it.each(['api_key', 'oauth_subscription'] as const)(
     const row = rows[0]
     if (!row) throw new Error('Missing inserted credential')
     expect(JSON.stringify(row)).not.toContain(secret)
+    expect(row).toMatchObject({ status: 'active', leaseId: null, leaseExpiresAt: null })
+    for (const value of [row.ciphertext, row.iv, row.wrappedDek, row.wrapIv]) {
+      expect(value).toEqual(expect.any(String))
+      expect(value?.length).toBeGreaterThan(0)
+    }
     const metadata = credentialMetadata(row)
     expect(metadata.last4).toBe('3456')
     expect(metadata.fingerprint).toMatch(/^[a-f0-9]{64}$/)
@@ -115,27 +120,5 @@ it.each([false, true])(
     })
     expect(row).not.toHaveProperty('ownerScope')
     expect(row).not.toHaveProperty('lastUsedAt')
-    for (const lease of [
-      { leaseId: 'lease', leaseExpiresAt: null },
-      { leaseId: null, leaseExpiresAt: 123 },
-    ]) {
-      await expect(
-        db.update(credentials).set(lease).where(eq(credentials.credentialId, row.credentialId)),
-      ).rejects.toThrow()
-    }
-    await db
-      .update(credentials)
-      .set({ leaseId: 'lease', leaseExpiresAt: 123 })
-      .where(eq(credentials.credentialId, row.credentialId))
-    await db
-      .update(credentials)
-      .set({ leaseId: null, leaseExpiresAt: null })
-      .where(eq(credentials.credentialId, row.credentialId))
-    await expect(
-      db
-        .update(credentials)
-        .set({ status: 'revoked' })
-        .where(eq(credentials.credentialId, row.credentialId)),
-    ).rejects.toThrow()
   },
 )

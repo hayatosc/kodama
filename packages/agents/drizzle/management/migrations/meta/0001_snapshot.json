@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a9e71783-0de9-4dab-ad4a-b8a6fa151101",
+  "id": "79e00464-74d5-488b-8a10-d3e075ac9dc4",
   "prevId": "cbbbad48-d20f-4106-9575-eca721be61cc",
   "tables": {
     "agent_config_versions": {
@@ -328,16 +328,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "agents_object_name": {
-          "name": "agents_object_name",
-          "value": "\"agents\".\"kind\" = 'dedicated' or \"agents\".\"object_name\" = \"agents\".\"agent_id\""
-        },
-        "agents_versions": {
-          "name": "agents_versions",
-          "value": "\"agents\".\"applied_version\" <= \"agents\".\"current_version\""
-        }
-      }
+      "checkConstraints": {}
     },
     "audit_log": {
       "name": "audit_log",
@@ -612,16 +603,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "credentials_payload": {
-          "name": "credentials_payload",
-          "value": "(\"credentials\".\"status\" = 'revoked' and \"credentials\".\"ciphertext\" is null and \"credentials\".\"iv\" is null and \"credentials\".\"wrapped_dek\" is null and \"credentials\".\"wrap_iv\" is null) or (\"credentials\".\"status\" <> 'revoked' and \"credentials\".\"ciphertext\" is not null and \"credentials\".\"iv\" is not null and \"credentials\".\"wrapped_dek\" is not null and \"credentials\".\"wrap_iv\" is not null)"
-        },
-        "credentials_lease": {
-          "name": "credentials_lease",
-          "value": "(\"credentials\".\"lease_id\" is null) = (\"credentials\".\"lease_expires_at\" is null)"
-        }
-      }
+      "checkConstraints": {}
     },
     "principals": {
       "name": "principals",

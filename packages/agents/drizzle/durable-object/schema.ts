@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { lte } from 'drizzle-orm'
-import { check, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /** Where a memory agent job is in the queue. */
 export const JOB_STATUSES = ['queued', 'running', 'settled'] as const
@@ -69,8 +68,5 @@ export const pruneRuns = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [
-    index('kodama_prune_runs_by_state').on(t.state),
-    check('kodama_prune_runs_range', lte(t.firstEntry, t.lastEntry)),
-  ],
+  (t) => [index('kodama_prune_runs_by_state').on(t.state)],
 )

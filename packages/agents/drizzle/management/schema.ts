@@ -12,8 +12,7 @@
  *
  * @module
  */
-import { sql } from 'drizzle-orm'
-import { check, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /**
  * Who can act: a person signed in through Access, a service token, or an agent. A principal is
@@ -75,11 +74,7 @@ export const agents = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [
-    index('agents_by_status').on(t.status, t.createdAt),
-    check('agents_object_name', sql`${t.kind} = 'dedicated' or ${t.objectName} = ${t.agentId}`),
-    check('agents_versions', sql`${t.appliedVersion} <= ${t.currentVersion}`),
-  ],
+  (t) => [index('agents_by_status').on(t.status, t.createdAt)],
 )
 
 /**
@@ -106,36 +101,26 @@ export const agentConfigVersions = sqliteTable(
 )
 
 /** Encrypted provider secrets; only src/credentials/ may access these rows. */
-export const credentials = sqliteTable(
-  'credentials',
-  {
-    credentialId: text('credential_id').primaryKey(),
-    kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
-    provider: text('provider').notNull(),
-    /** NULL means installation ownership; otherwise the owning principal. */
-    ownerId: text('owner_id').references(() => principals.principalId),
-    status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
-    revision: integer('revision').notNull(),
-    kekVersion: integer('kek_version').notNull(),
-    ciphertext: text('ciphertext'),
-    iv: text('iv'),
-    wrappedDek: text('wrapped_dek'),
-    wrapIv: text('wrap_iv'),
-    fingerprint: text('fingerprint').notNull(),
-    last4: text('last4').notNull(),
-    leaseId: text('lease_id'),
-    leaseExpiresAt: integer('lease_expires_at'),
-    createdAt: integer('created_at').notNull(),
-    revokedAt: integer('revoked_at'),
-  },
-  (t) => [
-    check(
-      'credentials_payload',
-      sql`(${t.status} = 'revoked' and ${t.ciphertext} is null and ${t.iv} is null and ${t.wrappedDek} is null and ${t.wrapIv} is null) or (${t.status} <> 'revoked' and ${t.ciphertext} is not null and ${t.iv} is not null and ${t.wrappedDek} is not null and ${t.wrapIv} is not null)`,
-    ),
-    check('credentials_lease', sql`(${t.leaseId} is null) = (${t.leaseExpiresAt} is null)`),
-  ],
-)
+export const credentials = sqliteTable('credentials', {
+  credentialId: text('credential_id').primaryKey(),
+  kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
+  provider: text('provider').notNull(),
+  /** NULL means installation ownership; otherwise the owning principal. */
+  ownerId: text('owner_id').references(() => principals.principalId),
+  status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
+  revision: integer('revision').notNull(),
+  kekVersion: integer('kek_version').notNull(),
+  ciphertext: text('ciphertext'),
+  iv: text('iv'),
+  wrappedDek: text('wrapped_dek'),
+  wrapIv: text('wrap_iv'),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4').notNull(),
+  leaseId: text('lease_id'),
+  leaseExpiresAt: integer('lease_expires_at'),
+  createdAt: integer('created_at').notNull(),
+  revokedAt: integer('revoked_at'),
+})
 
 /** Permission to use a credential, independent of immutable configuration references. */
 export const credentialGrants = sqliteTable(
