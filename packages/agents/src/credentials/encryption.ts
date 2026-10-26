@@ -10,7 +10,6 @@ export interface CredentialIdentity {
   credentialId: string
   kind: 'api_key' | 'oauth_subscription'
   provider: string
-  ownerScope: 'installation' | 'principal'
   ownerId: string | null
   revision: number
 }
@@ -41,7 +40,7 @@ function aad(identity: CredentialIdentity, purpose: string): Uint8Array<ArrayBuf
         identity.credentialId,
         identity.kind,
         identity.provider,
-        identity.ownerScope,
+        identity.ownerId === null ? 'installation' : 'principal',
         identity.ownerId,
         identity.revision,
       ]),

@@ -112,7 +112,7 @@ export const credentials = sqliteTable(
     credentialId: text('credential_id').primaryKey(),
     kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
     provider: text('provider').notNull(),
-    ownerScope: text('owner_scope', { enum: ['installation', 'principal'] }).notNull(),
+    /** NULL means installation ownership; otherwise the owning principal. */
     ownerId: text('owner_id').references(() => principals.principalId),
     status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
     revision: integer('revision').notNull(),
@@ -126,23 +126,14 @@ export const credentials = sqliteTable(
     leaseId: text('lease_id'),
     leaseExpiresAt: integer('lease_expires_at'),
     createdAt: integer('created_at').notNull(),
-    lastUsedAt: integer('last_used_at'),
     revokedAt: integer('revoked_at'),
   },
   (t) => [
     check(
-      'credentials_owner',
-      sql`(${t.ownerScope} = 'installation' and ${t.ownerId} is null) or (${t.ownerScope} = 'principal' and ${t.ownerId} is not null)`,
-    ),
-    check('credentials_versions', sql`${t.revision} >= 1 and ${t.kekVersion} >= 1`),
-    check(
       'credentials_payload',
       sql`(${t.status} = 'revoked' and ${t.ciphertext} is null and ${t.iv} is null and ${t.wrappedDek} is null and ${t.wrapIv} is null) or (${t.status} <> 'revoked' and ${t.ciphertext} is not null and ${t.iv} is not null and ${t.wrappedDek} is not null and ${t.wrapIv} is not null)`,
     ),
-    check(
-      'credentials_lease',
-      sql`(${t.leaseId} is null and ${t.leaseExpiresAt} is null) or (${t.leaseId} is not null and ${t.leaseExpiresAt} is not null)`,
-    ),
+    check('credentials_lease', sql`(${t.leaseId} is null) = (${t.leaseExpiresAt} is null)`),
   ],
 )
 
@@ -156,12 +147,11 @@ export const credentialGrants = sqliteTable(
     agentId: text('agent_id')
       .notNull()
       .references(() => agents.agentId),
-    createdAt: integer('created_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.credentialId, t.agentId] })],
 )
 
-/** Reverse index of current credential references, including explicit fallbacks. */
+/** Reverse index of current credential references. */
 export const agentCredentialRefs = sqliteTable(
   'agent_credential_refs',
   {
@@ -172,7 +162,6 @@ export const agentCredentialRefs = sqliteTable(
       .notNull()
       .references(() => credentials.credentialId),
     provider: text('provider').notNull(),
-    version: integer('version').notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.agentId, t.provider] }),

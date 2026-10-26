@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "18397353-e697-469a-bab9-eed1a8a8ef52",
+  "id": "a9e71783-0de9-4dab-ad4a-b8a6fa151101",
   "prevId": "cbbbad48-d20f-4106-9575-eca721be61cc",
   "tables": {
     "agent_config_versions": {
@@ -107,13 +107,6 @@
         "provider": {
           "name": "provider",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -450,13 +443,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         }
       },
       "indexes": {},
@@ -508,13 +494,6 @@
         },
         "provider": {
           "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_scope": {
-          "name": "owner_scope",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -611,13 +590,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "revoked_at": {
           "name": "revoked_at",
           "type": "integer",
@@ -641,21 +613,13 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "credentials_owner": {
-          "name": "credentials_owner",
-          "value": "(\"credentials\".\"owner_scope\" = 'installation' and \"credentials\".\"owner_id\" is null) or (\"credentials\".\"owner_scope\" = 'principal' and \"credentials\".\"owner_id\" is not null)"
-        },
-        "credentials_versions": {
-          "name": "credentials_versions",
-          "value": "\"credentials\".\"revision\" >= 1 and \"credentials\".\"kek_version\" >= 1"
-        },
         "credentials_payload": {
           "name": "credentials_payload",
           "value": "(\"credentials\".\"status\" = 'revoked' and \"credentials\".\"ciphertext\" is null and \"credentials\".\"iv\" is null and \"credentials\".\"wrapped_dek\" is null and \"credentials\".\"wrap_iv\" is null) or (\"credentials\".\"status\" <> 'revoked' and \"credentials\".\"ciphertext\" is not null and \"credentials\".\"iv\" is not null and \"credentials\".\"wrapped_dek\" is not null and \"credentials\".\"wrap_iv\" is not null)"
         },
         "credentials_lease": {
           "name": "credentials_lease",
-          "value": "(\"credentials\".\"lease_id\" is null and \"credentials\".\"lease_expires_at\" is null) or (\"credentials\".\"lease_id\" is not null and \"credentials\".\"lease_expires_at\" is not null)"
+          "value": "(\"credentials\".\"lease_id\" is null) = (\"credentials\".\"lease_expires_at\" is null)"
         }
       }
     },
