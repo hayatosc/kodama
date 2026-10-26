@@ -31,7 +31,7 @@ it('rewraps live and revoked records with one binding and fences old Workers', a
     provider: 'openai',
     secret: 'revoked-test-secret',
   })
-  await revokeCredential(call, env, revoked.credentialId)
+  await revokeCredential(call, revoked.credentialId)
   const before = await call.db
     .select()
     .from(credentials)

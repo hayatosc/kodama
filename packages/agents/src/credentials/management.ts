@@ -12,7 +12,6 @@ import {
   credentialGrants,
   agentCredentialRefs,
 } from '../../drizzle/management/schema.ts'
-import type { AgentEnv } from '../env.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'

@@ -16,8 +16,9 @@ configuration, shell argument or log. There is no public management HTTP endpoin
 3. The D1 transaction inserts the replacement, retires the previous row, copies the applicable grants
    and advances referencing configurations. Cache invalidation and configuration pushes follow.
 4. Retry until `complete` is true. Inspect `credentialCoverage` and `lastUsedAt` before revoking the
-   previous credential at its provider and calling `revokeCredential`. Its cleared metadata and
-   encrypted R2 receipt remain. R2 failure is retryable and does not undo the D1 revocation.
+   previous credential at its provider and calling `revokeCredential`. Revocation completes with
+   the D1 transaction that marks the row revoked, clears its encrypted envelope and appends audit.
+   Metadata remains; no separate revocation journal is written.
 
 Unassignment removes an agent's grant and reference. Revocation affects all grants. Every read checks
 current status and grants, even with a warm plaintext cache. Missing, revoked, unassigned and expired
@@ -48,12 +49,10 @@ an alternate runtime key or retain old-key resolution paths.
    memory agents. Future replacements repeat the same operation with the next generation; the
    Worker binding name never changes.
 
-Do not serve a restored old database before replaying revocation receipts. Backup restoration is
-follow-up work, not an alternate credential-resolution path.
-
 ## Leak response
 
-Revoke a leaked credential at the provider first, then revoke it in Kodama and verify the receipt.
+Revoke a leaked credential at the provider first, then revoke it in Kodama. Every credential
+resolution checks live D1 state, so revoked rows cannot be selected even with a warm cache.
 Inspect secret-free audit and coverage results. Redaction is defense in depth, not a substitute for
 revocation. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
 mitigation will be pursued for that scenario, including a separate vault or split-key design.
