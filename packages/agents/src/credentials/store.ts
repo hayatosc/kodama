@@ -52,7 +52,7 @@ export function createCredentialStore(
         and(
           eq(credentials.credentialId, id),
           eq(credentials.provider, provider),
-          or(eq(credentials.status, 'active'), eq(credentials.status, 'retiring')),
+          eq(credentials.status, 'active'),
         ),
       )
       .get()
@@ -135,7 +135,7 @@ export function createCredentialStore(
         .where(
           and(
             eq(credentials.credentialId, id),
-            or(eq(credentials.status, 'active'), eq(credentials.status, 'retiring')),
+            eq(credentials.status, 'active'),
             or(isNull(credentials.leaseId), lt(credentials.leaseExpiresAt, now())),
           ),
         )
@@ -171,7 +171,7 @@ export function createCredentialStore(
                 eq(credentials.leaseId, leaseId),
                 eq(credentials.revision, leased.revision),
                 gt(credentials.leaseExpiresAt, now()),
-                or(eq(credentials.status, 'active'), eq(credentials.status, 'retiring')),
+                eq(credentials.status, 'active'),
               ),
             )
             .returning(),
