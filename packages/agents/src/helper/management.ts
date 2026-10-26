@@ -79,7 +79,7 @@ export async function newAgentId(
       authorId: null,
       createdAt: now,
     }),
-    ...referenceStatements(management, agentId, 1, settings),
+    ...referenceStatements(management, agentId, settings),
   ])
   return agentId
 }

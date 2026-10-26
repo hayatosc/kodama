@@ -36,7 +36,6 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
         credentialId,
         kind: credentialId === primary ? kind : 'api_key',
         provider: 'openai',
-        ownerScope: 'principal',
         ownerId: principal.principalId,
         revision: 1,
       },
@@ -44,10 +43,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
       kek(),
       Date.now(),
     )
-    await db.batch([
-      statement,
-      db.insert(credentialGrants).values({ agentId, credentialId, createdAt: Date.now() }),
-    ])
+    await db.batch([statement, db.insert(credentialGrants).values({ agentId, credentialId })])
   }
   const settings: AgentSettings = {
     ...defaultAgentSettings(env),
