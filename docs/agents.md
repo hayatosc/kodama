@@ -777,8 +777,9 @@ From `packages/agents`:
    `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
    `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
    check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
-4. Set `CREDENTIAL_KEK_V1` to a base64-encoded random 32-byte key. See the replacement procedure
-   and operational policy in [credentials.md](credentials.md); provider keys are never Worker secrets.
+4. Provision `CREDENTIAL_KEK_V1` externally as a base64-encoded random 32-byte key. The Worker
+   reads it only; it cannot manage Worker Secrets. See the operational policy in
+   [credentials.md](credentials.md); provider keys are never Worker secrets.
 5. Deploy with `nr deploy`.
 6. Through the trusted RPC boundary, register the credential with `putCredential`, then call
    `AgentService.seed({ primary: { openai: credentialId } })`; it is idempotent.

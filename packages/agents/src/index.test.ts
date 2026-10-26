@@ -47,6 +47,12 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
 }
 
 describe('AgentService', () => {
+  it('does not expose credential rotation or KEK maintenance RPCs', () => {
+    const service = new AgentService(createExecutionContext(), { ...env, CLI_TOKEN: '' })
+    expect('rotateCredential' in service).toBe(false)
+    expect('rewrapCredentials' in service).toBe(false)
+  })
+
   it('settles an awaited rejected RPC and remains callable', async () => {
     await expect(
       Promise.resolve(

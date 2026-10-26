@@ -1,7 +1,7 @@
 /** Local-only registration through the same credential operations as trusted RPC callers. @module */
 import * as v from 'valibot'
 import type { ManagementEnv } from '../management/service/agents.ts'
-import type { KekEnv } from './keys.ts'
+import type { AgentEnv } from '../env.ts'
 import type { CredentialRefs, SeedResult } from '../protocol.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
@@ -17,7 +17,7 @@ const schema = v.record(
 
 /** Read keys from an authenticated local request, register them, then seed/assign both agent kinds. */
 export async function seedLocalCredentials(
-  env: ManagementEnv & KekEnv,
+  env: ManagementEnv & Pick<AgentEnv, 'CREDENTIAL_KEK_V1'>,
   request: Request,
   seed: (refs: CredentialRefs) => Promise<SeedResult>,
 ) {
