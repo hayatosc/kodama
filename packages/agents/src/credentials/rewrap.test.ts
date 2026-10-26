@@ -55,6 +55,7 @@ it('rewraps live and revoked records with one binding and fences old Workers', a
     .from(credentials)
     .where(eq(credentials.credentialId, live.credentialId))
     .get()
+  expect(after).toMatchObject({ leaseId: null, leaseExpiresAt: null })
   expect(after?.ciphertext).toBe(before?.ciphertext)
   expect(after?.iv).toBe(before?.iv)
   expect(after?.wrappedDek).not.toBe(before?.wrappedDek)
@@ -74,14 +75,20 @@ it('rewraps live and revoked records with one binding and fences old Workers', a
     ),
   ).toBe('live-test-secret')
   expect(
-    (
-      await call.db
-        .select()
-        .from(credentials)
-        .where(eq(credentials.credentialId, revoked.credentialId))
-        .get()
-    )?.ciphertext,
-  ).toBeNull()
+    await call.db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, revoked.credentialId))
+      .get(),
+  ).toMatchObject({
+    status: 'revoked',
+    ciphertext: null,
+    iv: null,
+    wrappedDek: null,
+    wrapIv: null,
+    leaseId: null,
+    leaseExpiresAt: null,
+  })
   expect(await rewrapCredentials(call, next, request)).toEqual({
     version: 2,
     rewrapped: 0,
@@ -128,4 +135,11 @@ it('reports incomplete work until a modification lease expires', async () => {
     .set({ leaseExpiresAt: 0 })
     .where(eq(credentials.credentialId, row.credentialId))
   expect((await rewrapCredentials(call, next, request)).complete).toBe(true)
+  expect(
+    await call.db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, row.credentialId))
+      .get(),
+  ).toMatchObject({ leaseId: null, leaseExpiresAt: null })
 })
