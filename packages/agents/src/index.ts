@@ -294,7 +294,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return assignCredential(await this.#call(actor), credentialId, agentId, true)
   }
 
-  /** Disable a credential; success requires its R2 revocation record to be durable. */
+  /** Disable a credential and clear its envelope with an atomic D1 audit record. */
   async revokeCredential(actor: ManagementActor, credentialId: string) {
     return credentialFlows.revokeCredential(await this.#call(actor), credentialId)
   }
