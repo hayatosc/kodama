@@ -11,6 +11,12 @@ Ownership is stored only as `owner_id`: NULL means installation, otherwise princ
 metadata retains `lastUsedAt: null`. Coverage reference versions come from the agent's current
 version, not a second stored copy in the reverse index.
 
+The schemas do not duplicate application invariants as SQL CHECK constraints. Primary keys,
+foreign keys, uniqueness and required columns remain database constraints. Behavioral tests cover
+complete encrypted-envelope writes, revocation cleanup and paired lease acquisition/release,
+including expired leases and revocation during modification. Conditional updates and transactions,
+not CHECK constraints, enforce concurrency control.
+
 ## Registration, assignment and revocation
 
 Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
