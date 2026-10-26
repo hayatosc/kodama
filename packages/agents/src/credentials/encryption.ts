@@ -20,7 +20,6 @@ export interface Envelope {
   iv: string
   wrappedDek: string
   wrapIv: string
-  kekVersion: number
 }
 
 function encode(bytes: ArrayBuffer | Uint8Array): string {
@@ -61,7 +60,6 @@ export async function encryptCredential(
   identity: CredentialIdentity,
   secret: string,
   kek: string,
-  kekVersion = 1,
 ): Promise<Envelope> {
   try {
     const dek = crypto.getRandomValues(new Uint8Array(32))
@@ -83,7 +81,6 @@ export async function encryptCredential(
       iv: encode(iv),
       wrappedDek: encode(wrappedDek),
       wrapIv: encode(wrapIv),
-      kekVersion,
     }
   } catch {
     throw new Error('credential_unavailable: encryption failed')
@@ -113,34 +110,5 @@ export async function decryptCredential(
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(plaintext)
   } catch {
     throw new Error('credential_unavailable: decryption failed')
-  }
-}
-
-/** Rewrap a DEK without exposing or re-encrypting the payload. */
-export async function rewrapCredential(
-  identity: CredentialIdentity,
-  envelope: Envelope,
-  previousKek: string,
-  nextKek: string,
-  kekVersion: number,
-): Promise<Envelope> {
-  try {
-    const dek = new Uint8Array(
-      await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: decode(envelope.wrapIv), additionalData: aad(identity, 'dek') },
-        await key(decode(previousKek), ['decrypt']),
-        decode(envelope.wrappedDek),
-      ),
-    )
-    const wrapIv = crypto.getRandomValues(new Uint8Array(12))
-    const wrappedDek = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: wrapIv, additionalData: aad(identity, 'dek') },
-      await key(decode(nextKek), ['encrypt']),
-      dek,
-    )
-    dek.fill(0)
-    return { ...envelope, wrappedDek: encode(wrappedDek), wrapIv: encode(wrapIv), kekVersion }
-  } catch {
-    throw new Error('credential_unavailable: rewrap failed')
   }
 }
