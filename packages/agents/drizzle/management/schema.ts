@@ -107,7 +107,7 @@ export const credentials = sqliteTable('credentials', {
   provider: text('provider').notNull(),
   /** NULL means installation ownership; otherwise the owning principal. */
   ownerId: text('owner_id').references(() => principals.principalId),
-  status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
+  status: text('status', { enum: ['active', 'revoked', 'needs_reauth'] }).notNull(),
   revision: integer('revision').notNull(),
   ciphertext: text('ciphertext'),
   iv: text('iv'),
