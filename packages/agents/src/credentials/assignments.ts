@@ -69,7 +69,7 @@ export async function assignCredential(
     }),
     ...changes.flatMap(({ agent, updated, statements }) => [
       ...statements,
-      ...referenceStatements(call.db, agent.agentId, agent.currentVersion + 1, updated),
+      ...referenceStatements(call.db, agent.agentId, updated),
       ...(remove
         ? [
             call.db
@@ -84,7 +84,7 @@ export async function assignCredential(
         : [
             call.db
               .insert(credentialGrants)
-              .values({ credentialId, agentId: agent.agentId, createdAt: call.now })
+              .values({ credentialId, agentId: agent.agentId })
               .onConflictDoNothing(),
           ]),
     ]),
