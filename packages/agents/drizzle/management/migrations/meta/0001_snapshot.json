@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "79e00464-74d5-488b-8a10-d3e075ac9dc4",
+  "id": "2f70b998-dd50-4c57-a463-85121b46c89a",
   "prevId": "cbbbad48-d20f-4106-9575-eca721be61cc",
   "tables": {
     "agent_config_versions": {
@@ -506,13 +506,6 @@
         },
         "revision": {
           "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kek_version": {
-          "name": "kek_version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

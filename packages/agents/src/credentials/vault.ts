@@ -41,7 +41,6 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     ownerId: row.ownerId,
     status: row.status,
     revision: row.revision,
-    kekVersion: row.kekVersion,
     fingerprint: row.fingerprint,
     last4: row.last4,
     createdAt: row.createdAt,

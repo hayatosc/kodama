@@ -1,6 +1,6 @@
 /** Envelope integrity, identity binding, and fail-closed key handling. @module */
 import { expect, it } from 'vitest'
-import { decryptCredential, encryptCredential, rewrapCredential } from './encryption.ts'
+import { decryptCredential, encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
 
 const identity: CredentialIdentity = {
@@ -23,7 +23,6 @@ it.each([
       iv: 'q7IK3WS48t++PIW1',
       wrappedDek: '5D4uWY7VHyg+k97jhkTSOi4/Aa2OWPoSdgqdl9ekGjRWU9WIp0yCmdZqI3MoytA2',
       wrapIv: 'iiS6Y2NDOkgcZUlU',
-      kekVersion: 1,
     },
   },
   {
@@ -33,7 +32,6 @@ it.each([
       iv: '8giBXFP0ZXsVZKeC',
       wrappedDek: 'qLvhj/uCianVVl5Juu+OHhXrzz//NA7iMUmINmNNYNkE8U84YP+732B67p3iHrWx',
       wrapIv: 'wbRfdMDBm8kag1Uc',
-      kekVersion: 1,
     },
   },
 ])('decrypts the previous AAD format for owner $ownerId', async ({ ownerId, envelope }) => {
@@ -83,15 +81,3 @@ it.each(['ciphertext', 'iv', 'wrappedDek', 'wrapIv'] as const)(
     ).rejects.toThrow('credential_unavailable')
   },
 )
-
-it('rewraps only the DEK and retires the old KEK', async () => {
-  const original = await encryptCredential(identity, secret, kek)
-  const rewrapped = await rewrapCredential(identity, original, kek, nextKek, 2)
-  expect(rewrapped.kekVersion).toBe(2)
-  expect(rewrapped.ciphertext).toBe(original.ciphertext)
-  expect(rewrapped.iv).toBe(original.iv)
-  expect(await decryptCredential(identity, rewrapped, nextKek)).toBe(secret)
-  await expect(decryptCredential(identity, rewrapped, kek)).rejects.toThrow(
-    'credential_unavailable',
-  )
-})

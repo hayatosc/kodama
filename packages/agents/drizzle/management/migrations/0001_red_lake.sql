@@ -23,7 +23,6 @@ CREATE TABLE `credentials` (
 	`owner_id` text,
 	`status` text NOT NULL,
 	`revision` integer NOT NULL,
-	`kek_version` integer NOT NULL,
 	`ciphertext` text,
 	`iv` text,
 	`wrapped_dek` text,

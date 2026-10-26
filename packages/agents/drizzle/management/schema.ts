@@ -109,7 +109,6 @@ export const credentials = sqliteTable('credentials', {
   ownerId: text('owner_id').references(() => principals.principalId),
   status: text('status', { enum: ['active', 'retiring', 'revoked', 'needs_reauth'] }).notNull(),
   revision: integer('revision').notNull(),
-  kekVersion: integer('kek_version').notNull(),
   ciphertext: text('ciphertext'),
   iv: text('iv'),
   wrappedDek: text('wrapped_dek'),
