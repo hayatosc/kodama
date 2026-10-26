@@ -125,10 +125,20 @@ it('serializes modification and releases the lease on failure without leaking ca
   const { store, primary } = await fixture()
   await store.modify('openai', async (current) => {
     expect(current).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
+    const held = await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, primary))
+      .get()
+    expect(held?.leaseId).toEqual(expect.any(String))
+    expect(held?.leaseExpiresAt).toBeGreaterThan(1000)
     await expect(store.modify('openai', async () => undefined)).rejects.toThrow('busy')
     return { type: 'api_key', key: 'sk-modified-test-key' }
   })
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-modified-test-key' })
+  expect(
+    await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+  ).toMatchObject({ leaseId: null, leaseExpiresAt: null, revision: 2 })
   await expect(
     store.modify('openai', async () => {
       throw new Error('sk-secret-error')
@@ -137,21 +147,49 @@ it('serializes modification and releases the lease on failure without leaking ca
   const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()
   expect(row?.revision).toBe(2)
   expect(row?.leaseId).toBeNull()
+  expect(row?.leaseExpiresAt).toBeNull()
   await expect(store.delete('openai')).rejects.toThrow('forbidden:')
+})
+
+it('reclaims an expired lease and clears both lease fields after modification', async () => {
+  const { store, primary } = await fixture()
+  await db
+    .update(credentials)
+    .set({ leaseId: 'stopped-worker', leaseExpiresAt: 999 })
+    .where(eq(credentials.credentialId, primary))
+  await store.modify('openai', async () => {
+    const held = await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, primary))
+      .get()
+    expect(held?.leaseId).toEqual(expect.any(String))
+    expect(held?.leaseId).not.toBe('stopped-worker')
+    expect(held?.leaseExpiresAt).toBeGreaterThan(1000)
+    return { type: 'api_key', key: 'sk-recovered-key' }
+  })
+  expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-recovered-key' })
+  expect(
+    await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+  ).toMatchObject({ leaseId: null, leaseExpiresAt: null })
 })
 
 it('does not overwrite revocation during a modification callback', async () => {
   const { store, primary } = await fixture()
   await expect(
     store.modify('openai', async () => {
-      await db
-        .update(credentials)
-        .set({ status: 'revoked', ciphertext: null, iv: null, wrappedDek: null, wrapIv: null })
-        .where(eq(credentials.credentialId, primary))
+      await revokeCredential(await credentialCall(), primary)
       return { type: 'api_key', key: 'sk-must-not-be-written' }
     }),
   ).rejects.toThrow('credential modification failed')
   const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()
-  expect(row?.status).toBe('revoked')
-  expect(row?.ciphertext).toBeNull()
+  expect(row).toMatchObject({
+    status: 'revoked',
+    ciphertext: null,
+    iv: null,
+    wrappedDek: null,
+    wrapIv: null,
+    leaseId: null,
+    leaseExpiresAt: null,
+  })
 })
