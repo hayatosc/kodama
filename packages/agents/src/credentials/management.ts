@@ -7,6 +7,7 @@
 import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import {
+  agents,
   credentials,
   credentialGrants,
   agentCredentialRefs,
@@ -51,7 +52,7 @@ export async function putCredential(
     if (
       row.kind !== input.kind ||
       row.provider !== input.provider ||
-      row.ownerScope !== input.ownerScope ||
+      (row.ownerId === null ? 'installation' : 'principal') !== input.ownerScope ||
       row.fingerprint !== (await sha256Hex(input.secret))
     )
       throw new Error('credential_conflict')
@@ -64,7 +65,6 @@ export async function putCredential(
       credentialId,
       kind: input.kind,
       provider: input.provider,
-      ownerScope: input.ownerScope,
       ownerId: input.ownerScope === 'principal' ? principal.principalId : null,
       revision: 1,
     },
@@ -116,8 +116,14 @@ export async function credentialRow(call: ManagementCall, id: string) {
 export async function credentialCoverage(call: ManagementCall, credentialId: string) {
   const row = await credentialRow(call, credentialId)
   const references = await call.db
-    .select()
+    .select({
+      agentId: agentCredentialRefs.agentId,
+      credentialId: agentCredentialRefs.credentialId,
+      provider: agentCredentialRefs.provider,
+      version: agents.currentVersion,
+    })
     .from(agentCredentialRefs)
+    .innerJoin(agents, eq(agents.agentId, agentCredentialRefs.agentId))
     .where(eq(agentCredentialRefs.credentialId, credentialId))
   const grants = await call.db
     .select()
@@ -146,7 +152,7 @@ export async function grantCredential(call: ManagementCall, credentialId: string
     .get()
   if (!existing)
     await call.db.batch([
-      call.db.insert(credentialGrants).values({ credentialId, agentId, createdAt: call.now }),
+      call.db.insert(credentialGrants).values({ credentialId, agentId }),
       auditStatement(call.db, {
         opId: uuidv7(),
         at: call.now,
