@@ -56,7 +56,7 @@ The object remembers decrypted values for at most the five-minute cache TTL and 
 `sk-…`, `xai-…` and JWT shapes. Memory-record and skill writes apply the same pattern filter even
 when called outside the model tool path. Credential operation exceptions return fixed messages,
 and background logs retain error categories rather than raw messages, causes, stacks or SQL
-bindings. Audit and revocation receipts contain metadata only.
+bindings. Audit records contain metadata only.
 
 A provider response is buffered until complete before emitting sanitized content. This intentionally
 trades token-by-token streaming for preventing split credential values from leaking through SSE.
