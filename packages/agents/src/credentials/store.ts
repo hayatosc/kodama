@@ -13,7 +13,6 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
-import { guardKekVersion } from './keys.ts'
 import { decryptCredential, encryptCredential } from './encryption.ts'
 
 /** Maximum lifetime of decrypted values; grants and status are checked on every read as well. */
@@ -154,12 +153,7 @@ export function createCredentialStore(
         if (!secret) throw new Error('credential_unavailable: empty credential')
         const value = parseCredential(leased.kind, secret)
         const revision = leased.revision + 1
-        const envelope = await encryptCredential(
-          { ...leased, revision },
-          secret,
-          kek(),
-          leased.kekVersion,
-        )
+        const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
         // Record the attempted refresh in the same batch; a losing CAS must not be reported
         // as a completed refresh. The caller retries only after acquiring a fresh lease.
         const [updated] = await db.batch([
@@ -181,7 +175,6 @@ export function createCredentialStore(
               ),
             )
             .returning(),
-          guardKekVersion(db, leased.kekVersion),
           auditStatement(db, {
             opId: leaseId,
             at: now(),

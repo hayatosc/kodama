@@ -56,11 +56,10 @@ export async function credentialInsert(
   secret: string,
   kek: string,
   now: number,
-  kekVersion = 1,
 ) {
   if (secret.length < 8 || secret.length > 16384) throw new TypeError('Invalid credential length')
   const value = parseCredential(identity.kind, secret)
-  const envelope = await encryptCredential(identity, secret, kek, kekVersion)
+  const envelope = await encryptCredential(identity, secret, kek)
   return {
     statement: db
       .insert(credentials)

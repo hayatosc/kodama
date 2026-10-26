@@ -11,48 +11,31 @@ Ownership is stored only as `owner_id`: NULL means installation, otherwise princ
 metadata retains `lastUsedAt: null`. Coverage reference versions come from the agent's current
 version, not a second stored copy in the reverse index.
 
-## Credential replacement
+## Registration, assignment and revocation
 
-1. Obtain replacement credentials from the provider; keep the previous credential valid during the
-   transition. OAuth login and refresh-provider integration are separate work.
-2. Call `rotateCredential(actor, credentialId, { requestId, secret })` through a trusted private
-   service binding. Reuse the request ID and payload on retries. Both credential kinds follow the
-   same encrypted storage, grant, configuration-version and audit flow.
-3. The D1 transaction inserts the replacement, retires the previous row, copies the applicable grants
-   and advances referencing configurations. Cache invalidation and configuration pushes follow.
-4. Retry until `complete` is true. Inspect `credentialCoverage` before revoking the
-   previous credential at its provider and calling `revokeCredential`. Revocation completes with
-   the D1 transaction that marks the row revoked, clears its encrypted envelope and appends audit.
-   Metadata remains; no separate revocation journal is written.
+Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
+`assignCredential` through a trusted private service binding. API keys and OAuth subscriptions use
+the same encrypted storage and metadata-only results. OAuth login and refresh-provider integration
+are separate work. There is no credential rotation RPC or automatic reassignment workflow.
 
-Unassignment removes an agent's grant and reference. Revocation affects all grants. Every read checks
-current status and grants, even with a warm plaintext cache. Missing, revoked, unassigned and expired
-credentials stop with `credential_unavailable`; no alternate credential or environment key is tried.
-An already-running provider request is not interrupted. Decrypted cache entries expire within five
-minutes and are invalidated after management changes.
+Unassignment removes an agent's grant and reference. Revocation affects all grants and atomically
+clears the encrypted envelope and lease while appending audit. Metadata remains; no separate
+revocation journal is written. Every read checks current status and grants, even with a warm
+plaintext cache. Missing, revoked, unassigned and expired credentials stop with
+`credential_unavailable`; no alternate credential or environment key is tried. An already-running
+provider request is not interrupted. Decrypted cache entries expire within five minutes and are
+invalidated after management changes.
 
-## Single-KEK replacement
+## Worker Secret boundary
 
-This explicit maintenance operation can temporarily make credentials unavailable. It does not install
-an alternate runtime key or retain old-key resolution paths.
+The Worker only reads `CREDENTIAL_KEK_V1` for encryption and decryption. It does not create, update,
+or delete Worker Secrets or call Cloudflare's Secret management API. Secret provisioning belongs to
+the operator outside the application. There is no KEK rotation, generation tracking, rewrapping,
+old-key input, or fallback key resolution.
 
-1. Keep the previous KEK available only for this replacement operation and its retries; this does
-   not require a permanent backup or recovery-custody scheme. Generate a random 32-byte replacement
-   and base64 encode it using standard tooling.
-2. Replace the value of the **same** `CREDENTIAL_KEK_V1` Worker Secret and deploy. Do not introduce
-   a V2 binding. Until replacement starts, the durable key fingerprint rejects writes by the new
-   deployment; old envelopes cannot be decrypted with its new key.
-3. Through a trusted private service binding, call
-   `rewrapCredentials(actor, { previousKek, previousVersion })`. The old key is write-only maintenance
-   input, never stored, returned, logged, or used for normal credential resolution. The first generation
-   is 1. Keep these exact inputs for retries.
-4. The operation atomically advances the durable generation and fingerprint, fencing outdated
-   writers. Each call leases and rewraps at most 100 old DEKs without decrypting provider payloads.
-   New writes use the single installed key. Unprocessed credentials remain unavailable, not rerouted.
-5. Retry until `remaining` is zero and `complete` is true. Revoked rows stay revoked with cleared
-   ciphertext. Expired leases permit resuming an interrupted batch. Verify assigned working and
-   memory agents. Future replacements repeat the same operation with the next generation; the
-   Worker binding name never changes.
+Changing or losing the KEK makes existing encrypted credentials unreadable. Re-register provider
+credentials and assign the new records; there is no encrypted-data recovery or migration workflow.
+Do not change the KEK as a routine application operation.
 
 ## Leak response
 
@@ -66,7 +49,5 @@ mitigation will be pursued for that scenario, including a separate vault or spli
 
 KEK loss does not require an elaborate backup-location or recovery-custody scheme. If the KEK is
 lost, re-register the provider credentials rather than plan recovery of the encrypted values.
-
-Only the KEK **rotation frequency** remains undecided. This document does not choose a schedule;
-backup location, custody/access rules and per-key usage limits are not outstanding policy decisions.
+Backup location, custody/access rules and per-key usage limits are not outstanding policy decisions.
 Kodama is not deployed; no legacy credential formats or provider-secret migration paths are supported.

@@ -12,14 +12,13 @@ import {
   credentialGrants,
   agentCredentialRefs,
 } from '../../drizzle/management/schema.ts'
+import type { AgentEnv } from '../env.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { parseAgentId } from '../validation.ts'
 import { invalidateCredential } from './invalidation.ts'
-import { activeKek, guardKekVersion } from './keys.ts'
-import type { KekEnv } from './keys.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
 /** Require the registered caller used by management, without credential-specific roles. */
@@ -38,7 +37,11 @@ const putSchema = v.object({
 })
 
 /** Register either credential kind atomically with its audit row; secret parsing errors contain no values. */
-export async function putCredential(call: ManagementCall, env: KekEnv, request: unknown) {
+export async function putCredential(
+  call: ManagementCall,
+  env: Pick<AgentEnv, 'CREDENTIAL_KEK_V1'>,
+  request: unknown,
+) {
   const principal = credentialActor(call)
   const parsed = v.safeParse(putSchema, request)
   if (!parsed.success) throw new TypeError('Invalid credential registration')
@@ -57,7 +60,6 @@ export async function putCredential(call: ManagementCall, env: KekEnv, request: 
     return credentialMetadata(row)
   }
   const credentialId = uuidv7(call.now)
-  const encryption = await activeKek(call.db, env)
   const { statement } = await credentialInsert(
     call.db,
     {
@@ -68,14 +70,12 @@ export async function putCredential(call: ManagementCall, env: KekEnv, request: 
       revision: 1,
     },
     input.secret,
-    encryption.key,
+    env.CREDENTIAL_KEK_V1,
     call.now,
-    encryption.version,
   )
   // The prepared insert contains ciphertext only. The audit never includes an input object.
   const [rows] = await call.db.batch([
     statement,
-    guardKekVersion(call.db, encryption.version),
     auditStatement(call.db, {
       opId,
       at: call.now,

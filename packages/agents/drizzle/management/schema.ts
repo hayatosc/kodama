@@ -175,12 +175,7 @@ export const agentMembers = sqliteTable(
 )
 
 /** Keys of `system_settings`. */
-export const SYSTEM_SETTING_KEYS = [
-  'install_id',
-  'reconcile_cursor',
-  'credential_kek_version',
-  'credential_kek_fingerprint',
-] as const
+export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor'] as const
 
 /**
  * Installation settings. The seed writes the installation ID once, and it never changes;
