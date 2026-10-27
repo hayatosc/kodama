@@ -100,6 +100,18 @@ it.each([
   expect(fetch).not.toHaveBeenCalled()
 })
 
+it('classifies real Pi cancellation without echoing its reason', async () => {
+  const abort = new AbortController()
+  await expect(loginRegistration(installId, 'cancelled', {
+    signal: abort.signal,
+    notify() {},
+    async prompt() {
+      abort.abort(new Error('private-abort-reason'))
+      return ''
+    },
+  })).rejects.toThrow('category=cancelled')
+})
+
 it('does not expose a pasted redirect or provider error in a failed login', async () => {
   await expect(
     loginRegistration(installId, 'bad', {
