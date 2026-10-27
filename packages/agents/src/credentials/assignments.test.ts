@@ -4,6 +4,7 @@ import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
 import { agents, credentialGrants, agentCredentialRefs } from '../../drizzle/management/schema.ts'
+import { Agent } from '../agent/agent.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { uuidv7 } from '../lib/uuid.ts'
@@ -21,19 +22,18 @@ it('pushes the committed version even when credential invalidation rejects', asy
     secret: 'sk-independent-push',
   })
   const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const invalidation = vi
+    .fn<Agent['invalidateCredentials']>()
+    .mockRejectedValue(new Error('invalidation unavailable'))
   try {
-    await runInDurableObject(env.AGENTS.getByName(agentId), (instance) => {
-      vi.spyOn(instance, 'invalidateCredentials').mockRejectedValue(
-        new Error('invalidation unavailable'),
-      )
+    await runInDurableObject(env.AGENTS.getByName(agentId), () => {
+      vi.spyOn(Agent.prototype, 'invalidateCredentials').mockImplementation(invalidation)
     })
     await assignCredential(call, credential.credentialId, agentId)
     const row = await call.db.select().from(agents).where(eq(agents.agentId, agentId)).get()
     expect(row?.appliedVersion).toBe(row?.currentVersion)
     expect(error).toHaveBeenCalled()
-    await runInDurableObject(env.AGENTS.getByName(agentId), (instance) => {
-      expect(instance.invalidateCredentials).toHaveBeenCalledOnce()
-    })
+    expect(invalidation).toHaveBeenCalledOnce()
   } finally {
     await runInDurableObject(env.AGENTS.getByName(agentId), () => {
       vi.restoreAllMocks()
