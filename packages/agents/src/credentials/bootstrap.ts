@@ -7,7 +7,6 @@ import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { createAgentModels } from '../models/index.ts'
 import { putCredential } from './management.ts'
-import { assignCredential } from './assignments.ts'
 import { credentialFingerprint } from './encryption.ts'
 
 const schema = v.record(
@@ -51,6 +50,5 @@ export async function seedLocalCredentials(
     primary[provider] = row.credentialId
   }
   const seeded = await seed({ primary })
-  for (const id of Object.values(primary)) await assignCredential(call, id, 'all')
   return { seeded, credentials: primary }
 }
