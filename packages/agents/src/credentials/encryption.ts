@@ -132,7 +132,7 @@ export async function decryptCredential(
       decode(envelope.ciphertext),
     )
     dek.fill(0)
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(plaintext)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(plaintext)
   } catch {
     throw new Error('credential_unavailable: decryption failed')
   }
