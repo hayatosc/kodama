@@ -7,6 +7,8 @@
  * @module
  */
 import { WorkerEntrypoint } from 'cloudflare:workers'
+import * as credentialFlows from './credentials/management.ts'
+import { assignCredential } from './credentials/assignments.ts'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
@@ -260,6 +262,41 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       expectedVersion: input.expectedVersion,
       ...(input.comment === undefined ? {} : { comment: input.comment }),
     })
+  }
+
+  /** Register an encrypted API credential; returns metadata only. */
+  async putCredential(actor: ManagementActor, request: unknown) {
+    return credentialFlows.putCredential(await this.#call(actor), this.env, request)
+  }
+
+  /** List credential metadata under the common management caller contract. */
+  async listCredentials(actor: ManagementActor) {
+    return credentialFlows.listCredentials(await this.#call(actor))
+  }
+
+  /** Preview affected agents before revoking a credential. */
+  async credentialCoverage(actor: ManagementActor, credentialId: string) {
+    return credentialFlows.credentialCoverage(await this.#call(actor), credentialId)
+  }
+
+  /** Grant an agent permission to use a credential without selecting it. */
+  async grantCredential(actor: ManagementActor, credentialId: string, agentId: string) {
+    return credentialFlows.grantCredential(await this.#call(actor), credentialId, agentId)
+  }
+
+  /** Select a credential in one agent or all current agents, writing configuration versions. */
+  async assignCredential(actor: ManagementActor, credentialId: string, target: string) {
+    return assignCredential(await this.#call(actor), credentialId, target)
+  }
+
+  /** Remove one agent's permission and selection without revoking other agents' access. */
+  async unassignCredential(actor: ManagementActor, credentialId: string, agentId: string) {
+    return assignCredential(await this.#call(actor), credentialId, agentId, true)
+  }
+
+  /** Disable a credential and clear its envelope with an atomic D1 audit record. */
+  async revokeCredential(actor: ManagementActor, credentialId: string) {
+    return credentialFlows.revokeCredential(await this.#call(actor), credentialId)
   }
 
   /** An SSE stream of the agent's events, starting with a snapshot. */

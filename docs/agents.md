@@ -341,7 +341,7 @@ interface AgentSettings {
     turnTokens?: number
     onExceed: 'refuse' | 'downgrade'
   }
-  credentials?: { primary: Record<string, string>; fallback: Record<string, string | null> }
+  credentials?: { primary: Record<string, string> }
   toolPolicy?: Record<string, 'allow' | 'deny'>
 }
 ```

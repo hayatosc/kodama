@@ -44,6 +44,7 @@ export default defineConfig({
       experimental: { newConfig: true },
       miniflare: {
         bindings: {
+          CREDENTIAL_KEK_V1: 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
           OPENAI_API_KEY: 'test-key',
           ANTHROPIC_API_KEY: '',
           GEMINI_API_KEY: '',

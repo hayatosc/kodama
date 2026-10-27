@@ -1,9 +1,11 @@
+/** Agent management commits registry, configuration and credential references together. @module */
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
   agentConfigVersions,
+  agentCredentialRefs,
   agentMembers,
   agents,
   auditLog,
@@ -44,6 +46,102 @@ async function create(displayName = 'Researcher', slug?: string) {
 }
 
 const uniqueSlug = () => `agent-${uuidv7().slice(-12)}`
+
+it('keeps credential coverage aligned with create, update and rollback versions', async () => {
+  const actor = await caller()
+  const credential = await exports.default.putCredential(actor, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    secret: 'sk-config-reference-1234',
+  })
+  const source = await create()
+  const configuration = await agentService().getConfig(actor, source.agentId)
+  const created = await agentService().createAgent(actor, {
+    requestId: uuidv7(),
+    displayName: 'With credentials',
+    settings: {
+      ...configuration.settings,
+      credentials: { primary: { openai: credential.credentialId } },
+    },
+  })
+  const references = () =>
+    management
+      .select()
+      .from(agentCredentialRefs)
+      .where(eq(agentCredentialRefs.agentId, created.agentId))
+  expect(await references()).toEqual([
+    { agentId: created.agentId, provider: 'openai', credentialId: credential.credentialId },
+  ])
+  await agentService().updateConfig(actor, created.agentId, {
+    requestId: uuidv7(),
+    expectedVersion: 1,
+    settings: configuration.settings,
+  })
+  expect(await references()).toEqual([])
+  await agentService().rollbackConfig(actor, created.agentId, {
+    requestId: uuidv7(),
+    expectedVersion: 2,
+    toVersion: 1,
+  })
+  expect(await references()).toHaveLength(1)
+  const coverage = await exports.default.credentialCoverage(actor, credential.credentialId)
+  expect(coverage.references).toContainEqual({
+    agentId: created.agentId,
+    provider: 'openai',
+    credentialId: credential.credentialId,
+    version: 3,
+  })
+})
+
+it('rejects unknown credential references before create or version writes', async () => {
+  const actor = await caller()
+  const source = await create()
+  const configuration = await agentService().getConfig(actor, source.agentId)
+  const settings = { ...configuration.settings, credentials: { primary: { openai: uuidv7() } } }
+  const state = async () => ({
+    agents: await management.select().from(agents),
+    versions: await management.select().from(agentConfigVersions),
+    refs: await management.select().from(agentCredentialRefs),
+    audit: await management.select().from(auditLog),
+  })
+  const before = await state()
+  expect(
+    await rejection(
+      agentService().createAgent(actor, {
+        requestId: uuidv7(),
+        displayName: 'Invalid refs',
+        settings,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(before)
+  expect(
+    await rejection(
+      agentService().updateConfig(actor, source.agentId, {
+        requestId: uuidv7(),
+        expectedVersion: 1,
+        settings,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(before)
+  // Simulate an old configuration whose referenced credential no longer exists.
+  await management
+    .update(agentConfigVersions)
+    .set({ settingsJson: JSON.stringify(settings) })
+    .where(eq(agentConfigVersions.agentId, source.agentId))
+  const historical = await state()
+  expect(
+    await rejection(
+      agentService().rollbackConfig(actor, source.agentId, {
+        requestId: uuidv7(),
+        expectedVersion: 1,
+        toVersion: 1,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(historical)
+})
 
 describe('createAgent', () => {
   it('assigns a UUID v7, writes the registry, version 1, membership, and audit, and activates it', async () => {
