@@ -2,6 +2,10 @@
 import { env, exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { seedLocalCredentials } from './bootstrap.ts'
+import { management } from '../helper/management.ts'
+import { auditLog } from '../../drizzle/management/schema.ts'
+import { sha256Hex } from '../lib/hash.ts'
+import { credentialFingerprint } from './encryption.ts'
 
 it('bootstraps idempotently without returning the key', async () => {
   const request = () =>
@@ -13,6 +17,11 @@ it('bootstraps idempotently without returning the key', async () => {
   expect(result.seeded.memoryAgentId).toBeTruthy()
   expect(result.credentials.openai).toBeTruthy()
   expect(JSON.stringify(result)).not.toContain('local-provider-test-key')
+  const audit = JSON.stringify(await management.select().from(auditLog))
+  expect(audit).not.toContain(await sha256Hex('local-provider-test-key'))
+  expect(audit).toContain(
+    await credentialFingerprint('local-provider-test-key', env.CREDENTIAL_KEK_V1),
+  )
   expect(await seedLocalCredentials(env, request(), (refs) => exports.default.seed(refs))).toEqual(
     result,
   )
