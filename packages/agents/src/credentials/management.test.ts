@@ -97,10 +97,23 @@ it('names credential IDs in validation errors', async () => {
 
 it('replays concurrent duplicate grants with a single audit', async () => {
   const { call, actor } = await caller()
-  const credential = await putCredential(call, env, { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-grant-secret' })
-  const results = await Promise.all([grantCredential(call, credential.credentialId, actor.externalId), grantCredential(call, credential.credentialId, actor.externalId)])
+  const credential = await putCredential(call, env, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    secret: 'concurrent-grant-secret',
+  })
+  const agent = await exports.default.createAgent(actor, { requestId: uuidv7(), displayName: 'Grant target' })
+  const results = await Promise.all([
+    grantCredential(call, credential.credentialId, agent.agentId),
+    grantCredential(call, credential.credentialId, agent.agentId),
+  ])
   expect(results[0]).toEqual(results[1])
-  expect(await db.select().from(credentialGrants).where(eq(credentialGrants.credentialId, credential.credentialId))).toHaveLength(1)
+  expect(
+    await db
+      .select()
+      .from(credentialGrants)
+      .where(eq(credentialGrants.credentialId, credential.credentialId)),
+  ).toHaveLength(1)
   const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.grant'))
   expect(audits.filter((row) => row.detailJson.includes(credential.credentialId))).toHaveLength(1)
 })
