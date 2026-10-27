@@ -8,7 +8,8 @@ import { agents } from '../../drizzle/management/schema.ts'
 import { newAgentId, management, updateSettings } from '../helper/management.ts'
 import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../helper/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
-import { contactAgent, CONTACT_WAIT_MS, MAX_CONTACT_HOPS } from './contact.ts'
+import { withHarness } from '../helper/harness.ts'
+import { contactAgent, contactOrigin, CONTACT_WAIT_MS, MAX_CONTACT_HOPS } from './contact.ts'
 
 useMockModel()
 
@@ -231,6 +232,65 @@ it('reports a terminal unanswered receiver separately from pending', async () =>
   expect((await exports.default.snapshot(sender)).snapshot.messages.at(-1)?.text).toBe(
     'The peer could not answer.',
   )
+})
+
+it.each([
+  { inputs: [3, 0], expectedHop: undefined },
+  { inputs: [0, 3], expectedHop: undefined },
+  { inputs: [3, 1], expectedHop: undefined },
+  { inputs: [2, 1], expectedHop: 3 },
+  { inputs: [0], expectedHop: 1 },
+])('derives contact from the whole run: $inputs', async ({ inputs, expectedHop }) => {
+  const sender = await newAgentId()
+  const firstStarted = Promise.withResolvers<void>()
+  const first = Promise.withResolvers<void>()
+  const nextStarted = Promise.withResolvers<void>()
+  const next = Promise.withResolvers<void>()
+  vi.mocked(fetch)
+    .mockImplementationOnce(async () => {
+      firstStarted.resolve()
+      await first.promise
+      return textResponse('Earlier hop-three work finished.')
+    })
+    .mockImplementationOnce(async (_input, init) => {
+      const body = requestBody(init)
+      for (const [index] of inputs.entries()) expect(body).toContain(`Queued input ${index}`)
+      nextStarted.resolve()
+      await next.promise
+      return textResponse('Batch finished.')
+    })
+  await withHarness({ steeringMode: 'all', followUpMode: 'all' }, async (harness) => {
+    const root = await harness.root(BACKGROUND_CONTEXT)
+    try {
+      await root.submit({
+        type: 'input', content: 'Earlier peer input',
+        entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop: 3 } },
+      }, BACKGROUND_CONTEXT)
+      await firstStarted.promise
+      const submissions = []
+      for (const [index, hop] of inputs.entries()) {
+        submissions.push(await root.submit({
+          type: 'input', content: `Queued input ${index}`,
+          whenBusy: hop === 0 ? 'steer' : 'followUp',
+          ...(hop === 0 ? {} : {
+            entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop } },
+          }),
+        }, BACKGROUND_CONTEXT))
+      }
+      first.resolve()
+      await nextStarted.promise
+      if (expectedHop === undefined) {
+        await expect(contactOrigin(harness, sender)).rejects.toThrow('delegation hop limit 3 reached')
+      } else {
+        expect(await contactOrigin(harness, sender)).toEqual({ senderAgentId: sender, hop: expectedHop })
+      }
+      next.resolve()
+      for (const submission of submissions) await submission.wait(BACKGROUND_CONTEXT)
+    } finally {
+      first.resolve()
+      next.resolve()
+    }
+  })
 })
 
 it('preserves the hop cap across eviction independently of peer message text', async () => {

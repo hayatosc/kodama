@@ -4,16 +4,11 @@
  *
  * @module
  */
-import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { Harness } from '@earendil-works/pi-durable'
-import type { HarnessOptions } from '@earendil-works/pi-durable'
-import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
+import type { Harness } from '@earendil-works/pi-durable'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createAgentOptions } from '../agent/config.ts'
-import { testCredentialStore } from '../helper/credentials.ts'
-import { newAgentId } from '../helper/management.ts'
+import { withHarness } from '../helper/harness.ts'
 import { createAgentModels } from '../models/index.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -52,32 +47,6 @@ function isSummaryRequest(body: string): boolean {
 
 function requestBody(init: RequestInit | undefined): string {
   return typeof init?.body === 'string' ? init.body : ''
-}
-
-/**
- * Open a Harness on a fresh object's storage. The object's own `Agent` harness stays passive:
- * nothing is submitted through it, so only this harness schedules work.
- */
-async function withHarness<T>(
-  settings: HarnessOptions['settings'],
-  run: (harness: Harness) => Promise<T>,
-): Promise<T> {
-  const agentId = await newAgentId()
-  const stub = env.AGENTS.getByName(agentId)
-  return runInDurableObject(stub, async (_instance, state) => {
-    const options = createAgentOptions(env, [], undefined, await testCredentialStore(agentId))
-    const storage = await openDurableObjectSqliteStorage(state.storage)
-    const harness = await Harness.open(
-      storage,
-      { ...options, settings: { ...options.settings, ...settings } },
-      context,
-    )
-    try {
-      return await run(harness)
-    } finally {
-      await harness.close(context)
-    }
-  })
 }
 
 async function answer(harness: Harness, requestId: string, content: string): Promise<void> {
