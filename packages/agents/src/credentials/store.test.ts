@@ -1,7 +1,7 @@
 /** Explicit resolution, live revocation, and lease-protected modifications. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
@@ -17,6 +17,8 @@ import { credentialFingerprint } from './encryption.ts'
 const db = managementDb(env.MANAGEMENT_DB)
 const kek = () => env.CREDENTIAL_KEK_V1
 
+afterEach(() => vi.restoreAllMocks())
+
 async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
   const agentId = await newAgentId()
   const { principal } = await credentialCall()
@@ -31,7 +33,9 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
             type: 'oauth',
             access: 'access-token',
             refresh: 'refresh-token',
-            expires: 2000,
+            expires: 600_000,
+            clientId: 'issued-client',
+            scopes: ['chatgpt.tokens.use.direct'],
           }),
     ],
     [alternative, 'sk-alternative-test-key'],
@@ -69,6 +73,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     open,
     settings,
     primary,
+    agentId,
     advance: (milliseconds: number) => {
       now += milliseconds
     },
@@ -108,11 +113,140 @@ it('uses only explicit references and checks status even with a warm cache and n
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })
 
-it('rejects an expired subscription even when another granted key exists', async () => {
-  const { store, advance } = await fixture('oauth_subscription')
-  expect(await store.read('openai')).toMatchObject({ type: 'oauth', access: 'access-token' })
-  advance(1001)
-  await expect(store.read('openai')).rejects.toThrow('credential expired')
+describe('OAuth resolution', () => {
+  it.each([undefined, 'rotated-refresh-token'])(
+    'refreshes an expired cached subscription and persists refresh token %s',
+    async (refreshToken) => {
+      const { store, advance, primary, open } = await fixture('oauth_subscription')
+      expect(await store.read('openai')).toMatchObject({ access: 'access-token' })
+      advance(600_000)
+      const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+        expect(String(url)).toBe('https://auth.openai.com/api/accounts/oauth/token')
+        expect(init?.method).toBe('POST')
+        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('refresh-token')
+        expect(new URLSearchParams(String(init?.body)).get('client_id')).toBe('issued-client')
+        const row = await db
+          .select()
+          .from(credentials)
+          .where(eq(credentials.credentialId, primary))
+          .get()
+        expect(row?.leaseId).toEqual(expect.any(String))
+        return Response.json({
+          access_token: 'refreshed-access-token',
+          ...(refreshToken ? { refresh_token: refreshToken } : {}),
+          expires_in: 3600,
+        })
+      })
+      const value = await store.read('openai')
+      expect(value).toEqual({
+        type: 'oauth',
+        access: 'refreshed-access-token',
+        refresh: refreshToken ?? 'refresh-token',
+        expires: 4_021_000,
+        clientId: 'issued-client',
+        scopes: ['chatgpt.tokens.use.direct'],
+      })
+      expect(await open().store.read('openai')).toEqual(value)
+      expect(fetch).toHaveBeenCalledTimes(1)
+      const row = await db
+        .select()
+        .from(credentials)
+        .where(eq(credentials.credentialId, primary))
+        .get()
+      expect(row).toMatchObject({
+        revision: 2,
+        status: 'active',
+        leaseId: null,
+        leaseExpiresAt: null,
+      })
+      expect(row?.ciphertext).not.toContain('refreshed-access-token')
+      expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toHaveLength(1)
+    },
+  )
+
+  it('serializes concurrent expired reads and refreshes only once', async () => {
+    const { store, open, advance, primary } = await fixture('oauth_subscription')
+    advance(600_000)
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      started.resolve()
+      await release.promise
+      return Response.json({
+        access_token: 'refreshed-access',
+        refresh_token: 'rotated-refresh',
+        expires_in: 3600,
+      })
+    })
+    const first = store.read('openai')
+    await started.promise
+    const waiting = Promise.withResolvers<void>()
+    const wait = scheduler.wait.bind(scheduler)
+    vi.spyOn(scheduler, 'wait').mockImplementation((delay, options) => {
+      waiting.resolve()
+      return wait(delay, options)
+    })
+    const second = open().store.read('openai')
+    await waiting.promise
+    release.resolve()
+    expect(await first).toMatchObject({ access: 'refreshed-access', refresh: 'rotated-refresh' })
+    expect(await second).toEqual(await first)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(
+      await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+    ).toMatchObject({ revision: 2, leaseId: null })
+  })
+
+  it.each(['invalid_grant', 'refresh_token_reused'])(
+    'records needs_reauth on %s, with guidance and no alternate key',
+    async (code) => {
+      const { store, advance, primary, open, agentId } = await fixture('oauth_subscription')
+      advance(600_000)
+      const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        Response.json(
+          {
+            error: { code, message: 'secret-provider-detail' },
+          },
+          { status: 400 },
+        ),
+      )
+      await expect(store.read('openai')).rejects.toThrow(
+        'credential_unavailable: openai: needs_reauth',
+      )
+      await expect(open().store.read('openai')).rejects.toThrow(
+        'nr agent credentials login --provider openai',
+      )
+      await expect(store.read('openai')).rejects.toThrow(
+        `nr agent credentials assign <new-credential-id> ${agentId}`,
+      )
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(await store.list()).toEqual([])
+      expect(
+        await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+      ).toMatchObject({ status: 'needs_reauth', revision: 1, leaseId: null, leaseExpiresAt: null })
+      const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+      expect(audit).toHaveLength(1)
+      expect(audit[0]).toMatchObject({ actorId: null, action: 'credential.needs_reauth' })
+      expect(JSON.stringify(audit)).not.toMatch(/secret-provider-detail|refresh-token|access-token/)
+    },
+  )
+
+  it.each([429, 500, 503])(
+    'keeps a transient HTTP %s failure active for a later retry',
+    async (status) => {
+      const { store, advance, primary } = await fixture('oauth_subscription')
+      advance(600_000)
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(Response.json({ error: 'server_error' }, { status }))
+        .mockResolvedValueOnce(Response.json({ access_token: 'retried-access', expires_in: 3600 }))
+      await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+      expect(
+        await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+      ).toMatchObject({ status: 'active', revision: 1, leaseId: null })
+      expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+      expect(await store.read('openai')).toMatchObject({ access: 'retried-access' })
+    },
+  )
 })
 
 it('retains decrypted values until invalidation or a fresh object instance', async () => {
