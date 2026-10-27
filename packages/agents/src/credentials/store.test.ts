@@ -200,7 +200,7 @@ describe('OAuth resolution', () => {
   })
 
   it.each(['invalid_grant', 'refresh_token_reused'])(
-    'records needs_reauth on %s, with guidance and no alternate key',
+    'records needs_reauth on %s, with structured identity and no alternate key',
     async (code) => {
       const { store, advance, primary, open, agentId } = await fixture('oauth_subscription')
       advance(600_000)
@@ -212,15 +212,19 @@ describe('OAuth resolution', () => {
           { status: 400 },
         ),
       )
-      await expect(store.read('openai')).rejects.toThrow(
-        'credential_unavailable: openai: needs_reauth',
-      )
-      await expect(open().store.read('openai')).rejects.toThrow(
-        'nr agent credentials login --provider openai',
-      )
-      await expect(store.read('openai')).rejects.toThrow(
-        `nr agent credentials assign <new-credential-id> ${agentId}`,
-      )
+      const failure = {
+        message: 'credential_unavailable: openai: needs_reauth',
+        cause: {
+          code: 'credential_unavailable',
+          status: 'needs_reauth',
+          provider: 'openai',
+          credentialId: primary,
+          agentId,
+        },
+      }
+      await expect(store.read('openai')).rejects.toMatchObject(failure)
+      await expect(open().store.read('openai')).rejects.toMatchObject(failure)
+      await expect(store.read('openai')).rejects.toMatchObject(failure)
       expect(fetch).toHaveBeenCalledTimes(1)
       expect(await store.list()).toEqual([])
       expect(

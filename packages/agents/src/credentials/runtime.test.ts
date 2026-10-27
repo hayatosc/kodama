@@ -79,7 +79,7 @@ it('sends with an expired subscription after one refresh, including after evicti
   ).toMatchObject({ status: 'active', revision: 2, leaseId: null })
 })
 
-it('refuses admission with reauthentication guidance after refresh rejection', async () => {
+it('refuses admission with structured reauthentication facts after refresh rejection', async () => {
   const call = await credentialCall()
   const credential = await putCredential(call, env, {
     requestId: 'runtime-rejection',
@@ -99,16 +99,26 @@ it('refuses admission with reauthentication guidance after refresh rejection', a
   const fetch = vi
     .spyOn(globalThis, 'fetch')
     .mockImplementation(async () => Response.json({ error: 'invalid_grant' }, { status: 400 }))
+  const failure = {
+    message: 'credential_unavailable: openai: needs_reauth',
+    cause: {
+      code: 'credential_unavailable',
+      status: 'needs_reauth',
+      provider: 'openai',
+      credentialId: credential.credentialId,
+      agentId,
+    },
+  }
   await expect(
     Promise.resolve(
       exports.default.sendMessage(agentId, { requestId: 'rejected', content: 'Hello' }),
     ),
-  ).rejects.toThrow('credential_unavailable: openai: needs_reauth')
+  ).rejects.toMatchObject(failure)
   await expect(
     Promise.resolve(
       exports.default.sendMessage(agentId, { requestId: 'still-rejected', content: 'Hello' }),
     ),
-  ).rejects.toThrow('nr agent credentials login --provider openai')
+  ).rejects.toMatchObject(failure)
   expect(fetch).toHaveBeenCalledTimes(1)
   expect(await exports.default.submission(agentId, 'rejected')).toBeUndefined()
 })
