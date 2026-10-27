@@ -87,10 +87,7 @@ describe('reconcileAgents', () => {
     expect((await cursor())?.valueJson).toBe(JSON.stringify(stuckIds.at(-2)))
     const attemptedIds = [...stuckIds, ...stuckIds.slice(0, 99)]
     expect(errors.mock.calls).toEqual(
-      attemptedIds.map((id) => [
-        `Reconciling agent ${id} failed`,
-        new TypeError(`Unknown version 1 of agent ${id}`),
-      ]),
+      attemptedIds.map((id) => [`Reconciling agent ${id} failed`, 'TypeError']),
     )
 
     const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()

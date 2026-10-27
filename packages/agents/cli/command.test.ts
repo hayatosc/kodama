@@ -19,6 +19,15 @@ describe('toCommand', () => {
     expect(command(['send', 'assistant', 'Hi'], { help: true })).toEqual({ action: 'help' })
   })
 
+  it('accepts local credential bootstrap without putting keys in arguments or the URL', () => {
+    const parsed = command(['dev', 'seed-credentials'])
+    expect(parsed).toEqual({ action: 'dev/seed-credentials' })
+    if (parsed.action !== 'dev/seed-credentials') throw new Error('Unexpected command')
+    const request = commandRequest(parsed, 'local-token', '{"openai":"opaque-provider-key"}')
+    expect(request.url).toBe('http://127.0.0.1:5173/cli/dev/seed-credentials')
+    expect(request.init.body).toBe('{"openai":"opaque-provider-key"}')
+  })
+
   it('reads seed, snapshot, and cancel', () => {
     expect(command(['seed'])).toEqual({ action: 'seed' })
     expect(command(['snapshot', 'assistant'])).toEqual({

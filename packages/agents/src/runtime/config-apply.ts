@@ -7,6 +7,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { AgentChange, Harness } from '@earendil-works/pi-durable'
@@ -104,11 +105,11 @@ async function applyHeld(deps: ApplyDeps): Promise<ApplyResult> {
   try {
     await applyAll(deps, held)
   } catch (error) {
-    console.error(`Applying configuration version ${held.version} failed`, error)
+    console.error(`Applying configuration version ${held.version} failed`, safeFailure(error))
     return { state: 'failed', appliedVersion: applied }
   }
   await deps.report(held.agentId, held.version).catch((error: unknown) => {
-    console.error('Reporting the applied configuration failed', error)
+    console.error('Reporting the applied configuration failed', safeFailure(error))
   })
   return { state: 'applied', appliedVersion: held.version }
 }

@@ -108,7 +108,7 @@ export const ExpectedVersionSchema = v.pipe(
 
 /** An optional comment of a version. */
 export const CommentSchema = v.optional(v.pipe(v.string(), v.maxLength(500)))
-/** A request ID: 1–128 letters, digits, `_`, or `-`. */
+/** A stable request ID of 1–128 safe characters, preserved verbatim for retries. */
 export const RequestIdSchema = idSchema('requestId', 128)
 
 /** Creation input; the flow validates settings against the model catalog. */

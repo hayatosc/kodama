@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type {
@@ -159,7 +160,7 @@ export class Agent extends DurableObject<AgentEnv> {
         parse: (value) => parseSettings(createAgentModels(), value),
       })
     } catch (error) {
-      console.error('Catching up with the registry failed', error)
+      console.error('Catching up with the registry failed', safeFailure(error))
     }
   }
 

@@ -15,6 +15,7 @@ export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
 
 /** The help text. */
 export const USAGE = `Usage:
+  nr agent dev seed-credentials < /secure/path/provider-keys.json
   nr agent seed
   nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
   nr agent snapshot <agent>
@@ -31,6 +32,7 @@ Ctrl+C disconnects; use cancel to stop the agent's work.`
 export type Command =
   | { action: 'help' }
   | { action: 'seed' }
+  | { action: 'dev/seed-credentials' }
   | { action: 'snapshot' | 'cancel'; agentRef: string }
   | { action: 'send'; agentRef: string; message: SendMessageRequest; events: boolean }
 
@@ -61,6 +63,8 @@ export function toCommand(
 ): Command {
   if (values.help || positionals.length === 0) return { action: 'help' }
   const [action, rawAgentRef, content] = positionals
+  if (action === 'dev' && rawAgentRef === 'seed-credentials' && positionals.length === 2)
+    return { action: 'dev/seed-credentials' }
   if (action !== 'seed' && action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
     throw new Error('Expected seed, send, snapshot, or cancel; see nr agent --help')
   }
@@ -83,14 +87,23 @@ export function toCommand(
 export function commandRequest(
   command: Exclude<Command, { action: 'help' }>,
   token: string,
+  credentialJson?: string,
 ): { url: string; init: RequestInit } {
-  const path = command.action === 'seed' ? 'seed' : `${command.action}/${command.agentRef}`
+  const path =
+    command.action === 'seed' || command.action === 'dev/seed-credentials'
+      ? command.action
+      : `${command.action}/${command.agentRef}`
   return {
     url: `${LOCAL_WORKER_URL}/cli/${path}`,
     init: {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: command.action === 'send' ? JSON.stringify(command.message) : undefined,
+      body:
+        command.action === 'send'
+          ? JSON.stringify(command.message)
+          : command.action === 'dev/seed-credentials'
+            ? credentialJson
+            : undefined,
       redirect: 'error',
     },
   }

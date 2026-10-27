@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, TaskId } from '@earendil-works/pi-durable'
 
@@ -137,7 +138,7 @@ export async function refreshRecovery(refresh: RecoveryRefresh): Promise<void> {
     void harness
       .waitForTask(id, BACKGROUND_CONTEXT)
       .then(refresh.refreshAgain)
-      .catch((error: unknown) => console.error('Agent recovery failed', error))
+      .catch((error: unknown) => console.error('Agent recovery failed', safeFailure(error)))
       .finally(() => watching.delete(id))
   }
 }

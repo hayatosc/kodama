@@ -1,5 +1,3 @@
-# Set the keys for the providers you use. Leave the others empty.
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-GEMINI_API_KEY=
-XAI_API_KEY=
+# Development only: replace with base64 of 32 random bytes (openssl rand -base64 32).
+CREDENTIAL_KEK_V1=
+# Provider keys are registered into local D1 through nr agent dev seed-credentials, never env.

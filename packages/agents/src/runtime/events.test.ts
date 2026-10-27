@@ -1,3 +1,4 @@
+/** Real RPC subscriptions stream partial assistant output and reconnect to durable state. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
@@ -32,6 +33,9 @@ it('streams generation, completion and reconnect state without polling', async (
   const agentId = await newAgentId()
   const events = readEvents(await exports.default.subscribe(agentId))
   const other = readEvents(await exports.default.subscribe(agentId))
+  const allowCompletion = Promise.withResolvers<void>()
+  let sawPartialBeforeCompletion = false
+  let providerCompleted = false
   try {
     expect((await events.next()).type).toBe('snapshot')
     expect((await other.next()).type).toBe('snapshot')
@@ -60,6 +64,8 @@ it('streams generation, completion and reconnect state without polling', async (
                   ),
                 )
               } else {
+                await allowCompletion.promise
+                providerCompleted = true
                 controller.enqueue(new TextEncoder().encode(body.slice(boundary)))
                 controller.close()
               }
@@ -69,7 +75,7 @@ it('streams generation, completion and reconnect state without polling', async (
         ),
     )
     const chat = new Response(
-      await exports.default.send(agentId, { requestId: 'sse', content: 'Hello' }),
+      await exports.default.send(agentId, { requestId: 'sse', content: 'Produce a greeting.' }),
     ).text()
     const received: string[] = []
     const [chatBody] = await Promise.all([
@@ -78,17 +84,27 @@ it('streams generation, completion and reconnect state without polling', async (
         let event = await events.next()
         while (event.type !== 'submission' || !JSON.stringify(event.data).includes('"done"')) {
           received.push(event.type)
+          if (
+            !providerCompleted &&
+            event.type === 'message_update' &&
+            JSON.stringify(event.data).includes(' from Kodama')
+          ) {
+            sawPartialBeforeCompletion = true
+            allowCompletion.resolve()
+          }
           event = await events.next()
         }
       })(),
     ])
+    expect(sawPartialBeforeCompletion).toBe(true)
     const chatEvents = decodeEvents(chatBody)
-    expect(chatEvents.map((event) => event.type)).toContain('message_update')
+    // Pi may coalesce same-tick updates, but must still expose the completed message.
+    expect(chatEvents.map((event) => event.type)).toContain('message_end')
     expect(chatEvents.at(-1)).toMatchObject({
       type: 'submission',
       data: { record: { status: 'done' } },
     })
-    expect(received).toContain('message_update')
+    expect(received).toContain('message_start')
     expect(received).toContain('message_end')
     await events.cancel()
     const reconnect = readEvents(await exports.default.subscribe(agentId))
@@ -100,6 +116,7 @@ it('streams generation, completion and reconnect state without polling', async (
       await reconnect.cancel()
     }
   } finally {
+    allowCompletion.resolve()
     await events.cancel()
     await other.cancel()
   }

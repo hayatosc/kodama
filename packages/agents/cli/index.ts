@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { CLI_OPTIONS, commandRequest, toCommand, USAGE } from './command.ts'
 import { readLocalToken } from './token.ts'
@@ -22,7 +23,11 @@ async function main(): Promise<void> {
   }
   let response: Response
   try {
-    const { url, init } = commandRequest(command, token)
+    const { url, init } = commandRequest(
+      command,
+      token,
+      command.action === 'dev/seed-credentials' ? readFileSync(0, 'utf8') : undefined,
+    )
     response = await fetch(url, init)
   } catch (error) {
     throw new Error('Cannot reach the local Worker. Start nr dev:agents first.', { cause: error })

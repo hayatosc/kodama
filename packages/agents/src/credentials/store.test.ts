@@ -11,7 +11,7 @@ import { newAgentId } from '../helper/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert } from './vault.ts'
 import { revokeCredential } from './management.ts'
-import { createCredentialStore, CREDENTIAL_CACHE_TTL } from './store.ts'
+import { createCredentialStore } from './store.ts'
 import { credentialFingerprint } from './encryption.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
@@ -69,7 +69,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     open,
     settings,
     primary,
-    advance: (milliseconds = CREDENTIAL_CACHE_TTL + 1) => {
+    advance: (milliseconds: number) => {
       now += milliseconds
     },
   }
@@ -115,17 +115,34 @@ it('rejects an expired subscription even when another granted key exists', async
   await expect(store.read('openai')).rejects.toThrow('credential expired')
 })
 
-it('expires and explicitly invalidates the decrypted cache', async () => {
-  const { store, primary, advance, invalidate } = await fixture()
+it('retains decrypted values until invalidation or a fresh object instance', async () => {
+  const { store, primary, advance, invalidate, open } = await fixture()
   await store.read('openai')
   await db
     .update(credentials)
     .set({ ciphertext: btoa('broken') })
     .where(eq(credentials.credentialId, primary))
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
-  advance()
-  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  advance(24 * 60 * 60 * 1000)
+  expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
+  await expect(open().store.read('openai')).rejects.toThrow('credential_unavailable')
   invalidate()
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+})
+
+it('drops an unassigned cached value rather than reviving it when its grant returns', async () => {
+  const { store, primary } = await fixture()
+  await store.read('openai')
+  const grants = await db
+    .delete(credentialGrants)
+    .where(eq(credentialGrants.credentialId, primary))
+    .returning()
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  await db
+    .update(credentials)
+    .set({ ciphertext: btoa('broken') })
+    .where(eq(credentials.credentialId, primary))
+  await db.insert(credentialGrants).values(grants)
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })
 

@@ -75,6 +75,6 @@ describe('coalescingRunner', () => {
     runner.start()
     await vi.waitFor(() => expect(runs).toBe(2))
 
-    expect(logged).toHaveBeenCalledWith('Runner failed', expect.any(Error))
+    expect(logged).toHaveBeenCalledWith('Runner failed', 'Error')
   })
 })

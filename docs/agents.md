@@ -48,7 +48,7 @@ packages/agents/
       memory/               MemoryAgent: its class, configuration, queue, and runner
     agent-object.ts         AgentObject, which selects a working or system agent by the object's name
     configuration/          per-agent configuration: validation and persistence
-    models/                 Pi provider catalog and Worker secret resolution
+    models/                 Pi provider catalog with explicit D1 credentials only
     tools/                  tool implementations and their registry
     memory/                 long-term memory (see memory.md)
     storage/                opening kodama's tables in each object's SQLite, and Pi's tables
@@ -138,23 +138,23 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                                                                                           | May import                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| lib                | `src/lib/`                                                                                                                      | nothing in `src/`                             |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                            | lib                                           |
-| settings           | `src/configuration/`, `src/models/`                                                                                             | lib, contracts, tool registry                 |
-| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                    | lib                                           |
-| storage            | `drizzle/`, `src/storage/`                                                                                                      | lib, memory contracts                         |
-| management         | `src/management/`, except `service/`                                                                                            | lib, contracts, settings, storage             |
-| credential storage | `src/credentials/`, except the management flows below                                                                           | lib, contracts, settings, storage, management |
-| memory store       | `src/memory/store/`                                                                                                             | lib, storage, memory contracts                |
-| memory             | the rest of `src/memory/`                                                                                                       | lib, contracts, storage, memory store         |
-| tool adapters      | `src/tools/`                                                                                                                    | lib, contracts, memory, memory store          |
-| runtime            | `src/runtime/`                                                                                                                  | all of the above                              |
-| agent              | `src/agent/`                                                                                                                    | all of the above                              |
-| system agents      | `src/system-agents/`                                                                                                            | all of the above, including Agent             |
-| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts` | all of the above                              |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                           | all of the above                              |
+| Layer              | Paths                                                                                                                                                           | May import                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| lib                | `src/lib/`                                                                                                                                                      | nothing in `src/`                             |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib                                           |
+| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, contracts, tool registry                 |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                    | lib                                           |
+| storage            | `drizzle/`, `src/storage/`                                                                                                                                      | lib, memory contracts                         |
+| management         | `src/management/`, except `service/`                                                                                                                            | lib, contracts, settings, storage             |
+| credential storage | `src/credentials/`, except the management flows below                                                                                                           | lib, contracts, settings, storage, management |
+| memory store       | `src/memory/store/`                                                                                                                                             | lib, storage, memory contracts                |
+| memory             | the rest of `src/memory/`                                                                                                                                       | lib, contracts, storage, memory store         |
+| tool adapters      | `src/tools/`                                                                                                                                                    | lib, contracts, memory, memory store          |
+| runtime            | `src/runtime/`                                                                                                                                                  | all of the above                              |
+| agent              | `src/agent/`                                                                                                                                                    | all of the above                              |
+| system agents      | `src/system-agents/`                                                                                                                                            | all of the above, including Agent             |
+| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts`, `src/credentials/bootstrap.ts` | all of the above                              |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                           | all of the above                              |
 
 Some consequences:
 
@@ -167,6 +167,8 @@ Some consequences:
   memory agent's configuration. Credential queries and helpers stay in `src/credentials/`;
   configuration writers in the service layer compose reverse-index statements in their batches.
   The lower management layer never imports credential storage.
+- Credential code stays in `src/credentials/`; contracts, settings, and memory stores do not depend
+  on credential storage or inspect credentials to rewrite content.
 - `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
   formatting. `src/tools/working-agent/memory.ts` serves working agents;
   `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's
@@ -437,18 +439,21 @@ revocation, narrower permissions, and pause and delete add their checks to the s
 and model catalogs. Provider and model IDs come from the installed Pi catalog, so updating Pi
 updates the catalog.
 
-Credentials are individual Worker secrets: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
-and `XAI_API_KEY`. They stay out of agent settings, storage, and RPC results.
+Provider credentials live only in the management D1 vault, envelope-encrypted with a per-row
+DEK wrapped by the single `CREDENTIAL_KEK_V1`. Configuration carries credential UUIDs,
+never values. `AgentService` methods register, assign, revoke and replace both credential kinds;
+any registered agent may call them, with its identity recorded in audit. See
+[credentials.md](credentials.md) for authorization, auditing, cache bounds and the KEK runbook.
 
-`sendMessage` checks that the selected provider has credentials before it admits input.
+Working agents and the memory agent use the same D1 `CredentialStore`. Resolution uses the
+version's sole provider reference and requires a usable grant. Missing, expired, revoked or
+unassigned credentials stop the request with `credential_unavailable`. Creation and configuration updates validate
+assignments; `sendMessage` checks authentication before admitting input. No environment variable,
+local credential file, shared default or implicit provider fallback is consulted.
 
-To support another provider:
-
-1. Add its secret binding in `cloudflare.config.ts`.
-2. Allow its environment name in `src/models/index.ts`.
-
-Only environment-based authentication is supported. Interactive OAuth login and local credential
-files are not.
+Pi's catalog supplies additional providers without new secret bindings. Interactive OAuth login
+and provider refresh are deferred to the subscription integration; the lease-based store is ready
+for it.
 
 The memory agent's model is set by its versions like any agent's. `MEMORY_MODEL_PROVIDER` and
 `MEMORY_MODEL_ID` only give the seed's version 1; when they are empty, it uses the default model.
@@ -650,7 +655,7 @@ Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 ```sh
 ni
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
-# Fill in the API keys of the providers you use.
+# Set CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
 nr dev:agents
 ```
 
@@ -675,15 +680,11 @@ so only one process is using its local storage.
 
 ### Local agent CLI
 
-First initialize a fresh database through a trusted service binding with registered credential
-IDs passed explicitly to `AgentService.seed({ primary: { openai: credentialId } })`, as described
-under deployment below. At this runtime layer, the CLI cannot bootstrap credentials itself;
-PR #16 adds the local credential bootstrap command. The commands below assume that initial seed
-has completed.
-
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
+# JSON maps provider IDs to keys; keep the file outside the repository with mode 0600.
+nr agent dev seed-credentials < /secure/path/provider-keys.json
 nr agent seed
 nr agent send assistant "Hello!"
 nr agent send assistant "Continue the conversation."
@@ -698,7 +699,9 @@ nr agent --help
 The CLI works like this:
 
 - `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the first agent, slug
-  `assistant`; a `send` to a slug runs the seed first if needed.
+  `assistant`. Run `dev seed-credentials` first: initial creation requires assigned credentials.
+  The development-only command reads keys from stdin, encrypts them into local D1, seeds the
+  registry, and assigns them to both working and memory agents; its response contains IDs only.
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
@@ -776,15 +779,14 @@ From `packages/agents`:
    `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
    `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
    check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
-4. Set only `CREDENTIAL_KEK_V1` as a Worker secret (base64 of 32 random bytes). Provider
-   credentials belong in the encrypted management D1 vault, never Worker secrets or `.dev.vars`.
+4. Provision `CREDENTIAL_KEK_V1` externally as a base64-encoded random 32-byte key. The Worker
+   reads it only; it cannot manage Worker Secrets. See the operational policy in
+   [credentials.md](credentials.md); provider keys are never Worker secrets.
 5. Deploy with `nr deploy`.
-6. From a trusted Worker service binding, register credentials with `AgentService.putCredential`.
-   Pass the returned IDs explicitly to `AgentService.seed({ primary: { openai: credentialId } })`
-   for the default working and memory models. Include a reference for every selected provider.
-   Seed creates the initial grants atomically and is idempotent; an empty installation cannot
-   be initialized by calling `seed()` without references. The local credential bootstrap command
-   is introduced by the following credential-hardening layer (PR #16), not this runtime layer.
+6. Through the trusted RPC boundary, register the credential with `putCredential`, then call
+   `AgentService.seed({ primary: { openai: credentialId } })`; it is idempotent.
+   Supply references for each configured default/memory provider. No owner role is required;
+   the local registration adapter is not deployed.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the
@@ -834,11 +836,16 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
   other than `seed`.
 - `AgentService` admits only registered working agents, so an unknown or mistyped ID never creates
   an object.
-- Provider credentials are Worker secrets, outside agent settings and RPC results. Never commit
-  `.dev.vars`, credentials, or generated `.cloudflare/` state.
+- Provider credentials are encrypted D1 rows, outside settings and RPC results. Only
+  `CREDENTIAL_KEK_V1` is a Worker secret. Never commit `.dev.vars`, credentials or generated local
+  state.
+- Outputs and stored content are not redacted: credentials are supplied only for provider
+  authentication, not model context or result fields. Provider output streams without a redaction
+  buffer. Do not paste secrets into ordinary content. Credential background logs contain categories,
+  not raw exception objects (see [credentials.md](credentials.md#leak-prevention-boundaries)).
 - Untrusted RPC input is validated with valibot at the boundary.
-- Long-term memory does not yet redact secrets or reject text written as instructions; a shared
-  space accepts only records that two agents keep (see [memory.md](memory.md#shared-memory)).
+- A shared space accepts only records that two agents
+  keep (see [memory.md](memory.md#shared-memory)).
 
 ## References
 

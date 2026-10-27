@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
@@ -59,7 +60,10 @@ export async function openHarness(
   const storage = await openDurableObjectSqliteStorage(ctx.storage)
   const harness = await Harness.open(
     storage,
-    { ...options, onReport: (error) => console.error('Agent background task failed', error) },
+    {
+      ...options,
+      onReport: (error) => console.error('Agent background task failed', safeFailure(error)),
+    },
     context,
   )
   void harness.closed.then((end) => {

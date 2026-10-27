@@ -4,6 +4,8 @@
  * @module
  */
 
+import { safeFailure } from './errors.ts'
+
 /** Run each operation after the previous one settles, whether it succeeded or failed. */
 export function serialQueue(): <T>(operation: () => Promise<T>) => Promise<T> {
   let tail: Promise<unknown> = Promise.resolve()
@@ -30,7 +32,7 @@ export function coalescingRunner(
       return
     }
     current = work()
-      .catch((error: unknown) => console.error(label, error))
+      .catch((error: unknown) => console.error(label, safeFailure(error)))
       .finally(() => {
         current = undefined
         if (!again) return

@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { safeFailure } from '../../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { LocalDb } from '../../storage/local.ts'
@@ -30,7 +31,7 @@ async function enqueueQuietly(deps: PruneDeps, job: unknown): Promise<void> {
   try {
     await deps.memoryAgent().enqueue(job)
   } catch (error) {
-    console.error('Memory job enqueue failed during pruning', error)
+    console.error('Memory job enqueue failed during pruning', safeFailure(error))
   }
 }
 

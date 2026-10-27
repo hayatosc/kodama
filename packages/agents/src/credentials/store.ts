@@ -1,5 +1,5 @@
 /**
- * Pi credential storage: explicit version references, live grants, bounded decrypted cache,
+ * Pi credential storage: explicit version references, live grants, instance-local decrypted cache,
  * and D1 leases for cross-object read-modify-write. No ambient credentials are consulted.
  *
  * @module
@@ -14,8 +14,6 @@ import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
 
-/** Maximum lifetime of decrypted values; grants and status are checked on every read as well. */
-export const CREDENTIAL_CACHE_TTL = 5 * 60 * 1000
 const LEASE_MS = 30_000
 
 /** Build one object-local store. The settings getter must return the applied version, not desired. */
@@ -26,7 +24,7 @@ export function createCredentialStore(
   kek: () => string,
   now: () => number = Date.now,
 ): { store: CredentialStore; invalidate: () => void } {
-  const cache = new Map<string, { revision: number; expires: number; value: Credential }>()
+  const cache = new Map<string, { revision: number; value: Credential }>()
   let generation = 0
   const invalidate = () => {
     generation += 1
@@ -35,6 +33,8 @@ export function createCredentialStore(
 
   async function selected(provider: string) {
     const refs = (await settings())?.credentials
+    const assigned = Object.values(refs?.primary ?? {})
+    if ([...cache.keys()].some((id) => !assigned.includes(id))) invalidate()
     const id = refs?.primary[provider]
     if (!id) return undefined
     const row = await db
@@ -55,6 +55,7 @@ export function createCredentialStore(
         ),
       )
       .get()
+    if (!row) invalidate()
     return row?.credential
   }
 
@@ -113,22 +114,15 @@ export function createCredentialStore(
       if (!row)
         throw new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
       const cached = cache.get(row.credentialId)
+      if (cached && cached.revision !== row.revision) cache.delete(row.credentialId)
       const before = generation
-      const value =
-        cached && cached.revision === row.revision && cached.expires > now()
-          ? cached.value
-          : await plaintext(row)
-      if (value.type === 'oauth' && value.expires <= now())
+      const value = cached?.revision === row.revision ? cached.value : await plaintext(row)
+      if (value.type === 'oauth' && value.expires <= now()) {
+        cache.delete(row.credentialId)
         throw new Error(`credential_unavailable: ${provider}: credential expired`)
-      if (
-        before === generation &&
-        (!cached || cached.revision !== row.revision || cached.expires <= now())
-      )
-        cache.set(row.credentialId, {
-          revision: row.revision,
-          expires: now() + CREDENTIAL_CACHE_TTL,
-          value,
-        })
+      }
+      if (before === generation && cached?.revision !== row.revision)
+        cache.set(row.credentialId, { revision: row.revision, value })
       return structuredClone(value)
     },
     async list() {

@@ -99,7 +99,10 @@ export function recordSharedRejection(
       result,
       statements: [
         insertOp(db, context, 'shared_rejected', result),
-        recordLedger(db, context, 'shared_rejected', scope, { content, reason }),
+        recordLedger(db, context, 'shared_rejected', scope, {
+          content,
+          reason,
+        }),
       ],
     }
   })

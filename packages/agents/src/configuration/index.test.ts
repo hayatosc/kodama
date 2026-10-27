@@ -1,6 +1,6 @@
 import { uuidv7 } from '../lib/uuid.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { agentSettingsSchema, defaultAgentSettings } from './index.ts'
+import { agentSettingsSchema, defaultAgentSettings, parseSettings } from './index.ts'
 import { createAgentModels } from '../models/index.ts'
 import { parseInput } from '../validation.ts'
 import { evictDurableObject } from 'cloudflare:test'
@@ -20,6 +20,22 @@ const valid = defaultAgentSettings({
 const credentialId = uuidv7()
 
 describe('agent settings schema', () => {
+  it.each(['labels', 'sharedSpaces'] as const)(
+    'preserves ordinary hyphenated %s identifiers',
+    (field) => {
+      const input = { ...valid, [field]: ['xai-research'] }
+      expect(() => parseInput(schema, input)).not.toThrow()
+      expect(parseSettings(createAgentModels(), input)[field]).toEqual(['xai-research'])
+    },
+  )
+
+  it('keeps unknown credential-shaped free text stable across settings reloads', () => {
+    const models = createAgentModels()
+    const settings = parseSettings(models, { ...valid, systemPrompt: 'Keep sk-private123456 safe' })
+    expect(settings.systemPrompt).toBe('Keep sk-private123456 safe')
+    expect(parseSettings(models, settings)).toEqual(settings)
+  })
+
   it('accepts complete settings with every optional field in its one shape', () => {
     const settings = {
       ...valid,

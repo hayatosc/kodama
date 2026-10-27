@@ -898,8 +898,9 @@ turns it into a `conflict` instead of being undone.
 - Whether `databaseSize` falls after pruning in production is not verified. Locally, it fell from
   20.5 MB to 5.1 MB.
 - `submissions` are never pruned; one row per input stays for the life of the agent.
-- Secrets in remembered text are not redacted, and text written as instructions is not rejected.
-  The archive keeps raw entries as they were.
+- Conversation, memory-record, and skill content is not redacted. Credentials are kept outside model
+  context and result fields; secrets pasted into ordinary content are not detected or removed.
+  Text written as instructions is not rejected. The archive keeps raw entries as they were.
 - 「プラクティス」 alone does not match 「ベストプラクティス」.
 - `history_search` has no ranking across all ranges, and finding something old can take several
   calls with a continuation `cursor`.

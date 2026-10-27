@@ -41,10 +41,6 @@ export const agentConfig = defineWorker({
     // The memory agent's initial model, read by the seed; empty values use the default model above.
     MEMORY_MODEL_PROVIDER: bindings.text(''),
     MEMORY_MODEL_ID: bindings.text(''),
-    OPENAI_API_KEY: bindings.secret(),
-    ANTHROPIC_API_KEY: bindings.secret(),
-    GEMINI_API_KEY: bindings.secret(),
-    XAI_API_KEY: bindings.secret(),
     CLI_TOKEN: bindings.text(''),
   },
 })

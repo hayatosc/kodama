@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { safeFailure } from '../lib/errors.ts'
 import type { Harness } from '@earendil-works/pi-durable'
 import { setAlarm, setAlarmNoLaterThan } from '../runtime/alarms.ts'
 import { appliedSettings } from '../runtime/config-apply.ts'
@@ -39,7 +40,7 @@ export async function refreshMemory(
     if (options.onlyIfChanged === true) await refreshAlwaysLoadedIfChanged(memory)
     else await refreshAlwaysLoaded(memory)
   } catch (error) {
-    console.error('Long-term memory refresh failed', error)
+    console.error('Long-term memory refresh failed', safeFailure(error))
   }
 }
 

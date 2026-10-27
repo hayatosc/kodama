@@ -183,7 +183,8 @@ export function defaultAgentSettings(env: DefaultModelEnv): AgentSettings {
  * @throws {@link TypeError} When `value` is not valid settings for `models`.
  */
 export function parseSettings(models: Models, value: unknown): AgentSettings {
-  return parseInput(agentSettingsSchema(models), value)
+  const schema = agentSettingsSchema(models)
+  return parseInput(schema, value)
 }
 
 /**

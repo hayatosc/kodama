@@ -4,6 +4,15 @@
  * @module
  */
 
+/** Log only a category; exception messages, causes and stacks may contain secrets. */
+export function safeFailure(error: unknown): string {
+  return error instanceof TypeError
+    ? 'TypeError'
+    : error instanceof Error
+      ? 'Error'
+      : 'Unknown failure'
+}
+
 /** Messages of an error and its causes; Drizzle wraps the D1 error in `cause`. */
 export function errorText(error: unknown): string {
   const parts: string[] = []

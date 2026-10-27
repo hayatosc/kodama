@@ -1,18 +1,18 @@
-/** Agent-local credential resolution, isolated from model and tool configuration. @module */
+/** Agent-local credential resolution through the live management database. @module */
 import type { AgentEnv } from '../env.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { managementDb } from '../management/db.ts'
 import { agentRowByObjectName } from '../management/registry.ts'
 import { createCredentialStore } from './store.ts'
 
-/** Resolve the registry identity lazily so dedicated object names never become grant IDs. */
+/** Working and dedicated agents resolve the registry ID through the same store. */
 export function agentCredentialStore(
   env: AgentEnv,
   objectName: () => string,
   settings: () => Promise<AgentSettings | undefined>,
 ) {
   const db = managementDb(env.MANAGEMENT_DB)
-  const handle = createCredentialStore(
+  return createCredentialStore(
     db,
     async () => {
       const row = await agentRowByObjectName(db, objectName())
@@ -22,5 +22,4 @@ export function agentCredentialStore(
     settings,
     () => env.CREDENTIAL_KEK_V1,
   )
-  return handle
 }
