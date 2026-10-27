@@ -20,7 +20,7 @@ it.each(['api_key', 'oauth_subscription'] as const)(
         ? 'sk-local-test-plaintext-123456'
         : JSON.stringify({
             type: 'oauth',
-            access: 'access-123456',
+            access: 'provider-access-123456',
             refresh: 'refresh-secret',
             expires: Date.now() + 60000,
             accountId: 'account-1',
@@ -68,8 +68,13 @@ it.each(['api_key', 'oauth_subscription'] as const)(
   },
 )
 
-it('does not expose an offline secret verifier or a complete short OAuth token', async () => {
-  const secret = JSON.stringify({ type: 'oauth', access: 'abcd', refresh: 'r', expires: 123 })
+it('does not expose an offline secret verifier or a suffix of a minimum-length OAuth token', async () => {
+  const secret = JSON.stringify({
+    type: 'oauth',
+    access: 'abcdefgh',
+    refresh: 'refresh1',
+    expires: 123,
+  })
   const fingerprints = []
   for (const key of [kek, btoa('11234567890123456789012345678901')]) {
     const { statement } = await credentialInsert(
@@ -102,16 +107,64 @@ it('preserves provider OAuth fields and rejects malformed payloads without echoi
       'oauth_subscription',
       JSON.stringify({
         type: 'oauth',
-        access: 'a',
-        refresh: 'r',
+        access: 'access12',
+        refresh: 'refresh1',
         expires: 123,
         accountId: 'account-1',
       }),
     ),
-  ).toEqual({ type: 'oauth', access: 'a', refresh: 'r', expires: 123, accountId: 'account-1' })
+  ).toEqual({
+    type: 'oauth',
+    access: 'access12',
+    refresh: 'refresh1',
+    expires: 123,
+    accountId: 'account-1',
+  })
   expect(() => parseCredential('oauth_subscription', 'secret-value')).toThrow(
     'credential_unavailable: invalid credential payload',
   )
+})
+
+it.each(['access', 'refresh'] as const)(
+  'enforces the OAuth %s boundary before encrypted registration',
+  async (field) => {
+    for (const length of [5, 7, 8]) {
+      const secret = JSON.stringify({
+        type: 'oauth',
+        access: 'access12',
+        refresh: 'refresh1',
+        expires: 123,
+        [field]: 'x'.repeat(length),
+      })
+      const insert = credentialInsert(
+        db,
+        {
+          credentialId: uuidv7(),
+          kind: 'oauth_subscription',
+          provider: 'openai',
+          ownerId: null,
+          revision: 1,
+        },
+        secret,
+        kek,
+        Date.now(),
+      )
+      if (length < 8) await expect(insert).rejects.toThrow('invalid credential payload')
+      else await expect(insert).resolves.toHaveProperty('statement')
+    }
+  },
+)
+
+it('does not expose a suffix of a minimum-length API key', async () => {
+  const { statement } = await credentialInsert(
+    db,
+    { credentialId: uuidv7(), kind: 'api_key', provider: 'openai', ownerId: null, revision: 1 },
+    '12345678',
+    kek,
+    Date.now(),
+  )
+  const [rows] = await db.batch([statement])
+  expect(rows[0]?.last4).toBe('')
 })
 
 it.each([false, true])(
