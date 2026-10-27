@@ -18,7 +18,7 @@ import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7, UUID_PATTERN } from '../lib/uuid.ts'
 import { isConstraintError } from '../lib/errors.ts'
 import { credentialFingerprint } from './encryption.ts'
-import { parseAgentId } from '../validation.ts'
+import { parseAgentId, RequestIdSchema } from '../validation.ts'
 import { invalidateCredential } from './invalidation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
@@ -43,7 +43,7 @@ export function credentialActor(call: ManagementCall) {
 
 const putSchema = v.object({
   kind: v.optional(v.picklist(['api_key', 'oauth_subscription']), 'api_key'),
-  requestId: v.pipe(v.string(), v.minLength(1), v.maxLength(128)),
+  requestId: RequestIdSchema,
   provider: v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]{0,63}$/)),
   secret: v.pipe(v.string(), v.minLength(8), v.maxLength(16384)),
   ownerScope: v.optional(v.picklist(['installation', 'principal']), 'installation'),

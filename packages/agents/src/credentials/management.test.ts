@@ -62,7 +62,9 @@ it('rejects credential-shaped request IDs before persisting audit or credential 
   const before = await db.select().from(credentials)
   const audits = await db.select().from(auditLog)
   const requestId = `sk-${'x'.repeat(32)}`
-  await expect(putCredential(call, env, { requestId, provider: 'openai', secret: 'safe-test-key' })).rejects.toThrow('requestId must not contain credential text')
+  await expect(
+    putCredential(call, env, { requestId, provider: 'openai', secret: 'safe-test-key' }),
+  ).rejects.toThrow('requestId must not contain credential text')
   expect(await db.select().from(credentials)).toEqual(before)
   expect(await db.select().from(auditLog)).toEqual(audits)
 })
