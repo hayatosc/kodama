@@ -130,16 +130,17 @@ it('rejects an expired subscription even when another granted key exists', async
   await expect(store.read('openai')).rejects.toThrow('credential expired')
 })
 
-it('expires and explicitly invalidates the decrypted cache', async () => {
-  const { store, primary, advance, invalidate } = await fixture()
+it('retains decrypted values until invalidation or a fresh object instance', async () => {
+  const { store, primary, advance, invalidate, open } = await fixture()
   await store.read('openai')
   await db
     .update(credentials)
     .set({ ciphertext: btoa('broken') })
     .where(eq(credentials.credentialId, primary))
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
-  advance()
-  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  advance(24 * 60 * 60 * 1000)
+  expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
+  await expect(open().store.read('openai')).rejects.toThrow('credential_unavailable')
   invalidate()
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })

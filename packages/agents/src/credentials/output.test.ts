@@ -59,6 +59,22 @@ it('removes credential-bearing tool argument keys before persistence and SSE', a
   expect(JSON.stringify(snapshot)).not.toContain('test-key')
 })
 
+it('redacts an opaque credential echoed by a request completing after six minutes', async () => {
+  const id = await newAgentId()
+  vi.mocked(globalThis.fetch).mockImplementationOnce(async () => {
+    const started = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(started + 6 * 60 * 1000)
+    return modelResponse('Late response echoes test-key')
+  })
+  const events = await new Response(
+    await exports.default.send(id, { requestId: 'long-request', content: 'Hello' }),
+  ).text()
+  expect(events).not.toContain('test-key')
+  expect(events).toContain('Late response echoes [REDACTED]')
+  using snapshot = await exports.default.snapshot(id)
+  expect(JSON.stringify(snapshot)).not.toContain('test-key')
+})
+
 it('redacts provider error bodies before unanswered details and SSE', async () => {
   const id = await newAgentId()
   vi.mocked(globalThis.fetch).mockImplementation(
