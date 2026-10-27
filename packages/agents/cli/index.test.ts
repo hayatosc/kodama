@@ -46,6 +46,13 @@ async function run(...args: string[]) {
 }
 
 describe('CLI entrypoint', () => {
+  it('preserves safe command errors while refusing unsupported login providers', async () => {
+    await run('credentials', 'login', '--provider', 'xai')
+    expect(process.exitCode).toBe(1)
+    expect(console.error).toHaveBeenCalledWith('ChatGPT login requires --provider openai')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('logs in and registers OAuth before any seed, using a lazy installation identity', async () => {
     const id = '019a0000-0000-7000-8000-000000000001'
     fetchMock.mockImplementation(async (input) => {
