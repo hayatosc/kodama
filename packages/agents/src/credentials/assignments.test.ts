@@ -31,6 +31,9 @@ it('pushes the committed version even when credential invalidation rejects', asy
     const row = await call.db.select().from(agents).where(eq(agents.agentId, agentId)).get()
     expect(row?.appliedVersion).toBe(row?.currentVersion)
     expect(error).toHaveBeenCalled()
+    await runInDurableObject(env.AGENTS.getByName(agentId), (instance) => {
+      expect(instance.invalidateCredentials).toHaveBeenCalledOnce()
+    })
   } finally {
     await runInDurableObject(env.AGENTS.getByName(agentId), () => {
       vi.restoreAllMocks()
