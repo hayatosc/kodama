@@ -5,7 +5,7 @@ export function redactSecrets(text: string, known: Iterable<string> = []): strin
   let safe = text
   for (const secret of known) if (secret.length >= 8) safe = safe.split(secret).join('[REDACTED]')
   return safe
-    .replace(/(?:sk|xai)-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
+    .replace(/(?:sk|xai)-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{30,}/g, '[REDACTED]')
     .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED]')
 }
 

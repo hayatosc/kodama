@@ -838,8 +838,9 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
   other than `seed`.
 - `AgentService` admits only registered working agents, so an unknown or mistyped ID never creates
   an object.
-- Provider credentials are encrypted D1 rows, outside settings and RPC results. Only versioned
-  KEKs are Worker secrets. Never commit `.dev.vars`, credentials or generated local state.
+- Provider credentials are encrypted D1 rows, outside settings and RPC results. Only
+  `CREDENTIAL_KEK_V1` is a Worker secret. Never commit `.dev.vars`, credentials or generated local
+  state.
 - Known credential values and API-key/JWT patterns are redacted before conversation persistence,
   tool results, SSE, memory records and skills. Provider output is buffered until its full message
   can be redacted, so split keys do not escape in deltas; SSE retains lifecycle/completion events,

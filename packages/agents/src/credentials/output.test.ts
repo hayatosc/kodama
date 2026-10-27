@@ -17,10 +17,22 @@ it('redacts compaction completion content and error bodies', async () => {
   const model = models.getModels('openai')[0]
   if (!model) throw new Error('Expected model')
   const message: AssistantMessage = {
-    role: 'assistant', api: model.api, model: model.id, provider: model.provider,
+    role: 'assistant',
+    api: model.api,
+    model: model.id,
+    provider: model.provider,
     content: [{ type: 'text', text: 'Summary opaque-provider-secret' }],
-    stopReason: 'error', errorMessage: 'Failure opaque-provider-secret', timestamp: 0,
-    usage: { input: 0, output: 0, totalTokens: 0, cacheRead: 0, cacheWrite: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: 'error',
+    errorMessage: 'Failure opaque-provider-secret',
+    timestamp: 0,
+    usage: {
+      input: 0,
+      output: 0,
+      totalTokens: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
   }
   vi.spyOn(models, 'completeSimple').mockResolvedValue(message)
   const redactor = createRedactor()
@@ -31,17 +43,28 @@ it('redacts compaction completion content and error bodies', async () => {
   expect(result.errorMessage).toBe('Failure [REDACTED]')
 })
 
-it.each(['completeSimple', 'fetchDeferred'] as const)('redacts rejected %s failures before Pi records them', async (method) => {
-  const models = createAgentModels()
-  const model = models.getModels('openai')[0]
-  if (!model) throw new Error('Expected model')
-  vi.spyOn(models, method).mockRejectedValue(new Error('Rejected opaque-provider-secret'))
-  const redactor = createRedactor()
-  redactor.remember('opaque-provider-secret')
-  const guarded = redactedModels(models, redactor.text)
-  const result = method === 'completeSimple' ? guarded.completeSimple(model, { messages: [] }) : guarded.fetchDeferred(model, { provider: model.provider, modelId: model.id, api: model.api, id: 'deferred' })
-  await expect(result).rejects.toThrow('Rejected [REDACTED]')
-})
+it.each(['completeSimple', 'fetchDeferred'] as const)(
+  'redacts rejected %s failures before Pi records them',
+  async (method) => {
+    const models = createAgentModels()
+    const model = models.getModels('openai')[0]
+    if (!model) throw new Error('Expected model')
+    vi.spyOn(models, method).mockRejectedValue(new Error('Rejected opaque-provider-secret'))
+    const redactor = createRedactor()
+    redactor.remember('opaque-provider-secret')
+    const guarded = redactedModels(models, redactor.text)
+    const result =
+      method === 'completeSimple'
+        ? guarded.completeSimple(model, { messages: [] })
+        : guarded.fetchDeferred(model, {
+            provider: model.provider,
+            modelId: model.id,
+            api: model.api,
+            id: 'deferred',
+          })
+    await expect(result).rejects.toThrow('Rejected [REDACTED]')
+  },
+)
 
 it('redacts known assigned values and key patterns before conversations and SSE are written', async () => {
   const id = await newAgentId()

@@ -21,7 +21,10 @@ not CHECK constraints, enforce concurrency control.
 
 Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
 `assignCredential` through a trusted private service binding. API keys and OAuth subscriptions use
-the same encrypted storage and metadata-only results. OAuth login and refresh-provider integration
+the same encrypted storage and metadata-only results. OAuth access and refresh tokens must each
+contain at least eight characters, both at registration and modification; shorter values are rejected
+rather than ambiguously matched against protocol text. Metadata includes a last-four suffix only
+for tokens with at least sixteen characters. OAuth login and refresh-provider integration
 are separate work. There is no credential rotation RPC or automatic reassignment workflow.
 
 Unassignment removes an agent's grant and reference. Revocation affects all grants and atomically

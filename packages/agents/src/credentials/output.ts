@@ -22,9 +22,19 @@ export function redactedModels(
   models: Models,
   redact: (text: string) => string = redactSecrets,
 ): Models {
+  async function guarded<T extends object>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return redactData(await operation(), redact)
+    } catch (error) {
+      throw new Error(redact(error instanceof Error ? error.message : 'Provider request failed'))
+    }
+  }
+  const completeSimple = models.completeSimple.bind(models)
+  models.completeSimple = (model, context, options) =>
+    guarded(() => completeSimple(model, context, options))
   const fetchDeferred = models.fetchDeferred.bind(models)
-  models.fetchDeferred = async (model, handle, options) =>
-    redactData(await fetchDeferred(model, handle, options), redact)
+  models.fetchDeferred = (model, handle, options) =>
+    guarded(() => fetchDeferred(model, handle, options))
   const streamSimple = models.streamSimple.bind(models)
   models.streamSimple = (model, context, options) => {
     const output = createAssistantMessageEventStream()
