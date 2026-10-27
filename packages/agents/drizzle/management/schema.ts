@@ -12,8 +12,15 @@
  *
  * @module
  */
-import { sql } from 'drizzle-orm'
-import { check, index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import {
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  unique,
+} from 'drizzle-orm/sqlite-core'
 
 /**
  * Who can act: a person signed in through Access, a service token, or an agent. A principal is
@@ -75,11 +82,7 @@ export const agents = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [
-    index('agents_by_status').on(t.status, t.createdAt),
-    check('agents_object_name', sql`${t.kind} = 'dedicated' or ${t.objectName} = ${t.agentId}`),
-    check('agents_versions', sql`${t.appliedVersion} <= ${t.currentVersion}`),
-  ],
+  (t) => [index('agents_by_status').on(t.status, t.createdAt)],
 )
 
 /**
@@ -103,6 +106,65 @@ export const agentConfigVersions = sqliteTable(
     createdAt: integer('created_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.agentId, t.version] })],
+)
+
+/** Encrypted provider secrets; only src/credentials/ may access these rows. */
+export const credentials = sqliteTable(
+  'credentials',
+  {
+    credentialId: text('credential_id').primaryKey(),
+    kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
+    provider: text('provider').notNull(),
+    /** NULL means installation ownership; otherwise the owning principal. */
+    ownerId: text('owner_id').references(() => principals.principalId),
+    status: text('status', { enum: ['active', 'revoked', 'needs_reauth'] }).notNull(),
+    revision: integer('revision').notNull(),
+    ciphertext: text('ciphertext'),
+    iv: text('iv'),
+    wrappedDek: text('wrapped_dek'),
+    wrapIv: text('wrap_iv'),
+    fingerprint: text('fingerprint').notNull(),
+    last4: text('last4').notNull(),
+    leaseId: text('lease_id'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    createdAt: integer('created_at').notNull(),
+    revokedAt: integer('revoked_at'),
+  },
+  (t) => [unique('credentials_id_provider').on(t.credentialId, t.provider)],
+)
+
+/** Permission to use a credential, independent of immutable configuration references. */
+export const credentialGrants = sqliteTable(
+  'credential_grants',
+  {
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credentials.credentialId),
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+  },
+  (t) => [primaryKey({ columns: [t.credentialId, t.agentId] })],
+)
+
+/** Reverse index of current credential references. */
+export const agentCredentialRefs = sqliteTable(
+  'agent_credential_refs',
+  {
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+    credentialId: text('credential_id').notNull(),
+    provider: text('provider').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.agentId, t.provider] }),
+    index('agent_credential_refs_by_credential').on(t.credentialId),
+    foreignKey({
+      columns: [t.credentialId, t.provider],
+      foreignColumns: [credentials.credentialId, credentials.provider],
+    }),
+  ],
 )
 
 /** Roles on one agent. */

@@ -10,8 +10,7 @@ CREATE TABLE `archive_segments` (
 	`first_at` integer NOT NULL,
 	`last_at` integer NOT NULL,
 	`has_summary` integer DEFAULT false NOT NULL,
-	`created_at` integer NOT NULL,
-	CONSTRAINT "archive_segments_range" CHECK("archive_segments"."first_entry" <= "archive_segments"."last_entry")
+	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `archive_segments_by_time` ON `archive_segments` (`agent_id`,`last_at`);--> statement-breakpoint

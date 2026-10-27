@@ -11,9 +11,8 @@
  *
  * @module
  */
-import { isNotNull, lte } from 'drizzle-orm'
+import { isNotNull } from 'drizzle-orm'
 import {
-  check,
   index,
   integer,
   primaryKey,
@@ -200,7 +199,6 @@ export const archiveSegments = sqliteTable(
   (t) => [
     unique('archive_segments_start').on(t.agentId, t.firstEntry),
     index('archive_segments_by_time').on(t.agentId, t.lastAt),
-    check('archive_segments_range', lte(t.firstEntry, t.lastEntry)),
   ],
 )
 

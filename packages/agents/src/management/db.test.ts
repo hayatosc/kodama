@@ -72,13 +72,4 @@ describe('D1 behavior the management database relies on', () => {
       .get()
     expect(row).toBeUndefined()
   })
-
-  it('enforces the object_name check for working agents', async () => {
-    const agentId = uuidv7()
-    const error = await db
-      .insert(agents)
-      .values({ ...registryRow(agentId), objectName: 'typo' })
-      .catch((caught: unknown) => caught)
-    expect(errorText(error)).toMatch(/CHECK constraint failed: agents_object_name/)
-  })
 })

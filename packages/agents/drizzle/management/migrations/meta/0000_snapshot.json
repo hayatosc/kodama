@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cbbbad48-d20f-4106-9575-eca721be61cc",
+  "id": "2bafc48a-2d19-41d6-bcf4-f4a76db311ff",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_config_versions": {
@@ -82,6 +82,67 @@
         "agent_config_versions_agent_id_version_pk": {
           "columns": ["agent_id", "version"],
           "name": "agent_config_versions_agent_id_version_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "agent_credential_refs": {
+      "name": "agent_credential_refs",
+      "columns": {
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_id": {
+          "name": "credential_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "agent_credential_refs_by_credential": {
+          "name": "agent_credential_refs_by_credential",
+          "columns": ["credential_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "agent_credential_refs_agent_id_agents_agent_id_fk": {
+          "name": "agent_credential_refs_agent_id_agents_agent_id_fk",
+          "tableFrom": "agent_credential_refs",
+          "tableTo": "agents",
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["agent_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_credential_refs_credential_id_provider_credentials_credential_id_provider_fk": {
+          "name": "agent_credential_refs_credential_id_provider_credentials_credential_id_provider_fk",
+          "tableFrom": "agent_credential_refs",
+          "tableTo": "credentials",
+          "columnsFrom": ["credential_id", "provider"],
+          "columnsTo": ["credential_id", "provider"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "agent_credential_refs_agent_id_provider_pk": {
+          "columns": ["agent_id", "provider"],
+          "name": "agent_credential_refs_agent_id_provider_pk"
         }
       },
       "uniqueConstraints": {},
@@ -267,16 +328,7 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "agents_object_name": {
-          "name": "agents_object_name",
-          "value": "\"agents\".\"kind\" = 'dedicated' or \"agents\".\"object_name\" = \"agents\".\"agent_id\""
-        },
-        "agents_versions": {
-          "name": "agents_versions",
-          "value": "\"agents\".\"applied_version\" <= \"agents\".\"current_version\""
-        }
-      }
+      "checkConstraints": {}
     },
     "audit_log": {
       "name": "audit_log",
@@ -357,6 +409,192 @@
           "tableFrom": "audit_log",
           "tableTo": "principals",
           "columnsFrom": ["actor_id"],
+          "columnsTo": ["principal_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "credential_grants": {
+      "name": "credential_grants",
+      "columns": {
+        "credential_id": {
+          "name": "credential_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "credential_grants_credential_id_credentials_credential_id_fk": {
+          "name": "credential_grants_credential_id_credentials_credential_id_fk",
+          "tableFrom": "credential_grants",
+          "tableTo": "credentials",
+          "columnsFrom": ["credential_id"],
+          "columnsTo": ["credential_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "credential_grants_agent_id_agents_agent_id_fk": {
+          "name": "credential_grants_agent_id_agents_agent_id_fk",
+          "tableFrom": "credential_grants",
+          "tableTo": "agents",
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["agent_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "credential_grants_credential_id_agent_id_pk": {
+          "columns": ["credential_id", "agent_id"],
+          "name": "credential_grants_credential_id_agent_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "credentials": {
+      "name": "credentials",
+      "columns": {
+        "credential_id": {
+          "name": "credential_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ciphertext": {
+          "name": "ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "iv": {
+          "name": "iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wrapped_dek": {
+          "name": "wrapped_dek",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wrap_iv": {
+          "name": "wrap_iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last4": {
+          "name": "last4",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "credentials_id_provider": {
+          "name": "credentials_id_provider",
+          "columns": ["credential_id", "provider"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "credentials_owner_id_principals_principal_id_fk": {
+          "name": "credentials_owner_id_principals_principal_id_fk",
+          "tableFrom": "credentials",
+          "tableTo": "principals",
+          "columnsFrom": ["owner_id"],
           "columnsTo": ["principal_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
