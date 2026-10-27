@@ -1,3 +1,5 @@
+/** Seed initialization validates both models before committing any installation state. @module */
+import { credentialCall, testCredentialRefs } from '../../helper/credentials.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
@@ -15,7 +17,7 @@ import { requestBody, textResponse, toolCallResponse, toolResults } from '../../
 import { piEntries } from '../../storage/pi-tables.ts'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../../helper/rpc.ts'
-import { FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, MEMORY_AGENT_ID } from './seed.ts'
+import { seed, FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, MEMORY_AGENT_ID } from './seed.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -31,6 +33,28 @@ async function firstAgent() {
 }
 
 describe('seed', () => {
+  it.each(['openai', 'xai', 'all'])(
+    'rejects missing %s references before persisting installation state',
+    async (missing) => {
+      const refs = await testCredentialRefs()
+      if (missing === 'all') refs.primary = {}
+      else delete refs.primary[missing]
+      const call = await credentialCall()
+      await expect(
+        seed(
+          {
+            ...call,
+            principal: null,
+            env: { ...env, MEMORY_MODEL_PROVIDER: 'xai', MEMORY_MODEL_ID: 'grok-4.3' },
+          },
+          refs,
+        ),
+      ).rejects.toThrow('credential_unavailable')
+      expect(await management.select().from(agents)).toEqual([])
+      expect(await management.select().from(systemSettings)).toEqual([])
+    },
+  )
+
   it('registers the memory agent on its existing object, and the first agent like any other', async () => {
     // State the memory agent's object holds from before the registry existed.
     await runInDurableObject(memoryAgent(), async (_instance, state) => {

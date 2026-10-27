@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
-import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
+import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { defaultAgentSettings } from '../configuration/index.ts'
@@ -12,6 +12,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { credentialInsert } from './vault.ts'
 import { revokeCredential } from './management.ts'
 import { createCredentialStore, CREDENTIAL_CACHE_TTL } from './store.ts'
+import { credentialFingerprint } from './encryption.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 const kek = () => env.CREDENTIAL_KEK_V1
@@ -149,6 +150,18 @@ it('serializes modification and releases the lease on failure without leaking ca
   expect(row?.leaseId).toBeNull()
   expect(row?.leaseExpiresAt).toBeNull()
   await expect(store.delete('openai')).rejects.toThrow('forbidden:')
+})
+
+it('keeps modified credential metadata keyed and masks short OAuth tokens', async () => {
+  const { store, primary } = await fixture('oauth_subscription')
+  const next = { type: 'oauth' as const, access: 'a', refresh: 'refresh', expires: 3000 }
+  await store.modify('openai', async () => next)
+  const fingerprint = await credentialFingerprint(JSON.stringify(next), kek())
+  const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()
+  expect(row).toMatchObject({ fingerprint, last4: '' })
+  const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+  expect(audit).toHaveLength(1)
+  expect(audit[0]?.detailJson).toContain(fingerprint)
 })
 
 it('reclaims an expired lease and clears both lease fields after modification', async () => {
