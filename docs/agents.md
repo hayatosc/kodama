@@ -675,6 +675,12 @@ so only one process is using its local storage.
 
 ### Local agent CLI
 
+First initialize a fresh database through a trusted service binding with registered credential
+IDs passed explicitly to `AgentService.seed({ primary: { openai: credentialId } })`, as described
+under deployment below. At this runtime layer, the CLI cannot bootstrap credentials itself;
+PR #16 adds the local credential bootstrap command. The commands below assume that initial seed
+has completed.
+
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
