@@ -95,6 +95,16 @@ it('names credential IDs in validation errors', async () => {
   await expect(credentialRow(call, uuidv7())).rejects.toThrow('Unknown credential')
 })
 
+it('replays concurrent duplicate grants with a single audit', async () => {
+  const { call, actor } = await caller()
+  const credential = await putCredential(call, env, { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-grant-secret' })
+  const results = await Promise.all([grantCredential(call, credential.credentialId, actor.externalId), grantCredential(call, credential.credentialId, actor.externalId)])
+  expect(results[0]).toEqual(results[1])
+  expect(await db.select().from(credentialGrants).where(eq(credentialGrants.credentialId, credential.credentialId))).toHaveLength(1)
+  const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.grant'))
+  expect(audits.filter((row) => row.detailJson.includes(credential.credentialId))).toHaveLength(1)
+})
+
 it('rejects a grant to an unknown agent without writing a grant or audit', async () => {
   const { call } = await caller()
   const credential = await putCredential(call, env, {
