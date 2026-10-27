@@ -4,15 +4,17 @@
  *
  * @module
  */
-import { and, eq, gt, isNull, lt, or } from 'drizzle-orm'
+import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai'
-import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
+import { credentials, credentialGrants, auditLog } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
+
+import { REFRESH_REJECTED, refreshChatGPT, refreshDue, reauthCommand } from './refresh.ts'
 
 const LEASE_MS = 30_000
 
@@ -47,16 +49,18 @@ export function createCredentialStore(
           eq(credentialGrants.agentId, await agentId()),
         ),
       )
-      .where(
-        and(
-          eq(credentials.credentialId, id),
-          eq(credentials.provider, provider),
-          eq(credentials.status, 'active'),
-        ),
-      )
+      .where(and(eq(credentials.credentialId, id), eq(credentials.provider, provider)))
       .get()
-    if (!row) invalidate()
+    if (row?.credential.status !== 'active') invalidate()
     return row?.credential
+  }
+
+  async function unavailable(provider: string, row?: typeof credentials.$inferSelect) {
+    const reason =
+      row?.status === 'needs_reauth'
+        ? `needs_reauth; reauthCommand: ${reauthCommand(provider, await agentId())}`
+        : 'no usable assigned credential'
+    return new Error(`credential_unavailable: ${provider}: ${reason}`)
   }
 
   async function plaintext(row: typeof credentials.$inferSelect): Promise<Credential> {
@@ -86,7 +90,9 @@ export function createCredentialStore(
     for (;;) {
       signal?.throwIfAborted()
       // A waiter must recheck live permission and the applied reference, not just lease expiry.
-      if ((await selected(provider))?.credentialId !== id)
+      const row = await selected(provider)
+      if (row?.status !== 'active') throw await unavailable(provider, row)
+      if (row.credentialId !== id)
         throw new Error('credential_unavailable: assigned credential changed')
       const leased = await db
         .update(credentials)
@@ -111,15 +117,24 @@ export function createCredentialStore(
     async read(provider, options) {
       options?.signal?.throwIfAborted()
       const row = await selected(provider)
-      if (!row)
-        throw new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
+      if (row?.status !== 'active') throw await unavailable(provider, row)
       const cached = cache.get(row.credentialId)
       if (cached && cached.revision !== row.revision) cache.delete(row.credentialId)
       const before = generation
       const value = cached?.revision === row.revision ? cached.value : await plaintext(row)
-      if (value.type === 'oauth' && value.expires <= now()) {
+      if (value.type === 'oauth' && refreshDue(value, now())) {
         cache.delete(row.credentialId)
-        throw new Error(`credential_unavailable: ${provider}: credential expired`)
+        return store.modify(
+          provider,
+          async (current) => {
+            // modify re-reads under the lease; a previous holder may already have rotated the token.
+            if (current?.type !== 'oauth' || !refreshDue(current, now())) return undefined
+            if (provider !== 'openai')
+              throw new Error('credential_unavailable: unsupported OAuth provider')
+            return refreshChatGPT(current, now, options?.signal)
+          },
+          options,
+        )
       }
       if (before === generation && cached?.revision !== row.revision)
         cache.set(row.credentialId, { revision: row.revision, value })
@@ -130,7 +145,7 @@ export function createCredentialStore(
       const entries = await Promise.all(
         providers.map(async (providerId) => {
           const row = await selected(providerId)
-          return row
+          return row?.status === 'active'
             ? [
                 {
                   providerId,
@@ -145,7 +160,7 @@ export function createCredentialStore(
     async modify(provider, fn, options) {
       options?.signal?.throwIfAborted()
       const selectedRow = await selected(provider)
-      if (!selectedRow) throw new Error('credential_unavailable: no assigned credential')
+      if (selectedRow?.status !== 'active') throw await unavailable(provider, selectedRow)
       const id = selectedRow.credentialId
       const leaseId = uuidv7()
       const leased = await acquire(provider, id, leaseId, options?.signal)
@@ -199,7 +214,41 @@ export function createCredentialStore(
           throw new Error('credential_unavailable: credential changed during refresh')
         invalidate()
         return next
-      } catch {
+      } catch (error) {
+        invalidate()
+        if (error instanceof Error && error.message === REFRESH_REJECTED) {
+          const at = now()
+          const held = and(
+            eq(credentials.credentialId, id),
+            eq(credentials.leaseId, leaseId),
+            eq(credentials.revision, leased.revision),
+            eq(credentials.status, 'active'),
+            gt(credentials.leaseExpiresAt, at),
+          )
+          const [, updated] = await db.batch([
+            // Audit only a transition this live lease can perform, in the same transaction.
+            db.insert(auditLog).select(
+              db
+                .select({
+                  seq: sql<null>`${null}`.as('seq'),
+                  opId: sql<string>`${leaseId}`.as('op_id'),
+                  at: sql<number>`${at}`.as('at'),
+                  actorId: sql<null>`${null}`.as('actor_id'),
+                  action: sql<string>`${'credential.needs_reauth'}`.as('action'),
+                  targetKind: sql<'system'>`${'system'}`.as('target_kind'),
+                  targetId: credentials.credentialId,
+                  detailJson: sql<string>`${JSON.stringify({ kind: leased.kind, provider })}`.as(
+                    'detail_json',
+                  ),
+                })
+                .from(credentials)
+                .where(held),
+            ),
+            db.update(credentials).set({ status: 'needs_reauth' }).where(held).returning(),
+          ])
+          const row = updated[0]
+          if (row) throw await unavailable(provider, row)
+        }
         throw new Error('credential_unavailable: credential modification failed')
       } finally {
         await db

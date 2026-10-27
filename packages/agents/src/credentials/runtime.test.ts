@@ -98,7 +98,7 @@ it('refuses admission with reauthentication guidance after refresh rejection', a
   await assignCredential(call, credential.credentialId, agentId)
   const fetch = vi
     .spyOn(globalThis, 'fetch')
-    .mockResolvedValue(Response.json({ error: 'invalid_grant' }, { status: 400 }))
+    .mockImplementation(async () => Response.json({ error: 'invalid_grant' }, { status: 400 }))
   await expect(
     Promise.resolve(
       exports.default.sendMessage(agentId, { requestId: 'rejected', content: 'Hello' }),

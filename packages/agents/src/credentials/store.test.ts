@@ -121,10 +121,12 @@ describe('OAuth resolution', () => {
       expect(await store.read('openai')).toMatchObject({ access: 'access-token' })
       advance(600_000)
       const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-        expect(String(url)).toBe('https://auth.openai.com/api/accounts/oauth/token')
-        expect(init?.method).toBe('POST')
-        expect(new URLSearchParams(String(init?.body)).get('refresh_token')).toBe('refresh-token')
-        expect(new URLSearchParams(String(init?.body)).get('client_id')).toBe('issued-client')
+        const request = new Request(url, init)
+        expect(request.url).toBe('https://auth.openai.com/api/accounts/oauth/token')
+        expect(request.method).toBe('POST')
+        const body = new URLSearchParams(await request.text())
+        expect(body.get('refresh_token')).toBe('refresh-token')
+        expect(body.get('client_id')).toBe('issued-client')
         const row = await db
           .select()
           .from(credentials)
@@ -230,6 +232,43 @@ describe('OAuth resolution', () => {
       expect(JSON.stringify(audit)).not.toMatch(/secret-provider-detail|refresh-token|access-token/)
     },
   )
+
+  it.each(['success', 'rejection'] as const)(
+    'does not commit refresh %s after losing its lease',
+    async (outcome) => {
+      const { store, advance, primary } = await fixture('oauth_subscription')
+      advance(600_000)
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        await db
+          .update(credentials)
+          .set({ leaseId: 'replacement-holder', leaseExpiresAt: 900_000 })
+          .where(eq(credentials.credentialId, primary))
+        return outcome === 'success'
+          ? Response.json({ access_token: 'must-not-persist', expires_in: 3600 })
+          : Response.json({ error: 'invalid_grant' }, { status: 400 })
+      })
+      await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+      expect(
+        await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+      ).toMatchObject({ status: 'active', revision: 1, leaseId: 'replacement-holder' })
+      const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+      expect(audit.some((row) => row.action === 'credential.needs_reauth')).toBe(false)
+    },
+  )
+
+  it('does not commit rejection after its lease expires', async () => {
+    const { store, advance, primary } = await fixture('oauth_subscription')
+    advance(600_000)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      advance(30_001)
+      return Response.json({ error: 'invalid_grant' }, { status: 400 })
+    })
+    await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+    expect(
+      await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+    ).toMatchObject({ status: 'active', revision: 1, leaseId: null })
+    expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+  })
 
   it.each([429, 500, 503])(
     'keeps a transient HTTP %s failure active for a later retry',
