@@ -51,21 +51,53 @@ it('produces a ChatGPT URL, accepts a pasted redirect, and registers the OAuth r
   expect(fetch).toHaveBeenCalledOnce()
 })
 
-it('hides provider response bodies containing credentials on a failed token exchange', async () => {
+it.each([
+  ['private-provider-token', 500, 'http_500_unclassified'],
+  [
+    JSON.stringify({ error: 'invalid_grant', error_description: 'private-code private-verifier' }),
+    400,
+    'http_400_invalid_grant',
+  ],
+  [JSON.stringify({ error: 'private-token' }), 400, 'http_400_unclassified'],
+])(
+  'categorizes token exchange without exposing response body %j',
+  async (body, status, category) => {
+    let state = ''
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status }))
+    await expect(
+      loginRegistration(installId, 'failed-exchange', {
+        notify(event) {
+          if (event.type === 'auth_url') state = new URL(event.url).searchParams.get('state') ?? ''
+        },
+        async prompt() {
+          return `http://127.0.0.1:1455/auth/callback?code=private-code&state=${state}&client_id=issued-client`
+        },
+      }),
+    ).rejects.toThrow(
+      `ChatGPT login failed [stage=token_exchange; category=${category}]. Start a fresh login.`,
+    )
+  },
+)
+
+it.each([
+  ['state_mismatch', true],
+  ['missing_client_id', false],
+])('rejects %s before any token request', async (category, wrongState) => {
   let state = ''
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response('private-provider-token', { status: 500 }),
-  )
+  const fetch = vi.spyOn(globalThis, 'fetch')
   await expect(
-    loginRegistration(installId, 'failed-exchange', {
+    loginRegistration(installId, 'redirect-failure', {
       notify(event) {
         if (event.type === 'auth_url') state = new URL(event.url).searchParams.get('state') ?? ''
       },
       async prompt() {
-        return `http://127.0.0.1:1455/auth/callback?code=private-code&state=${state}&client_id=issued-client`
+        return `http://127.0.0.1:1455/auth/callback?code=private-code&state=${wrongState ? 'wrong' : state}`
       },
     }),
-  ).rejects.toThrow('ChatGPT login failed; retry with the full redirect URL from the browser.')
+  ).rejects.toThrow(
+    `ChatGPT login failed [stage=redirect_validation; category=${category}]. Start a fresh login.`,
+  )
+  expect(fetch).not.toHaveBeenCalled()
 })
 
 it('does not expose a pasted redirect or provider error in a failed login', async () => {
@@ -76,5 +108,7 @@ it('does not expose a pasted redirect or provider error in a failed login', asyn
         return 'http://evil.invalid/?code=private-code'
       },
     }),
-  ).rejects.toThrow('ChatGPT login failed')
+  ).rejects.toThrow(
+    'ChatGPT login failed [stage=redirect_validation; category=wrong_redirect]. Start a fresh login.',
+  )
 })
