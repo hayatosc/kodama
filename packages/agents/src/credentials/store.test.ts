@@ -27,7 +27,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
       primary,
       kind === 'api_key'
         ? 'sk-primary-test-key'
-        : JSON.stringify({ type: 'oauth', access: 'access', refresh: 'refresh', expires: 2000 }),
+        : JSON.stringify({ type: 'oauth', access: 'access-token', refresh: 'refresh-token', expires: 2000 }),
     ],
     [alternative, 'sk-alternative-test-key'],
   ] as const) {
@@ -105,7 +105,7 @@ it('uses only explicit references and checks status even with a warm cache and n
 
 it('rejects an expired subscription even when another granted key exists', async () => {
   const { store, advance } = await fixture('oauth_subscription')
-  expect(await store.read('openai')).toMatchObject({ type: 'oauth', access: 'access' })
+  expect(await store.read('openai')).toMatchObject({ type: 'oauth', access: 'access-token' })
   advance(1001)
   await expect(store.read('openai')).rejects.toThrow('credential expired')
 })
@@ -218,9 +218,16 @@ it('releases the lease on failure without leaking callback errors', async () => 
   await expect(store.delete('openai')).rejects.toThrow('forbidden:')
 })
 
+it.each(['access', 'refresh'] as const)('rejects a seven-character OAuth %s without committing refresh', async (field) => {
+  const { store, primary } = await fixture('oauth_subscription')
+  await expect(store.modify('openai', async () => ({ type: 'oauth', access: '12345678', refresh: '87654321', expires: 3000, [field]: '1234567' }))).rejects.toThrow('credential modification failed')
+  expect(await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()).toMatchObject({ revision: 1, leaseId: null })
+  expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+})
+
 it('keeps modified credential metadata keyed and masks short OAuth tokens', async () => {
   const { store, primary } = await fixture('oauth_subscription')
-  const next = { type: 'oauth' as const, access: 'a', refresh: 'refresh', expires: 3000 }
+  const next = { type: 'oauth' as const, access: '12345678', refresh: '87654321', expires: 3000 }
   await store.modify('openai', async () => next)
   const fingerprint = await credentialFingerprint(JSON.stringify(next), kek())
   const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()
