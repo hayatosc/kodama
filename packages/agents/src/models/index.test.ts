@@ -11,6 +11,27 @@ it('cannot authenticate from provider environment keys', async () => {
   expect(await createAgentModels().checkAuth('xai')).toBeUndefined()
 })
 
+it('derives OpenAI subscription authentication through statically bundled OAuth in workerd', async () => {
+  const models = createAgentModels({
+    read: async () => ({
+      type: 'oauth',
+      access: 'subscription-test-access',
+      refresh: 'subscription-test-refresh',
+      expires: Date.now() + 3600000,
+      clientId: 'issued-client',
+      scopes: ['chatgpt.tokens.use.direct'],
+    }),
+    list: async () => [{ providerId: 'openai', type: 'oauth' }],
+    modify: async () => {
+      throw new Error('Unexpected refresh')
+    },
+    delete: async () => {
+      throw new Error('Unexpected logout')
+    },
+  })
+  expect((await models.getAuth('openai'))?.auth).toEqual({ apiKey: 'subscription-test-access' })
+})
+
 it('authenticates through an explicit credential store', async () => {
   const models = createAgentModels({
     read: async () => ({ type: 'api_key', key: 'sk-explicit-key' }),
