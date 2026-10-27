@@ -16,7 +16,7 @@ import type { AgentEnv } from '../env.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { sha256Hex } from '../lib/hash.ts'
+import { credentialFingerprint } from './encryption.ts'
 import { parseAgentId } from '../validation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
 
@@ -45,6 +45,7 @@ export async function putCredential(
   const parsed = v.safeParse(putSchema, request)
   if (!parsed.success) throw new TypeError('Invalid credential registration')
   const input = parsed.output
+  const fingerprint = await credentialFingerprint(input.secret, env.CREDENTIAL_KEK_V1)
   const opId = `credential.put:${principal.principalId}:${input.requestId}`
   const previous = await auditByOpId(call.db, opId)
   if (previous) {
@@ -53,7 +54,7 @@ export async function putCredential(
       row.kind !== input.kind ||
       row.provider !== input.provider ||
       (row.ownerId === null ? 'installation' : 'principal') !== input.ownerScope ||
-      row.fingerprint !== (await sha256Hex(input.secret))
+      row.fingerprint !== fingerprint
     )
       throw new Error('credential_conflict')
     return credentialMetadata(row)
@@ -85,7 +86,7 @@ export async function putCredential(
       detail: {
         kind: input.kind,
         provider: input.provider,
-        fingerprint: await sha256Hex(input.secret),
+        fingerprint,
       },
     }),
   ])
@@ -140,7 +141,12 @@ export async function credentialCoverage(call: ManagementCall, credentialId: str
 export async function grantCredential(call: ManagementCall, credentialId: string, agentId: string) {
   const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
-  parseAgentId(agentId)
+  const agent = await call.db
+    .select({ agentId: agents.agentId })
+    .from(agents)
+    .where(eq(agents.agentId, parseAgentId(agentId)))
+    .get()
+  if (!agent) throw new TypeError('Unknown agent')
   if (row.status !== 'active') throw new Error('credential_unavailable: inactive credential')
   const existing = await call.db
     .select()
