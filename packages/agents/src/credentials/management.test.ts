@@ -108,6 +108,40 @@ it('uses the same caller rules for principal-owned subscriptions and API keys', 
   )
 })
 
+it('preserves the first revocation and one audit for concurrent retries', async () => {
+  const { call } = await caller()
+  const credential = await putCredential(call, env, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    secret: 'sk-concurrent-test-1234',
+  })
+  const results = await Promise.all([
+    revokeCredential(call, credential.credentialId),
+    revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId),
+  ])
+  expect(results[0]).toEqual(results[1])
+  const row = await db
+    .select()
+    .from(credentials)
+    .where(eq(credentials.credentialId, credential.credentialId))
+    .get()
+  expect([call.now, call.now + 1000]).toContain(row?.revokedAt)
+  await revokeCredential({ ...call, now: call.now + 2000 }, credential.credentialId)
+  expect(
+    await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, credential.credentialId))
+      .get(),
+  ).toEqual(row)
+  expect(
+    await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.opId, `credential.revoke:${credential.credentialId}`)),
+  ).toHaveLength(1)
+})
+
 it.each(['api_key', 'oauth_subscription'] as const)(
   'revokes %s, clears its envelope and lease, and preserves state on retry',
   async (kind) => {

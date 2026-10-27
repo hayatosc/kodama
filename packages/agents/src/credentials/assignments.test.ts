@@ -31,6 +31,7 @@ it('assigns all agents and unassigns one without revoking the shared key', async
       .where(eq(agentCredentialRefs.credentialId, credential.credentialId)),
   ).toHaveLength(all.agents.length)
   const before = await db.select().from(agents).where(eq(agents.agentId, first.agentId)).get()
+  expect(before?.appliedVersion).toBe(before?.currentVersion)
   const assigned = await exports.default.credentialCoverage(actor, credential.credentialId)
   expect(assigned.references.find((ref) => ref.agentId === first.agentId)).toEqual({
     agentId: first.agentId,
@@ -41,6 +42,7 @@ it('assigns all agents and unassigns one without revoking the shared key', async
   await exports.default.unassignCredential(actor, credential.credentialId, first.agentId)
   const after = await db.select().from(agents).where(eq(agents.agentId, first.agentId)).get()
   expect(after?.currentVersion).toBe((before?.currentVersion ?? 0) + 1)
+  expect(after?.appliedVersion).toBe(after?.currentVersion)
   expect(
     await db
       .select()
