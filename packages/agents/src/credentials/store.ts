@@ -10,10 +10,9 @@ import { credentials, credentialGrants } from '../../drizzle/management/schema.t
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { sha256Hex } from '../lib/hash.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
-import { decryptCredential, encryptCredential } from './encryption.ts'
+import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
 
 /** Maximum lifetime of decrypted values; grants and status are checked on every read as well. */
 export const CREDENTIAL_CACHE_TTL = 5 * 60 * 1000
@@ -81,6 +80,32 @@ export function createCredentialStore(
     return parseCredential(row.kind, value)
   }
 
+  async function acquire(provider: string, id: string, leaseId: string, signal?: AbortSignal) {
+    const deadline = Date.now() + LEASE_MS
+    for (;;) {
+      signal?.throwIfAborted()
+      // A waiter must recheck live permission and the applied reference, not just lease expiry.
+      if ((await selected(provider))?.credentialId !== id)
+        throw new Error('credential_unavailable: assigned credential changed')
+      const leased = await db
+        .update(credentials)
+        .set({ leaseId, leaseExpiresAt: now() + LEASE_MS })
+        .where(
+          and(
+            eq(credentials.credentialId, id),
+            eq(credentials.status, 'active'),
+            or(isNull(credentials.leaseId), lt(credentials.leaseExpiresAt, now())),
+          ),
+        )
+        .returning()
+        .get()
+      if (leased) return leased
+      const delay = Math.min(100, deadline - Date.now())
+      if (delay <= 0) throw new Error('credential_unavailable: credential is busy')
+      await scheduler.wait(delay, { signal })
+    }
+  }
+
   const store: CredentialStore = {
     async read(provider, options) {
       options?.signal?.throwIfAborted()
@@ -129,20 +154,9 @@ export function createCredentialStore(
       if (!selectedRow) throw new Error('credential_unavailable: no assigned credential')
       const id = selectedRow.credentialId
       const leaseId = uuidv7()
-      const leased = await db
-        .update(credentials)
-        .set({ leaseId, leaseExpiresAt: now() + LEASE_MS })
-        .where(
-          and(
-            eq(credentials.credentialId, id),
-            eq(credentials.status, 'active'),
-            or(isNull(credentials.leaseId), lt(credentials.leaseExpiresAt, now())),
-          ),
-        )
-        .returning()
-        .get()
-      if (!leased) throw new Error('credential_unavailable: credential is busy')
+      const leased = await acquire(provider, id, leaseId, options?.signal)
       try {
+        options?.signal?.throwIfAborted()
         const current = await plaintext(leased)
         const next = await fn(current)
         if (next === undefined) return current
@@ -152,6 +166,8 @@ export function createCredentialStore(
         const secret = next.type === 'api_key' ? next.key : JSON.stringify(next)
         if (!secret) throw new Error('credential_unavailable: empty credential')
         const value = parseCredential(leased.kind, secret)
+        const fingerprint = await credentialFingerprint(secret, kek())
+        const token = value.type === 'api_key' ? value.key : value.access
         const revision = leased.revision + 1
         const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
         // Record the attempted refresh in the same batch; a losing CAS must not be reported
@@ -162,8 +178,8 @@ export function createCredentialStore(
             .set({
               ...envelope,
               revision,
-              fingerprint: await sha256Hex(secret),
-              last4: (value.type === 'api_key' ? value.key : value.access).slice(-4),
+              fingerprint,
+              last4: token.length > 4 ? token.slice(-4) : '',
             })
             .where(
               and(
@@ -182,7 +198,7 @@ export function createCredentialStore(
             action: 'credential.modify.attempt',
             targetKind: 'system',
             targetId: id,
-            detail: { kind: leased.kind, provider, fingerprint: await sha256Hex(secret) },
+            detail: { kind: leased.kind, provider, fingerprint },
           }),
         ])
         if (!updated.length)

@@ -8,7 +8,6 @@
  */
 import { and, desc, eq, gte, lt } from 'drizzle-orm'
 import { agentConfigVersions, agents } from '../../drizzle/management/schema.ts'
-import { referenceStatements } from '../credentials/references.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../configuration/index.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { auditStatement } from './audit.ts'
@@ -50,7 +49,6 @@ export function writeVersionStatements(
       .update(agents)
       .set({ currentVersion: version, updatedAt: write.now })
       .where(and(eq(agents.agentId, agentId), eq(agents.currentVersion, expected))),
-    ...referenceStatements(db, agentId, settings),
     auditStatement(db, {
       opId: write.opId,
       at: write.now,

@@ -24,7 +24,10 @@ revocation journal is written. Every read checks current status and grants, even
 plaintext cache. Missing, revoked, unassigned and expired credentials stop with
 `credential_unavailable`; no alternate credential or environment key is tried. An already-running
 provider request is not interrupted. Decrypted cache entries expire within five minutes and are
-invalidated after management changes.
+invalidated after management changes. Cross-object modifications acquire a 30-second D1 lease;
+contending callers wait up to 30 seconds, honor cancellation, and recheck live permission before
+acquiring the lease. The callback reads the newest committed value, so a concurrent OAuth refresh
+can observe the first caller's update rather than refresh the same token twice.
 
 ## Worker Secret boundary
 

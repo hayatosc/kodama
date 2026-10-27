@@ -7,6 +7,10 @@ import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   agentMembers,
+  agentConfigVersions,
+  agentCredentialRefs,
+  credentialGrants,
+  auditLog,
   agents,
   principals,
   systemSettings,
@@ -36,6 +40,17 @@ describe('seed', () => {
   it.each(['openai', 'xai', 'all'])(
     'rejects missing %s references before persisting installation state',
     async (missing) => {
+      // The memory-test helper seeds in beforeAll; exercise a genuinely fresh installation.
+      for (const table of [
+        auditLog,
+        agentMembers,
+        agentCredentialRefs,
+        credentialGrants,
+        agentConfigVersions,
+        agents,
+        systemSettings,
+      ])
+        await management.delete(table)
       const refs = await testCredentialRefs()
       if (missing === 'all') refs.primary = {}
       else delete refs.primary[missing]
@@ -52,6 +67,7 @@ describe('seed', () => {
       ).rejects.toThrow('credential_unavailable')
       expect(await management.select().from(agents)).toEqual([])
       expect(await management.select().from(systemSettings)).toEqual([])
+      await exports.default.seed(await testCredentialRefs())
     },
   )
 

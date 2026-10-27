@@ -18,8 +18,10 @@ import type { AgentEnv } from '../../env.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
 
 /** The variables that name the memory agent's initial model. */
-export type MemoryModelEnv = DefaultModelEnv &
-  Pick<AgentEnv, 'MEMORY_MODEL_PROVIDER' | 'MEMORY_MODEL_ID'>
+export type MemoryModelEnv = DefaultModelEnv & {
+  MEMORY_MODEL_PROVIDER: string
+  MEMORY_MODEL_ID: string
+}
 import { harnessSettings } from '../../runtime/harness.ts'
 import { guardedModels } from '../../runtime/restrictions.ts'
 import type { Refusal } from '../../runtime/restrictions.ts'

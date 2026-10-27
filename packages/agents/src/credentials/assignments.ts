@@ -9,6 +9,7 @@ import { auditStatement } from '../management/audit.ts'
 import { parseAgentId } from '../validation.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialRow, credentialActor } from './management.ts'
+import { referenceStatements } from './references.ts'
 
 /** Assign or unassign one credential, for one agent or every current agent, as one D1 transaction. */
 export async function assignCredential(
@@ -67,8 +68,9 @@ export async function assignCredential(
         agents: targets.map((row) => row.agentId),
       },
     }),
-    ...changes.flatMap(({ agent, statements }) => [
+    ...changes.flatMap(({ agent, updated, statements }) => [
       ...statements,
+      ...referenceStatements(call.db, agent.agentId, updated),
       ...(remove
         ? [
             call.db
@@ -92,9 +94,14 @@ export async function assignCredential(
     changes.map(async ({ agent }) => {
       try {
         await call.env.AGENTS.getByName(agent.objectName).invalidateCredentials()
+      } catch {
+        console.error(`Invalidating credentials of agent ${agent.agentId} failed`)
+      }
+      try {
         await pushDesired(call, agent.agentId)
       } catch {
-        // The committed desired version is retried by reconciliation. Live grant checks fail closed.
+        // Reconciliation retries committed versions; never log credential-bearing errors.
+        console.error(`Pushing desired version to agent ${agent.agentId} failed`)
       }
     }),
   )

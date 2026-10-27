@@ -155,6 +155,31 @@ it('serializes refresh across independent stores and reads the freshly committed
   expect(refreshes).toBe(1)
 })
 
+it('cancels a waiting modifier without releasing the current holder lease', async () => {
+  const { store, open, primary } = await fixture()
+  await store.modify('openai', async () => {
+    const second = open().store
+    await expect(
+      second.modify(
+        'openai',
+        async () => {
+          throw new Error('Cancelled callback must not run')
+        },
+        { signal: AbortSignal.timeout(10) },
+      ),
+    ).rejects.toThrow()
+    const row = await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialId, primary))
+      .get()
+    expect(row?.leaseId).toEqual(expect.any(String))
+    return undefined
+  })
+  const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()
+  expect(row?.leaseId).toBeNull()
+})
+
 it('releases the lease on failure without leaking callback errors', async () => {
   const { store, primary } = await fixture()
   await store.modify('openai', async (current) => {

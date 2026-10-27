@@ -10,6 +10,10 @@ export async function validateCredentialRefs(
   settings: AgentSettings,
   agentId?: string,
 ) {
+  if (!settings.credentials?.primary[settings.model.provider])
+    throw new TypeError(
+      `credential_unavailable: missing credential reference for ${settings.model.provider}`,
+    )
   for (const [provider, credentialId] of Object.entries(settings.credentials?.primary ?? {})) {
     const row = await db
       .select()

@@ -15,7 +15,7 @@ import { referenceStatements, initialGrantStatements } from '../../credentials/r
 import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
 import { memoryAgentSettings } from '../../system-agents/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
-import { auditStatement } from '../audit.ts'
+import { auditByOpId, auditStatement } from '../audit.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
@@ -72,6 +72,19 @@ export async function seed(
   credentials?: AgentSettings['credentials'],
 ): Promise<SeedResult> {
   const { db, env, now } = call
+  const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
+  const existingFirst = await auditByOpId(db, 'agent.create:system:seed')
+  const initialSettings = parseSettings(call.models, {
+    ...memoryAgentSettings(env),
+    ...(credentials ? { credentials } : {}),
+  })
+  const firstSettings = parseSettings(call.models, {
+    ...firstAgentSettings(env),
+    ...(credentials ? { credentials } : {}),
+  })
+  // Validate every missing agent before writing any installation or registry state.
+  if (!existingMemory) await validateCredentialRefs(db, initialSettings)
+  if (!existingFirst) await validateCredentialRefs(db, firstSettings)
   await db
     .insert(systemSettings)
     .values({ key: 'install_id', valueJson: JSON.stringify(uuidv7(now)) })
@@ -84,13 +97,7 @@ export async function seed(
   if (row === undefined) throw new Error('The seed could not store the installation ID')
   const installId = String(JSON.parse(row.valueJson))
 
-  const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
-  const initialSettings = parseSettings(call.models, {
-    ...memoryAgentSettings(env),
-    ...(credentials ? { credentials } : {}),
-  })
   if (!existingMemory) {
-    await validateCredentialRefs(db, initialSettings)
     try {
       await db.batch([
         db.insert(agents).values({
@@ -106,10 +113,7 @@ export async function seed(
         db.insert(agentConfigVersions).values({
           agentId: MEMORY_AGENT_ID,
           version: 1,
-          settingsJson: JSON.stringify({
-            ...memoryAgentSettings(env),
-            ...(credentials ? { credentials } : {}),
-          }),
+          settingsJson: JSON.stringify(initialSettings),
           schemaVersion: SETTINGS_SCHEMA_VERSION,
           authorId: null,
           comment: 'seed',
@@ -136,7 +140,7 @@ export async function seed(
     requestId: 'seed',
     displayName: 'Kodama',
     slug: FIRST_AGENT_SLUG,
-    settings: { ...firstAgentSettings(env), ...(credentials ? { credentials } : {}) },
+    settings: firstSettings,
   })
   // The memory agent keeps its existing object; this applies its desired version once.
   await pushDesired(call, MEMORY_AGENT_ID)

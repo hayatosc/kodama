@@ -333,8 +333,8 @@ async function writeVersion(
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
   }
   try {
-    await call.db.batch(
-      writeVersionStatements(
+    await call.db.batch([
+      ...writeVersionStatements(
         call.db,
         { actorId: actorId(call), now: call.now, opId: write.opId },
         agentId,
@@ -342,7 +342,8 @@ async function writeVersion(
         write.settings,
         detail,
       ),
-    )
+      ...referenceStatements(call.db, agentId, write.settings),
+    ])
   } catch (error) {
     if (!isConstraintError(error)) throw error
     const replay = await replayed()
