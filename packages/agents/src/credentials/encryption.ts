@@ -55,6 +55,31 @@ async function key(
   return crypto.subtle.importKey('raw', value, 'AES-GCM', false, usage)
 }
 
+/** Keyed comparison tag: metadata cannot verify guessed secrets without the Worker Secret. */
+export async function credentialFingerprint(secret: string, kek: string): Promise<string> {
+  try {
+    const bytes = decode(kek)
+    if (bytes.byteLength !== 32) throw new Error('Invalid encryption key')
+    const material = await crypto.subtle.importKey('raw', bytes, 'HKDF', false, ['deriveKey'])
+    const signingKey = await crypto.subtle.deriveKey(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: new Uint8Array(),
+        info: new TextEncoder().encode('kodama-credential-fingerprint-v1'),
+      },
+      material,
+      { name: 'HMAC', hash: 'SHA-256', length: 256 },
+      false,
+      ['sign'],
+    )
+    const tag = await crypto.subtle.sign('HMAC', signingKey, new TextEncoder().encode(secret))
+    return Array.from(new Uint8Array(tag), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  } catch {
+    throw new Error('credential_unavailable: fingerprint failed')
+  }
+}
+
 /** Encrypt a secret with a fresh DEK; KEKs are canonical base64-encoded 32-byte secrets. */
 export async function encryptCredential(
   identity: CredentialIdentity,

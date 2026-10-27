@@ -8,8 +8,7 @@ import type { Credential } from '@earendil-works/pi-ai'
 import * as v from 'valibot'
 import { credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
-import { sha256Hex } from '../lib/hash.ts'
-import { encryptCredential } from './encryption.ts'
+import { credentialFingerprint, encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
 
 const oauthSchema = v.looseObject({
@@ -60,6 +59,7 @@ export async function credentialInsert(
   if (secret.length < 8 || secret.length > 16384) throw new TypeError('Invalid credential length')
   const value = parseCredential(identity.kind, secret)
   const envelope = await encryptCredential(identity, secret, kek)
+  const token = value.type === 'api_key' ? value.key : value.access
   return {
     statement: db
       .insert(credentials)
@@ -67,8 +67,8 @@ export async function credentialInsert(
         ...identity,
         ...envelope,
         status: 'active',
-        fingerprint: await sha256Hex(secret),
-        last4: (value.type === 'api_key' ? value.key : value.access).slice(-4),
+        fingerprint: await credentialFingerprint(secret, kek),
+        last4: token.length > 4 ? token.slice(-4) : '',
         createdAt: now,
       })
       .returning(),

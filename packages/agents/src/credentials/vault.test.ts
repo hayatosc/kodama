@@ -74,7 +74,13 @@ it('does not expose an offline secret verifier or a complete short OAuth token',
   for (const key of [kek, btoa('11234567890123456789012345678901')]) {
     const { statement } = await credentialInsert(
       db,
-      { credentialId: uuidv7(), kind: 'oauth_subscription', provider: 'openai', ownerId: null, revision: 1 },
+      {
+        credentialId: uuidv7(),
+        kind: 'oauth_subscription',
+        provider: 'openai',
+        ownerId: null,
+        revision: 1,
+      },
       secret,
       key,
       Date.now(),
