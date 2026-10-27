@@ -699,11 +699,15 @@ nr agent list
 nr agent send assistant "Hello!"
 nr agent send second "Hello from the second agent!"
 nr agent snapshot second
-nr agent credentials unassign <credential-id> second
-nr agent credentials revoke <credential-id>
 # Alternative authentication: complete Sign in with ChatGPT in your browser.
 nr agent credentials login --provider openai
-# Assign the returned OAuth credentialId with the same assign command.
+# Switch existing agents explicitly to the newly returned OAuth credentialId:
+nr agent credentials assign <oauth-credential-id> assistant
+nr agent credentials assign <oauth-credential-id> second
+# For memory, use its UUID from `nr agent list`:
+nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
+# Revoke the previous credential only after replacing every reference:
+nr agent credentials revoke <old-credential-id>
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
