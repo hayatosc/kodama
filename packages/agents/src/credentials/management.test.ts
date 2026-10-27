@@ -102,7 +102,10 @@ it('replays concurrent duplicate grants with a single audit', async () => {
     provider: 'openai',
     secret: 'concurrent-grant-secret',
   })
-  const agent = await exports.default.createAgent(actor, { requestId: uuidv7(), displayName: 'Grant target' })
+  const agent = await exports.default.createAgent(actor, {
+    requestId: uuidv7(),
+    displayName: 'Grant target',
+  })
   const results = await Promise.all([
     grantCredential(call, credential.credentialId, agent.agentId),
     grantCredential(call, credential.credentialId, agent.agentId),

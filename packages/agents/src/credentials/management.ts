@@ -157,31 +157,37 @@ export async function grantCredential(call: ManagementCall, credentialId: string
     .get()
   if (!agent) throw new TypeError('Unknown agent')
   if (row.status !== 'active') throw new Error('credential_unavailable: inactive credential')
-  const existing = await call.db
-    .select()
-    .from(credentialGrants)
-    .where(
-      and(eq(credentialGrants.credentialId, credentialId), eq(credentialGrants.agentId, agentId)),
-    )
-    .get()
-  if (!existing)
-    await call.db.batch([
-      call.db.insert(credentialGrants).values({ credentialId, agentId }),
-      auditStatement(call.db, {
-        opId: uuidv7(),
-        at: call.now,
-        actorId: principal.principalId,
-        action: 'credential.grant',
-        targetKind: 'agent',
-        targetId: agentId,
-        detail: {
-          credentialId,
-          kind: row.kind,
-          provider: row.provider,
-          fingerprint: row.fingerprint,
-        },
-      }),
-    ])
+  const findGrant = () =>
+    call.db
+      .select()
+      .from(credentialGrants)
+      .where(
+        and(eq(credentialGrants.credentialId, credentialId), eq(credentialGrants.agentId, agentId)),
+      )
+      .get()
+  if (!(await findGrant())) {
+    try {
+      await call.db.batch([
+        call.db.insert(credentialGrants).values({ credentialId, agentId }),
+        auditStatement(call.db, {
+          opId: uuidv7(),
+          at: call.now,
+          actorId: principal.principalId,
+          action: 'credential.grant',
+          targetKind: 'agent',
+          targetId: agentId,
+          detail: {
+            credentialId,
+            kind: row.kind,
+            provider: row.provider,
+            fingerprint: row.fingerprint,
+          },
+        }),
+      ])
+    } catch (error) {
+      if (!isConstraintError(error) || !(await findGrant())) throw error
+    }
+  }
   return { credentialId, agentId }
 }
 
