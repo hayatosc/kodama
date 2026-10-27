@@ -3,6 +3,7 @@ import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { newAgentId } from '../src/helper/management.ts'
 import { seedOnce } from '../src/helper/management.ts'
+import { CLI_ACTOR } from './credentials.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -41,6 +42,27 @@ it('creates and addresses an agent by slug before seed', async () => {
   expect(sent.status).toBe(200)
   expect(await sent.text()).toContain('Hello from Kodama')
   expect((await post('cancel/before-seed')).status).toBe(200)
+})
+
+it('enables and disables optional tools through versioned configuration without losing credentials', async () => {
+  const id = await newAgentId()
+  const before = await exports.default.getConfig(CLI_ACTOR, id)
+  for (const tools of [['contact_agent'], []]) {
+    const response = await handleCli(
+      new Request(`http://localhost/cli/tools/${id}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token' },
+        body: JSON.stringify({ requestId: `tools-${tools.length}`, tools }),
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
+    expect(response.status).toBe(200)
+    const current = await exports.default.getConfig(CLI_ACTOR, id)
+    expect(current.settings.tools).toEqual(tools)
+    expect(current.settings.credentials).toEqual(before.settings.credentials)
+  }
 })
 
 it('authenticates the CLI adapter and sends through real Durable Object RPC', async () => {

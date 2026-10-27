@@ -468,8 +468,14 @@ To add a tool:
 1. Implement it in `src/tools/`, in a lowercase hyphenated file such as `current-time.ts`.
 2. Register it in [`src/tools/index.ts`](../packages/agents/src/tools/index.ts).
 
-Agents enable registered tools by name in `tools`, and the default list is empty. The only tool
-today is `current_time`. The memory tools come from the memory extension, not from this list.
+Agents enable registered tools by name in `tools`, and the default list is empty. Optional tools
+are `current_time` and `contact_agent`. The memory tools come from the memory extension, not from
+this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
+registers it nor permits `sendTo`.
+
+Locally, `nr agent tools assistant current_time contact_agent` replaces the optional tool selection
+through the versioned configuration API, preserving the other settings and credential references.
+Omit tool names to disable all optional tools.
 
 ## RPC contract
 
@@ -538,7 +544,7 @@ await env.AGENT_SERVICE.sendMessage(agentId, {
 
 `submission(agentId, requestId)` reports the status of one input:
 
-- `done` means an answer was committed;
+- `done` means an answer was committed; `answerEntryId` identifies that input's exact answer;
 - `unanswered` means generation produced no answer. Its `reason` (for example `model_error`) and
   text `detail` (such as the provider's message) say why.
 
@@ -556,9 +562,35 @@ new messages work right after.
 ### Agent to agent
 
 `Agent.sendTo(targetId, message)` checks this agent's restrictions, admits the target from the
-registry, and calls `sendMessage(message)` on its object. It acknowledges durable admission and
-does not wait for the target's model. It is a transport
-primitive, not a multi-agent workflow or a model-invoked tool.
+registry, and calls `sendMessage` on its object, which checks target credentials. It acknowledges
+durable admission without waiting for the target model. The receiver persists a
+`kodama.agent-message` input with sender UUID and hop count; the same provenance is visible in the
+message text. Peer input is always queued as `followUp`, never injected into an unrelated active
+turn. Self-contact is refused.
+
+The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
+Its workflow in `src/agent/contact.ts` resolves the registry reference and calls this same `sendTo`
+path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
+the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
+`answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked
+unavailable. Timeout or sender cancellation does not cancel the receiver. Pending is not a reason
+to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
+delivery. Its delivery request ID is scoped to the sender and tool task.
+
+`MAX_CONTACT_HOPS = 3` is defined once in `src/agent/contact.ts`: A→B→C→D is allowed, but D cannot
+deliver another message from that chain. This permits two intermediary delegates while bounding
+cycles; replies collected by the initiating tool do not consume hops. The next hop comes from
+persisted input metadata, not editable message text, and survives eviction. An execution can own
+multiple inputs: a final boundary may place both human steering and peer follow-up, and later
+steering joins the active input set. `src/runtime/inputs.ts` resolves that complete durable set.
+If any input is a peer message, the next hop inherits the maximum peer hop; input order cannot
+reset the chain. Only a purely human execution starts a fresh chain at zero incoming hops.
+Idle, non-model `sendTo` calls retain the latest durable input's provenance. The cap bounds chain
+depth, not total fan-out or the number of independent human requests. Other agents' text remains
+data, not trusted instructions. An execution containing any peer input, including a mixed
+human/peer execution, cannot label a `remember` call as `user_request`. Its own conclusions may
+use `agent_judgment`; the last execution input remains its evidence/quota anchor, not an assertion
+that this input alone caused the tool call.
 
 ## Events
 

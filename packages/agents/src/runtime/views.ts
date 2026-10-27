@@ -61,6 +61,8 @@ export function toSubmissionStatus(
   submission: SubmissionRecord,
 ): SubmissionStatus {
   const { id } = submission
+  if (submission.status === 'done' && submission.type === 'input')
+    return { id, requestId, status: 'done', answerEntryId: submission.answer }
   if (submission.status !== 'unanswered') return { id, requestId, status: submission.status }
   const { status, reason, detail } = submission
   if (detail === undefined) return { id, requestId, status, reason }

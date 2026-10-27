@@ -376,7 +376,10 @@ It also lists what not to keep: task progress, guesses, secrets, and one-off req
 
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
-`kodama_remember_turns`.
+`kodama_remember_turns`. Attribution uses the active execution's full durable input set, not the
+newest transcript entry. If any input is from a peer, `remember(origin: user_request)` is rejected,
+including when human steering and peer follow-up share the execution. `agent_judgment` remains
+available, anchored to the last execution input for quota and evidence.
 
 ## Write paths
 
@@ -401,6 +404,8 @@ finds the checkpoint behind the range it archives.
 1. `read_entries` pages through entries after the checkpoint. The entries come from the agent DO
    (`readEntries`), or from the R2 segment for a range already pruned. The memory agent persists
    the highest covered entry for the current job; pages cannot jump ahead of that read range.
+   Agent-contact inputs retain their body and sender/hop preamble with role `peer`, distinct from
+   human `user` input, in both live extraction and archived text/history search.
 2. The model extracts candidate records. Each one cites the entries that support it, and code
    refuses a citation outside the job's range.
 3. The model adds, supersedes, invalidates, or skips each candidate against existing records,

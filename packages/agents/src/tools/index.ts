@@ -5,10 +5,17 @@
  * @module
  */
 import type { ToolRegistration } from '@earendil-works/pi-durable'
+import { createContactAgentTool } from './contact-agent.ts'
+import type { ContactAgent } from './contact-agent.ts'
 import { currentTimeTool } from './current-time.ts'
 
 /** Every registered tool. Add a tool here; each agent enables an explicit subset by name. */
-export const agentTools: readonly ToolRegistration[] = [currentTimeTool]
+export const agentTools: readonly ToolRegistration[] = createAgentTools()
+
+/** Bind runtime-only delivery while retaining the same opt-in names and schemas. */
+export function createAgentTools(contact?: ContactAgent): ToolRegistration[] {
+  return [currentTimeTool, createContactAgentTool(contact)]
+}
 
 const toolsByName = new Map(agentTools.map((tool) => [tool.name, tool]))
 

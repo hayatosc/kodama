@@ -186,9 +186,11 @@ or a retry wait, and withdraws queued input. Those submissions settle as
 configuration are kept, so a held configuration version and new messages apply immediately after.
 
 `Agent.sendTo(targetId, message)` admits the target from the registry and calls its
-`sendMessage` over Durable Object RPC, for callers and future orchestration. It acknowledges
-durable admission rather than waiting for the target model to finish. This is a
-transport primitive, not a durable multi-agent workflow or automatic LLM tool.
+`sendMessage` over Durable Object RPC. The opt-in `contact_agent` tool reuses this path, accepts a
+UUID, slug, or unique prefix, and waits up to 30 seconds for the correlated answer before returning
+accepted/pending. Enable it locally with `nr agent tools assistant current_time contact_agent`.
+Messages identify their sender; a persisted three-hop cap allows multi-stage delegation while
+bounding cycles. The memory agent cannot use it. See [Agent to agent](docs/agents.md#agent-to-agent).
 
 Active work has a recovery alarm. On wake, the object reopens Pi's SQLite storage,
 reconstructs pending tasks, and resumes the scheduler. Once tasks settle, the

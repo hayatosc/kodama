@@ -9,14 +9,14 @@ import { describe, expect, it } from 'vitest'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { db } from '../../helper/memory.ts'
 import { searchHistory } from './history.ts'
-import { indexSchema, readJson, readSegment } from './reader.ts'
+import { indexSchema, readJson, readSegment, readArchivedText } from './reader.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
 
-async function archive(content: string) {
+async function archive(content: string, kind = 'pi.user') {
   const agentId = uuidv7()
   const record = {
     id: 1,
-    kind: 'pi.user',
+    kind,
     model: [{ role: 'user', content, timestamp: 1_000 }],
   }
   const files = await buildSegment(agentId, [{ id: 1, record: JSON.stringify(record) }], 1_000)
@@ -39,6 +39,15 @@ async function archive(content: string) {
 }
 
 describe('archive word indexes', () => {
+  it('retains peer evidence in archive extraction and history search', async () => {
+    const text = '[Message from agent sender; delegation hop 1/3.]\nPeer evidence needle'
+    const { agentId, prefix } = await archive(text, 'kodama.agent-message')
+    const page = await readArchivedText(env.ARCHIVE, prefix, 0, 10)
+    expect(page.entries).toEqual([{ id: 1, role: 'peer', text }])
+    const found = await searchHistory(db, env.ARCHIVE, agentId, 'needle')
+    expect(found.hits.map((hit) => hit.text)).toEqual([`#1 peer: ${text}`])
+  })
+
   it('exports, reads, and searches a constructor word without losing it during validation', async () => {
     const { agentId, prefix, record } = await archive('A constructor initializes the widget')
     const index = await readJson(env.ARCHIVE, `${prefix}.index.json`, indexSchema)

@@ -14,6 +14,19 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('sets the full optional tool selection, including an empty selection', () => {
+    expect(command(['tools', 'assistant', 'contact_agent'])).toEqual({
+      action: 'tools',
+      agentRef: 'assistant',
+      tools: ['contact_agent'],
+      requestId: 'generated',
+    })
+    const disabled = command(['tools', 'assistant'])
+    if (disabled.action !== 'tools') throw new Error('Expected tools command')
+    expect(commandRequest(disabled, 'local-token').init.body).toBe(
+      JSON.stringify({ tools: [], requestId: 'generated' }),
+    )
+  })
   it('parses agent visibility, creation and credential management commands', () => {
     expect(command(['list'])).toEqual({ action: 'list' })
     expect(command(['create', 'second'], { name: 'Second agent' })).toEqual({

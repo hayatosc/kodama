@@ -7,7 +7,8 @@
  */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
-import type { ToolRegistration } from '@earendil-works/pi-durable'
+import type { EntryRecord, ToolRegistration } from '@earendil-works/pi-durable'
+import type { Context } from '@earendil-works/chord/context'
 import { searchHistory } from '../../memory/archive/history.ts'
 import type { HistoryResult } from '../../memory/archive/history.ts'
 import { isSkillName } from '../../memory/skills.ts'
@@ -102,7 +103,10 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
  * `remember`: queues a memory agent job to save what the user asked to keep. The memory agent
  * decides what to write; the tool only records the request.
  */
-export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
+export function rememberTool(
+  deps: WorkingMemoryDeps,
+  readInputs: (context: Context) => Promise<readonly EntryRecord[]>,
+): ToolRegistration {
   return defineTool({
     name: 'remember',
     description:
@@ -112,15 +116,17 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
       origin: Type.Union([Type.Literal('user_request'), Type.Literal('agent_judgment')]),
     }),
     replay: 'safe',
-    execute: async ({ content, origin }, api, context) => {
-      const userEntry = await api.commit(async (tx) => {
-        const page = await tx.scanEntries(
-          { conversationId: api.conversationId, order: 'descending' },
-          64,
+    execute: async ({ content, origin }, _api, context) => {
+      const inputs = await readInputs(context)
+      if (
+        inputs.some((entry) => entry.kind === 'kodama.agent-message') &&
+        origin === 'user_request'
+      )
+        throw new Error(
+          'A peer message is not a user request; use agent_judgment for your own conclusions',
         )
-        return page.items.find((entry) => entry.kind === 'pi.user')?.id
-      }, context)
-      const status = await requestRemember(deps, userEntry, content, origin)
+      // The last input remains the quota/evidence anchor, not a claim of sole execution ownership.
+      const status = await requestRemember(deps, inputs.at(-1)?.id, content, origin)
       return {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },
