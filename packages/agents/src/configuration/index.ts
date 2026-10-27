@@ -184,7 +184,9 @@ export function defaultAgentSettings(env: DefaultModelEnv): AgentSettings {
  * @throws {@link TypeError} When `value` is not valid settings for `models`.
  */
 export function parseSettings(models: Models, value: unknown): AgentSettings {
-  return redactData(parseInput(agentSettingsSchema(models), value))
+  const schema = agentSettingsSchema(models)
+  // Redaction may invalidate an identifier; never persist settings that cannot be reloaded.
+  return parseInput(schema, redactData(parseInput(schema, value)))
 }
 
 /**
