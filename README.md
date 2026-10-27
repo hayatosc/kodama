@@ -51,7 +51,7 @@ wrappers; `packageManager` pins pnpm for the workspace.
 ```sh
 ni
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
-# Fill the individual API keys in packages/agents/.dev.vars for the providers you use.
+# Set only CREDENTIAL_KEK_V1 (base64 of 32 random bytes); never put provider keys here.
 nr dev:agents
 ```
 
@@ -76,12 +76,23 @@ Generated runtime types and local state are ignored by Git.
 
 ## Local agent CLI
 
-Configure provider credentials in `packages/agents/.dev.vars`, then start
-`nr dev:agents`. In another terminal, run these commands from the repository root:
+Set the local encryption key `CREDENTIAL_KEK_V1` in `packages/agents/.dev.vars`, then start
+`nr dev:agents`. Provider credentials belong in the encrypted local credential store, not
+`.dev.vars`. In another terminal, register them through the CLI from the repository root:
 
 ```sh
 nr agent seed
+nr agent create second --name "Second agent"
+# Read the key from a protected source; never pass its value as a command-line argument.
+nr agent credentials add --provider openai < /secure/path/openai-key
+# Or use --key-from-env ENV_NAME with an explicitly supplied, temporary shell variable.
+nr agent credentials assign <credential-id> assistant
+nr agent credentials assign <credential-id> second
+nr agent credentials list
+nr agent list
 nr agent send assistant "Hello!"
+nr agent send second "Hello!"
+# Alternatively: nr agent credentials login --provider openai, then assign the returned ID.
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
@@ -215,9 +226,9 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 ## Deployment
 
 From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
-`kodama-management` and apply their migrations, configure each provider's Worker secret (for
-example, `nr cf workers secrets update OPENAI_API_KEY`), deploy with `nr deploy`, and call
-`AgentService.seed()` once. See [docs/agents.md](docs/agents.md#deployment).
+`kodama-management` and apply their migrations, provision only the encryption secret
+`CREDENTIAL_KEK_V1`, and deploy with `nr deploy`. Register provider credentials through the
+trusted management RPC into encrypted D1, then seed and assign credentials to agents. See [docs/agents.md](docs/agents.md#deployment).
 Use `nr cf workers secrets update --help` for the pinned CLI's input options.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin;
 Wrangler is only a transitive dependency of Cloudflare's tooling.
@@ -254,26 +265,27 @@ exactly one succeeds. `rollbackConfig` writes an old version's content as a new 
 default tool list is empty. Add tool implementations in `src/tools/` and register them in
 `src/tools/index.ts`; agents enable registered tools by name.
 
-`src/models/index.ts` registers Pi's built-in providers and model catalogs. The
-provider keys are individual Worker secrets. For local development, write one
-key per line in `packages/agents/.dev.vars`:
+`src/models/index.ts` registers Pi's built-in providers and model catalogs. Provider credentials
+are encrypted in the management D1 credential store; agents select credential IDs in configuration.
+There is no environment or local-file authentication fallback in the Worker.
+
+For local development, `.dev.vars` contains only the encryption key (and any non-secret local
+settings), never provider API keys:
 
 ```dotenv
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-GEMINI_API_KEY=...
-XAI_API_KEY=...
+CREDENTIAL_KEK_V1=...
 ```
 
-Only fill the providers you use; leave other keys empty. To support another provider's
-credentials or options, add its secret binding in `cloudflare.config.ts` and allow
-its environment name in `src/models/index.ts`. Keys remain in Worker secrets, outside
-agent settings, storage, and RPC results. Submission checks authentication for
-the selected provider. Provider/model IDs come from the installed Pi catalog;
-updating Pi updates that catalog. Environment-based authentication is supported;
-interactive OAuth login and local credential files are not implemented. Providers
-requiring those flows need an additional authentication adapter. Provider-specific
-reasoning levels and runtime requirements still apply. Integration tests exercise
+Register API keys with `nr agent credentials add` using piped stdin or an explicitly supplied
+shell environment variable, or use `nr agent credentials login --provider openai` for Sign in
+with ChatGPT. The CLI's `--key-from-env` is an explicit registration input, not Worker environment
+authentication. Assign the returned credential ID before sending; reads return only metadata.
+The CLI writes no auth.json. See [Local agent CLI](docs/agents.md#local-agent-cli) for
+assignment, unassignment, revocation and hidden OAuth redirect input.
+
+Submission checks authentication for the selected provider. Provider/model IDs come from the
+installed Pi catalog; updating Pi updates that catalog. Provider-specific reasoning levels and
+runtime requirements still apply. Integration tests exercise
 OpenAI and xAI with mocked model responses; other providers have not been tested
 against live services.
 

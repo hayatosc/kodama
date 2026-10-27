@@ -451,9 +451,10 @@ unassigned credentials stop the request with `credential_unavailable`. Creation 
 assignments; `sendMessage` checks authentication before admitting input. No environment variable,
 local credential file, shared default or implicit provider fallback is consulted.
 
-Pi's catalog supplies additional providers without new secret bindings. Interactive OAuth login
-and provider refresh are deferred to the subscription integration; the lease-based store is ready
-for it.
+Pi's catalog supplies additional providers without new secret bindings. The local CLI supports
+interactive ChatGPT login and encrypted registration; see [Local agent CLI](#local-agent-cli).
+Production subscription integration and refresh policy remain separate work; the lease-based store
+is ready for it.
 
 The memory agent's model is set by its versions like any agent's. `MEMORY_MODEL_PROVIDER` and
 `MEMORY_MODEL_ID` only give the seed's version 1; when they are empty, it uses the default model.
@@ -655,7 +656,8 @@ Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 ```sh
 ni
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
-# Set CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
+# Set only CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
+# Never store provider API keys in .dev.vars; register them through the CLI below.
 nr dev:agents
 ```
 
@@ -722,8 +724,9 @@ The CLI works like this:
   fingerprint, last4 and timestamps), never key or token values. Assign/unassign update configuration
   through the existing management RPCs; revoke immediately prevents further resolution. Configure
   `CREDENTIAL_KEK_V1` in the local Worker before registration; the CLI never manages Worker Secrets.
-  The CLI does not implicitly load `.dev.vars`: export the chosen key variable in your shell or
-  pipe a key from a protected source. Never paste keys into command-line arguments or shell history.
+  `.dev.vars` must contain only the KEK and non-secret local settings, never provider API keys.
+  The CLI does not load credentials from `.dev.vars`: supply a temporary key variable in your
+  shell or pipe a key from a protected source, then register it into the encrypted local store. Never paste keys into command-line arguments or shell history.
 - `credentials login --provider openai` calls Pi `Models.login` on Node with an in-memory store,
   the seeded installation ID and agent name `kodama`. It prints the authorization URL, then accepts
   the final redirect URL without echoing it. The browser callback uses `127.0.0.1:1455`; if that port
