@@ -29,7 +29,7 @@ it('redacts known assigned values and key patterns before conversations and SSE 
   ])
 })
 
-it.each(['sk-request00000001', 'test-key'])(
+it.each(['sk-request00000001', 'test-key', 'prefix_sk-abcdef123456'])(
   'rejects credential text in request IDs: %s',
   async (requestId) => {
     const id = await newAgentId()

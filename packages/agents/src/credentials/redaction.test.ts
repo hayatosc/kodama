@@ -12,6 +12,13 @@ it('removes known values, API-key shapes and JWTs without changing ordinary pros
   expect(redactSecrets('A useful ordinary sentence.')).toBe('A useful ordinary sentence.')
 })
 
+it('detects key and JWT shapes embedded after request-ID prefixes', () => {
+  for (const prefix of ['prefix_', 'prefix-', 'prefix']) {
+    expect(redactSecrets(`${prefix}sk-abcdef123456`)).toBe(`${prefix}[REDACTED]`)
+    expect(redactSecrets(`${prefix}eyJabc.def.ghi`)).toBe(`${prefix}[REDACTED]`)
+  }
+})
+
 it('redacts nested protocol values without mutating the input', () => {
   const input = { content: [{ text: 'sk-secret123456' }], detail: 'xai-secret123456' }
   expect(redactData(input)).toEqual({ content: [{ text: '[REDACTED]' }], detail: '[REDACTED]' })
