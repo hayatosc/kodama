@@ -31,7 +31,7 @@ function reconcile() {
   return reconcileAgents({
     env,
     db: managementDb(env.MANAGEMENT_DB),
-    models: createAgentModels(env),
+    models: createAgentModels(),
     principal: null,
     now: Date.now(),
   })
@@ -70,10 +70,10 @@ describe('a version written while a turn runs', () => {
       model: { provider: 'openai', modelId: 'gpt-6-sol' },
       systemPrompt: 'You are the new prompt.',
     })
-    expect(written).toMatchObject({ version: 1, apply: { state: 'pending', appliedVersion: 0 } })
+    expect(written).toMatchObject({ version: 2, apply: { state: 'pending', appliedVersion: 1 } })
     expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
-      desiredVersion: 1,
-      appliedVersion: 0,
+      desiredVersion: 2,
+      appliedVersion: 1,
       pending: true,
     })
 
@@ -81,7 +81,7 @@ describe('a version written while a turn runs', () => {
     await waitForAnswer(agentId, 'running')
     expect(bodies[0]).not.toContain('gpt-6-sol')
     expect(bodies[0]).not.toContain('You are the new prompt.')
-    await expect.poll(async () => (await versions(agentId)).applied).toBe(1)
+    await expect.poll(async () => (await versions(agentId)).applied).toBe(2)
 
     await exports.default.sendMessage(agentId, { requestId: 'next', content: 'Second' })
     await waitForAnswer(agentId, 'next')
@@ -99,14 +99,14 @@ describe('convergence', () => {
     const written = await updateSettings(agentId, { systemPrompt: 'Pulled on open' })
     expect(written.apply.state).toBe('failed')
     expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
-      desiredVersion: 1,
-      appliedVersion: 0,
+      desiredVersion: 2,
+      appliedVersion: 1,
       pending: true,
     })
 
     await evictDurableObject(env.AGENTS.getByName(agentId))
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe('Pulled on open')
-    expect(await versions(agentId)).toEqual({ desired: 1, applied: 1 })
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 2 })
   })
 
   it('applies a version whose push was lost at the daily reconciliation', async () => {
@@ -115,10 +115,10 @@ describe('convergence', () => {
     await exports.default.snapshot(agentId)
     vi.spyOn(Agent.prototype, 'applyConfig').mockRejectedValueOnce(new Error('push lost'))
     await updateSettings(agentId, { systemPrompt: 'Pushed again' })
-    expect(await versions(agentId)).toEqual({ desired: 1, applied: 0 })
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 1 })
 
     await reconcile()
-    expect(await versions(agentId)).toEqual({ desired: 1, applied: 1 })
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 2 })
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe('Pushed again')
   })
 
@@ -134,13 +134,13 @@ describe('convergence', () => {
       systemPrompt: 'Needs memory',
       sharedSpaces: ['team-x', 'global'],
     })
-    expect(written.apply).toEqual({ state: 'failed', appliedVersion: 0 })
-    expect(await versions(agentId)).toEqual({ desired: 1, applied: 0 })
+    expect(written.apply).toEqual({ state: 'failed', appliedVersion: 1 })
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 1 })
     expect(await env.AGENTS.getByName(agentId).getConfig()).toEqual(before)
 
     prepare.mockRestore()
     await reconcile()
-    expect(await versions(agentId)).toEqual({ desired: 1, applied: 1 })
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 2 })
     expect(await env.AGENTS.getByName(agentId).getConfig()).toMatchObject({
       systemPrompt: 'Needs memory',
       sharedSpaces: ['team-x', 'global'],

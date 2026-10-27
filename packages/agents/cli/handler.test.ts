@@ -1,6 +1,7 @@
 import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { newAgentId } from '../src/helper/management.ts'
+import { seedOnce } from '../src/helper/management.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/helper/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -72,6 +73,7 @@ it('rejects malformed CLI input before RPC admission', async () => {
 })
 
 it('seeds, and sends to the first agent by its slug', async () => {
+  await seedOnce()
   const post = (path: string, body?: unknown) =>
     handleCli(
       new Request(`http://localhost/cli/${path}`, {

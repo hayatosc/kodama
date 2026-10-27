@@ -1,11 +1,19 @@
-/** Validate supplied credential references before immutable configuration writes. @module */
-import { eq } from 'drizzle-orm'
-import { credentials } from '../../drizzle/management/schema.ts'
+/** Validation of immutable credential references before configuration writes. @module */
+import { and, eq } from 'drizzle-orm'
+import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 
-/** Reject unknown, inactive or provider-mismatched references before any database mutation. */
-export async function validateCredentialRefs(db: ManagementDb, settings: AgentSettings) {
+/** All credential kinds use the same status, provider and grant rules; ownership is metadata. */
+export async function validateCredentialRefs(
+  db: ManagementDb,
+  settings: AgentSettings,
+  agentId?: string,
+) {
+  if (!settings.credentials?.primary[settings.model.provider])
+    throw new TypeError(
+      `credential_unavailable: missing credential reference for ${settings.model.provider}`,
+    )
   for (const [provider, credentialId] of Object.entries(settings.credentials?.primary ?? {})) {
     const row = await db
       .select()
@@ -18,5 +26,19 @@ export async function validateCredentialRefs(db: ManagementDb, settings: AgentSe
       )
     if (row.status !== 'active' || row.provider !== provider)
       throw new TypeError('credential_unavailable: invalid credential reference')
+    if (agentId) {
+      const grant = await db
+        .select()
+        .from(credentialGrants)
+        .where(
+          and(
+            eq(credentialGrants.agentId, agentId),
+            eq(credentialGrants.credentialId, credentialId),
+          ),
+        )
+        .get()
+      if (!grant)
+        throw new TypeError('credential_unavailable: credential is not granted to the agent')
+    }
   }
 }

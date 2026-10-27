@@ -5,12 +5,12 @@
  *
  * @module
  */
+import type { CredentialStore } from '@earendil-works/pi-ai'
 import { configure, createRegistry, defineExtension } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
 import { agentChange, defaultAgentConfig } from '../configuration/index.ts'
 import type { DefaultModelEnv } from '../configuration/index.ts'
 import { createAgentModels } from '../models/index.ts'
-import type { ModelProviderEnv } from '../models/index.ts'
 import { agentTools } from '../tools/index.ts'
 import { harnessSettings } from '../runtime/harness.ts'
 import { guardedModels } from '../runtime/restrictions.ts'
@@ -23,16 +23,17 @@ import type { Refusal } from '../runtime/restrictions.ts'
  * @param refusal - Checked before every model request.
  */
 export function createAgentOptions(
-  env: DefaultModelEnv & ModelProviderEnv,
+  env: DefaultModelEnv,
   always: readonly Extension[] = [],
   refusal: Refusal = () => undefined,
+  credentials?: CredentialStore,
 ): HarnessOptions {
   const extension = defineExtension({ name: 'kodama', tools: agentTools })
   const registry = createRegistry()
   registry.install(extension)
   for (const extra of always) registry.install(extra)
   return {
-    models: guardedModels(createAgentModels(env), refusal),
+    models: guardedModels(createAgentModels(credentials), refusal),
     registry,
     settings: harnessSettings([extension, ...always]),
     conversationCreated: (tx, conversation) =>

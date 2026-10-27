@@ -5,9 +5,11 @@
  */
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { agents, principals } from '../../drizzle/management/schema.ts'
+import { agents, principals, agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from '../configuration/index.ts'
 import { managementDb } from '../management/db.ts'
+import { grantTestCredentials, testCredentialRefs } from './credentials.ts'
+import { referenceStatements } from '../credentials/references.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { ManagementActor, AgentSettings, ConfigWriteResult, SeedResult } from '../protocol.ts'
 
@@ -21,7 +23,7 @@ let seeded: Promise<SeedResult> | undefined
 
 /** The seed's result; the first call of a test file seeds. */
 export function seedOnce(): Promise<SeedResult> {
-  seeded ??= agentService().seed()
+  seeded ??= testCredentialRefs().then((refs) => agentService().seed(refs))
   return seeded
 }
 
@@ -47,7 +49,11 @@ export async function principalIdOf(actor: ManagementActor): Promise<string> {
  * starts on the first call with the default configuration and no version. Use
  * `agentService().createAgent` to test creation itself.
  */
-export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
+export async function newAgentId(
+  agentId: string = uuidv7(),
+  withCredentials = true,
+): Promise<string> {
+  await seedOnce()
   const now = Date.now()
   await management.insert(agents).values({
     agentId,
@@ -55,10 +61,26 @@ export async function newAgentId(agentId: string = uuidv7()): Promise<string> {
     kind: 'working',
     displayName: `test ${agentId.slice(0, 8)}`,
     status: 'active',
-    currentVersion: 0,
+    currentVersion: withCredentials ? 1 : 0,
     createdAt: now,
     updatedAt: now,
   })
+  if (!withCredentials) return agentId
+  const settings = {
+    ...defaultAgentSettings(env),
+    credentials: await grantTestCredentials(agentId),
+  }
+  await management.batch([
+    management.insert(agentConfigVersions).values({
+      agentId,
+      version: 1,
+      settingsJson: JSON.stringify(settings),
+      schemaVersion: 1,
+      authorId: null,
+      createdAt: now,
+    }),
+    ...referenceStatements(management, agentId, settings),
+  ])
   return agentId
 }
 

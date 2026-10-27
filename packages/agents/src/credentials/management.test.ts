@@ -5,6 +5,7 @@ import { expect, it } from 'vitest'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
+import { newAgentId } from '../helper/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../models/index.ts'
 import {
@@ -26,7 +27,7 @@ async function caller() {
     call: {
       db,
       env,
-      models: createAgentModels(env),
+      models: createAgentModels(),
       now: Date.now(),
       principal,
     },
@@ -96,19 +97,16 @@ it('names credential IDs in validation errors', async () => {
 })
 
 it('replays concurrent duplicate grants with a single audit', async () => {
-  const { call, actor } = await caller()
+  const { call } = await caller()
   const credential = await putCredential(call, env, {
     requestId: uuidv7(),
     provider: 'openai',
     secret: 'concurrent-grant-secret',
   })
-  const agent = await exports.default.createAgent(actor, {
-    requestId: uuidv7(),
-    displayName: 'Grant target',
-  })
+  const agentId = await newAgentId()
   const results = await Promise.all([
-    grantCredential(call, credential.credentialId, agent.agentId),
-    grantCredential(call, credential.credentialId, agent.agentId),
+    grantCredential(call, credential.credentialId, agentId),
+    grantCredential(call, credential.credentialId, agentId),
   ])
   expect(results[0]).toEqual(results[1])
   expect(

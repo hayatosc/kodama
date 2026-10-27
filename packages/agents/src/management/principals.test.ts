@@ -5,6 +5,9 @@
  * @module
  */
 import { uuidv7 } from '../lib/uuid.ts'
+import { env } from 'cloudflare:workers'
+import { defaultAgentSettings } from '../configuration/index.ts'
+import { testCredentialRefs } from '../helper/credentials.ts'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { auditLog, principals } from '../../drizzle/management/schema.ts'
@@ -26,6 +29,7 @@ async function create() {
   return agentService().createAgent(await caller(), {
     requestId: uuidv7(),
     displayName: 'Caller',
+    settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
   })
 }
 
@@ -36,6 +40,7 @@ describe('callers', () => {
     const created = await agentService().createAgent(actor, {
       requestId: uuidv7(),
       displayName: 'Made by an agent',
+      settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
     })
     const { settings } = await agentService().getConfig(actor, created.agentId)
     await agentService().updateConfig(actor, created.agentId, {

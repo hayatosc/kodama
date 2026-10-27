@@ -18,11 +18,14 @@ import type { AgentEnv } from '../../env.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
 
 /** The variables that name the memory agent's initial model. */
-export type MemoryModelEnv = DefaultModelEnv &
-  Pick<AgentEnv, 'MEMORY_MODEL_PROVIDER' | 'MEMORY_MODEL_ID'>
+export type MemoryModelEnv = DefaultModelEnv & {
+  MEMORY_MODEL_PROVIDER: string
+  MEMORY_MODEL_ID: string
+}
 import { harnessSettings } from '../../runtime/harness.ts'
 import { guardedModels } from '../../runtime/restrictions.ts'
 import type { Refusal } from '../../runtime/restrictions.ts'
+import type { CredentialStore } from '@earendil-works/pi-ai'
 import { createAgentModels } from '../../models/index.ts'
 import type { AgentConfig, AgentSettings } from '../../protocol.ts'
 import type { RunningJob, MemoryJobDeps } from '../../memory/job-context.ts'
@@ -86,6 +89,7 @@ export function memoryHarnessOptions(
   runningJob: () => Promise<RunningJob | undefined>,
   storage: DurableObjectStorage,
   guard: { extension: Extension; refusal: Refusal },
+  credentials?: CredentialStore,
 ): HarnessOptions {
   const extension = defineExtension({
     name: 'kodama-memory-agent',
@@ -95,7 +99,7 @@ export function memoryHarnessOptions(
   registry.install(extension)
   registry.install(guard.extension)
   return {
-    models: guardedModels(createAgentModels(env), guard.refusal),
+    models: guardedModels(createAgentModels(credentials), guard.refusal),
     registry,
     settings: harnessSettings([extension, guard.extension]),
     conversationCreated: (tx, conversation) =>

@@ -1,8 +1,15 @@
 /** Current-version reverse indexes for credential invalidation. @module */
 import { eq } from 'drizzle-orm'
-import { agentCredentialRefs } from '../../drizzle/management/schema.ts'
+import { agentCredentialRefs, credentialGrants } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
+
+/** Initial grants for an authorized creation; include them in the registry creation batch. */
+export function initialGrantStatements(db: ManagementDb, agentId: string, settings: AgentSettings) {
+  return [...new Set(Object.values(settings.credentials?.primary ?? {}))].map((credentialId) =>
+    db.insert(credentialGrants).values({ credentialId, agentId }).onConflictDoNothing(),
+  )
+}
 
 /** Replace an agent's reverse index in the same batch as its configuration version. */
 export function referenceStatements(db: ManagementDb, agentId: string, settings: AgentSettings) {

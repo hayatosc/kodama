@@ -1,7 +1,8 @@
 /** Credential assignments update grants, configuration versions, indexes, and audit atomically. @module */
 import { and, eq } from 'drizzle-orm'
 import { agents, credentialGrants } from '../../drizzle/management/schema.ts'
-import { pushVersion, type ManagementCall } from '../management/service/agents.ts'
+import { pushDesired } from '../management/service/agents.ts'
+import type { ManagementCall } from '../management/service/agents.ts'
 import { parseSettings } from '../configuration/index.ts'
 import { versionRow, writeVersionStatements } from '../management/versions.ts'
 import { auditStatement } from '../management/audit.ts'
@@ -90,9 +91,19 @@ export async function assignCredential(
     ]),
   ])
   await Promise.all(
-    changes.map(({ agent, updated }) =>
-      pushVersion(call.env, call.db, agent, agent.currentVersion + 1, updated),
-    ),
+    changes.map(async ({ agent }) => {
+      try {
+        await call.env.AGENTS.getByName(agent.objectName).invalidateCredentials()
+      } catch {
+        console.error(`Invalidating credentials of agent ${agent.agentId} failed`)
+      }
+      try {
+        await pushDesired(call, agent.agentId)
+      } catch {
+        // Reconciliation retries committed versions; never log credential-bearing errors.
+        console.error(`Pushing desired version to agent ${agent.agentId} failed`)
+      }
+    }),
   )
   return {
     credentialId,

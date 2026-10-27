@@ -6,6 +6,7 @@
  *
  * @module
  */
+import type { CredentialRefs } from './protocol.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'
@@ -82,7 +83,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       const result = await reconcileAgents({
         env: this.env,
         db: managementDb(this.env.MANAGEMENT_DB),
-        models: createAgentModels(this.env),
+        models: createAgentModels(),
         principal: null,
         now: controller.scheduledTime,
       })
@@ -114,7 +115,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return {
       env: this.env,
       db: managementDb(this.env.MANAGEMENT_DB),
-      models: createAgentModels(this.env),
+      models: createAgentModels(),
       principal: null,
       now: Date.now(),
     }
@@ -136,8 +137,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * Create the installation's starting rows if missing: the installation ID, the memory agent with
    * its version 1, and the first agent. Idempotent.
    */
-  async seed(): Promise<SeedResult> {
-    return seed(this.#systemCall())
+  async seed(credentials?: CredentialRefs): Promise<SeedResult> {
+    return seed(this.#systemCall(), credentials)
   }
 
   /**

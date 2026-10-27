@@ -1,7 +1,9 @@
 /** Agent management commits registry, configuration and credential references together. @module */
+import { defaultAgentSettings } from '../../configuration/index.ts'
+import { grantTestCredentials, testCredentialRefs } from '../../helper/credentials.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
   agentConfigVersions,
@@ -41,6 +43,7 @@ async function create(displayName = 'Researcher', slug?: string) {
   return agentService().createAgent(await caller(), {
     requestId: uuidv7(),
     displayName,
+    settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
     ...(slug === undefined ? {} : { slug }),
   })
 }
@@ -68,10 +71,16 @@ it('keeps credential coverage aligned with create, update and rollback versions'
     management
       .select()
       .from(agentCredentialRefs)
-      .where(eq(agentCredentialRefs.agentId, created.agentId))
+      .where(
+        and(
+          eq(agentCredentialRefs.agentId, created.agentId),
+          eq(agentCredentialRefs.credentialId, credential.credentialId),
+        ),
+      )
   expect(await references()).toEqual([
     { agentId: created.agentId, provider: 'openai', credentialId: credential.credentialId },
   ])
+  await grantTestCredentials(created.agentId)
   await agentService().updateConfig(actor, created.agentId, {
     requestId: uuidv7(),
     expectedVersion: 1,
@@ -190,7 +199,12 @@ describe('createAgent', () => {
 
   it('returns the first agent for a repeated requestId, and refuses a taken slug', async () => {
     const actor = await caller()
-    const request = { requestId: uuidv7(), displayName: 'Once', slug: uniqueSlug() }
+    const request = {
+      requestId: uuidv7(),
+      displayName: 'Once',
+      slug: uniqueSlug(),
+      settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
+    }
     const first = await agentService().createAgent(actor, request)
     const again = await agentService().createAgent(actor, request)
     expect(again.agentId).toBe(first.agentId)
@@ -203,7 +217,12 @@ describe('createAgent', () => {
 
   it('creates one agent for two concurrent deliveries of the same request', async () => {
     const actor = await caller()
-    const request = { requestId: uuidv7(), displayName: 'Twice', slug: uniqueSlug() }
+    const request = {
+      requestId: uuidv7(),
+      displayName: 'Twice',
+      slug: uniqueSlug(),
+      settings: { ...defaultAgentSettings(env), credentials: await testCredentialRefs() },
+    }
 
     const [first, second] = await Promise.all([
       agentService().createAgent(actor, request),
@@ -396,7 +415,7 @@ describe('configuration versions', () => {
   })
 
   it('refuses to read the configuration of an agent with no version', async () => {
-    const agentId = await newAgentId()
+    const agentId = await newAgentId(undefined, false)
 
     const refused = agentService().getConfig(await caller(), agentId)
 

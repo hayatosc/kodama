@@ -138,22 +138,23 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                | May import                            |
-| ------------------ | ---------------------------------------------------- | ------------------------------------- |
-| lib                | `src/lib/`                                           | nothing in `src/`                     |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts` | lib                                   |
-| settings           | `src/configuration/`, `src/models/`                  | lib, contracts, tool registry         |
-| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`         | lib                                   |
-| storage            | `drizzle/`, `src/storage/`                           | lib, memory contracts                 |
-| management         | `src/management/`, except `service/`                 | lib, contracts, settings, storage     |
-| memory store       | `src/memory/store/`                                  | lib, storage, memory contracts        |
-| memory             | the rest of `src/memory/`                            | lib, contracts, storage, memory store |
-| tool adapters      | `src/tools/`                                         | lib, contracts, memory, memory store  |
-| runtime            | `src/runtime/`                                       | all of the above                      |
-| agent              | `src/agent/`                                         | all of the above                      |
-| system agents      | `src/system-agents/`                                 | all of the above, including Agent     |
-| management service | `src/management/service/`                            | all of the above                      |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                | all of the above                      |
+| Layer              | Paths                                                                                                                           | May import                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| lib                | `src/lib/`                                                                                                                      | nothing in `src/`                             |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                            | lib                                           |
+| settings           | `src/configuration/`, `src/models/`                                                                                             | lib, contracts, tool registry                 |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                    | lib                                           |
+| storage            | `drizzle/`, `src/storage/`                                                                                                      | lib, memory contracts                         |
+| management         | `src/management/`, except `service/`                                                                                            | lib, contracts, settings, storage             |
+| credential storage | `src/credentials/`, except the management flows below                                                                           | lib, contracts, settings, storage, management |
+| memory store       | `src/memory/store/`                                                                                                             | lib, storage, memory contracts                |
+| memory             | the rest of `src/memory/`                                                                                                       | lib, contracts, storage, memory store         |
+| tool adapters      | `src/tools/`                                                                                                                    | lib, contracts, memory, memory store          |
+| runtime            | `src/runtime/`                                                                                                                  | all of the above                              |
+| agent              | `src/agent/`                                                                                                                    | all of the above                              |
+| system agents      | `src/system-agents/`                                                                                                            | all of the above, including Agent             |
+| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts` | all of the above                              |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                           | all of the above                              |
 
 Some consequences:
 
@@ -162,8 +163,10 @@ Some consequences:
   helpers the `Agent` class uses (`serial.ts`).
 - `src/management/`, except `service/`, knows the management database and nothing of objects; the
   agent runtime uses it to report applied versions and to admit `sendTo`. Only
-  `src/management/service/` and the entrypoint push to objects, because the seed needs the memory
-  agent's configuration.
+  management-service-layer flows and the entrypoint push to objects, because the seed needs the
+  memory agent's configuration. Credential queries and helpers stay in `src/credentials/`;
+  configuration writers in the service layer compose reverse-index statements in their batches.
+  The lower management layer never imports credential storage.
 - `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
   formatting. `src/tools/working-agent/memory.ts` serves working agents;
   `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's
@@ -672,6 +675,12 @@ so only one process is using its local storage.
 
 ### Local agent CLI
 
+First initialize a fresh database through a trusted service binding with registered credential
+IDs passed explicitly to `AgentService.seed({ primary: { openai: credentialId } })`, as described
+under deployment below. At this runtime layer, the CLI cannot bootstrap credentials itself;
+PR #16 adds the local credential bootstrap command. The commands below assume that initial seed
+has completed.
+
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
@@ -767,10 +776,15 @@ From `packages/agents`:
    `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
    `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
    check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
-4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
-   `nr cf workers secrets update --help` for the pinned CLI's options.
+4. Set only `CREDENTIAL_KEK_V1` as a Worker secret (base64 of 32 random bytes). Provider
+   credentials belong in the encrypted management D1 vault, never Worker secrets or `.dev.vars`.
 5. Deploy with `nr deploy`.
-6. Call `AgentService.seed()` once from the trusted Worker that binds it; it is idempotent.
+6. From a trusted Worker service binding, register credentials with `AgentService.putCredential`.
+   Pass the returned IDs explicitly to `AgentService.seed({ primary: { openai: credentialId } })`
+   for the default working and memory models. Include a reference for every selected provider.
+   Seed creates the initial grants atomically and is idempotent; an empty installation cannot
+   be initialized by calling `seed()` without references. The local credential bootstrap command
+   is introduced by the following credential-hardening layer (PR #16), not this runtime layer.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the

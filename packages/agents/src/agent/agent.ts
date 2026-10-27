@@ -58,6 +58,7 @@ import type { JobStatus } from '../memory/jobs.ts'
 import { createWorkingMemoryExtension } from './memory-extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../models/index.ts'
+import { agentCredentialStore } from '../credentials/runtime.ts'
 import type {
   AgentConfig,
   AgentSettings,
@@ -111,11 +112,17 @@ export class Agent extends DurableObject<AgentEnv> {
   #memoryChanged = false
   /** Why the next external call must not happen, checked before each one. */
   readonly #refusal: Refusal
+  readonly #credentials: ReturnType<typeof agentCredentialStore>
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
     this.#refusal = anyRefusal(statusRefusal(ctx.storage))
+    this.#credentials = agentCredentialStore(
+      env,
+      () => this.#agentId(),
+      () => appliedSettings(ctx.storage),
+    )
     this.#local = openLocalDb(ctx.storage)
     // Every request waits until the harness is open and prepared. The await comes first, so a
     // subclass has initialized its fields before `#open` calls its hooks.
@@ -149,7 +156,7 @@ export class Agent extends DurableObject<AgentEnv> {
       await pullIfBehind(this.#applyDeps(harness), {
         db: managementDb(this.env.MANAGEMENT_DB),
         objectName: this.#agentId(),
-        parse: (value) => parseSettings(createAgentModels(this.env), value),
+        parse: (value) => parseSettings(createAgentModels(), value),
       })
     } catch (error) {
       console.error('Catching up with the registry failed', error)
@@ -159,6 +166,16 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Why the next external call must not happen; checked before each one. */
   protected refusal(): Refusal {
     return this.#refusal
+  }
+
+  /** The shared credential store used by working and dedicated agents. */
+  protected credentialStore() {
+    return this.#credentials.store
+  }
+
+  /** Drop decrypted values immediately after a management restriction change. */
+  async invalidateCredentials(): Promise<void> {
+    this.#credentials.invalidate()
   }
 
   /** How a version's settings become Pi's change; the memory agent has its own. */
@@ -212,6 +229,7 @@ export class Agent extends DurableObject<AgentEnv> {
         toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
       ],
       this.#refusal,
+      this.credentialStore(),
     )
   }
 
@@ -364,9 +382,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const message = parseMessage(request)
     await refuseWhenFull(this.ctx.storage)
     const config = await readConfig(await this.#config())
-    if (!(await createAgentModels(this.env).checkAuth(config.model.provider))) {
-      throw new Error(`Credentials are not configured for provider: ${config.model.provider}`)
-    }
+    await this.credentialStore().read(config.model.provider)
     if (await isIdle(await this.#harness)) {
       await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
     }
@@ -406,7 +422,7 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws {@link TypeError} When the settings are invalid.
    */
   async applyConfig(pushed: PushedConfig): Promise<ApplyResult> {
-    const settings = parseSettings(createAgentModels(this.env), pushed.settings)
+    const settings = parseSettings(createAgentModels(), pushed.settings)
     const agentId = parseAgentId(pushed.agentId)
     const harness = await this.#harness
     const deps = this.#applyDeps(harness)

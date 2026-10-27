@@ -1,11 +1,46 @@
 /** Assignment and unassignment keep grants, versions, and reverse indexes together. @module */
+import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { agents, credentialGrants, agentCredentialRefs } from '../../drizzle/management/schema.ts'
+import { Agent } from '../agent/agent.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { uuidv7 } from '../lib/uuid.ts'
+import { credentialCall } from '../helper/credentials.ts'
+import { newAgentId } from '../helper/management.ts'
+import { assignCredential } from './assignments.ts'
+import { putCredential } from './management.ts'
+
+it('pushes the committed version even when credential invalidation rejects', async () => {
+  const agentId = await newAgentId()
+  const call = await credentialCall()
+  const credential = await putCredential(call, env, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    secret: 'sk-independent-push',
+  })
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const invalidation = vi
+    .fn<Agent['invalidateCredentials']>()
+    .mockRejectedValue(new Error('invalidation unavailable'))
+  try {
+    await runInDurableObject(env.AGENTS.getByName(agentId), () => {
+      vi.spyOn(Agent.prototype, 'invalidateCredentials').mockImplementation(invalidation)
+    })
+    await assignCredential(call, credential.credentialId, agentId)
+    const row = await call.db.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    expect(row?.appliedVersion).toBe(row?.currentVersion)
+    expect(error).toHaveBeenCalled()
+    expect(invalidation).toHaveBeenCalledOnce()
+  } finally {
+    await runInDurableObject(env.AGENTS.getByName(agentId), () => {
+      vi.restoreAllMocks()
+    })
+    error.mockRestore()
+  }
+})
 
 it('assigns all agents and unassigns one without revoking the shared key', async () => {
   const db = managementDb(env.MANAGEMENT_DB)
