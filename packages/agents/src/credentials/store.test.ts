@@ -1,7 +1,7 @@
 /** Explicit resolution, live revocation, and lease-protected modifications. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
@@ -137,6 +137,12 @@ it('serializes refresh across independent stores and reads the freshly committed
     return { type: 'oauth', access: 'new-access', refresh: 'new-refresh', expires: 9000 }
   })
   await started.promise
+  const waiting = Promise.withResolvers<void>()
+  const wait = scheduler.wait.bind(scheduler)
+  const waitSpy = vi.spyOn(scheduler, 'wait').mockImplementation((delay, options) => {
+    waiting.resolve()
+    return wait(delay, options)
+  })
   const next = second.modify('openai', async (current) => {
     expect(current).toMatchObject({ access: 'new-access' })
     return undefined
@@ -146,8 +152,11 @@ it('serializes refresh across independent stores and reads the freshly committed
     (error: unknown) => ({ error }),
   )
   try {
-    await scheduler.wait(10)
+    expect(await Promise.race([waiting.promise.then(() => true), result.then(() => false)])).toBe(
+      true,
+    )
   } finally {
+    waitSpy.mockRestore()
     release.resolve()
   }
   await first
