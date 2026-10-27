@@ -15,6 +15,7 @@ import {
 import type { AgentEnv } from '../env.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
+import { installationId } from '../management/installation.ts'
 import { uuidv7, UUID_PATTERN } from '../lib/uuid.ts'
 import { isConstraintError } from '../lib/errors.ts'
 import { credentialFingerprint } from './encryption.ts'
@@ -90,6 +91,7 @@ export async function putCredential(
     env.CREDENTIAL_KEK_V1,
     call.now,
   )
+  await installationId(call.db, call.now)
   // The prepared insert contains ciphertext only. The audit never includes an input object.
   try {
     const [rows] = await call.db.batch([

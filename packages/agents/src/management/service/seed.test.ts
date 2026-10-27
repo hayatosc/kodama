@@ -1,4 +1,4 @@
-/** Seed initialization validates both models before committing any installation state. @module */
+/** Seed initialization validates both models before creating agents; identity is independent. @module */
 import { credentialCall, testCredentialRefs } from '../../helper/credentials.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
@@ -38,7 +38,7 @@ async function firstAgent() {
 
 describe('seed', () => {
   it.each(['openai', 'xai', 'all'])(
-    'rejects missing %s references before persisting installation state',
+    'rejects missing %s references without creating agents or changing identity',
     async (missing) => {
       // The memory-test helper seeds in beforeAll; exercise a genuinely fresh installation.
       for (const table of [
@@ -55,6 +55,7 @@ describe('seed', () => {
       if (missing === 'all') refs.primary = {}
       else delete refs.primary[missing]
       const call = await credentialCall()
+      const identity = await management.select().from(systemSettings)
       await expect(
         seed(
           {
@@ -66,7 +67,7 @@ describe('seed', () => {
         ),
       ).rejects.toThrow('credential_unavailable')
       expect(await management.select().from(agents)).toEqual([])
-      expect(await management.select().from(systemSettings)).toEqual([])
+      expect(await management.select().from(systemSettings)).toEqual(identity)
       await exports.default.seed(await testCredentialRefs())
     },
   )

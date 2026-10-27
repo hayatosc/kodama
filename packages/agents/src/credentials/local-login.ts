@@ -113,7 +113,7 @@ export async function loginRegistration(
         'Port 1455 is in use. Cancel the other login or stop the process using it, then retry.',
       )
     throw new Error(
-      `ChatGPT login failed [stage=${stage}; category=${failureCategory(error)}]. Start a fresh login.`,
+      `ChatGPT login failed [stage=${stage}; category=${interaction.signal?.aborted ? 'cancelled' : failureCategory(error)}]. Start a fresh login.`,
     )
   } finally {
     await store.delete('openai')

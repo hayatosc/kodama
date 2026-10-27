@@ -42,11 +42,11 @@ async function main(): Promise<void> {
     )
   }
   if (command.action === 'credentials/login') {
-    const seedRequest = commandRequest({ action: 'seed' }, token)
-    const seeded = await fetch(seedRequest.url, seedRequest.init)
-    if (!seeded.ok)
+    const identityRequest = commandRequest({ action: 'credentials/installation' }, token)
+    const identity = await fetch(identityRequest.url, identityRequest.init)
+    if (!identity.ok)
       throw new Error('Cannot initialize the local installation; start nr dev:agents first.')
-    const seed: unknown = await seeded.json()
+    const seed: unknown = await identity.json()
     if (
       typeof seed !== 'object' ||
       seed === null ||

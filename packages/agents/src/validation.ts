@@ -117,6 +117,7 @@ export const CreateAgentSchema = v.strictObject(
     requestId: RequestIdSchema,
     displayName: DisplayNameSchema,
     slug: v.optional(SlugSchema),
+    credentials: v.optional(v.unknown()),
     settings: v.optional(v.unknown()),
   },
   'Expected requestId and displayName',

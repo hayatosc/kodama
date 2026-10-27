@@ -8,6 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { USAGE } from './command.ts'
 import { readLocalToken } from './token.ts'
 
+const prompt = vi.hoisted(() => vi.fn<() => Promise<string>>())
+vi.mock('node:readline/promises', () => ({
+  createInterface: () => ({ question: prompt, once() {}, close() {} }),
+}))
+
 vi.mock('./token.ts', () => ({ readLocalToken: vi.fn(() => 'local-secret') }))
 
 const originalArgv = process.argv
@@ -41,6 +46,47 @@ async function run(...args: string[]) {
 }
 
 describe('CLI entrypoint', () => {
+  it('logs in and registers OAuth before any seed, using a lazy installation identity', async () => {
+    const id = '019a0000-0000-7000-8000-000000000001'
+    fetchMock.mockImplementation(async (input) => {
+      const url = input instanceof Request ? input.url : input.toString()
+      if (url.endsWith('/credentials/installation')) return Response.json({ installId: id })
+      if (url.endsWith('/credentials/add')) return Response.json({ credentialId: id })
+      if (url.startsWith('https://auth.openai.com/'))
+        return Response.json({
+          access_token: 'oauth-only-access',
+          refresh_token: 'oauth-only-refresh',
+          id_token: 'test-id-token',
+          expires_in: 3600,
+          scope: 'openid chatgpt.tokens.use.direct',
+        })
+      throw new Error('Unexpected endpoint')
+    })
+    prompt.mockImplementation(async () => {
+      const message: unknown = vi
+        .mocked(console.error)
+        .mock.calls.find(
+          ([value]) => typeof value === 'string' && value.startsWith('Open in your browser:'),
+        )?.[0]
+      if (typeof message !== 'string') throw new Error('Missing authorization URL')
+      const url = new URL(message.replace('Open in your browser: ', ''))
+      expect(url.searchParams.get('ext_agent_host_id')).toBe(`urn:uuid:${id}`)
+      return `http://127.0.0.1:1455/auth/callback?code=test-code&state=${url.searchParams.get('state')}&client_id=issued-client`
+    })
+    await run('credentials', 'login', '--provider', 'openai')
+    expect(process.exitCode, JSON.stringify(vi.mocked(console.error).mock.calls)).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:5173/cli/credentials/add',
+      expect.objectContaining({ body: expect.stringContaining('oauth_subscription') }),
+    )
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        (url instanceof Request ? url.url : url.toString()).endsWith('/seed'),
+      ),
+    ).toBe(false)
+    expect(JSON.stringify(vi.mocked(console.log).mock.calls)).not.toContain('oauth-only-access')
+  })
+
   it('registers an explicit environment key without printing it, even on a reflecting HTTP error', async () => {
     vi.stubEnv('CLI_TEST_KEY', 'private-test-api-key')
     fetchMock.mockResolvedValue(new Response('private-test-api-key', { status: 400 }))

@@ -39,6 +39,7 @@ import { principalOf } from './management/principals.ts'
 import * as flows from './management/service/agents.ts'
 import type { ManagementCall } from './management/service/agents.ts'
 import { seed } from './management/service/seed.ts'
+import { installationId } from './management/installation.ts'
 import {
   CreateAgentSchema,
   UpdateConfigSchema,
@@ -134,6 +135,12 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return { ...call, principal }
   }
 
+  /** Lazily obtain the installation identity for authentication without creating agents. */
+  async getInstallationId(actor: ManagementActor): Promise<string> {
+    const call = await this.#call(actor)
+    return installationId(call.db, call.now)
+  }
+
   /**
    * Create the installation's starting rows if missing: the installation ID, the memory agent with
    * its version 1, and the first agent. Idempotent.
@@ -155,6 +162,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       displayName: input.displayName,
       ...(input.slug === undefined ? {} : { slug: input.slug }),
       ...(input.settings === undefined ? {} : { settings: input.settings }),
+      ...(input.credentials === undefined ? {} : { credentials: input.credentials }),
     })
   }
 

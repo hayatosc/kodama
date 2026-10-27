@@ -13,6 +13,8 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
+          // Real OAuth callback tests share the fixed loopback port 1455.
+          fileParallelism: false,
           include: [
             'cli/index.test.ts',
             'cli/token.test.ts',

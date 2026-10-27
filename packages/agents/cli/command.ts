@@ -16,9 +16,9 @@ export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
 /** The help text. */
 export const USAGE = `Usage:
   nr agent dev seed-credentials < /secure/path/provider-keys.json
-  nr agent seed
+  nr agent seed [--credential ID ...]
   nr agent list
-  nr agent create <slug> [--name NAME]
+  nr agent create <slug> --credential ID [--credential ID ...] [--name NAME]
   nr agent credentials add --provider openai [--key-from-env ENV_NAME]
   nr agent credentials login --provider openai
   nr agent credentials list
@@ -38,13 +38,16 @@ Ctrl+C disconnects; use cancel to stop the agent's work.
 Credentials add reads the key from stdin when --key-from-env is absent.
 Never pass a key as an argument. Login prints the ChatGPT authorization URL
 and accepts a pasted redirect URL without echoing it. Credentials stay in memory
-until write-only registration; reads return metadata only. Assign after registration.`
+until write-only registration; reads return metadata only. Seed/create select registered IDs
+explicitly with --credential (repeat once per provider). Seed without IDs only verifies an
+already initialized installation. Login does not seed or create agents.`
 
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
-  | { action: 'seed' | 'list' | 'credentials/list' }
-  | { action: 'create'; request: CreateAgentRequest }
+  | { action: 'list' | 'credentials/list' | 'credentials/installation' }
+  | { action: 'seed'; credentialIds?: string[] }
+  | { action: 'create'; request: CreateAgentRequest & { credentialIds?: string[] } }
   | { action: 'credentials/add'; provider: string; keyFromEnv?: string; requestId: string }
   | { action: 'credentials/login'; provider: 'openai'; requestId: string }
   | {
@@ -64,6 +67,7 @@ export const CLI_OPTIONS = {
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
   name: { type: 'string' },
+  credential: { type: 'string', multiple: true },
   provider: { type: 'string' },
   'key-from-env': { type: 'string' },
 } as const
@@ -76,6 +80,7 @@ export interface ParsedArgs {
     steer?: boolean
     events?: boolean
     name?: string
+    credential?: string[]
     provider?: string
     'key-from-env'?: string
   }
@@ -105,6 +110,7 @@ export function toCommand(
         requestId: values['request-id'] ?? newRequestId(),
         slug: rawAgentRef,
         displayName: values.name ?? rawAgentRef,
+        ...(values.credential ? { credentialIds: values.credential.map(parseAgentId) } : {}),
       },
     }
   if (action === 'credentials') {
@@ -142,7 +148,11 @@ export function toCommand(
   if (positionals.length !== expected) {
     throw new Error('Unexpected arguments; quote the message and see nr agent --help')
   }
-  if (action === 'seed') return { action }
+  if (action === 'seed')
+    return {
+      action,
+      ...(values.credential ? { credentialIds: values.credential.map(parseAgentId) } : {}),
+    }
   const agentRef = parseAgentRef(rawAgentRef)
   if (action !== 'send') return { action, agentRef }
   const message = parseMessage({
@@ -177,7 +187,9 @@ export function commandRequest(
           ? JSON.stringify(command.message)
           : command.action === 'create'
             ? JSON.stringify(command.request)
-            : credentialJson,
+            : command.action === 'seed' && command.credentialIds
+              ? JSON.stringify({ credentialIds: command.credentialIds })
+              : credentialJson,
       redirect: 'error',
     },
   }

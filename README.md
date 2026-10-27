@@ -81,22 +81,26 @@ Set the local encryption key `CREDENTIAL_KEK_V1` in `packages/agents/.dev.vars`,
 `.dev.vars`. In another terminal, register them through the CLI from the repository root:
 
 ```sh
-nr agent seed
-nr agent create second --name "Second agent"
 # Read the key from a protected source; never pass its value as a command-line argument.
 nr agent credentials add --provider openai < /secure/path/openai-key
 # Or use --key-from-env ENV_NAME with an explicitly supplied, temporary shell variable.
-nr agent credentials assign <credential-id> assistant
-nr agent credentials assign <credential-id> second
+# Alternatively, login first: nr agent credentials login --provider openai
+# Use the ID returned by registration or login:
+nr agent seed --credential <credential-id>
+nr agent create second --name "Second agent" --credential <credential-id>
 nr agent credentials list
 nr agent list
 nr agent send assistant "Hello!"
 nr agent send second "Hello!"
-# Alternatively: nr agent credentials login --provider openai, then assign the returned ID.
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
 ```
+
+Login and registration lazily initialize the stable installation ID without creating agents.
+`--credential` selects an existing active credential explicitly; repeat it once per provider when
+needed. A fresh seed requires references for its default models; an existing seed keeps its current
+references. Use `credentials assign` to change an existing agent's selection.
 
 `seed` creates the first agent, a general-purpose assistant with the slug `assistant`; a `send` to a slug runs it first if
 needed. An agent is named by its UUID, its slug, or a unique UUID prefix, and it retains its

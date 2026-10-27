@@ -3,15 +3,18 @@
  *
  * @module
  */
+import * as v from 'valibot'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
+import { selectedCredentialRefs } from '../src/credentials/validation.ts'
 import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
 type Management = Pick<
   AgentService,
   | 'seed'
+  | 'getInstallationId'
   | 'resolveAgent'
   | 'listAgents'
   | 'createAgent'
@@ -50,14 +53,33 @@ export async function handleCli(
   try {
     if (action === 'credentials')
       return credentialResponse(request, management, rawAgentRef, credentialId, target)
-    if (action === 'seed') return Response.json(await management.seed())
+    if (action === 'seed') {
+      const input: unknown = await request.text().then((text) => (text ? JSON.parse(text) : {}))
+      return Response.json(
+        await management.seed(
+          selectedCredentialRefs(input, await management.listCredentials(CLI_ACTOR)),
+        ),
+      )
+    }
     if (action === 'list') return Response.json(await management.listAgents(CLI_ACTOR))
     if (action === 'create') {
-      const input = parseInput(CreateAgentSchema, await request.json())
+      const body = parseInput(
+        v.strictObject({
+          ...v.pick(CreateAgentSchema, ['requestId', 'displayName', 'slug']).entries,
+          credentialIds: v.optional(v.unknown()),
+        }),
+        await request.json(),
+      )
+      const { credentialIds, ...input } = body
+      const credentials = selectedCredentialRefs(
+        { credentialIds },
+        await management.listCredentials(CLI_ACTOR),
+      )
       return Response.json(
         await management.createAgent(CLI_ACTOR, {
           requestId: input.requestId,
           displayName: input.displayName,
+          ...(credentials ? { credentials } : {}),
           ...(input.slug === undefined ? {} : { slug: input.slug }),
         }),
       )

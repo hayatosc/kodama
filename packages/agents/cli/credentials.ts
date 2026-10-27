@@ -7,6 +7,7 @@ export const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as co
 
 type Management = Pick<
   AgentService,
+  | 'getInstallationId'
   | 'putCredential'
   | 'listCredentials'
   | 'assignCredential'
@@ -24,6 +25,8 @@ export async function credentialResponse(
   ref?: string,
 ): Promise<Response> {
   try {
+    if (action === 'installation')
+      return Response.json({ installId: await management.getInstallationId(CLI_ACTOR) })
     if (action === 'add')
       return Response.json(await management.putCredential(CLI_ACTOR, await request.json()))
     if (action === 'list') return Response.json(await management.listCredentials(CLI_ACTOR))
