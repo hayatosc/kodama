@@ -5,6 +5,7 @@ import { expect, it } from 'vitest'
 import { credentials, principals } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'
+import { sha256Hex } from '../lib/hash.ts'
 import { credentialInsert, credentialMetadata, parseCredential } from './vault.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
@@ -66,6 +67,28 @@ it.each(['api_key', 'oauth_subscription'] as const)(
     })
   },
 )
+
+it('does not expose an offline secret verifier or a complete short OAuth token', async () => {
+  const secret = JSON.stringify({ type: 'oauth', access: 'abcd', refresh: 'r', expires: 123 })
+  const fingerprints = []
+  for (const key of [kek, btoa('11234567890123456789012345678901')]) {
+    const { statement } = await credentialInsert(
+      db,
+      { credentialId: uuidv7(), kind: 'oauth_subscription', provider: 'openai', ownerId: null, revision: 1 },
+      secret,
+      key,
+      Date.now(),
+    )
+    const [rows] = await db.batch([statement])
+    const row = rows[0]
+    if (!row) throw new Error('Missing inserted credential')
+    const metadata = credentialMetadata(row)
+    expect.soft(metadata.last4).toBe('')
+    expect.soft(metadata.fingerprint).not.toBe(await sha256Hex(secret))
+    fingerprints.push(metadata.fingerprint)
+  }
+  expect(fingerprints[0]).not.toBe(fingerprints[1])
+})
 
 it('preserves provider OAuth fields and rejects malformed payloads without echoing them', () => {
   expect(
