@@ -9,6 +9,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../models/index.ts'
 import {
   credentialCoverage,
+  credentialRow,
   grantCredential,
   putCredential,
   revokeCredential,
@@ -53,6 +54,42 @@ it('returns only metadata through RPC and records a secret-free registration aud
   expect(audits).toHaveLength(1)
   expect(audits[0]?.detailJson).toContain(result.fingerprint)
   expect(JSON.stringify(audits)).not.toContain(request.secret)
+})
+
+it('replays identical concurrent registrations without extra credentials or audits', async () => {
+  const { call } = await caller()
+  const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
+  const [first, second] = await Promise.all([
+    putCredential(call, env, input),
+    putCredential(call, env, input),
+  ])
+  expect(second).toEqual(first)
+  expect(await db.select().from(credentials)).toHaveLength(1)
+  expect(
+    await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put')),
+  ).toHaveLength(1)
+})
+
+it('reports a credential conflict for concurrent reuse with different content', async () => {
+  const { call } = await caller()
+  const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
+  const results = await Promise.allSettled([
+    putCredential(call, env, input),
+    putCredential(call, env, { ...input, secret: 'different-secret-key' }),
+  ])
+  expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed?.status !== 'rejected') throw new Error('Expected rejected retry')
+  expect(String(failed.reason)).toContain('credential_conflict')
+  expect(await db.select().from(credentials)).toHaveLength(1)
+})
+
+it('names credential IDs in validation errors', async () => {
+  const { call } = await caller()
+  await expect(credentialRow(call, 'invalid')).rejects.toThrow(
+    'credentialId must be a lowercase UUID v7',
+  )
+  await expect(credentialRow(call, uuidv7())).rejects.toThrow('Unknown credential')
 })
 
 it('rejects a grant to an unknown agent without writing a grant or audit', async () => {

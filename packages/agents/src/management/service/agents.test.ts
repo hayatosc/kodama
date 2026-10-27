@@ -93,6 +93,40 @@ it('keeps credential coverage aligned with create, update and rollback versions'
   })
 })
 
+it('rejects unknown credential references before create or version writes', async () => {
+  const actor = await caller()
+  const source = await create()
+  const configuration = await agentService().getConfig(actor, source.agentId)
+  const settings = { ...configuration.settings, credentials: { primary: { openai: uuidv7() } } }
+  const state = async () => ({
+    agents: await management.select().from(agents),
+    versions: await management.select().from(agentConfigVersions),
+    refs: await management.select().from(agentCredentialRefs),
+    audit: await management.select().from(auditLog),
+  })
+  const before = await state()
+  expect(
+    await rejection(
+      agentService().createAgent(actor, {
+        requestId: uuidv7(),
+        displayName: 'Invalid refs',
+        settings,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(before)
+  expect(
+    await rejection(
+      agentService().updateConfig(actor, source.agentId, {
+        requestId: uuidv7(),
+        expectedVersion: 1,
+        settings,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(before)
+})
+
 describe('createAgent', () => {
   it('assigns a UUID v7, writes the registry, version 1, membership, and audit, and activates it', async () => {
     const actor = await caller()
