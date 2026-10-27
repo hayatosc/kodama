@@ -7,7 +7,7 @@ import { credentials, credentialGrants } from '../../drizzle/management/schema.t
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings, CredentialRefs } from '../protocol.ts'
 
-/** Resolve explicitly supplied CLI IDs from metadata; never choose an implicit credential. */
+/** Resolve explicitly supplied credential IDs from metadata; never choose an implicit credential. */
 export function selectedCredentialRefs(
   input: unknown,
   rows: readonly { credentialId: string; provider: string; status: string }[],

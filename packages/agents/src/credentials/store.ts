@@ -13,8 +13,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
-
-import { REFRESH_REJECTED, refreshChatGPT, refreshDue, reauthCommand } from './refresh.ts'
+import { REFRESH_REJECTED, refreshChatGPT, refreshDue } from './refresh.ts'
 
 const LEASE_MS = 30_000
 
@@ -56,11 +55,18 @@ export function createCredentialStore(
   }
 
   async function unavailable(provider: string, row?: typeof credentials.$inferSelect) {
-    const reason =
-      row?.status === 'needs_reauth'
-        ? `needs_reauth; reauthCommand: ${reauthCommand(provider, await agentId())}`
-        : 'no usable assigned credential'
-    return new Error(`credential_unavailable: ${provider}: ${reason}`)
+    if (row?.status === 'needs_reauth') {
+      return new Error(`credential_unavailable: ${provider}: needs_reauth`, {
+        cause: {
+          code: 'credential_unavailable',
+          status: row.status,
+          provider,
+          credentialId: row.credentialId,
+          agentId: await agentId(),
+        },
+      })
+    }
+    return new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
   }
 
   async function plaintext(row: typeof credentials.$inferSelect): Promise<Credential> {

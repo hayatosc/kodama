@@ -18,17 +18,12 @@ const permanentErrors = new Set([
   'refresh_token_invalidated',
 ])
 
-/** Internal failure marker: the lease owner must persist needs_reauth before surfacing guidance. */
+/** Internal failure marker: the lease owner must persist needs_reauth before surfacing the state. */
 export const REFRESH_REJECTED = 'credential_refresh_rejected'
 
 /** Keep refresh inside the vault lease, including Pi's five-minute preemptive auth window. */
 export function refreshDue(credential: OAuthCredential, now: number): boolean {
   return credential.expires <= now + 5 * 60_000
-}
-
-/** Current CLI recovery uses a new credential and assignment, not an in-place login operation. */
-export function reauthCommand(provider: string, agentId: string): string {
-  return `nr agent credentials login --provider ${provider}; nr agent credentials assign <new-credential-id> ${agentId}`
 }
 
 /**
