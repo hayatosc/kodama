@@ -15,7 +15,6 @@ CREATE TABLE `kodama_memory_jobs` (
 	`outcome` text,
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`not_before` integer NOT NULL,
-	`submission_id` integer,
 	`created_at` integer NOT NULL,
 	`settled_at` integer
 );
@@ -33,8 +32,7 @@ CREATE TABLE `kodama_prune_runs` (
 	`first_at` integer,
 	`last_at` integer,
 	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL,
-	CONSTRAINT "kodama_prune_runs_range" CHECK("kodama_prune_runs"."first_entry" <= "kodama_prune_runs"."last_entry")
+	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX `kodama_prune_runs_by_state` ON `kodama_prune_runs` (`state`);--> statement-breakpoint

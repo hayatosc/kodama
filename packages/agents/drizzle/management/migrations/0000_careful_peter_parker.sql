@@ -11,6 +11,16 @@ CREATE TABLE `agent_config_versions` (
 	FOREIGN KEY (`author_id`) REFERENCES `principals`(`principal_id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE TABLE `agent_credential_refs` (
+	`agent_id` text NOT NULL,
+	`credential_id` text NOT NULL,
+	`provider` text NOT NULL,
+	PRIMARY KEY(`agent_id`, `provider`),
+	FOREIGN KEY (`agent_id`) REFERENCES `agents`(`agent_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`credential_id`) REFERENCES `credentials`(`credential_id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE INDEX `agent_credential_refs_by_credential` ON `agent_credential_refs` (`credential_id`);--> statement-breakpoint
 CREATE TABLE `agent_members` (
 	`agent_id` text NOT NULL,
 	`principal_id` text NOT NULL,
@@ -34,9 +44,7 @@ CREATE TABLE `agents` (
 	`owner_id` text,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`owner_id`) REFERENCES `principals`(`principal_id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "agents_object_name" CHECK("agents"."kind" = 'dedicated' or "agents"."object_name" = "agents"."agent_id"),
-	CONSTRAINT "agents_versions" CHECK("agents"."applied_version" <= "agents"."current_version")
+	FOREIGN KEY (`owner_id`) REFERENCES `principals`(`principal_id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `agents_object_name_unique` ON `agents` (`object_name`);--> statement-breakpoint
@@ -56,6 +64,34 @@ CREATE TABLE `audit_log` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `audit_log_op_id_unique` ON `audit_log` (`op_id`);--> statement-breakpoint
 CREATE INDEX `audit_log_by_target` ON `audit_log` (`target_id`,`seq`);--> statement-breakpoint
+CREATE TABLE `credential_grants` (
+	`credential_id` text NOT NULL,
+	`agent_id` text NOT NULL,
+	PRIMARY KEY(`credential_id`, `agent_id`),
+	FOREIGN KEY (`credential_id`) REFERENCES `credentials`(`credential_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`agent_id`) REFERENCES `agents`(`agent_id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `credentials` (
+	`credential_id` text PRIMARY KEY NOT NULL,
+	`kind` text NOT NULL,
+	`provider` text NOT NULL,
+	`owner_id` text,
+	`status` text NOT NULL,
+	`revision` integer NOT NULL,
+	`ciphertext` text,
+	`iv` text,
+	`wrapped_dek` text,
+	`wrap_iv` text,
+	`fingerprint` text NOT NULL,
+	`last4` text NOT NULL,
+	`lease_id` text,
+	`lease_expires_at` integer,
+	`created_at` integer NOT NULL,
+	`revoked_at` integer,
+	FOREIGN KEY (`owner_id`) REFERENCES `principals`(`principal_id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `principals` (
 	`principal_id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "84f996a6-2aa8-450f-b101-92c691141ab6",
+  "id": "7e4aefda-ebce-4489-a456-13ada40b0036",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "kodama_always_loaded": {
@@ -109,13 +109,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "submission_id": {
-          "name": "submission_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "created_at": {
@@ -243,12 +236,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "kodama_prune_runs_range": {
-          "name": "kodama_prune_runs_range",
-          "value": "\"kodama_prune_runs\".\"first_entry\" <= \"kodama_prune_runs\".\"last_entry\""
-        }
-      }
+      "checkConstraints": {}
     },
     "kodama_remember_turns": {
       "name": "kodama_remember_turns",

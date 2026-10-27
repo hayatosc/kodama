@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0b5ceeae-b790-490b-9668-b8126e23c3a2",
+  "id": "c3101b3e-38bf-431d-b876-175dfca56086",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "archive_segments": {
@@ -108,12 +108,7 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {
-        "archive_segments_range": {
-          "name": "archive_segments_range",
-          "value": "\"archive_segments\".\"first_entry\" <= \"archive_segments\".\"last_entry\""
-        }
-      }
+      "checkConstraints": {}
     },
     "extraction_checkpoints": {
       "name": "extraction_checkpoints",
