@@ -141,14 +141,13 @@ imports say where it sits.
 | Layer              | Paths                                                                                                                                                           | May import                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | lib                | `src/lib/`                                                                                                                                                      | nothing in `src/`                             |
-| redaction          | `src/credentials/redaction.ts`                                                                                                                                  | nothing in `src/`                             |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib, redaction                                |
-| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, redaction, contracts, tool registry      |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib                                           |
+| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, contracts, tool registry                 |
 | memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                    | lib                                           |
 | storage            | `drizzle/`, `src/storage/`                                                                                                                                      | lib, memory contracts                         |
 | management         | `src/management/`, except `service/`                                                                                                                            | lib, contracts, settings, storage             |
-| credential storage | `src/credentials/`, except pure redaction and the management flows below                                                                                        | lib, contracts, settings, storage, management |
-| memory store       | `src/memory/store/`                                                                                                                                             | lib, redaction, storage, memory contracts     |
+| credential storage | `src/credentials/`, except the management flows below                                                                                                           | lib, contracts, settings, storage, management |
+| memory store       | `src/memory/store/`                                                                                                                                             | lib, storage, memory contracts                |
 | memory             | the rest of `src/memory/`                                                                                                                                       | lib, contracts, storage, memory store         |
 | tool adapters      | `src/tools/`                                                                                                                                                    | lib, contracts, memory, memory store          |
 | runtime            | `src/runtime/`                                                                                                                                                  | all of the above                              |
@@ -168,9 +167,8 @@ Some consequences:
   memory agent's configuration. Credential queries and helpers stay in `src/credentials/`;
   configuration writers in the service layer compose reverse-index statements in their batches.
   The lower management layer never imports credential storage.
-- Credential code stays in `src/credentials/`. Its pure `redaction.ts` is a leaf module, not a
-  credential-storage dependency: contracts, settings, and memory store may import it directly.
-  It imports no other source module and does not access the vault, runtime, or agent layers.
+- Credential code stays in `src/credentials/`; contracts, settings, and memory stores do not depend
+  on credential storage or inspect credentials to rewrite content.
 - `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
   formatting. `src/tools/working-agent/memory.ts` serves working agents;
   `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's
@@ -841,12 +839,12 @@ observation, it uses `EventSource` on a separate route backed by `subscribe()`, 
 - Provider credentials are encrypted D1 rows, outside settings and RPC results. Only
   `CREDENTIAL_KEK_V1` is a Worker secret. Never commit `.dev.vars`, credentials or generated local
   state.
-- Known credential values and API-key/JWT patterns are redacted before conversation persistence,
-  tool results, SSE, memory records and skills. Provider output is buffered until its full message
-  can be redacted, so split keys do not escape in deltas; SSE retains lifecycle/completion events,
-  not token-by-token output. Background logs contain categories, not raw exception objects.
+- Outputs and stored content are not redacted: credentials are supplied only for provider
+  authentication, not model context or result fields. Provider output streams without a redaction
+  buffer. Do not paste secrets into ordinary content. Credential background logs contain categories,
+  not raw exception objects (see [credentials.md](credentials.md#leak-prevention-boundaries)).
 - Untrusted RPC input is validated with valibot at the boundary.
-- Redaction is not an instruction filter; a shared space accepts only records that two agents
+- A shared space accepts only records that two agents
   keep (see [memory.md](memory.md#shared-memory)).
 
 ## References

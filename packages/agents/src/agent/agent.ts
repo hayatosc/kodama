@@ -72,7 +72,6 @@ import type {
 } from '../protocol.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
-import { redactData } from '../credentials/redaction.ts'
 import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
@@ -170,9 +169,6 @@ export class Agent extends DurableObject<AgentEnv> {
     return this.#refusal
   }
 
-  /** Redact exact credential values known to this object as well as recognizable key patterns. */
-  protected redactText = (text: string): string => this.#credentials.redact(text)
-
   /** The shared credential store used by working and dedicated agents. */
   protected credentialStore() {
     return this.#credentials.store
@@ -235,7 +231,6 @@ export class Agent extends DurableObject<AgentEnv> {
       ],
       this.#refusal,
       this.credentialStore(),
-      this.redactText,
     )
   }
 
@@ -365,14 +360,12 @@ export class Agent extends DurableObject<AgentEnv> {
    * admission and Pi's scheduler.
    */
   protected async admit(draft: SubmissionDraft): Promise<Submission> {
-    if (draft.requestId && this.redactText(draft.requestId) !== draft.requestId)
-      throw new TypeError('requestId must not contain credential text')
     const harness = await this.#harness
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
-      return conversation.submit(redactData(draft, this.redactText), context)
+      return conversation.submit(draft, context)
     })
     await this.#refreshRecovery(harness)
     return submission

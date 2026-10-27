@@ -5,7 +5,6 @@
  * @module
  */
 import * as v from 'valibot'
-import { redactSecrets } from './credentials/redaction.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
@@ -24,7 +23,7 @@ export function parseInput<const TSchema extends v.GenericSchema>(
 ): v.InferOutput<TSchema> {
   const result = v.safeParse(schema, value, { abortEarly: true })
   if (result.success) return result.output
-  throw new TypeError(redactSecrets(result.issues[0].message))
+  throw new TypeError(result.issues[0].message)
 }
 
 /**
@@ -109,11 +108,8 @@ export const ExpectedVersionSchema = v.pipe(
 
 /** An optional comment of a version. */
 export const CommentSchema = v.optional(v.pipe(v.string(), v.maxLength(500)))
-/** A stable request ID: 1–128 safe characters, never credential-shaped text. */
-export const RequestIdSchema = v.pipe(
-  idSchema('requestId', 128),
-  v.check((id) => redactSecrets(id) === id, 'requestId must not contain credential text'),
-)
+/** A stable request ID of 1–128 safe characters, preserved verbatim for retries. */
+export const RequestIdSchema = idSchema('requestId', 128)
 
 /** Creation input; the flow validates settings against the model catalog. */
 export const CreateAgentSchema = v.strictObject(

@@ -1,9 +1,8 @@
-/** Agent-local credential resolution and exact-secret redaction. @module */
+/** Agent-local credential resolution through the live management database. @module */
 import type { AgentEnv } from '../env.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { managementDb } from '../management/db.ts'
 import { agentRowByObjectName } from '../management/registry.ts'
-import { createRedactor } from './redaction.ts'
 import { createCredentialStore } from './store.ts'
 
 /** Working and dedicated agents resolve the registry ID through the same store. */
@@ -13,8 +12,7 @@ export function agentCredentialStore(
   settings: () => Promise<AgentSettings | undefined>,
 ) {
   const db = managementDb(env.MANAGEMENT_DB)
-  const redactor = createRedactor()
-  const handle = createCredentialStore(
+  return createCredentialStore(
     db,
     async () => {
       const row = await agentRowByObjectName(db, objectName())
@@ -23,8 +21,5 @@ export function agentCredentialStore(
     },
     settings,
     () => env.CREDENTIAL_KEK_V1,
-    Date.now,
-    redactor.remember,
   )
-  return { ...handle, redact: redactor.text }
 }

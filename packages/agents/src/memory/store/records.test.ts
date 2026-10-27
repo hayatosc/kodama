@@ -60,10 +60,10 @@ async function written(scope: Scope, agentId: string, content: string, entry: nu
 }
 
 describe('applying operations', () => {
-  it('redacts credential-shaped text before a memory record is stored', async () => {
+  it('preserves unknown credential-shaped text in a memory record', async () => {
     const { scope, agentId } = agentScope()
     await written(scope, agentId, 'Key sk-private123456 and xai-private123456', 1)
-    expect(await activeContents(scope)).toEqual(['Key [REDACTED] and [REDACTED]'])
+    expect(await activeContents(scope)).toEqual(['Key sk-private123456 and xai-private123456'])
   })
 
   it('applies the same supersede once when it is repeated', async () => {

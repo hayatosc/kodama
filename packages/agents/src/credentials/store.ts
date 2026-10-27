@@ -23,7 +23,6 @@ export function createCredentialStore(
   settings: () => Promise<AgentSettings | undefined>,
   kek: () => string,
   now: () => number = Date.now,
-  remember: (secret: string) => void = () => {},
 ): { store: CredentialStore; invalidate: () => void } {
   const cache = new Map<string, { revision: number; value: Credential }>()
   let generation = 0
@@ -79,13 +78,7 @@ export function createCredentialStore(
       },
       kek(),
     )
-    const parsed = parseCredential(row.kind, value)
-    if (parsed.type === 'api_key') remember(parsed.key)
-    else {
-      remember(parsed.access)
-      remember(parsed.refresh)
-    }
-    return parsed
+    return parseCredential(row.kind, value)
   }
 
   async function acquire(provider: string, id: string, leaseId: string, signal?: AbortSignal) {
@@ -169,11 +162,6 @@ export function createCredentialStore(
         const value = parseCredential(leased.kind, secret)
         const fingerprint = await credentialFingerprint(secret, kek())
         const token = value.type === 'api_key' ? value.key : value.access
-        if (value.type === 'api_key') remember(value.key)
-        else {
-          remember(value.access)
-          remember(value.refresh)
-        }
         const revision = leased.revision + 1
         const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
         // Record the attempted refresh in the same batch; a losing CAS must not be reported

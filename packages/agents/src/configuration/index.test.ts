@@ -21,18 +21,18 @@ const credentialId = uuidv7()
 
 describe('agent settings schema', () => {
   it.each(['labels', 'sharedSpaces'] as const)(
-    'rejects %s identifiers made invalid by redaction before storage',
+    'preserves ordinary hyphenated %s identifiers',
     (field) => {
       const input = { ...valid, [field]: ['xai-research'] }
       expect(() => parseInput(schema, input)).not.toThrow()
-      expect(() => parseSettings(createAgentModels(), input)).toThrow(TypeError)
+      expect(parseSettings(createAgentModels(), input)[field]).toEqual(['xai-research'])
     },
   )
 
-  it('keeps redacted free text valid and stable across settings reloads', () => {
+  it('keeps unknown credential-shaped free text stable across settings reloads', () => {
     const models = createAgentModels()
     const settings = parseSettings(models, { ...valid, systemPrompt: 'Keep sk-private123456 safe' })
-    expect(settings.systemPrompt).toBe('Keep [REDACTED] safe')
+    expect(settings.systemPrompt).toBe('Keep sk-private123456 safe')
     expect(parseSettings(models, settings)).toEqual(settings)
   })
 

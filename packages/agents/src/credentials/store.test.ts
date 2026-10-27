@@ -9,7 +9,6 @@ import { defaultAgentSettings } from '../configuration/index.ts'
 import { credentialCall } from '../helper/credentials.ts'
 import { newAgentId } from '../helper/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { createRedactor } from './redaction.ts'
 import { credentialInsert } from './vault.ts'
 import { revokeCredential } from './management.ts'
 import { createCredentialStore } from './store.ts'
@@ -57,7 +56,6 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     credentials: { primary: { openai: primary } },
   }
   let now = 1000
-  const redactor = createRedactor()
   const open = () =>
     createCredentialStore(
       db,
@@ -65,12 +63,10 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
       async () => settings,
       kek,
       () => now,
-      redactor.remember,
     )
   return {
     ...open(),
     open,
-    redact: redactor.text,
     settings,
     primary,
     advance: (milliseconds: number) => {
@@ -85,17 +81,6 @@ it('rejects a warm cached credential immediately after D1 revocation without a j
   await revokeCredential(await credentialCall(), primary)
   // This standalone store receives no object invalidation push; live D1 status is authoritative.
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
-})
-
-it('redacts newly modified opaque tokens before the next credential read', async () => {
-  const { store, redact } = await fixture('oauth_subscription')
-  await store.modify('openai', async () => ({
-    type: 'oauth',
-    access: 'opaque-new-access',
-    refresh: 'opaque-new-refresh',
-    expires: 5000,
-  }))
-  expect(redact('opaque-new-access opaque-new-refresh')).toBe('[REDACTED] [REDACTED]')
 })
 
 it('uses only explicit references and checks status even with a warm cache and no invalidation push', async () => {

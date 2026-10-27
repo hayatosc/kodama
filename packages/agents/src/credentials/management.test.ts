@@ -57,16 +57,16 @@ it('returns only metadata through RPC and records a secret-free registration aud
   expect(JSON.stringify(audits)).not.toContain(request.secret)
 })
 
-it('rejects credential-shaped request IDs before persisting audit or credential rows', async () => {
+it('replays credential-shaped request IDs without changing their identity', async () => {
   const { call } = await caller()
   const before = await db.select().from(credentials)
   const audits = await db.select().from(auditLog)
   const requestId = `sk-${'x'.repeat(32)}`
-  await expect(
-    putCredential(call, env, { requestId, provider: 'openai', secret: 'safe-test-key' }),
-  ).rejects.toThrow('Invalid credential registration')
-  expect(await db.select().from(credentials)).toEqual(before)
-  expect(await db.select().from(auditLog)).toEqual(audits)
+  const input = { requestId, provider: 'openai', secret: 'safe-test-key' }
+  const first = await putCredential(call, env, input)
+  expect(await putCredential(call, env, input)).toEqual(first)
+  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
+  expect(await db.select().from(auditLog)).toHaveLength(audits.length + 1)
 })
 
 it('replays identical concurrent registrations without extra credentials or audits', async () => {

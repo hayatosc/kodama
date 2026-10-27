@@ -5,7 +5,6 @@
  *
  * @module
  */
-import { redactData, redactSecrets } from '../../credentials/redaction.ts'
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
 import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'
@@ -83,7 +82,7 @@ export function applyOperation(
   context: OperationContext,
   op: Operation,
 ): Promise<OperationResult & { replayed: boolean }> {
-  return applyPlan(db, context, () => plan(db, context, redactData(op)))
+  return applyPlan(db, context, () => plan(db, context, op))
 }
 
 /** Record a rejected shared write in the ledger without changing any records. */
@@ -101,8 +100,8 @@ export function recordSharedRejection(
       statements: [
         insertOp(db, context, 'shared_rejected', result),
         recordLedger(db, context, 'shared_rejected', scope, {
-          content: redactSecrets(content),
-          reason: redactSecrets(reason),
+          content,
+          reason,
         }),
       ],
     }

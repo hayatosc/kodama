@@ -8,7 +8,6 @@
  * @module
  */
 import * as v from 'valibot'
-import { redactData } from '../credentials/redaction.ts'
 import { AgentDoc, configure, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, AgentChange } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -185,8 +184,7 @@ export function defaultAgentSettings(env: DefaultModelEnv): AgentSettings {
  */
 export function parseSettings(models: Models, value: unknown): AgentSettings {
   const schema = agentSettingsSchema(models)
-  // Redaction may invalidate an identifier; never persist settings that cannot be reloaded.
-  return parseInput(schema, redactData(parseInput(schema, value)))
+  return parseInput(schema, value)
 }
 
 /**

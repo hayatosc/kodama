@@ -32,6 +32,9 @@ it('streams generation, completion and reconnect state without polling', async (
   const agentId = await newAgentId()
   const events = readEvents(await exports.default.subscribe(agentId))
   const other = readEvents(await exports.default.subscribe(agentId))
+  const allowCompletion = Promise.withResolvers<void>()
+  let sawPartialBeforeCompletion = false
+  let providerCompleted = false
   try {
     expect((await events.next()).type).toBe('snapshot')
     expect((await other.next()).type).toBe('snapshot')
@@ -60,6 +63,8 @@ it('streams generation, completion and reconnect state without polling', async (
                   ),
                 )
               } else {
+                await allowCompletion.promise
+                providerCompleted = true
                 controller.enqueue(new TextEncoder().encode(body.slice(boundary)))
                 controller.close()
               }
@@ -78,12 +83,16 @@ it('streams generation, completion and reconnect state without polling', async (
         let event = await events.next()
         while (event.type !== 'submission' || !JSON.stringify(event.data).includes('"done"')) {
           received.push(event.type)
+          if (!providerCompleted && JSON.stringify(event.data).includes('Hello')) {
+            sawPartialBeforeCompletion = true
+            allowCompletion.resolve()
+          }
           event = await events.next()
         }
       })(),
     ])
+    expect(sawPartialBeforeCompletion).toBe(true)
     const chatEvents = decodeEvents(chatBody)
-    // Provider output is buffered until secrets split across deltas can be redacted.
     // Pi may coalesce same-tick updates, but must still expose the completed message.
     expect(chatEvents.map((event) => event.type)).toContain('message_end')
     expect(chatEvents.at(-1)).toMatchObject({
@@ -102,6 +111,7 @@ it('streams generation, completion and reconnect state without polling', async (
       await reconnect.cancel()
     }
   } finally {
+    allowCompletion.resolve()
     await events.cancel()
     await other.cancel()
   }

@@ -64,7 +64,6 @@ export class MemoryAgent extends Agent {
         refusal,
       },
       this.credentialStore(),
-      this.redactText,
     )
   }
 

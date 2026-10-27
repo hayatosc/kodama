@@ -56,31 +56,29 @@ Do not change the KEK as a routine application operation.
 
 Revoke a leaked credential at the provider first, then revoke it in Kodama. Every credential
 resolution checks live D1 state, so revoked rows cannot be selected even with a warm cache.
-Inspect secret-free audit and coverage results. Redaction is defense in depth, not a substitute for
-revocation. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
+Inspect secret-free audit and coverage results. Revoke exposed credentials; output filtering is not
+part of the credential boundary. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
 mitigation will be pursued for that scenario, including a separate vault or split-key design.
 
 ## Leak-prevention boundaries
 
-Configurations reject unknown fields and redact credential-shaped text before returning or storing
-it. User input and provider output are redacted before Pi persistence; tool results are redacted
-before committing their entries. Secret-bearing object keys are dropped, not renamed into colliding
-keys. Credential-shaped request IDs are rejected rather than redacted so deduplication, lookup, and
-SSE keep one stable identifier; admission also rejects IDs containing a known assigned secret.
-Exact-value redaction knowledge also lives only in the object's memory until eviction, protecting
-late provider responses even after a credential is invalidated. This lifetime retention is intentional:
-the agents Worker has no public HTTP surface, and objects are reached only through private RPC
-within the deployment. There is no five-minute plaintext-retention limit. The filter also recognizes
-`sk-…`, `xai-…` and JWT shapes. Memory-record and skill writes apply the same pattern filter even
-when called outside the model tool path. Credential operation exceptions return fixed messages,
-and background logs retain error categories rather than raw messages, causes, stacks or SQL
-bindings. Audit records contain metadata only.
+Outputs are not redacted. Credentials leave the store only for provider authentication, not as
+model-visible context, tool results, responses, snapshots, or log fields. There is no output-scrubbing
+wrapper and no in-memory set of secret values retained for redaction. This separation, rather than
+inspection of response text, is the credential boundary.
 
-A provider response is buffered until complete before emitting sanitized content. This intentionally
-trades token-by-token streaming for preventing split credential values from leaking through SSE.
-Lifecycle and completion events remain available. Redaction cannot recognize arbitrary secrets
-that have never been registered or do not match a known pattern; never use conversations or memory
-to transport keys, including encoded or transformed keys.
+Provider output streams normally without a redaction buffer. User and provider text, tool argument
+keys, settings, and memory content are not rewritten based on either key shapes or credential values.
+Request IDs retain their original identity subject to syntax and length validation, so retries,
+lookup, and SSE agree. Do not paste secrets into conversations, settings, memory, or request IDs:
+Kodama does not detect or remove secrets supplied as ordinary content, nor scrub a provider's
+unexpected echo of authentication data.
+
+Credential metadata APIs expose fingerprints and last4, never plaintext or encrypted envelopes.
+Credential operation exceptions return fixed messages, and credential background logs retain error
+categories rather than raw messages, causes, stacks, SQL bindings, or input secrets. Audit records
+contain metadata only. Live D1 status and grant checks remain authoritative for every credential
+resolution; removing response redaction does not weaken revocation or authorize credential access.
 
 For local development, set a stable development KEK and run
 `nr agent dev seed-credentials < /secure/path/provider-keys.json`. The JSON object maps provider
