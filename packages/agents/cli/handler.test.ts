@@ -1,3 +1,4 @@
+/** Authenticated local adapter routes registry references without implicit seeding. @module */
 import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { newAgentId } from '../src/helper/management.ts'
@@ -8,6 +9,22 @@ import { decodeEvents, useMockModel } from '../src/helper/rpc.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
+
+it('creates and addresses an agent by slug before seed', async () => {
+  const post = (path: string, body?: unknown) => handleCli(new Request(`http://localhost/cli/${path}`, {
+    method: 'POST', headers: { authorization: 'Bearer test-token' }, body: body === undefined ? undefined : JSON.stringify(body),
+  }), 'test-token', exports.default, exports.default)
+  expect(await (await post('list')).json()).toEqual([])
+  const added = await post('credentials/add', { requestId: 'create-first-key', provider: 'openai', secret: 'create-first-test-key' })
+  const credential: { credentialId: string } = await added.json()
+  const created = await post('create', { requestId: 'create-first', slug: 'before-seed', displayName: 'Before seed', credentialIds: [credential.credentialId] })
+  expect(created.status).toBe(200)
+  expect((await post('snapshot/before-seed')).status).toBe(200)
+  const sent = await post('send/before-seed', { requestId: 'before-seed-send', content: 'Hello' })
+  expect(sent.status).toBe(200)
+  expect(await sent.text()).toContain('Hello from Kodama')
+  expect((await post('cancel/before-seed')).status).toBe(200)
+})
 
 it('authenticates the CLI adapter and sends through real Durable Object RPC', async () => {
   const agentId = await newAgentId()
