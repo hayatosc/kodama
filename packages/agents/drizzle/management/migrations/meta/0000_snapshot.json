@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff67a3df-a332-4e14-91cb-8426090513f4",
+  "id": "2bafc48a-2d19-41d6-bcf4-f4a76db311ff",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_config_versions": {
@@ -129,12 +129,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "agent_credential_refs_credential_id_credentials_credential_id_fk": {
-          "name": "agent_credential_refs_credential_id_credentials_credential_id_fk",
+        "agent_credential_refs_credential_id_provider_credentials_credential_id_provider_fk": {
+          "name": "agent_credential_refs_credential_id_provider_credentials_credential_id_provider_fk",
           "tableFrom": "agent_credential_refs",
           "tableTo": "credentials",
-          "columnsFrom": ["credential_id"],
-          "columnsTo": ["credential_id"],
+          "columnsFrom": ["credential_id", "provider"],
+          "columnsTo": ["credential_id", "provider"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -582,7 +582,13 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "credentials_id_provider": {
+          "name": "credentials_id_provider",
+          "columns": ["credential_id", "provider"],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "credentials_owner_id_principals_principal_id_fk": {
           "name": "credentials_owner_id_principals_principal_id_fk",

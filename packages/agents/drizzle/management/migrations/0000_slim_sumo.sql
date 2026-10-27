@@ -17,7 +17,7 @@ CREATE TABLE `agent_credential_refs` (
 	`provider` text NOT NULL,
 	PRIMARY KEY(`agent_id`, `provider`),
 	FOREIGN KEY (`agent_id`) REFERENCES `agents`(`agent_id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`credential_id`) REFERENCES `credentials`(`credential_id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`credential_id`,`provider`) REFERENCES `credentials`(`credential_id`,`provider`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE INDEX `agent_credential_refs_by_credential` ON `agent_credential_refs` (`credential_id`);--> statement-breakpoint
@@ -92,6 +92,7 @@ CREATE TABLE `credentials` (
 	FOREIGN KEY (`owner_id`) REFERENCES `principals`(`principal_id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `credentials_id_provider` ON `credentials` (`credential_id`,`provider`);--> statement-breakpoint
 CREATE TABLE `principals` (
 	`principal_id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,

@@ -13,8 +13,8 @@ import type { CredentialIdentity } from './encryption.ts'
 
 const oauthSchema = v.looseObject({
   type: v.literal('oauth'),
-  access: v.pipe(v.string(), v.minLength(1)),
-  refresh: v.pipe(v.string(), v.minLength(1)),
+  access: v.pipe(v.string(), v.minLength(8)),
+  refresh: v.pipe(v.string(), v.minLength(8)),
   expires: v.pipe(v.number(), v.finite()),
 })
 
@@ -68,7 +68,7 @@ export async function credentialInsert(
         ...envelope,
         status: 'active',
         fingerprint: await credentialFingerprint(secret, kek),
-        last4: token.length > 4 ? token.slice(-4) : '',
+        last4: token.length >= 16 ? token.slice(-4) : '',
         createdAt: now,
       })
       .returning(),

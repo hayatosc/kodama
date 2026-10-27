@@ -10,31 +10,27 @@ it('rejects credential references labeled as a different provider', async () => 
   const db = managementDb(env.MANAGEMENT_DB)
   const agentId = '00000000-0000-7000-8000-000000000001'
   const credentialId = '00000000-0000-7000-8000-000000000002'
-  await db
-    .insert(schema.agents)
-    .values({
-      agentId,
-      objectName: agentId,
-      kind: 'working',
-      displayName: 'Test',
-      status: 'active',
-      currentVersion: 1,
-      createdAt: 1,
-      updatedAt: 1,
-    })
-  await db
-    .insert(schema.credentials)
-    .values({
-      credentialId,
-      kind: 'api_key',
-      provider: 'openai',
-      ownerId: null,
-      status: 'active',
-      revision: 1,
-      fingerprint: 'test',
-      last4: '',
-      createdAt: 1,
-    })
+  await db.insert(schema.agents).values({
+    agentId,
+    objectName: agentId,
+    kind: 'working',
+    displayName: 'Test',
+    status: 'active',
+    currentVersion: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.insert(schema.credentials).values({
+    credentialId,
+    kind: 'api_key',
+    provider: 'openai',
+    ownerId: null,
+    status: 'active',
+    revision: 1,
+    fingerprint: 'test',
+    last4: '',
+    createdAt: 1,
+  })
   await expect(
     db.insert(schema.agentCredentialRefs).values({ agentId, credentialId, provider: 'anthropic' }),
   ).rejects.toThrow()
