@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import * as v from 'valibot'
 import {
   agents,
@@ -195,7 +195,7 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
           leaseId: null,
           leaseExpiresAt: null,
         })
-        .where(eq(credentials.credentialId, credentialId)),
+        .where(and(eq(credentials.credentialId, credentialId), ne(credentials.status, 'revoked'))),
       auditStatement(call.db, {
         opId: `credential.revoke:${credentialId}`,
         at: call.now,
@@ -204,7 +204,7 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
         targetKind: 'system',
         targetId: credentialId,
         detail: { kind: row.kind, provider: row.provider, fingerprint: row.fingerprint },
-      }),
+      }).onConflictDoNothing(),
     ])
   return { credentialId, status: 'revoked' as const, affectedAgents: coverage.agents }
 }

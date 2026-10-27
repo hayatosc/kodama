@@ -21,6 +21,7 @@ import type { MemoryModelEnv } from '../../system-agents/memory/config.ts'
 import type { AgentEnv } from '../../env.ts'
 import { errorText, isConstraintError } from '../../lib/errors.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import { referenceStatements } from '../../credentials/references.ts'
 import type {
   AgentSettings,
   AgentStatus,
@@ -199,6 +200,7 @@ export async function createAgent(
         createdAt: call.now,
       }),
       ...membership,
+      ...referenceStatements(call.db, agentId, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,
@@ -327,8 +329,8 @@ async function writeVersion(
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
   }
   try {
-    await call.db.batch(
-      writeVersionStatements(
+    await call.db.batch([
+      ...writeVersionStatements(
         call.db,
         { actorId: actorId(call), now: call.now, opId: write.opId },
         agentId,
@@ -336,7 +338,8 @@ async function writeVersion(
         write.settings,
         detail,
       ),
-    )
+      ...referenceStatements(call.db, agentId, write.settings),
+    ])
   } catch (error) {
     if (!isConstraintError(error)) throw error
     const replay = await replayed()
