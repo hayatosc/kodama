@@ -228,7 +228,7 @@ export class Agent extends DurableObject<AgentEnv> {
     return createAgentOptions(
       this.env,
       [
-        createWorkingMemoryExtension(this.#workingMemory()),
+        createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
         toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
       ],
       this.#refusal,

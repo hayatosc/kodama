@@ -50,58 +50,75 @@ it('never attributes a peer remember request to an earlier human input', async (
   )
 })
 
-it.each([true, false])('rejects user_request for mixed inputs (peer first: %s)', async (peerFirst) => {
-  const receiver = await newAgentId()
-  const peer = await newAgentId()
-  const held = Promise.withResolvers<void>()
-  const results: string[] = []
-  const fetch = vi.spyOn(globalThis, 'fetch')
-    .mockImplementationOnce(async () => {
-      await held.promise
-      return modelResponse('Initial work finished.')
-    })
-    .mockImplementationOnce(async (_input, init) => {
-      expect(requestBody(init)).toContain('QUEUED-PEER')
-      expect(requestBody(init)).toContain('QUEUED-HUMAN')
-      return toolCallResponse({
-        name: 'remember',
-        arguments: { content: 'Mixed input must not become a fresh user request', origin: 'user_request' },
+it.each([true, false])(
+  'rejects user_request for mixed inputs (peer first: %s)',
+  async (peerFirst) => {
+    const receiver = await newAgentId()
+    const peer = await newAgentId()
+    const held = Promise.withResolvers<void>()
+    const results: string[] = []
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async () => {
+        await held.promise
+        return modelResponse('Initial work finished.')
       })
-    })
-    .mockImplementation(async (_input, init) => {
-      results.push(requestBody(init))
-      return modelResponse('Mixed-origin memory rejected.')
-    })
-  try {
-    await exports.default.sendMessage(receiver, { requestId: 'mixed-initial', content: 'Initial work' })
-    await expect.poll(async () => {
-      using status = await exports.default.submission(receiver, 'mixed-initial')
-      void status
-      return fetch.mock.calls.length
-    }, { timeout: 10_000 }).toBe(1)
-    for (const isPeer of [peerFirst, !peerFirst]) {
-      if (isPeer) {
-        await env.AGENTS.getByName(receiver).sendMessage(
-          { requestId: 'mixed-peer', content: 'QUEUED-PEER: remember this' },
-          { senderAgentId: peer, hop: 3 },
-        )
-      } else {
-        await exports.default.sendMessage(receiver, {
-          requestId: 'mixed-human', content: 'QUEUED-HUMAN: unrelated input', whenBusy: 'steer',
+      .mockImplementationOnce(async (_input, init) => {
+        expect(requestBody(init)).toContain('QUEUED-PEER')
+        expect(requestBody(init)).toContain('QUEUED-HUMAN')
+        return toolCallResponse({
+          name: 'remember',
+          arguments: {
+            content: 'Mixed input must not become a fresh user request',
+            origin: 'user_request',
+          },
         })
+      })
+      .mockImplementation(async (_input, init) => {
+        results.push(requestBody(init))
+        return modelResponse('Mixed-origin memory rejected.')
+      })
+    try {
+      await exports.default.sendMessage(receiver, {
+        requestId: 'mixed-initial',
+        content: 'Initial work',
+      })
+      await expect
+        .poll(
+          async () => {
+            using status = await exports.default.submission(receiver, 'mixed-initial')
+            void status
+            return fetch.mock.calls.length
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(1)
+      for (const isPeer of [peerFirst, !peerFirst]) {
+        if (isPeer) {
+          await env.AGENTS.getByName(receiver).sendMessage(
+            { requestId: 'mixed-peer', content: 'QUEUED-PEER: remember this' },
+            { senderAgentId: peer, hop: 3 },
+          )
+        } else {
+          await exports.default.sendMessage(receiver, {
+            requestId: 'mixed-human',
+            content: 'QUEUED-HUMAN: unrelated input',
+            whenBusy: 'steer',
+          })
+        }
       }
+    } finally {
+      held.resolve()
     }
-  } finally {
-    held.resolve()
-  }
-  await waitForAnswer(receiver, 'mixed-peer')
-  await waitForAnswer(receiver, 'mixed-human')
-  expect(results.join('\n')).toContain('A peer message is not a user request')
-  expect(results.join('\n')).not.toContain('accepted (job ')
-  expect((await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text).toBe(
-    'Mixed-origin memory rejected.',
-  )
-})
+    await waitForAnswer(receiver, 'mixed-peer')
+    await waitForAnswer(receiver, 'mixed-human')
+    expect(results.join('\n')).toContain('A peer message is not a user request')
+    expect(results.join('\n')).not.toContain('accepted (job ')
+    expect((await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text).toBe(
+      'Mixed-origin memory rejected.',
+    )
+  },
+)
 
 describe('working memory search', () => {
   it('hides prohibited overrides even when the required policy does not match the query', async () => {

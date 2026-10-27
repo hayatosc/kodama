@@ -262,27 +262,44 @@ it.each([
   await withHarness({ steeringMode: 'all', followUpMode: 'all' }, async (harness) => {
     const root = await harness.root(BACKGROUND_CONTEXT)
     try {
-      await root.submit({
-        type: 'input', content: 'Earlier peer input',
-        entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop: 3 } },
-      }, BACKGROUND_CONTEXT)
+      await root.submit(
+        {
+          type: 'input',
+          content: 'Earlier peer input',
+          entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop: 3 } },
+        },
+        BACKGROUND_CONTEXT,
+      )
       await firstStarted.promise
       const submissions = []
       for (const [index, hop] of inputs.entries()) {
-        submissions.push(await root.submit({
-          type: 'input', content: `Queued input ${index}`,
-          whenBusy: hop === 0 ? 'steer' : 'followUp',
-          ...(hop === 0 ? {} : {
-            entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop } },
-          }),
-        }, BACKGROUND_CONTEXT))
+        submissions.push(
+          await root.submit(
+            {
+              type: 'input',
+              content: `Queued input ${index}`,
+              whenBusy: hop === 0 ? 'steer' : 'followUp',
+              ...(hop === 0
+                ? {}
+                : {
+                    entry: { kind: 'kodama.agent-message', data: { senderAgentId: sender, hop } },
+                  }),
+            },
+            BACKGROUND_CONTEXT,
+          ),
+        )
       }
       first.resolve()
       await nextStarted.promise
       if (expectedHop === undefined) {
-        await expect(contactOrigin(harness, sender)).rejects.toThrow('delegation hop limit 3 reached')
+        await expect(contactOrigin(harness, sender)).rejects.toThrow(
+          'delegation hop limit 3 reached',
+        )
       } else {
-        expect(await contactOrigin(harness, sender)).toEqual({ senderAgentId: sender, hop: expectedHop })
+        expect(await contactOrigin(harness, sender)).toEqual({
+          senderAgentId: sender,
+          hop: expectedHop,
+        })
       }
       next.resolve()
       for (const submission of submissions) await submission.wait(BACKGROUND_CONTEXT)

@@ -580,11 +580,17 @@ delivery. Its delivery request ID is scoped to the sender and tool task.
 `MAX_CONTACT_HOPS = 3` is defined once in `src/agent/contact.ts`: A→B→C→D is allowed, but D cannot
 deliver another message from that chain. This permits two intermediary delegates while bounding
 cycles; replies collected by the initiating tool do not consume hops. The next hop comes from
-persisted input metadata, not editable message text, and survives eviction. A new human input
-starts a fresh chain. The cap bounds chain depth, not total fan-out or the number of independent
-human requests. Other agents' text remains data, not trusted instructions. A peer turn cannot
-label a `remember` call as `user_request` or attribute it to an earlier human input; its own
-conclusions may use `agent_judgment` with the peer entry as evidence.
+persisted input metadata, not editable message text, and survives eviction. An execution can own
+multiple inputs: a final boundary may place both human steering and peer follow-up, and later
+steering joins the active input set. `src/runtime/inputs.ts` resolves that complete durable set.
+If any input is a peer message, the next hop inherits the maximum peer hop; input order cannot
+reset the chain. Only a purely human execution starts a fresh chain at zero incoming hops.
+Idle, non-model `sendTo` calls retain the latest durable input's provenance. The cap bounds chain
+depth, not total fan-out or the number of independent human requests. Other agents' text remains
+data, not trusted instructions. An execution containing any peer input, including a mixed
+human/peer execution, cannot label a `remember` call as `user_request`. Its own conclusions may
+use `agent_judgment`; the last execution input remains its evidence/quota anchor, not an assertion
+that this input alone caused the tool call.
 
 ## Events
 

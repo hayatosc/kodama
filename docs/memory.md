@@ -376,7 +376,10 @@ It also lists what not to keep: task progress, guesses, secrets, and one-off req
 
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
-`kodama_remember_turns`.
+`kodama_remember_turns`. Attribution uses the active execution's full durable input set, not the
+newest transcript entry. If any input is from a peer, `remember(origin: user_request)` is rejected,
+including when human steering and peer follow-up share the execution. `agent_judgment` remains
+available, anchored to the last execution input for quota and evidence.
 
 ## Write paths
 
