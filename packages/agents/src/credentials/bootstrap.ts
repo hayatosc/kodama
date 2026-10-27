@@ -43,7 +43,7 @@ export async function seedLocalCredentials(
   for (const [provider, secret] of Object.entries(parsed.output)) {
     if (!secret) continue
     const row = await putCredential(call, env, {
-      requestId: `dev:${provider}:${await credentialFingerprint(secret, env.CREDENTIAL_KEK_V1)}`,
+      requestId: `dev_${provider}_${await credentialFingerprint(secret, env.CREDENTIAL_KEK_V1)}`,
       provider,
       secret,
     })

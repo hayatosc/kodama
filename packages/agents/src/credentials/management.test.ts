@@ -64,7 +64,7 @@ it('rejects credential-shaped request IDs before persisting audit or credential 
   const requestId = `sk-${'x'.repeat(32)}`
   await expect(
     putCredential(call, env, { requestId, provider: 'openai', secret: 'safe-test-key' }),
-  ).rejects.toThrow('requestId must not contain credential text')
+  ).rejects.toThrow('Invalid credential registration')
   expect(await db.select().from(credentials)).toEqual(before)
   expect(await db.select().from(auditLog)).toEqual(audits)
 })
