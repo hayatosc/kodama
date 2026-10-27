@@ -4,6 +4,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { RequestIdSchema } from '../src/validation.ts'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
@@ -18,6 +19,8 @@ type Management = Pick<
   | 'resolveAgent'
   | 'listAgents'
   | 'createAgent'
+  | 'getConfig'
+  | 'updateConfig'
   | 'putCredential'
   | 'listCredentials'
   | 'assignCredential'
@@ -81,6 +84,20 @@ export async function handleCli(
       )
     }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
+    if (action === 'tools') {
+      const input = parseInput(
+        v.object({ requestId: RequestIdSchema, tools: v.array(v.string()) }),
+        await request.json(),
+      )
+      const current = await management.getConfig(CLI_ACTOR, agentId)
+      return Response.json(
+        await management.updateConfig(CLI_ACTOR, agentId, {
+          requestId: input.requestId,
+          expectedVersion: current.version,
+          settings: { ...current.settings, tools: input.tools },
+        }),
+      )
+    }
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)

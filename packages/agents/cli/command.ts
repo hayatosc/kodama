@@ -19,6 +19,7 @@ export const USAGE = `Usage:
   nr agent seed [--credential ID ...]
   nr agent list
   nr agent create <slug> --credential ID [--credential ID ...] [--name NAME]
+  nr agent tools <agent> [tool ...]   Replace enabled optional tools; omit names to disable all
   nr agent credentials add --provider openai [--key-from-env ENV_NAME]
   nr agent credentials login --provider openai
   nr agent credentials list
@@ -48,6 +49,7 @@ export type Command =
   | { action: 'list' | 'credentials/list' | 'credentials/installation' }
   | { action: 'seed'; credentialIds?: string[] }
   | { action: 'create'; request: CreateAgentRequest & { credentialIds?: string[] } }
+  | { action: 'tools'; agentRef: string; tools: string[]; requestId: string }
   | { action: 'credentials/add'; provider: string; keyFromEnv?: string; requestId: string }
   | { action: 'credentials/login'; provider: 'openai'; requestId: string }
   | {
@@ -103,6 +105,13 @@ export function toCommand(
   if (action === 'dev' && rawAgentRef === 'seed-credentials' && positionals.length === 2)
     return { action: 'dev/seed-credentials' }
   if (action === 'list' && positionals.length === 1) return { action }
+  if (action === 'tools' && rawAgentRef)
+    return {
+      action,
+      agentRef: parseAgentRef(rawAgentRef),
+      tools: positionals.slice(2),
+      requestId: values['request-id'] ?? newRequestId(),
+    }
   if (action === 'create' && positionals.length === 2 && rawAgentRef)
     return {
       action,
@@ -189,7 +198,9 @@ export function commandRequest(
             ? JSON.stringify(command.request)
             : command.action === 'seed' && command.credentialIds
               ? JSON.stringify({ credentialIds: command.credentialIds })
-              : credentialJson,
+              : command.action === 'tools'
+                ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
+                : credentialJson,
       redirect: 'error',
     },
   }

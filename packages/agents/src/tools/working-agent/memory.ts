@@ -113,14 +113,20 @@ export function rememberTool(deps: WorkingMemoryDeps): ToolRegistration {
     }),
     replay: 'safe',
     execute: async ({ content, origin }, api, context) => {
-      const userEntry = await api.commit(async (tx) => {
+      const source = await api.commit(async (tx) => {
         const page = await tx.scanEntries(
           { conversationId: api.conversationId, order: 'descending' },
           64,
         )
-        return page.items.find((entry) => entry.kind === 'pi.user')?.id
+        return page.items.find(
+          (entry) => entry.kind === 'pi.user' || entry.kind === 'kodama.agent-message',
+        )
       }, context)
-      const status = await requestRemember(deps, userEntry, content, origin)
+      if (source?.kind === 'kodama.agent-message' && origin === 'user_request')
+        throw new Error(
+          'A peer message is not a user request; use agent_judgment for your own conclusions',
+        )
+      const status = await requestRemember(deps, source?.id, content, origin)
       return {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },

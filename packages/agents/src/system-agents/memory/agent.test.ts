@@ -28,6 +28,11 @@ describe('the memory agent', () => {
 
   it('rejects the calls that only make sense on a working agent', async () => {
     expect(
+      await rejectionInObject(memoryAgent(), (agent) =>
+        agent.sendTo(uuidv7(), { requestId: 'contact', content: 'Hello' }),
+      ),
+    ).toContain('does not message other agents')
+    expect(
       await rejectionInObject(memoryAgent(), (agent) => agent.readEntries({ after: 0, limit: 5 })),
     ).toMatch(/no entries/)
     expect(await rejectionInObject(memoryAgent(), (agent) => agent.memoryChanged())).toMatch(

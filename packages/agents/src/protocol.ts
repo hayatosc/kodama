@@ -174,6 +174,12 @@ export interface SendMessageRequest {
   whenBusy?: 'followUp' | 'steer'
 }
 
+/** Internal DO-to-DO provenance; set by sendTo, never inferred from message text. */
+export interface AgentOrigin {
+  senderAgentId: string
+  hop: number
+}
+
 /** The acknowledgement that a message was durably admitted. */
 export interface SendMessageResponse {
   agentId: string
@@ -214,6 +220,7 @@ export interface AgentSnapshot {
  * provider's error message. Non-string details are JSON-encoded.
  */
 export type SubmissionStatus = { id: number; requestId: string } & (
-  | { status: Exclude<SubmissionRecord['status'], 'unanswered'> }
+  | { status: Exclude<SubmissionRecord['status'], 'unanswered' | 'done'> }
+  | { status: 'done'; answerEntryId?: number }
   | { status: 'unanswered'; reason: string; detail?: string }
 )
