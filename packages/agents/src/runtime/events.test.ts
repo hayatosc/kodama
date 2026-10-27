@@ -1,3 +1,4 @@
+/** Real RPC subscriptions stream partial assistant output and reconnect to durable state. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
@@ -74,7 +75,7 @@ it('streams generation, completion and reconnect state without polling', async (
         ),
     )
     const chat = new Response(
-      await exports.default.send(agentId, { requestId: 'sse', content: 'Hello' }),
+      await exports.default.send(agentId, { requestId: 'sse', content: 'Produce a greeting.' }),
     ).text()
     const received: string[] = []
     const [chatBody] = await Promise.all([
@@ -83,7 +84,11 @@ it('streams generation, completion and reconnect state without polling', async (
         let event = await events.next()
         while (event.type !== 'submission' || !JSON.stringify(event.data).includes('"done"')) {
           received.push(event.type)
-          if (!providerCompleted && JSON.stringify(event.data).includes('Hello')) {
+          if (
+            !providerCompleted &&
+            event.type === 'message_update' &&
+            JSON.stringify(event.data).includes(' from Kodama')
+          ) {
             sawPartialBeforeCompletion = true
             allowCompletion.resolve()
           }

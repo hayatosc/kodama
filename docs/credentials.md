@@ -56,7 +56,9 @@ Do not change the KEK as a routine application operation.
 
 Revoke a leaked credential at the provider first, then revoke it in Kodama. Every credential
 resolution checks live D1 state, so revoked rows cannot be selected even with a warm cache.
-Inspect secret-free audit and coverage results. Revoke exposed credentials; output filtering is not
+Inspect audit and coverage results. Audit detail excludes resolved credential values, but operation
+IDs retain caller-supplied request IDs unchanged; never use a secret as a request ID.
+Revoke exposed credentials; output filtering is not
 part of the credential boundary. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
 mitigation will be pursued for that scenario, including a separate vault or split-key design.
 
