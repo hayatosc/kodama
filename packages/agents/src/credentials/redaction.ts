@@ -9,7 +9,7 @@ export function redactSecrets(text: string, known: Iterable<string> = []): strin
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED]')
 }
 
-/** Clone plain protocol data and redact every string before it reaches a durable boundary. */
+/** Clone protocol data, redact string values, and drop secret-bearing keys without collisions. */
 export function redactData<T extends object>(
   value: T,
   redact: (text: string) => string = redactSecrets,
@@ -18,6 +18,10 @@ export function redactData<T extends object>(
   function visit(item: unknown): void {
     if (typeof item !== 'object' || item === null) return
     for (const key of Object.keys(item)) {
+      if (redact(key) !== key) {
+        Reflect.deleteProperty(item, key)
+        continue
+      }
       const child: unknown = Reflect.get(item, key)
       if (typeof child === 'string') Reflect.set(item, key, redact(child))
       else visit(child)

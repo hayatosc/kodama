@@ -138,23 +138,24 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                                                                                           | May import                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| lib                | `src/lib/`                                                                                                                      | nothing in `src/`                             |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                            | lib                                           |
-| settings           | `src/configuration/`, `src/models/`                                                                                             | lib, contracts, tool registry                 |
-| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                    | lib                                           |
-| storage            | `drizzle/`, `src/storage/`                                                                                                      | lib, memory contracts                         |
-| management         | `src/management/`, except `service/`                                                                                            | lib, contracts, settings, storage             |
-| credential storage | `src/credentials/`, except the management flows below                                                                           | lib, contracts, settings, storage, management |
-| memory store       | `src/memory/store/`                                                                                                             | lib, storage, memory contracts                |
-| memory             | the rest of `src/memory/`                                                                                                       | lib, contracts, storage, memory store         |
-| tool adapters      | `src/tools/`                                                                                                                    | lib, contracts, memory, memory store          |
-| runtime            | `src/runtime/`                                                                                                                  | all of the above                              |
-| agent              | `src/agent/`                                                                                                                    | all of the above                              |
-| system agents      | `src/system-agents/`                                                                                                            | all of the above, including Agent             |
-| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts` | all of the above                              |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                           | all of the above                              |
+| Layer              | Paths                                                                                                                                                           | May import                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| lib                | `src/lib/`                                                                                                                                                      | nothing in `src/`                             |
+| redaction          | `src/credentials/redaction.ts`                                                                                                                                  | nothing in `src/`                             |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib, redaction                                |
+| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, redaction, contracts, tool registry      |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                    | lib                                           |
+| storage            | `drizzle/`, `src/storage/`                                                                                                                                      | lib, memory contracts                         |
+| management         | `src/management/`, except `service/`                                                                                                                            | lib, contracts, settings, storage             |
+| credential storage | `src/credentials/`, except pure redaction and the management flows below                                                                                        | lib, contracts, settings, storage, management |
+| memory store       | `src/memory/store/`                                                                                                                                             | lib, redaction, storage, memory contracts     |
+| memory             | the rest of `src/memory/`                                                                                                                                       | lib, contracts, storage, memory store         |
+| tool adapters      | `src/tools/`                                                                                                                                                    | lib, contracts, memory, memory store          |
+| runtime            | `src/runtime/`                                                                                                                                                  | all of the above                              |
+| agent              | `src/agent/`                                                                                                                                                    | all of the above                              |
+| system agents      | `src/system-agents/`                                                                                                                                            | all of the above, including Agent             |
+| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts`, `src/credentials/bootstrap.ts` | all of the above                              |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                           | all of the above                              |
 
 Some consequences:
 
@@ -167,6 +168,9 @@ Some consequences:
   memory agent's configuration. Credential queries and helpers stay in `src/credentials/`;
   configuration writers in the service layer compose reverse-index statements in their batches.
   The lower management layer never imports credential storage.
+- Credential code stays in `src/credentials/`. Its pure `redaction.ts` is a leaf module, not a
+  credential-storage dependency: contracts, settings, and memory store may import it directly.
+  It imports no other source module and does not access the vault, runtime, or agent layers.
 - `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
   formatting. `src/tools/working-agent/memory.ts` serves working agents;
   `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's

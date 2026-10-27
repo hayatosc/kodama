@@ -109,8 +109,11 @@ export const ExpectedVersionSchema = v.pipe(
 
 /** An optional comment of a version. */
 export const CommentSchema = v.optional(v.pipe(v.string(), v.maxLength(500)))
-/** A request ID: 1–128 letters, digits, `_`, or `-`. */
-export const RequestIdSchema = idSchema('requestId', 128)
+/** A stable request ID: 1–128 safe characters, never credential-shaped text. */
+export const RequestIdSchema = v.pipe(
+  idSchema('requestId', 128),
+  v.check((id) => redactSecrets(id) === id, 'requestId must not contain credential text'),
+)
 
 /** Creation input; the flow validates settings against the model catalog. */
 export const CreateAgentSchema = v.strictObject(

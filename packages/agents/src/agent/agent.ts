@@ -365,6 +365,8 @@ export class Agent extends DurableObject<AgentEnv> {
    * admission and Pi's scheduler.
    */
   protected async admit(draft: SubmissionDraft): Promise<Submission> {
+    if (draft.requestId && this.redactText(draft.requestId) !== draft.requestId)
+      throw new TypeError('requestId must not contain credential text')
     const harness = await this.#harness
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {

@@ -8,7 +8,7 @@ import { principalOf } from '../management/principals.ts'
 import { createAgentModels } from '../models/index.ts'
 import { putCredential } from './management.ts'
 import { assignCredential } from './assignments.ts'
-import { sha256Hex } from '../lib/hash.ts'
+import { credentialFingerprint } from './encryption.ts'
 
 const schema = v.record(
   v.picklist(['openai', 'anthropic', 'google', 'xai']),
@@ -44,7 +44,7 @@ export async function seedLocalCredentials(
   for (const [provider, secret] of Object.entries(parsed.output)) {
     if (!secret) continue
     const row = await putCredential(call, env, {
-      requestId: `dev:${provider}:${await sha256Hex(secret)}`,
+      requestId: `dev:${provider}:${await credentialFingerprint(secret, env.CREDENTIAL_KEK_V1)}`,
       provider,
       secret,
     })

@@ -18,6 +18,14 @@ it('redacts nested protocol values without mutating the input', () => {
   expect(input.content[0]?.text).toBe('sk-secret123456')
 })
 
+it('drops secret-bearing keys rather than overwriting safe keys or mutating the input', () => {
+  const input = {
+    nested: { 'sk-secret123456': 'one', 'sk-another123456': 'two', '[REDACTED]': 'safe' },
+  }
+  expect(redactData(input)).toEqual({ nested: { '[REDACTED]': 'safe' } })
+  expect(input.nested['sk-secret123456']).toBe('one')
+})
+
 it('retains exact values for at most five minutes', () => {
   let now = 0
   const redactor = createRedactor(() => now)

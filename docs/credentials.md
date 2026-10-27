@@ -56,8 +56,11 @@ mitigation will be pursued for that scenario, including a separate vault or spli
 
 ## Leak-prevention boundaries
 
-Configurations reject unknown fields and credential-shaped text. User input and provider output
-are redacted before Pi persistence; tool results are redacted before committing their entries.
+Configurations reject unknown fields and redact credential-shaped text before returning or storing
+it. User input and provider output are redacted before Pi persistence; tool results are redacted
+before committing their entries. Secret-bearing object keys are dropped, not renamed into colliding
+keys. Credential-shaped request IDs are rejected rather than redacted so deduplication, lookup, and
+SSE keep one stable identifier; admission also rejects IDs containing a known assigned secret.
 The object remembers decrypted values for at most the five-minute cache TTL and also recognizes
 `sk-…`, `xai-…` and JWT shapes. Memory-record and skill writes apply the same pattern filter even
 when called outside the model tool path. Credential operation exceptions return fixed messages,
