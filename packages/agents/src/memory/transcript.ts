@@ -19,7 +19,7 @@ import type { LocalDb } from '../storage/local.ts'
 export const TOOL_RESULT_TEXT_LIMIT = 2_000
 
 /** Who an entry's text came from; `summary` is a compaction summary. */
-export type EntryRole = 'user' | 'assistant' | 'tool' | 'summary' | 'other'
+export type EntryRole = 'user' | 'peer' | 'assistant' | 'tool' | 'summary' | 'other'
 
 /** One entry as text. */
 export interface EntryText {
@@ -52,6 +52,8 @@ function roleOf(kind: string): EntryRole {
   switch (kind) {
     case 'pi.user':
       return 'user'
+    case 'kodama.agent-message':
+      return 'peer'
     case 'pi.assistant':
       return 'assistant'
     case 'pi.tool-result':

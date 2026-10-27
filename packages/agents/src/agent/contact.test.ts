@@ -1,4 +1,5 @@
 /** Model-driven contact uses real DO delivery, admission, provenance and reply correlation. @module */
+import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
@@ -7,7 +8,7 @@ import { agents } from '../../drizzle/management/schema.ts'
 import { newAgentId, management, updateSettings } from '../helper/management.ts'
 import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../helper/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
-import { CONTACT_WAIT_MS, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactAgent, CONTACT_WAIT_MS, MAX_CONTACT_HOPS } from './contact.ts'
 
 useMockModel()
 
@@ -59,6 +60,63 @@ it.each(['uuid', 'slug', 'prefix'])(
     )
   },
 )
+
+it('returns the exact submission answer even when a newer unrelated answer exists', async () => {
+  const receiver = await newAgentId()
+  vi.mocked(fetch)
+    .mockImplementationOnce(async () => textResponse('Correlated answer.'))
+    .mockImplementationOnce(async () => textResponse('Unrelated newer answer.'))
+  const result = await contactAgent(
+    env,
+    async (id, request) => {
+      const accepted = await exports.default.sendMessage(id, request)
+      await waitForAnswer(id, request.requestId)
+      await exports.default.sendMessage(id, { requestId: 'unrelated', content: 'Another question' })
+      await waitForAnswer(id, 'unrelated')
+      return accepted
+    },
+    receiver,
+    'Target question',
+    'correlated',
+    BACKGROUND_CONTEXT,
+  )
+  expect(JSON.parse(result)).toMatchObject({ status: 'answered', answer: 'Correlated answer.' })
+})
+
+it('cancels sender observation without cancelling accepted receiver work', async () => {
+  const receiver = await newAgentId()
+  const abort = new AbortController()
+  let release: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  vi.mocked(fetch).mockImplementationOnce(async () => {
+    await held
+    return textResponse('Receiver completed after cancellation.')
+  })
+  try {
+    await expect(
+      contactAgent(
+        env,
+        async (id, request) => {
+          const accepted = await exports.default.sendMessage(id, request)
+          abort.abort(new Error('Sender cancelled'))
+          return accepted
+        },
+        receiver,
+        'Continue independently',
+        'cancel-observer',
+        withAbortSignal(abort.signal, BACKGROUND_CONTEXT),
+      ),
+    ).rejects.toThrow('Sender cancelled')
+  } finally {
+    release?.()
+  }
+  await waitForAnswer(receiver, 'cancel-observer')
+  expect((await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text).toBe(
+    'Receiver completed after cancellation.',
+  )
+})
 
 it.each(['unknown', 'ambiguous', 'not-admitting', 'missing-credentials', 'disabled', 'self'])(
   'returns a model-visible error for %s',

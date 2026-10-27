@@ -57,7 +57,7 @@ export async function contactOrigin(harness: Harness, senderAgentId: string): Pr
 
 /** Resolve and deliver through sendTo, then observe only the answer correlated to that submission. */
 export async function contactAgent(
-  env: AgentEnv,
+  env: Pick<AgentEnv, 'MANAGEMENT_DB' | 'AGENTS'>,
   sendTo: (agentId: string, request: SendMessageRequest) => Promise<SendMessageResponse>,
   target: string,
   message: string,
