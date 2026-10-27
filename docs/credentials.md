@@ -24,8 +24,8 @@ Register credentials with `putCredential`, grant access with `grantCredential`, 
 the same encrypted storage and metadata-only results. OAuth access and refresh tokens must each
 contain at least eight characters, both at registration and modification; shorter values are rejected
 rather than ambiguously matched against protocol text. Metadata includes a last-four suffix only
-for tokens with at least sixteen characters. OAuth login and refresh-provider integration
-are separate work. There is no credential rotation RPC or automatic reassignment workflow.
+for tokens with at least sixteen characters. The local CLI implements OAuth login through Pi;
+Worker authentication uses the statically bundled OAuth flows and D1-backed refresh leases. There is no credential rotation RPC or automatic reassignment workflow.
 
 Unassignment removes an agent's grant and reference. Revocation affects all grants and atomically
 clears the encrypted envelope and lease while appending audit. Metadata remains; no separate
@@ -83,7 +83,12 @@ contain metadata only. Live D1 status and grant checks remain authoritative for 
 resolution; removing response redaction does not weaken revocation or authorize credential access.
 
 For local development, set a stable development KEK and run
-`nr agent dev seed-credentials < /secure/path/provider-keys.json`. The JSON object maps provider
+`nr agent dev seed-credentials < /secure/path/provider-keys.json`.
+Alternatively, register an API key with `nr agent credentials add --provider openai` using piped
+stdin, or run `nr agent credentials login --provider openai` for ChatGPT OAuth. Registration/login
+lazily initialize identity without creating agents. Pass the returned ID to
+`nr agent seed --credential ID` and `nr agent create second --credential ID`; use
+`credentials assign ID AGENT` only when changing an existing selection. The JSON object maps provider
 IDs (`openai`, `anthropic`, `google`, `xai`) to keys. The command reads stdin, uses the authenticated
 localhost-only development adapter, registers encrypted rows, and assigns both agent kinds. Keep
 the file outside the repository with mode 0600 and remove it after registration. The adapter and

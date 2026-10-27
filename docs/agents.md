@@ -274,10 +274,11 @@ here and carried out by later work.
 
 ### Seed
 
-`AgentService.seed()` ([`src/management/service/seed.ts`](../packages/agents/src/management/service/seed.ts)) creates the
-rows every installation starts with, and is idempotent:
+`AgentService.seed(credentials?)` ([`src/management/service/seed.ts`](../packages/agents/src/management/service/seed.ts))
+creates the initial agents idempotently. Fresh agents require explicit credential references.
+The stable `install_id` UUID v7 is initialized lazily on first use by registration, login or seed;
+it does not imply any agents exist. Seed ensures these rows:
 
-- `install_id`, a UUID v7 chosen once;
 - the memory agent's row, `kind = 'dedicated'` with the fixed UUID
   `00000000-0000-7000-8000-00000000000a` mapped to `object_name = 'kodama:memory'`, and its
   version 1 from `MEMORY_MODEL_*`; it keeps its existing object;
@@ -301,19 +302,19 @@ limited for being that kind. An actor becomes a `principals` row on its first ca
 is recorded as the author of versions, the owner of agents it creates, and the actor of audit
 rows; a disabled principal is refused with `forbidden:`. Roles and permissions are issue #7.
 
-| Method                                                             | Result                                                                       |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `getInstallationId(actor)`                                         | lazily initialized stable installation UUID, without creating agents         |
-| `seed(credentials?)`                                               | the starting rows; `{ installId, memoryAgentId }`                            |
-| `createAgent(actor, { requestId, displayName, slug?, settings? })` | a new working agent with a server-issued UUID v7                             |
-| `listAgents(actor, { kind?, status? })`                            | registry rows, newest first                                                  |
-| `getAgent(actor, agentId)`                                         | one registry row                                                             |
-| `resolveAgent(actor, ref)`                                         | the agent a UUID, slug, or unique prefix names                               |
-| `renameAgent(actor, agentId, { displayName?, slug? })`             | the row after the change; `slug: null` removes the slug                      |
-| `getConfig(actor, agentId)`                                        | the desired version                                                          |
-| `updateConfig(actor, agentId, request)`                            | `{ version, apply }` (see [Configuration versions](#configuration-versions)) |
-| `rollbackConfig(actor, agentId, request)`                          | `{ version, apply }`                                                         |
-| `configHistory(actor, agentId, page)`                              | versions, newest first                                                       |
+| Method                                                                           | Result                                                                       |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `getInstallationId(actor)`                                                       | lazily initialized stable installation UUID, without creating agents         |
+| `seed(credentials?)`                                                             | the starting rows; `{ installId, memoryAgentId }`                            |
+| `createAgent(actor, { requestId, displayName, slug?, settings?, credentials? })` | a new working agent with a server-issued UUID v7                             |
+| `listAgents(actor, { kind?, status? })`                                          | registry rows, newest first                                                  |
+| `getAgent(actor, agentId)`                                                       | one registry row                                                             |
+| `resolveAgent(actor, ref)`                                                       | the agent a UUID, slug, or unique prefix names                               |
+| `renameAgent(actor, agentId, { displayName?, slug? })`                           | the row after the change; `slug: null` removes the slug                      |
+| `getConfig(actor, agentId)`                                                      | the desired version                                                          |
+| `updateConfig(actor, agentId, request)`                                          | `{ version, apply }` (see [Configuration versions](#configuration-versions)) |
+| `rollbackConfig(actor, agentId, request)`                                        | `{ version, apply }`                                                         |
+| `configHistory(actor, agentId, page)`                                            | versions, newest first                                                       |
 
 `createAgent` writes the registry row (`provisioning`), version 1, the caller's owner membership,
 and the audit row in one batch, then initializes the object and sets it `active`. Reusing

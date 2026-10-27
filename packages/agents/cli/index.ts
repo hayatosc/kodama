@@ -15,12 +15,13 @@ import { readLocalToken } from './token.ts'
 import { printStream } from './stream.ts'
 
 async function main(): Promise<void> {
-  let command
+  let args
   try {
-    command = toCommand(parseArgs({ allowPositionals: true, options: CLI_OPTIONS }))
+    args = parseArgs({ allowPositionals: true, options: CLI_OPTIONS })
   } catch {
     throw new Error('Invalid arguments. See nr agent --help; never pass credentials as arguments.')
   }
+  const command = toCommand(args)
   if (command.action === 'help') {
     console.log(USAGE)
     return

@@ -8,7 +8,7 @@
  */
 import { uuidv7 } from '../src/lib/uuid.ts'
 import type { CreateAgentRequest, SendMessageRequest } from '../src/protocol.ts'
-import { parseAgentId, parseAgentRef, parseMessage } from '../src/validation.ts'
+import { parseAgentId, parseAgentRef, parseMessage, parseRequestId } from '../src/validation.ts'
 
 /** Where the local Worker listens. */
 export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
@@ -119,7 +119,7 @@ export function toCommand(
       const provider = values.provider
       if (!provider || !['openai', 'anthropic', 'google', 'xai'].includes(provider))
         throw new Error('Choose a supported provider with --provider')
-      const requestId = values['request-id'] ?? newRequestId()
+      const requestId = parseRequestId(values['request-id'] ?? newRequestId())
       if (rawAgentRef === 'login') {
         if (provider !== 'openai') throw new Error('ChatGPT login requires --provider openai')
         return { action: 'credentials/login', provider, requestId }

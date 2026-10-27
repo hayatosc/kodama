@@ -48,6 +48,17 @@ describe('toCommand', () => {
     expect(() => command(['credentials', 'login'], { provider: 'xai' })).toThrow()
   })
 
+  it('rejects credential text in registration request IDs before transport', () => {
+    for (const action of ['add', 'login']) {
+      expect(() =>
+        command(['credentials', action], {
+          provider: 'openai',
+          'request-id': `sk-${'x'.repeat(32)}`,
+        }),
+      ).toThrow('requestId must not contain credential text')
+    }
+  })
+
   it('sends credentials only in the body, never a path or redirect', () => {
     const parsed = command(['credentials', 'add'], { provider: 'openai' })
     if (parsed.action === 'help') throw new Error('Unexpected help')
