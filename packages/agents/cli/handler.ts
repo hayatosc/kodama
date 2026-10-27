@@ -3,23 +3,31 @@
  *
  * @module
  */
+import * as v from 'valibot'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
-import { parseAgentRef, parseMessage } from '../src/validation.ts'
+import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
+import { selectedCredentialRefs } from '../src/credentials/validation.ts'
+import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
-type Management = Pick<AgentService, 'seed' | 'resolveAgent'>
+type Management = Pick<
+  AgentService,
+  | 'seed'
+  | 'getInstallationId'
+  | 'resolveAgent'
+  | 'listAgents'
+  | 'createAgent'
+  | 'putCredential'
+  | 'listCredentials'
+  | 'assignCredential'
+  | 'unassignCredential'
+  | 'revokeCredential'
+>
 
-/** The actor the development CLI calls `AgentService` management methods as. */
-const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
-
-/**
- * The UUID an agent reference names. A slug or UUID prefix is resolved after making sure the seed
- * has run, so `assistant` works on a fresh local database.
- */
+/** Resolve an existing agent without provisioning unrelated initial agents. */
 async function agentIdOf(management: Management, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  await management.seed()
   return (await management.resolveAgent(CLI_ACTOR, ref)).agentId
 }
 
@@ -34,10 +42,44 @@ export async function handleCli(
     return new Response('Unauthorized', { status: 401 })
   }
   if (request.method !== 'POST') return new Response('Use POST', { status: 405 })
-  const [, prefix, action, rawAgentRef] = new URL(request.url).pathname.split('/')
+  const [, prefix, action, rawAgentRef, credentialId, target] = new URL(request.url).pathname.split(
+    '/',
+  )
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
-    if (action === 'seed') return Response.json(await management.seed())
+    if (action === 'credentials')
+      return credentialResponse(request, management, rawAgentRef, credentialId, target)
+    if (action === 'seed') {
+      const input: unknown = await request.text().then((text) => (text ? JSON.parse(text) : {}))
+      return Response.json(
+        await management.seed(
+          selectedCredentialRefs(input, await management.listCredentials(CLI_ACTOR)),
+        ),
+      )
+    }
+    if (action === 'list') return Response.json(await management.listAgents(CLI_ACTOR))
+    if (action === 'create') {
+      const body = parseInput(
+        v.strictObject({
+          ...v.pick(CreateAgentSchema, ['requestId', 'displayName', 'slug']).entries,
+          credentialIds: v.optional(v.unknown()),
+        }),
+        await request.json(),
+      )
+      const { credentialIds, ...input } = body
+      const credentials = selectedCredentialRefs(
+        { credentialIds },
+        await management.listCredentials(CLI_ACTOR),
+      )
+      return Response.json(
+        await management.createAgent(CLI_ACTOR, {
+          requestId: input.requestId,
+          displayName: input.displayName,
+          ...(credentials ? { credentials } : {}),
+          ...(input.slug === undefined ? {} : { slug: input.slug }),
+        }),
+      )
+    }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {

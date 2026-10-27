@@ -34,7 +34,12 @@ export default defineConfig({
   test: {
     name: 'workerd',
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
-    exclude: ['cli/index.test.ts', 'cli/token.test.ts', 'cli/migrate.test.ts'],
+    exclude: [
+      'cli/index.test.ts',
+      'cli/token.test.ts',
+      'cli/migrate.test.ts',
+      'src/credentials/local-login.test.ts',
+    ],
     setupFiles: ['vitest.setup.ts'],
     fsModuleCache: false,
     testTimeout: 15_000,

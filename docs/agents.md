@@ -222,7 +222,7 @@ truth for agents:
 | `agent_config_versions` | immutable configuration versions, numbered per agent                            |
 | `principals`            | who may call management RPC: people, service tokens, and agents                 |
 | `agent_members`         | roles on one agent                                                              |
-| `system_settings`       | `install_id`, written once by the seed, and the reconciliation cursor           |
+| `system_settings`       | `install_id`, lazily initialized on first use, and the reconciliation cursor    |
 | `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
@@ -274,10 +274,11 @@ here and carried out by later work.
 
 ### Seed
 
-`AgentService.seed()` ([`src/management/service/seed.ts`](../packages/agents/src/management/service/seed.ts)) creates the
-rows every installation starts with, and is idempotent:
+`AgentService.seed(credentials?)` ([`src/management/service/seed.ts`](../packages/agents/src/management/service/seed.ts))
+creates the initial agents idempotently. Fresh agents require explicit credential references.
+The stable `install_id` UUID v7 is initialized lazily on first use by registration, login or seed;
+it does not imply any agents exist. Seed ensures these rows:
 
-- `install_id`, a UUID v7 chosen once;
 - the memory agent's row, `kind = 'dedicated'` with the fixed UUID
   `00000000-0000-7000-8000-00000000000a` mapped to `object_name = 'kodama:memory'`, and its
   version 1 from `MEMORY_MODEL_*`; it keeps its existing object;
@@ -301,18 +302,19 @@ limited for being that kind. An actor becomes a `principals` row on its first ca
 is recorded as the author of versions, the owner of agents it creates, and the actor of audit
 rows; a disabled principal is refused with `forbidden:`. Roles and permissions are issue #7.
 
-| Method                                                             | Result                                                                       |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `seed()`                                                           | the starting rows; `{ installId, memoryAgentId }`                            |
-| `createAgent(actor, { requestId, displayName, slug?, settings? })` | a new working agent with a server-issued UUID v7                             |
-| `listAgents(actor, { kind?, status? })`                            | registry rows, newest first                                                  |
-| `getAgent(actor, agentId)`                                         | one registry row                                                             |
-| `resolveAgent(actor, ref)`                                         | the agent a UUID, slug, or unique prefix names                               |
-| `renameAgent(actor, agentId, { displayName?, slug? })`             | the row after the change; `slug: null` removes the slug                      |
-| `getConfig(actor, agentId)`                                        | the desired version                                                          |
-| `updateConfig(actor, agentId, request)`                            | `{ version, apply }` (see [Configuration versions](#configuration-versions)) |
-| `rollbackConfig(actor, agentId, request)`                          | `{ version, apply }`                                                         |
-| `configHistory(actor, agentId, page)`                              | versions, newest first                                                       |
+| Method                                                                           | Result                                                                       |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `getInstallationId(actor)`                                                       | lazily initialized stable installation UUID, without creating agents         |
+| `seed(credentials?)`                                                             | the starting rows; `{ installId, memoryAgentId }`                            |
+| `createAgent(actor, { requestId, displayName, slug?, settings?, credentials? })` | a new working agent with a server-issued UUID v7                             |
+| `listAgents(actor, { kind?, status? })`                                          | registry rows, newest first                                                  |
+| `getAgent(actor, agentId)`                                                       | one registry row                                                             |
+| `resolveAgent(actor, ref)`                                                       | the agent a UUID, slug, or unique prefix names                               |
+| `renameAgent(actor, agentId, { displayName?, slug? })`                           | the row after the change; `slug: null` removes the slug                      |
+| `getConfig(actor, agentId)`                                                      | the desired version                                                          |
+| `updateConfig(actor, agentId, request)`                                          | `{ version, apply }` (see [Configuration versions](#configuration-versions)) |
+| `rollbackConfig(actor, agentId, request)`                                        | `{ version, apply }`                                                         |
+| `configHistory(actor, agentId, page)`                                            | versions, newest first                                                       |
 
 `createAgent` writes the registry row (`provisioning`), version 1, the caller's owner membership,
 and the audit row in one batch, then initializes the object and sets it `active`. Reusing
@@ -451,9 +453,10 @@ unassigned credentials stop the request with `credential_unavailable`. Creation 
 assignments; `sendMessage` checks authentication before admitting input. No environment variable,
 local credential file, shared default or implicit provider fallback is consulted.
 
-Pi's catalog supplies additional providers without new secret bindings. Interactive OAuth login
-and provider refresh are deferred to the subscription integration; the lease-based store is ready
-for it.
+Pi's catalog supplies additional providers without new secret bindings. The local CLI supports
+interactive ChatGPT login and encrypted registration; see [Local agent CLI](#local-agent-cli).
+Production subscription integration and refresh policy remain separate work; the lease-based store
+is ready for it.
 
 The memory agent's model is set by its versions like any agent's. `MEMORY_MODEL_PROVIDER` and
 `MEMORY_MODEL_ID` only give the seed's version 1; when they are empty, it uses the default model.
@@ -655,7 +658,8 @@ Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 ```sh
 ni
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
-# Set CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
+# Set only CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
+# Never store provider API keys in .dev.vars; register them through the CLI below.
 nr dev:agents
 ```
 
@@ -683,10 +687,28 @@ so only one process is using its local storage.
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
-# JSON maps provider IDs to keys; keep the file outside the repository with mode 0600.
-nr agent dev seed-credentials < /secure/path/provider-keys.json
-nr agent seed
+# Read an explicitly exported environment variable; never pass the key itself as an argument.
+nr agent credentials add --provider openai --key-from-env OPENAI_API_KEY
+# Or read the key from a protected file on stdin:
+nr agent credentials add --provider openai < /secure/path/openai-key
+nr agent credentials list
+# Alternatively, run credentials login --provider openai before seed.
+# Use the credentialId returned by registration or login:
+nr agent seed --credential <credential-id>
+nr agent create second --name "Second agent" --credential <credential-id>
+nr agent list
 nr agent send assistant "Hello!"
+nr agent send second "Hello from the second agent!"
+nr agent snapshot second
+# Alternative authentication: complete Sign in with ChatGPT in your browser.
+nr agent credentials login --provider openai
+# Switch existing agents explicitly to the newly returned OAuth credentialId:
+nr agent credentials assign <oauth-credential-id> assistant
+nr agent credentials assign <oauth-credential-id> second
+# For memory, use its UUID from `nr agent list`:
+nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
+# Revoke the previous credential only after replacing every reference:
+nr agent credentials revoke <old-credential-id>
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
@@ -699,9 +721,33 @@ nr agent --help
 The CLI works like this:
 
 - `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the first agent, slug
-  `assistant`. Run `dev seed-credentials` first: initial creation requires assigned credentials.
-  The development-only command reads keys from stdin, encrypts them into local D1, seeds the
-  registry, and assigns them to both working and memory agents; its response contains IDs only.
+  `assistant`. `create` uses current server defaults; its display name defaults to its slug.
+  Fresh agents require explicit `--credential ID` references for their model providers; repeat the
+  option once per provider when defaults differ. No credential is automatically selected. Repeated
+  seed preserves existing agents and can omit the references when nothing needs creating.
+  `list` includes every registered working and dedicated agent, with its UUID, optional slug,
+  display name, status, and desired/applied configuration versions. Results are JSON.
+- Credential registration is write-only. Listing returns only metadata (ID, kind, provider, status,
+  fingerprint, last4 and timestamps), never key or token values. Assign/unassign update configuration
+  through the existing management RPCs; revoke immediately prevents further resolution. Configure
+  `CREDENTIAL_KEK_V1` in the local Worker before registration; the CLI never manages Worker Secrets.
+  `.dev.vars` must contain only the KEK and non-secret local settings, never provider API keys.
+  The CLI does not load credentials from `.dev.vars`: supply a temporary key variable in your
+  shell or pipe a key from a protected source, then register it into the encrypted local store. Never paste keys into command-line arguments or shell history.
+- `credentials login --provider openai` calls Pi `Models.login` on Node with an in-memory store,
+  a lazily initialized installation ID and agent name `kodama`. It prints the authorization URL, then accepts
+  the final redirect URL without echoing it. The browser callback uses `127.0.0.1:1455`; if that port
+  is occupied, cancel the other login first. A remote browser can paste the full redirect URL back
+  into the CLI. Login validates the issued client ID and `chatgpt.tokens.use.direct` scope, then
+  registers an `oauth_subscription` through the same write-only endpoint. No `auth.json` is written.
+  Login never seeds agents: pass the returned ID to `seed --credential ID` or `create --credential ID`,
+  or assign it to an existing agent. Registration itself also lazily initializes identity, without
+  creating agents. Browser completion requires the owner; automated tests
+  exercise Pi's real authorization/manual-redirect flow with a mocked token endpoint.
+- `dev seed-credentials < /secure/path/provider-keys.json` remains a bootstrap shortcut: the JSON
+  maps provider IDs to keys, which are encrypted into local D1 and assigned to working and memory
+  agents. To assign memory separately, use its UUID from `list`. Keep input files outside the
+  repository with mode 0600.
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.

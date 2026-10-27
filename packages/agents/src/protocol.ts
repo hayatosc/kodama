@@ -108,6 +108,8 @@ export interface CreateAgentRequest {
   requestId: string
   displayName: string
   slug?: string
+  /** Explicit initial references, overriding the references in settings when provided. */
+  credentials?: CredentialRefs
   /** Version 1; the current defaults when left out. */
   settings?: AgentSettings
 }

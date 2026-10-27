@@ -163,16 +163,23 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
  */
 export async function createAgent(
   call: ManagementCall,
-  request: Omit<CreateAgentRequest, 'settings'> & { settings?: unknown },
+  request: Omit<CreateAgentRequest, 'settings' | 'credentials'> & {
+    settings?: unknown
+    credentials?: unknown
+  },
 ): Promise<AgentSummary> {
   const creator = actorId(call)
   const opId = `agent.create:${creator ?? 'system'}:${request.requestId}`
   const earlier = await auditByOpId(call.db, opId)
   if (earlier !== undefined) return summaryOf(await finishProvisioning(call, earlier.targetId))
-  const settings =
+  const initial =
     request.settings === undefined
       ? defaultAgentSettings(call.env)
       : parseSettings(call.models, request.settings)
+  const settings =
+    request.credentials === undefined
+      ? initial
+      : parseSettings(call.models, { ...initial, credentials: request.credentials })
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   const membership =

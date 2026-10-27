@@ -6,18 +6,17 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
+import { installationId } from '../installation.ts'
 import { agentRowByObjectName } from '../registry.ts'
 import { isConstraintError } from '../../lib/errors.ts'
 import { parseSettings } from '../../configuration/index.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { referenceStatements, initialGrantStatements } from '../../credentials/references.ts'
-import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
+import { agentConfigVersions, agents } from '../../../drizzle/management/schema.ts'
 import { memoryAgentSettings } from '../../system-agents/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
 import type { AgentSettings, SeedResult } from '../../protocol.ts'
 import { createAgent, pushDesired } from './agents.ts'
@@ -85,17 +84,7 @@ export async function seed(
   // Validate every missing agent before writing any installation or registry state.
   if (!existingMemory) await validateCredentialRefs(db, initialSettings)
   if (!existingFirst) await validateCredentialRefs(db, firstSettings)
-  await db
-    .insert(systemSettings)
-    .values({ key: 'install_id', valueJson: JSON.stringify(uuidv7(now)) })
-    .onConflictDoNothing()
-  const row = await db
-    .select()
-    .from(systemSettings)
-    .where(eq(systemSettings.key, 'install_id'))
-    .get()
-  if (row === undefined) throw new Error('The seed could not store the installation ID')
-  const installId = String(JSON.parse(row.valueJson))
+  const installId = await installationId(db, now)
 
   if (!existingMemory) {
     try {

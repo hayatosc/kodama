@@ -1,3 +1,5 @@
 # Development only: replace with base64 of 32 random bytes (openssl rand -base64 32).
 CREDENTIAL_KEK_V1=
-# Provider keys are registered into local D1 through nr agent dev seed-credentials, never env.
+# Never store provider API keys in this file.
+# Register them into encrypted local D1 with nr agent credentials add (piped stdin or an explicit
+# shell variable via --key-from-env), or nr agent credentials login --provider openai.
