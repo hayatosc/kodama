@@ -38,6 +38,12 @@ it.each([
   expect(await decryptCredential({ ...identity, ownerId }, envelope, kek)).toBe(secret)
 })
 
+it('preserves a leading BOM in credential plaintext', async () => {
+  const plaintext = '\uFEFFabcdefgh'
+  const envelope = await encryptCredential(identity, plaintext, kek)
+  expect(await decryptCredential(identity, envelope, kek)).toBe(plaintext)
+})
+
 it('uses fresh authenticated envelopes for identical plaintexts', async () => {
   const first = await encryptCredential(identity, secret, kek)
   const second = await encryptCredential(identity, secret, kek)
