@@ -60,10 +60,11 @@ it('removes credential-bearing tool argument keys before persistence and SSE', a
 })
 
 it('redacts an opaque credential echoed by a request completing after six minutes', async () => {
+  const clock = vi.spyOn(Date, 'now')
   const id = await newAgentId()
   vi.mocked(globalThis.fetch).mockImplementationOnce(async () => {
     const started = Date.now()
-    vi.spyOn(Date, 'now').mockReturnValue(started + 6 * 60 * 1000)
+    clock.mockReturnValue(started + 6 * 60 * 1000)
     return modelResponse('Late response echoes test-key')
   })
   const events = await new Response(
