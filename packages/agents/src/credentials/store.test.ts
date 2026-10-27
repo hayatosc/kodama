@@ -51,15 +51,17 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     credentials: { primary: { openai: primary } },
   }
   let now = 1000
-  const handle = createCredentialStore(
-    db,
-    async () => agentId,
-    async () => settings,
-    kek,
-    () => now,
-  )
+  const open = () =>
+    createCredentialStore(
+      db,
+      async () => agentId,
+      async () => settings,
+      kek,
+      () => now,
+    )
   return {
-    ...handle,
+    ...open(),
+    open,
     settings,
     primary,
     advance: (milliseconds = CREDENTIAL_CACHE_TTL + 1) => {
@@ -122,7 +124,38 @@ it('expires and explicitly invalidates the decrypted cache', async () => {
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })
 
-it('serializes modification and releases the lease on failure without leaking callback errors', async () => {
+it('serializes refresh across independent stores and reads the freshly committed value', async () => {
+  const { store, open } = await fixture('oauth_subscription')
+  const second = open().store
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let refreshes = 0
+  const first = store.modify('openai', async () => {
+    refreshes += 1
+    started.resolve()
+    await release.promise
+    return { type: 'oauth', access: 'new-access', refresh: 'new-refresh', expires: 9000 }
+  })
+  await started.promise
+  const next = second.modify('openai', async (current) => {
+    expect(current).toMatchObject({ access: 'new-access' })
+    return undefined
+  })
+  const result = next.then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  )
+  try {
+    await scheduler.wait(10)
+  } finally {
+    release.resolve()
+  }
+  await first
+  expect(await result).toMatchObject({ value: { access: 'new-access' } })
+  expect(refreshes).toBe(1)
+})
+
+it('releases the lease on failure without leaking callback errors', async () => {
   const { store, primary } = await fixture()
   await store.modify('openai', async (current) => {
     expect(current).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
@@ -133,7 +166,6 @@ it('serializes modification and releases the lease on failure without leaking ca
       .get()
     expect(held?.leaseId).toEqual(expect.any(String))
     expect(held?.leaseExpiresAt).toBeGreaterThan(1000)
-    await expect(store.modify('openai', async () => undefined)).rejects.toThrow('busy')
     return { type: 'api_key', key: 'sk-modified-test-key' }
   })
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-modified-test-key' })
