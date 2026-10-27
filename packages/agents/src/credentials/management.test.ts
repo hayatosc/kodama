@@ -2,12 +2,18 @@
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
-import { auditLog, credentials } from '../../drizzle/management/schema.ts'
+import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../management/db.ts'
 import { principalOf } from '../management/principals.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../models/index.ts'
-import { credentialCoverage, putCredential, revokeCredential } from './management.ts'
+import {
+  credentialCoverage,
+  grantCredential,
+  putCredential,
+  revokeCredential,
+} from './management.ts'
+import { credentialFingerprint } from './encryption.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
@@ -31,6 +37,9 @@ it('returns only metadata through RPC and records a secret-free registration aud
   const request = { requestId: uuidv7(), provider: 'openai', secret: 'sk-credential-test-123456' }
   const result = await exports.default.putCredential(actor, request)
   expect(result.last4).toBe('3456')
+  expect(result.fingerprint).toBe(
+    await credentialFingerprint(request.secret, env.CREDENTIAL_KEK_V1),
+  )
   expect(result).not.toHaveProperty('ciphertext')
   expect(result).not.toHaveProperty('wrappedDek')
   expect(await exports.default.putCredential(actor, request)).toEqual(result)
@@ -44,6 +53,27 @@ it('returns only metadata through RPC and records a secret-free registration aud
   expect(audits).toHaveLength(1)
   expect(audits[0]?.detailJson).toContain(result.fingerprint)
   expect(JSON.stringify(audits)).not.toContain(request.secret)
+})
+
+it('rejects a grant to an unknown agent without writing a grant or audit', async () => {
+  const { call } = await caller()
+  const credential = await putCredential(call, env, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    secret: 'sk-grant-test-1234',
+  })
+  await expect(grantCredential(call, credential.credentialId, uuidv7())).rejects.toThrow(
+    new TypeError('Unknown agent'),
+  )
+  expect(
+    await db
+      .select()
+      .from(credentialGrants)
+      .where(eq(credentialGrants.credentialId, credential.credentialId)),
+  ).toEqual([])
+  expect(
+    await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
+  ).toHaveLength(1)
 })
 
 it('allows non-owner callers and does not echo invalid secret inputs', async () => {
