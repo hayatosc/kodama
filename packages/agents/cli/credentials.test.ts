@@ -18,12 +18,15 @@ function post(path: string, body?: unknown, token = 'test-token') {
 }
 
 it('creates and lists agents, registers metadata only, assigns, unassigns and revokes', async () => {
-  expect((await post('seed')).status).toBe(200)
+  const initial = await post('credentials/add', { requestId: uuidv7(), provider: 'openai', secret: 'initial-cli-key' })
+  const credential: { credentialId: string } = await initial.json()
+  expect((await post('seed', { credentialIds: [credential.credentialId] })).status).toBe(200)
   const slug = `cli-${uuidv7()}`
   const created = await post('create', {
     requestId: uuidv7(),
     slug,
     displayName: 'CLI second agent',
+    credentialIds: [credential.credentialId],
   })
   expect(created.status).toBe(200)
   expect(await created.json()).toMatchObject({
