@@ -15,7 +15,8 @@ import {
 import type { AgentEnv } from '../env.ts'
 import type { ManagementCall } from '../management/service/agents.ts'
 import { auditByOpId, auditStatement } from '../management/audit.ts'
-import { uuidv7 } from '../lib/uuid.ts'
+import { uuidv7, UUID_PATTERN } from '../lib/uuid.ts'
+import { isConstraintError } from '../lib/errors.ts'
 import { credentialFingerprint } from './encryption.ts'
 import { parseAgentId } from '../validation.ts'
 import { credentialInsert, credentialMetadata } from './vault.ts'
@@ -47,8 +48,9 @@ export async function putCredential(
   const input = parsed.output
   const fingerprint = await credentialFingerprint(input.secret, env.CREDENTIAL_KEK_V1)
   const opId = `credential.put:${principal.principalId}:${input.requestId}`
-  const previous = await auditByOpId(call.db, opId)
-  if (previous) {
+  async function replay() {
+    const previous = await auditByOpId(call.db, opId)
+    if (!previous) return undefined
     const row = await credentialRow(call, previous.targetId)
     if (
       row.kind !== input.kind ||
@@ -59,6 +61,8 @@ export async function putCredential(
       throw new Error('credential_conflict')
     return credentialMetadata(row)
   }
+  const previous = await replay()
+  if (previous) return previous
   const credentialId = uuidv7(call.now)
   const { statement } = await credentialInsert(
     call.db,
@@ -74,25 +78,33 @@ export async function putCredential(
     call.now,
   )
   // The prepared insert contains ciphertext only. The audit never includes an input object.
-  const [rows] = await call.db.batch([
-    statement,
-    auditStatement(call.db, {
-      opId,
-      at: call.now,
-      actorId: principal.principalId,
-      action: 'credential.put',
-      targetKind: 'system',
-      targetId: credentialId,
-      detail: {
-        kind: input.kind,
-        provider: input.provider,
-        fingerprint,
-      },
-    }),
-  ])
-  const row = rows[0]
-  if (!row) throw new Error('credential_unavailable: registration failed')
-  return credentialMetadata(row)
+  try {
+    const [rows] = await call.db.batch([
+      statement,
+      auditStatement(call.db, {
+        opId,
+        at: call.now,
+        actorId: principal.principalId,
+        action: 'credential.put',
+        targetKind: 'system',
+        targetId: credentialId,
+        detail: {
+          kind: input.kind,
+          provider: input.provider,
+          fingerprint,
+        },
+      }),
+    ])
+    const row = rows[0]
+    if (!row) throw new Error('credential_unavailable: registration failed')
+    return credentialMetadata(row)
+  } catch (error) {
+    if (isConstraintError(error)) {
+      const previous = await replay()
+      if (previous) return previous
+    }
+    throw error
+  }
 }
 
 /** List metadata only; envelopes are never part of this result. */
@@ -104,11 +116,8 @@ export async function listCredentials(call: ManagementCall) {
 /** Read one credential after authorization, rejecting unknown IDs. */
 export async function credentialRow(call: ManagementCall, id: string) {
   credentialActor(call)
-  const row = await call.db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.credentialId, parseAgentId(id)))
-    .get()
+  if (!UUID_PATTERN.test(id)) throw new TypeError('credentialId must be a lowercase UUID v7')
+  const row = await call.db.select().from(credentials).where(eq(credentials.credentialId, id)).get()
   if (!row) throw new TypeError('Unknown credential')
   return row
 }

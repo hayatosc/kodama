@@ -125,6 +125,22 @@ it('rejects unknown credential references before create or version writes', asyn
     ),
   ).toContain('Unknown credential')
   expect(await state()).toEqual(before)
+  // Simulate an old configuration whose referenced credential no longer exists.
+  await management
+    .update(agentConfigVersions)
+    .set({ settingsJson: JSON.stringify(settings) })
+    .where(eq(agentConfigVersions.agentId, source.agentId))
+  const historical = await state()
+  expect(
+    await rejection(
+      agentService().rollbackConfig(actor, source.agentId, {
+        requestId: uuidv7(),
+        expectedVersion: 1,
+        toVersion: 1,
+      }),
+    ),
+  ).toContain('Unknown credential')
+  expect(await state()).toEqual(historical)
 })
 
 describe('createAgent', () => {

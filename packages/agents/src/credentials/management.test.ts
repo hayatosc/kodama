@@ -59,20 +59,23 @@ it('returns only metadata through RPC and records a secret-free registration aud
 it('replays identical concurrent registrations without extra credentials or audits', async () => {
   const { call } = await caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
+  const before = await db.select().from(credentials)
+  const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put'))
   const [first, second] = await Promise.all([
     putCredential(call, env, input),
     putCredential(call, env, input),
   ])
   expect(second).toEqual(first)
-  expect(await db.select().from(credentials)).toHaveLength(1)
+  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
   expect(
     await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put')),
-  ).toHaveLength(1)
+  ).toHaveLength(audits.length + 1)
 })
 
 it('reports a credential conflict for concurrent reuse with different content', async () => {
   const { call } = await caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
+  const before = await db.select().from(credentials)
   const results = await Promise.allSettled([
     putCredential(call, env, input),
     putCredential(call, env, { ...input, secret: 'different-secret-key' }),
@@ -81,7 +84,7 @@ it('reports a credential conflict for concurrent reuse with different content', 
   const failed = results.find((result) => result.status === 'rejected')
   if (failed?.status !== 'rejected') throw new Error('Expected rejected retry')
   expect(String(failed.reason)).toContain('credential_conflict')
-  expect(await db.select().from(credentials)).toHaveLength(1)
+  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
 })
 
 it('names credential IDs in validation errors', async () => {
