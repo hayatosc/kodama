@@ -20,7 +20,11 @@ export async function validateCredentialRefs(
       .from(credentials)
       .where(eq(credentials.credentialId, credentialId))
       .get()
-    if (!row || row.status !== 'active' || row.provider !== provider)
+    if (!row)
+      throw new TypeError(
+        'credential_unavailable: invalid credential reference (Unknown credential)',
+      )
+    if (row.status !== 'active' || row.provider !== provider)
       throw new TypeError('credential_unavailable: invalid credential reference')
     if (agentId) {
       const grant = await db

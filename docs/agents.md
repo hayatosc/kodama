@@ -770,10 +770,15 @@ From `packages/agents`:
    `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
    `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
    check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
-4. Set each provider's secret, for example `nr cf workers secrets update OPENAI_API_KEY`. Use
-   `nr cf workers secrets update --help` for the pinned CLI's options.
+4. Set only `CREDENTIAL_KEK_V1` as a Worker secret (base64 of 32 random bytes). Provider
+   credentials belong in the encrypted management D1 vault, never Worker secrets or `.dev.vars`.
 5. Deploy with `nr deploy`.
-6. Call `AgentService.seed()` once from the trusted Worker that binds it; it is idempotent.
+6. From a trusted Worker service binding, register credentials with `AgentService.putCredential`.
+   Pass the returned IDs explicitly to `AgentService.seed({ primary: { openai: credentialId } })`
+   for the default working and memory models. Include a reference for every selected provider.
+   Seed creates the initial grants atomically and is idempotent; an empty installation cannot
+   be initialized by calling `seed()` without references. The local credential bootstrap command
+   is introduced by the following credential-hardening layer (PR #16), not this runtime layer.
 
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the

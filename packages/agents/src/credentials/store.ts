@@ -179,7 +179,7 @@ export function createCredentialStore(
               ...envelope,
               revision,
               fingerprint,
-              last4: token.length > 4 ? token.slice(-4) : '',
+              last4: token.length >= 16 ? token.slice(-4) : '',
             })
             .where(
               and(
