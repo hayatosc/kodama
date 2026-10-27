@@ -29,8 +29,11 @@ clears the encrypted envelope and lease while appending audit. Metadata remains;
 revocation journal is written. Every read checks current status and grants, even with a warm
 plaintext cache. Missing, revoked, unassigned and expired credentials stop with
 `credential_unavailable`; no alternate credential or environment key is tried. An already-running
-provider request is not interrupted. Decrypted cache entries expire within five minutes and are
-invalidated after management changes. Cross-object modifications acquire a 30-second D1 lease;
+provider request is not interrupted. Decrypted values are held only in the Durable Object's memory,
+never persisted in plaintext or returned through RPC, and may remain until that instance is evicted.
+Management changes invalidate the cache; every resolution still checks live D1 status, grants,
+revision and OAuth expiry. Revoked or unassigned values are dropped as soon as detected and are
+never served from a stale cache. Cross-object modifications acquire a 30-second D1 lease;
 contending callers wait up to 30 seconds, honor cancellation, and recheck live permission before
 acquiring the lease. The callback reads the newest committed value, so a concurrent OAuth refresh
 can observe the first caller's update rather than refresh the same token twice.
@@ -61,7 +64,10 @@ it. User input and provider output are redacted before Pi persistence; tool resu
 before committing their entries. Secret-bearing object keys are dropped, not renamed into colliding
 keys. Credential-shaped request IDs are rejected rather than redacted so deduplication, lookup, and
 SSE keep one stable identifier; admission also rejects IDs containing a known assigned secret.
-The object remembers decrypted values for at most the five-minute cache TTL and also recognizes
+Exact-value redaction knowledge also lives only in the object's memory until eviction, protecting
+late provider responses even after a credential is invalidated. This lifetime retention is intentional:
+the agents Worker has no public HTTP surface, and objects are reached only through private RPC
+within the deployment. There is no five-minute plaintext-retention limit. The filter also recognizes
 `sk-…`, `xai-…` and JWT shapes. Memory-record and skill writes apply the same pattern filter even
 when called outside the model tool path. Credential operation exceptions return fixed messages,
 and background logs retain error categories rather than raw messages, causes, stacks or SQL

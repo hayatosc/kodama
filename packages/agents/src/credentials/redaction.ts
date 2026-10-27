@@ -31,16 +31,15 @@ export function redactData<T extends object>(
   return copy
 }
 
-/** Keep exact-value redaction knowledge no longer than the decrypted cache's five-minute TTL. */
-export function createRedactor(now: () => number = Date.now) {
-  const known = new Map<string, number>()
+/** Keep exact-value redaction knowledge in memory until the owning object is evicted. */
+export function createRedactor() {
+  const known = new Set<string>()
   return {
     remember(this: void, secret: string) {
-      known.set(secret, now() + 300_000)
+      known.add(secret)
     },
     text(this: void, value: string) {
-      for (const [secret, until] of known) if (until <= now()) known.delete(secret)
-      return redactSecrets(value, known.keys())
+      return redactSecrets(value, known)
     },
   }
 }

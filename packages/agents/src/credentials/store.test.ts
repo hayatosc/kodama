@@ -12,7 +12,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { createRedactor } from './redaction.ts'
 import { credentialInsert } from './vault.ts'
 import { revokeCredential } from './management.ts'
-import { createCredentialStore, CREDENTIAL_CACHE_TTL } from './store.ts'
+import { createCredentialStore } from './store.ts'
 import { credentialFingerprint } from './encryption.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
@@ -57,7 +57,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     credentials: { primary: { openai: primary } },
   }
   let now = 1000
-  const redactor = createRedactor(() => now)
+  const redactor = createRedactor()
   const open = () =>
     createCredentialStore(
       db,
@@ -73,7 +73,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
     redact: redactor.text,
     settings,
     primary,
-    advance: (milliseconds = CREDENTIAL_CACHE_TTL + 1) => {
+    advance: (milliseconds: number) => {
       now += milliseconds
     },
   }
@@ -142,6 +142,22 @@ it('retains decrypted values until invalidation or a fresh object instance', asy
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
   await expect(open().store.read('openai')).rejects.toThrow('credential_unavailable')
   invalidate()
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+})
+
+it('drops an unassigned cached value rather than reviving it when its grant returns', async () => {
+  const { store, primary } = await fixture()
+  await store.read('openai')
+  const grants = await db
+    .delete(credentialGrants)
+    .where(eq(credentialGrants.credentialId, primary))
+    .returning()
+  await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+  await db
+    .update(credentials)
+    .set({ ciphertext: btoa('broken') })
+    .where(eq(credentials.credentialId, primary))
+  await db.insert(credentialGrants).values(grants)
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })
 

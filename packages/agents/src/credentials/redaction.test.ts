@@ -1,5 +1,5 @@
-/** Redaction recognizes key patterns and expires exact-value knowledge with the cache. @module */
-import { expect, it } from 'vitest'
+/** Redaction recognizes key patterns and keeps exact values for the object lifetime. @module */
+import { expect, it, vi } from 'vitest'
 import { createRedactor, redactData, redactSecrets } from './redaction.ts'
 
 it('removes known values, API-key shapes and JWTs without changing ordinary prose', () => {
@@ -26,11 +26,15 @@ it('drops secret-bearing keys rather than overwriting safe keys or mutating the 
   expect(input.nested['sk-secret123456']).toBe('one')
 })
 
-it('retains exact values for at most five minutes', () => {
-  let now = 0
-  const redactor = createRedactor(() => now)
-  redactor.remember('opaque-provider-secret')
-  expect(redactor.text('opaque-provider-secret')).toBe('[REDACTED]')
-  now = 300_000
-  expect(redactor.text('opaque-provider-secret')).toBe('opaque-provider-secret')
+it('retains exact values for the instance lifetime, never sharing them with fresh instances', () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(0)
+  try {
+    const redactor = createRedactor()
+    redactor.remember('opaque-provider-secret')
+    clock.mockReturnValue(24 * 60 * 60 * 1000)
+    expect(redactor.text('opaque-provider-secret')).toBe('[REDACTED]')
+    expect(createRedactor().text('opaque-provider-secret')).toBe('opaque-provider-secret')
+  } finally {
+    clock.mockRestore()
+  }
 })
