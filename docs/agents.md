@@ -222,7 +222,7 @@ truth for agents:
 | `agent_config_versions` | immutable configuration versions, numbered per agent                            |
 | `principals`            | who may call management RPC: people, service tokens, and agents                 |
 | `agent_members`         | roles on one agent                                                              |
-| `system_settings`       | `install_id`, written once by the seed, and the reconciliation cursor           |
+| `system_settings`       | `install_id`, lazily initialized on first use, and the reconciliation cursor    |
 | `audit_log`             | append-only changes, written in the batch of the change, keyed by `op_id`       |
 
 Only the agents Worker binds either database. The UI Worker binds no D1 and reaches both through
@@ -303,7 +303,8 @@ rows; a disabled principal is refused with `forbidden:`. Roles and permissions a
 
 | Method                                                             | Result                                                                       |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `seed()`                                                           | the starting rows; `{ installId, memoryAgentId }`                            |
+| `getInstallationId(actor)`                                         | lazily initialized stable installation UUID, without creating agents         |
+| `seed(credentials?)`                                               | the starting rows; `{ installId, memoryAgentId }`                            |
 | `createAgent(actor, { requestId, displayName, slug?, settings? })` | a new working agent with a server-issued UUID v7                             |
 | `listAgents(actor, { kind?, status? })`                            | registry rows, newest first                                                  |
 | `getAgent(actor, agentId)`                                         | one registry row                                                             |
@@ -685,17 +686,16 @@ so only one process is using its local storage.
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
-nr agent seed
-nr agent list
-nr agent create second --name "Second agent"
 # Read an explicitly exported environment variable; never pass the key itself as an argument.
 nr agent credentials add --provider openai --key-from-env OPENAI_API_KEY
 # Or read the key from a protected file on stdin:
 nr agent credentials add --provider openai < /secure/path/openai-key
 nr agent credentials list
-# Use the credentialId returned by registration; an agent can be a slug or UUID.
-nr agent credentials assign <credential-id> assistant
-nr agent credentials assign <credential-id> second
+# Alternatively, run credentials login --provider openai before seed.
+# Use the credentialId returned by registration or login:
+nr agent seed --credential <credential-id>
+nr agent create second --name "Second agent" --credential <credential-id>
+nr agent list
 nr agent send assistant "Hello!"
 nr agent send second "Hello from the second agent!"
 nr agent snapshot second
@@ -717,7 +717,9 @@ The CLI works like this:
 
 - `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the first agent, slug
   `assistant`. `create` uses current server defaults; its display name defaults to its slug.
-  Both commands can create agents before authentication, but sending requires an assigned credential.
+  Fresh agents require explicit `--credential ID` references for their model providers; repeat the
+  option once per provider when defaults differ. No credential is automatically selected. Repeated
+  seed preserves existing agents and can omit the references when nothing needs creating.
   `list` includes every registered working and dedicated agent, with its UUID, optional slug,
   display name, status, and desired/applied configuration versions. Results are JSON.
 - Credential registration is write-only. Listing returns only metadata (ID, kind, provider, status,
@@ -728,12 +730,14 @@ The CLI works like this:
   The CLI does not load credentials from `.dev.vars`: supply a temporary key variable in your
   shell or pipe a key from a protected source, then register it into the encrypted local store. Never paste keys into command-line arguments or shell history.
 - `credentials login --provider openai` calls Pi `Models.login` on Node with an in-memory store,
-  the seeded installation ID and agent name `kodama`. It prints the authorization URL, then accepts
+  a lazily initialized installation ID and agent name `kodama`. It prints the authorization URL, then accepts
   the final redirect URL without echoing it. The browser callback uses `127.0.0.1:1455`; if that port
   is occupied, cancel the other login first. A remote browser can paste the full redirect URL back
   into the CLI. Login validates the issued client ID and `chatgpt.tokens.use.direct` scope, then
   registers an `oauth_subscription` through the same write-only endpoint. No `auth.json` is written.
-  Assign the returned credential separately. Browser completion requires the owner; automated tests
+  Login never seeds agents: pass the returned ID to `seed --credential ID` or `create --credential ID`,
+  or assign it to an existing agent. Registration itself also lazily initializes identity, without
+  creating agents. Browser completion requires the owner; automated tests
   exercise Pi's real authorization/manual-redirect flow with a mocked token endpoint.
 - `dev seed-credentials < /secure/path/provider-keys.json` remains a bootstrap shortcut: the JSON
   maps provider IDs to keys, which are encrypted into local D1 and assigned to working and memory

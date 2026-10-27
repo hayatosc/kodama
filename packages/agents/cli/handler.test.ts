@@ -11,13 +11,30 @@ import '@earendil-works/pi-ai/api/openai-responses'
 useMockModel()
 
 it('creates and addresses an agent by slug before seed', async () => {
-  const post = (path: string, body?: unknown) => handleCli(new Request(`http://localhost/cli/${path}`, {
-    method: 'POST', headers: { authorization: 'Bearer test-token' }, body: body === undefined ? undefined : JSON.stringify(body),
-  }), 'test-token', exports.default, exports.default)
+  const post = (path: string, body?: unknown) =>
+    handleCli(
+      new Request(`http://localhost/cli/${path}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
   expect(await (await post('list')).json()).toEqual([])
-  const added = await post('credentials/add', { requestId: 'create-first-key', provider: 'openai', secret: 'create-first-test-key' })
+  const added = await post('credentials/add', {
+    requestId: 'create-first-key',
+    provider: 'openai',
+    secret: 'create-first-test-key',
+  })
   const credential: { credentialId: string } = await added.json()
-  const created = await post('create', { requestId: 'create-first', slug: 'before-seed', displayName: 'Before seed', credentialIds: [credential.credentialId] })
+  const created = await post('create', {
+    requestId: 'create-first',
+    slug: 'before-seed',
+    displayName: 'Before seed',
+    credentialIds: [credential.credentialId],
+  })
   expect(created.status).toBe(200)
   expect((await post('snapshot/before-seed')).status).toBe(200)
   const sent = await post('send/before-seed', { requestId: 'before-seed-send', content: 'Hello' })

@@ -102,8 +102,9 @@ Login and registration lazily initialize the stable installation ID without crea
 needed. A fresh seed requires references for its default models; an existing seed keeps its current
 references. Use `credentials assign` to change an existing agent's selection.
 
-`seed` creates the first agent, a general-purpose assistant with the slug `assistant`; a `send` to a slug runs it first if
-needed. An agent is named by its UUID, its slug, or a unique UUID prefix, and it retains its
+`seed` creates the first agent, a general-purpose assistant with the slug `assistant`.
+`send` resolves existing agents without implicitly seeding. An agent is named by its UUID,
+its slug, or a unique UUID prefix, and it retains its
 conversation in local Durable Object storage.
 `send` prints assistant text as it arrives and exits nonzero on model failure or
 an interrupted stream. Request IDs appear on stderr. To retry a delivery without

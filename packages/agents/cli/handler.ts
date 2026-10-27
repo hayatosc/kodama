@@ -25,13 +25,9 @@ type Management = Pick<
   | 'revokeCredential'
 >
 
-/**
- * The UUID an agent reference names. A slug or UUID prefix is resolved after making sure the seed
- * has run, so `assistant` works on a fresh local database.
- */
+/** Resolve an existing agent without provisioning unrelated initial agents. */
 async function agentIdOf(management: Management, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  await management.seed()
   return (await management.resolveAgent(CLI_ACTOR, ref)).agentId
 }
 
