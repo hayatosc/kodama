@@ -22,12 +22,5 @@ export function agentCredentialStore(
     settings,
     () => env.CREDENTIAL_KEK_V1,
   )
-  const read = handle.store.read.bind(handle.store)
-  handle.store.read = async (provider, options) => {
-    const value = await read(provider, options)
-    if (!value)
-      throw new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
-    return value
-  }
   return handle
 }

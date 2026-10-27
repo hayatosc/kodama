@@ -1,0 +1,53 @@
+# Credential operations
+
+Provider credentials belong to the management D1 vault. The only Worker encryption secret is
+`CREDENTIAL_KEK_V1`. The default `AgentService` uses the common registered-caller contract, including
+registered agents; credential ownership is metadata, not an extra administration role. Results
+contain metadata, fingerprints and last four characters only. Never paste secrets into a conversation,
+configuration, shell argument or log. There is no public management HTTP endpoint.
+
+Ownership is stored only as `owner_id`: NULL means installation, otherwise principal. Both outward
+`ownerScope` and encryption AAD derive that scope from the ID. Usage timestamps are not tracked;
+metadata retains `lastUsedAt: null`. Coverage reference versions come from the agent's current
+version, not a second stored copy in the reverse index.
+
+## Registration, assignment and revocation
+
+Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
+`assignCredential` through a trusted private service binding. API keys and OAuth subscriptions use
+the same encrypted storage and metadata-only results. OAuth login and refresh-provider integration
+are separate work. There is no credential rotation RPC or automatic reassignment workflow.
+
+Unassignment removes an agent's grant and reference. Revocation affects all grants and atomically
+clears the encrypted envelope and lease while appending audit. Metadata remains; no separate
+revocation journal is written. Every read checks current status and grants, even with a warm
+plaintext cache. Missing, revoked, unassigned and expired credentials stop with
+`credential_unavailable`; no alternate credential or environment key is tried. An already-running
+provider request is not interrupted. Decrypted cache entries expire within five minutes and are
+invalidated after management changes.
+
+## Worker Secret boundary
+
+The Worker only reads `CREDENTIAL_KEK_V1` for encryption and decryption. It does not create, update,
+or delete Worker Secrets or call Cloudflare's Secret management API. Secret provisioning belongs to
+the operator outside the application. There is no KEK rotation, generation tracking, rewrapping,
+old-key input, or fallback key resolution.
+
+Changing or losing the KEK makes existing encrypted credentials unreadable. Re-register provider
+credentials and assign the new records; there is no encrypted-data recovery or migration workflow.
+Do not change the KEK as a routine application operation.
+
+## Leak response
+
+Revoke a leaked credential at the provider first, then revoke it in Kodama. Every credential
+resolution checks live D1 state, so revoked rows cannot be selected even with a warm cache.
+Inspect secret-free audit and coverage results. Redaction is defense in depth, not a substitute for
+revocation. A combined leak of the KEK and D1 database is an accepted residual risk; no additional
+mitigation will be pursued for that scenario, including a separate vault or split-key design.
+
+## Operational policy
+
+KEK loss does not require an elaborate backup-location or recovery-custody scheme. If the KEK is
+lost, re-register the provider credentials rather than plan recovery of the encrypted values.
+Backup location, custody/access rules and per-key usage limits are not outstanding policy decisions.
+Kodama is not deployed; no legacy credential formats or provider-secret migration paths are supported.
