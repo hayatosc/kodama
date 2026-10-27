@@ -19,6 +19,12 @@ it('detects key and JWT shapes embedded after request-ID prefixes', () => {
   }
 })
 
+it('redacts unselected Google key shapes including prefixed request IDs', () => {
+  const key = `AIza${'a'.repeat(35)}`
+  expect(redactSecrets(`Provider echoed ${key}`)).toBe('Provider echoed [REDACTED]')
+  expect(redactSecrets(`prefix_${key}`)).toBe('prefix_[REDACTED]')
+})
+
 it('redacts nested protocol values without mutating the input', () => {
   const input = { content: [{ text: 'sk-secret123456' }], detail: 'xai-secret123456' }
   expect(redactData(input)).toEqual({ content: [{ text: '[REDACTED]' }], detail: '[REDACTED]' })
