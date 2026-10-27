@@ -683,10 +683,25 @@ so only one process is using its local storage.
 With `nr dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
-# JSON maps provider IDs to keys; keep the file outside the repository with mode 0600.
-nr agent dev seed-credentials < /secure/path/provider-keys.json
 nr agent seed
+nr agent list
+nr agent create second --name "Second agent"
+# Read an explicitly exported environment variable; never pass the key itself as an argument.
+nr agent credentials add --provider openai --key-from-env OPENAI_API_KEY
+# Or read the key from a protected file on stdin:
+nr agent credentials add --provider openai < /secure/path/openai-key
+nr agent credentials list
+# Use the credentialId returned by registration; an agent can be a slug or UUID.
+nr agent credentials assign <credential-id> assistant
+nr agent credentials assign <credential-id> second
 nr agent send assistant "Hello!"
+nr agent send second "Hello from the second agent!"
+nr agent snapshot second
+nr agent credentials unassign <credential-id> second
+nr agent credentials revoke <credential-id>
+# Alternative authentication: complete Sign in with ChatGPT in your browser.
+nr agent credentials login --provider openai
+# Assign the returned OAuth credentialId with the same assign command.
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
 nr agent cancel assistant
@@ -699,9 +714,28 @@ nr agent --help
 The CLI works like this:
 
 - `<agent>` is a UUID, a slug, or a unique UUID prefix. `seed` creates the first agent, slug
-  `assistant`. Run `dev seed-credentials` first: initial creation requires assigned credentials.
-  The development-only command reads keys from stdin, encrypts them into local D1, seeds the
-  registry, and assigns them to both working and memory agents; its response contains IDs only.
+  `assistant`. `create` uses current server defaults; its display name defaults to its slug.
+  Both commands can create agents before authentication, but sending requires an assigned credential.
+  `list` includes every registered working and dedicated agent, with its UUID, optional slug,
+  display name, status, and desired/applied configuration versions. Results are JSON.
+- Credential registration is write-only. Listing returns only metadata (ID, kind, provider, status,
+  fingerprint, last4 and timestamps), never key or token values. Assign/unassign update configuration
+  through the existing management RPCs; revoke immediately prevents further resolution. Configure
+  `CREDENTIAL_KEK_V1` in the local Worker before registration; the CLI never manages Worker Secrets.
+  The CLI does not implicitly load `.dev.vars`: export the chosen key variable in your shell or
+  pipe a key from a protected source. Never paste keys into command-line arguments or shell history.
+- `credentials login --provider openai` calls Pi `Models.login` on Node with an in-memory store,
+  the seeded installation ID and agent name `kodama`. It prints the authorization URL, then accepts
+  the final redirect URL without echoing it. The browser callback uses `127.0.0.1:1455`; if that port
+  is occupied, cancel the other login first. A remote browser can paste the full redirect URL back
+  into the CLI. Login validates the issued client ID and `chatgpt.tokens.use.direct` scope, then
+  registers an `oauth_subscription` through the same write-only endpoint. No `auth.json` is written.
+  Assign the returned credential separately. Browser completion requires the owner; automated tests
+  exercise Pi's real authorization/manual-redirect flow with a mocked token endpoint.
+- `dev seed-credentials < /secure/path/provider-keys.json` remains a bootstrap shortcut: the JSON
+  maps provider IDs to keys, which are encrypted into local D1 and assigned to working and memory
+  agents. To assign memory separately, use its UUID from `list`. Keep input files outside the
+  repository with mode 0600.
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.

@@ -13,7 +13,12 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['cli/index.test.ts', 'cli/token.test.ts', 'cli/migrate.test.ts'],
+          include: [
+            'cli/index.test.ts',
+            'cli/token.test.ts',
+            'cli/migrate.test.ts',
+            'src/credentials/local-login.test.ts',
+          ],
         },
       },
     ],

@@ -32,6 +32,7 @@ afterEach(() => {
   process.exitCode = originalExitCode
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 async function run(...args: string[]) {
@@ -40,6 +41,28 @@ async function run(...args: string[]) {
 }
 
 describe('CLI entrypoint', () => {
+  it('registers an explicit environment key without printing it, even on a reflecting HTTP error', async () => {
+    vi.stubEnv('CLI_TEST_KEY', 'private-test-api-key')
+    fetchMock.mockResolvedValue(new Response('private-test-api-key', { status: 400 }))
+    await run('credentials', 'add', '--provider', 'openai', '--key-from-env', 'CLI_TEST_KEY')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:5173/cli/credentials/add',
+      expect.objectContaining({ body: expect.stringContaining('private-test-api-key') }),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(console.log).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith(
+      'Credential operation failed (400); check the local Worker, KEK and input.',
+    )
+  })
+
+  it('does not echo an accidentally supplied key argument', async () => {
+    await run('credentials', 'add', '--provider', 'openai', '--key', 'private-test-api-key')
+    expect(console.error).toHaveBeenCalledWith(
+      'Invalid arguments. See nr agent --help; never pass credentials as arguments.',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('prints help without reading credentials or connecting', async () => {
     await run('--help')
     expect(console.log).toHaveBeenCalledWith(USAGE)

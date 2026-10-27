@@ -14,6 +14,48 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('parses agent visibility, creation and credential management commands', () => {
+    expect(command(['list'])).toEqual({ action: 'list' })
+    expect(command(['create', 'second'], { name: 'Second agent' })).toEqual({
+      action: 'create',
+      request: { requestId: 'generated', slug: 'second', displayName: 'Second agent' },
+    })
+    expect(
+      command(['credentials', 'add'], { provider: 'openai', 'key-from-env': 'OPENAI_API_KEY' }),
+    ).toEqual({
+      action: 'credentials/add',
+      provider: 'openai',
+      keyFromEnv: 'OPENAI_API_KEY',
+      requestId: 'generated',
+    })
+    expect(command(['credentials', 'login'], { provider: 'openai' })).toEqual({
+      action: 'credentials/login',
+      provider: 'openai',
+      requestId: 'generated',
+    })
+    expect(command(['credentials', 'list'])).toEqual({ action: 'credentials/list' })
+    for (const action of ['assign', 'unassign'])
+      expect(command(['credentials', action, agentId, 'second'])).toEqual({
+        action: `credentials/${action}`,
+        credentialId: agentId,
+        agentRef: 'second',
+      })
+    expect(command(['credentials', 'revoke', agentId])).toEqual({
+      action: 'credentials/revoke',
+      credentialId: agentId,
+    })
+    expect(() => command(['credentials', 'add'], {})).toThrow()
+    expect(() => command(['credentials', 'login'], { provider: 'xai' })).toThrow()
+  })
+
+  it('sends credentials only in the body, never a path or redirect', () => {
+    const parsed = command(['credentials', 'add'], { provider: 'openai' })
+    if (parsed.action === 'help') throw new Error('Unexpected help')
+    const request = commandRequest(parsed, 'token', '{"secret":"private-key"}')
+    expect(request.url).toBe(`${LOCAL_WORKER_URL}/cli/credentials/add`)
+    expect(request.init.body).toBe('{"secret":"private-key"}')
+    expect(request.init.redirect).toBe('error')
+  })
   it('asks for help with no arguments or --help', () => {
     expect(command([])).toEqual({ action: 'help' })
     expect(command(['send', 'assistant', 'Hi'], { help: true })).toEqual({ action: 'help' })

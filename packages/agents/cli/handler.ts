@@ -5,13 +5,22 @@
  */
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
-import { parseAgentRef, parseMessage } from '../src/validation.ts'
+import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
+import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 
 type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
-type Management = Pick<AgentService, 'seed' | 'resolveAgent'>
-
-/** The actor the development CLI calls `AgentService` management methods as. */
-const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
+type Management = Pick<
+  AgentService,
+  | 'seed'
+  | 'resolveAgent'
+  | 'listAgents'
+  | 'createAgent'
+  | 'putCredential'
+  | 'listCredentials'
+  | 'assignCredential'
+  | 'unassignCredential'
+  | 'revokeCredential'
+>
 
 /**
  * The UUID an agent reference names. A slug or UUID prefix is resolved after making sure the seed
@@ -34,10 +43,25 @@ export async function handleCli(
     return new Response('Unauthorized', { status: 401 })
   }
   if (request.method !== 'POST') return new Response('Use POST', { status: 405 })
-  const [, prefix, action, rawAgentRef] = new URL(request.url).pathname.split('/')
+  const [, prefix, action, rawAgentRef, credentialId, target] = new URL(request.url).pathname.split(
+    '/',
+  )
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
+    if (action === 'credentials')
+      return credentialResponse(request, management, rawAgentRef, credentialId, target)
     if (action === 'seed') return Response.json(await management.seed())
+    if (action === 'list') return Response.json(await management.listAgents(CLI_ACTOR))
+    if (action === 'create') {
+      const input = parseInput(CreateAgentSchema, await request.json())
+      return Response.json(
+        await management.createAgent(CLI_ACTOR, {
+          requestId: input.requestId,
+          displayName: input.displayName,
+          ...(input.slug === undefined ? {} : { slug: input.slug }),
+        }),
+      )
+    }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
