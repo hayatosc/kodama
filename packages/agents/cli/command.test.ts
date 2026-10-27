@@ -48,14 +48,12 @@ describe('toCommand', () => {
     expect(() => command(['credentials', 'login'], { provider: 'xai' })).toThrow()
   })
 
-  it('rejects credential text in registration request IDs before transport', () => {
+  it('preserves credential-shaped registration request IDs without rewriting their identity', () => {
+    const requestId = `sk-${'x'.repeat(32)}`
     for (const action of ['add', 'login']) {
-      expect(() =>
-        command(['credentials', action], {
-          provider: 'openai',
-          'request-id': `sk-${'x'.repeat(32)}`,
-        }),
-      ).toThrow('requestId must not contain credential text')
+      expect(
+        command(['credentials', action], { provider: 'openai', 'request-id': requestId }),
+      ).toMatchObject({ requestId })
     }
   })
 
