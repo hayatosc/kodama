@@ -1,4 +1,4 @@
-/** ChatGPT token endpoint validation and safe failure classification. @module */
+/** ChatGPT token endpoint contracts from RFC 6749 and the bundled Pi OAuth client. @module */
 import type { OAuthCredential } from '@earendil-works/pi-ai'
 import { afterEach, expect, it, vi } from 'vitest'
 import { REFRESH_REJECTED, refreshChatGPT, refreshDue } from './refresh.ts'
@@ -12,6 +12,7 @@ const credential: OAuthCredential = {
   scopes: ['chatgpt.tokens.use.direct'],
   accountId: 'kept-account',
 }
+const token = { access_token: 'renewed-access', token_type: 'Bearer', expires_in: 3600 }
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -20,46 +21,91 @@ it('refreshes inside Pi auth’s preemptive window', () => {
   expect(refreshDue({ ...credential, expires: 301_001 }, 1000)).toBe(false)
 })
 
-it('retains account metadata and accepts returned scopes without requiring rotation', async () => {
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-    const request = new Request(url, init)
-    expect(request.redirect).toBe('manual')
-    expect(request.headers.get('content-type')).toBe('application/x-www-form-urlencoded')
-    expect(new URLSearchParams(await request.text())).toEqual(
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: 'stored-refresh',
-        client_id: 'issued-client',
-      }),
-    )
-    return Response.json({
-      access_token: 'renewed-access',
-      expires_in: 3600,
-      scope: 'openid chatgpt.tokens.use.direct',
-    })
-  })
+it('sends exactly Pi’s public-client refresh fields and headers', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(token))
+  await refreshChatGPT(credential, () => 1000)
+  const [url, init] = fetch.mock.calls[0] ?? []
+  if (!url) throw new Error('Missing refresh request')
+  const request = new Request(url, init)
+  expect(request.url).toBe('https://auth.openai.com/api/accounts/oauth/token')
+  expect(request.method).toBe('POST')
+  expect(request.redirect).toBe('manual')
+  expect(request.headers.get('accept')).toBe('application/json')
+  expect(request.headers.get('content-type')).toBe('application/x-www-form-urlencoded')
+  expect(request.headers.has('authorization')).toBe(false)
+  expect([...new URLSearchParams(await request.text()).entries()].sort()).toEqual(
+    Object.entries({
+      grant_type: 'refresh_token',
+      client_id: 'issued-client',
+      refresh_token: 'stored-refresh',
+      resource: 'https://api.openai.com/v1',
+    }).sort(),
+  )
+})
+
+// RFC 6749 §§5.1, 6: rotation is optional, omitted scope retains the grant, unknown fields are ignored.
+it.each([
+  { rotation: false, scope: false },
+  { rotation: true, scope: false },
+  { rotation: false, scope: true },
+  { rotation: true, scope: true },
+])('parses a spec-shaped success (rotation: $rotation, scope: $scope)', async (options) => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({
+      ...token,
+      access_token: 'a',
+      token_type: 'bEaReR',
+      ...(options.rotation ? { refresh_token: 'r' } : {}),
+      ...(options.scope ? { scope: 'openid chatgpt.tokens.use.direct' } : {}),
+      extension_parameter: 'ignored',
+    }),
+  )
   expect(await refreshChatGPT(credential, () => 1000)).toEqual({
     ...credential,
-    access: 'renewed-access',
+    access: 'a',
+    refresh: options.rotation ? 'r' : credential.refresh,
     expires: 3_421_000,
-    scopes: ['openid', 'chatgpt.tokens.use.direct'],
+    scopes: options.scope ? ['openid', 'chatgpt.tokens.use.direct'] : credential.scopes,
   })
 })
 
-it.each([
-  { error: 'invalid_grant' },
-  { error: { code: 'refresh_token_reused', message: 'do-not-expose' } },
-  { error: { code: 'refresh_token_expired' } },
-  { error: { code: 'refresh_token_invalidated' } },
-])('classifies terminal token rejection without exposing its body', async (body) => {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(body, { status: 400 }))
+it('requires reauthentication on HTTP 401 without echoing a non-JSON body', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('do-not-expose', { status: 401 }))
   await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(REFRESH_REJECTED)
 })
 
-it.each([401, 403])('requires reauthentication on HTTP %s even without JSON', async (status) => {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('do-not-expose', { status }))
+it.each([undefined, { detail: 'do-not-expose' }, { error: { code: 'permission_denied' } }])(
+  'does not infer unusable credentials from HTTP 403 without a permanent code',
+  async (body) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      body === undefined
+        ? new Response('do-not-expose', { status: 403 })
+        : Response.json(body, { status: 403 }),
+    )
+    await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
+      'credential_unavailable: OAuth refresh temporarily unavailable',
+    )
+  },
+)
+
+it('recognizes a permanent OpenAI error object even on HTTP 403', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({ error: { code: 'refresh_token_reused' } }, { status: 403 }),
+  )
   await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(REFRESH_REJECTED)
 })
+
+it.each([302, 429, 500, 503])(
+  'does not invalidate credentials on HTTP %s even with a permanent code',
+  async (status) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({ error: 'invalid_client' }, { status }),
+    )
+    await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
+      'credential_unavailable: OAuth refresh temporarily unavailable',
+    )
+  },
+)
 
 it('requires a fresh login rather than guessing a missing client ID', async () => {
   const fetch = vi.spyOn(globalThis, 'fetch')
@@ -70,23 +116,32 @@ it('requires a fresh login rather than guessing a missing client ID', async () =
 })
 
 it('requires reauthentication when the provider removes direct-token scope', async () => {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    Response.json({
-      access_token: 'renewed-access',
-      expires_in: 3600,
-      scope: 'openid',
-    }),
-  )
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ...token, scope: 'openid' }))
   await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(REFRESH_REJECTED)
 })
 
 it.each([
-  { expires_in: 3600 },
-  { access_token: 'renewed-access', expires_in: -1 },
-  { access_token: 'renewed-access', expires_in: '3600' },
-  { access_token: 'renewed-access', expires_in: 3600, refresh_token: '' },
-])('does not accept malformed success payloads', async (body) => {
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(body))
+  { access_token: undefined },
+  { access_token: '' },
+  { access_token: '   ' },
+  { token_type: undefined },
+  { token_type: 'MAC' },
+  { expires_in: undefined },
+  { expires_in: 0 },
+  { expires_in: -1 },
+  { expires_in: '3600' },
+  { refresh_token: '' },
+  { refresh_token: '   ' },
+  { scope: [] },
+])('rejects malformed or unsupported success fields: %j', async (fields) => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ...token, ...fields }))
+  await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
+    'credential_unavailable: invalid OAuth refresh response',
+  )
+})
+
+it('requires the HTTP 200 token response specified by RFC 6749 §5.1', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(token, { status: 201 }))
   await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
     'credential_unavailable: invalid OAuth refresh response',
   )

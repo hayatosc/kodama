@@ -40,6 +40,7 @@ it('sends with an expired subscription after one refresh, including after evicti
       refreshes += 1
       return Response.json({
         access_token: 'runtime-refreshed-access',
+        token_type: 'Bearer',
         refresh_token: 'runtime-rotated-refresh',
         expires_in: 3600,
       })

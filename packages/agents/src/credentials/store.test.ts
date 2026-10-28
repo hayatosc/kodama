@@ -114,7 +114,7 @@ it('uses only explicit references and checks status even with a warm cache and n
 })
 
 describe('OAuth resolution', () => {
-  it.each([undefined, 'rotated-refresh-token'])(
+  it.each([undefined, 'r'])(
     'refreshes an expired cached subscription and persists refresh token %s',
     async (refreshToken) => {
       const { store, advance, primary, open } = await fixture('oauth_subscription')
@@ -127,6 +127,7 @@ describe('OAuth resolution', () => {
         const body = new URLSearchParams(await request.text())
         expect(body.get('refresh_token')).toBe('refresh-token')
         expect(body.get('client_id')).toBe('issued-client')
+        expect(body.get('resource')).toBe('https://api.openai.com/v1')
         const row = await db
           .select()
           .from(credentials)
@@ -134,7 +135,8 @@ describe('OAuth resolution', () => {
           .get()
         expect(row?.leaseId).toEqual(expect.any(String))
         return Response.json({
-          access_token: 'refreshed-access-token',
+          access_token: 'a',
+          token_type: 'Bearer',
           ...(refreshToken ? { refresh_token: refreshToken } : {}),
           expires_in: 3600,
         })
@@ -142,7 +144,7 @@ describe('OAuth resolution', () => {
       const value = await store.read('openai')
       expect(value).toEqual({
         type: 'oauth',
-        access: 'refreshed-access-token',
+        access: 'a',
         refresh: refreshToken ?? 'refresh-token',
         expires: 4_021_000,
         clientId: 'issued-client',
@@ -161,7 +163,7 @@ describe('OAuth resolution', () => {
         leaseId: null,
         leaseExpiresAt: null,
       })
-      expect(row?.ciphertext).not.toContain('refreshed-access-token')
+      expect(row?.last4).toBe('')
       expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toHaveLength(1)
     },
   )
@@ -176,6 +178,7 @@ describe('OAuth resolution', () => {
       await release.promise
       return Response.json({
         access_token: 'refreshed-access',
+        token_type: 'Bearer',
         refresh_token: 'rotated-refresh',
         expires_in: 3600,
       })
@@ -199,17 +202,38 @@ describe('OAuth resolution', () => {
     ).toMatchObject({ revision: 2, leaseId: null })
   })
 
-  it.each(['invalid_grant', 'refresh_token_reused'])(
-    'records needs_reauth on %s, with structured identity and no alternate key',
-    async (code) => {
+  // RFC 6749 §5.2 plus OpenAI's documented refresh codes, in both response shapes.
+  it.each([
+    ...[
+      'invalid_request',
+      'invalid_client',
+      'invalid_grant',
+      'unauthorized_client',
+      'unsupported_grant_type',
+      'invalid_scope',
+      'invalid_refresh_token',
+      'token_expired',
+      'refresh_token_expired',
+      'refresh_token_invalidated',
+      'refresh_token_reused',
+    ].flatMap((code) => [
+      { code, status: 400, error: code },
+      { code, status: 400, error: { code, message: 'secret-provider-detail' } },
+    ]),
+    { code: 'invalid_client', status: 401, error: 'invalid_client' },
+    { code: 'refresh_token_reused', status: 403, error: { code: 'refresh_token_reused' } },
+  ])(
+    'records needs_reauth on HTTP $status / $code, with structured identity and no alternate key',
+    async ({ status, error }) => {
       const { store, advance, primary, open, agentId } = await fixture('oauth_subscription')
       advance(600_000)
       const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
         Response.json(
           {
-            error: { code, message: 'secret-provider-detail' },
+            error,
+            error_description: 'secret-provider-detail',
           },
-          { status: 400 },
+          { status },
         ),
       )
       const failure = {
@@ -248,7 +272,11 @@ describe('OAuth resolution', () => {
           .set({ leaseId: 'replacement-holder', leaseExpiresAt: 900_000 })
           .where(eq(credentials.credentialId, primary))
         return outcome === 'success'
-          ? Response.json({ access_token: 'must-not-persist', expires_in: 3600 })
+          ? Response.json({
+              access_token: 'must-not-persist',
+              token_type: 'Bearer',
+              expires_in: 3600,
+            })
           : Response.json({ error: 'invalid_grant' }, { status: 400 })
       })
       await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
@@ -274,20 +302,33 @@ describe('OAuth resolution', () => {
     expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
   })
 
-  it.each([429, 500, 503])(
-    'keeps a transient HTTP %s failure active for a later retry',
+  it.each([0, 302, 400, 403, 429, 500, 503])(
+    'preserves credentials on network (0) or non-terminal HTTP %s failure for a later retry',
     async (status) => {
       const { store, advance, primary } = await fixture('oauth_subscription')
       advance(600_000)
-      vi.spyOn(globalThis, 'fetch')
-        .mockResolvedValueOnce(Response.json({ error: 'server_error' }, { status }))
-        .mockResolvedValueOnce(Response.json({ access_token: 'retried-access', expires_in: 3600 }))
+      const before = await db
+        .select()
+        .from(credentials)
+        .where(eq(credentials.credentialId, primary))
+        .get()
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementationOnce(async () => {
+          if (status === 0) throw new Error('secret-provider-detail')
+          const code = status === 400 || status === 403 ? 'unknown_error' : 'invalid_client'
+          return Response.json({ error: code }, { status })
+        })
+        .mockResolvedValueOnce(
+          Response.json({ access_token: 'retried-access', token_type: 'Bearer', expires_in: 3600 }),
+        )
       await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
       expect(
         await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-      ).toMatchObject({ status: 'active', revision: 1, leaseId: null })
+      ).toEqual(before)
       expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
       expect(await store.read('openai')).toMatchObject({ access: 'retried-access' })
+      expect(fetch).toHaveBeenCalledTimes(2)
     },
   )
 })
@@ -418,7 +459,7 @@ it('releases the lease on failure without leaking callback errors', async () => 
 })
 
 it.each(['access', 'refresh'] as const)(
-  'rejects a seven-character OAuth %s without committing refresh',
+  'rejects an empty OAuth %s without committing refresh',
   async (field) => {
     const { store, primary } = await fixture('oauth_subscription')
     await expect(
@@ -427,7 +468,7 @@ it.each(['access', 'refresh'] as const)(
         access: '12345678',
         refresh: '87654321',
         expires: 3000,
-        [field]: '1234567',
+        [field]: '',
       })),
     ).rejects.toThrow('credential modification failed')
     expect(
@@ -439,7 +480,7 @@ it.each(['access', 'refresh'] as const)(
 
 it('keeps modified credential metadata keyed and masks short OAuth tokens', async () => {
   const { store, primary } = await fixture('oauth_subscription')
-  const next = { type: 'oauth' as const, access: '12345678', refresh: '87654321', expires: 3000 }
+  const next = { type: 'oauth' as const, access: 'a', refresh: 'r', expires: 3000 }
   await store.modify('openai', async () => next)
   const fingerprint = await credentialFingerprint(JSON.stringify(next), kek())
   const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()

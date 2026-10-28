@@ -18,6 +18,7 @@ it('produces a ChatGPT URL, accepts a pasted redirect, and registers the OAuth r
   const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
     Response.json({
       access_token: 'private-access',
+      token_type: 'Bearer',
       refresh_token: 'private-refresh',
       id_token: 'private-id',
       expires_in: 3600,
