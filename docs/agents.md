@@ -250,7 +250,8 @@ state does not allow the call is refused with `agent_unavailable:`. `sendTo` adm
 same way.
 
 `resolveAgent` accepts a UUID, a slug, or a UUID prefix of at least 4 characters; an ambiguous
-prefix is an error that lists the candidates.
+prefix is an error that lists the candidates. A slug of hex digits that is also another agent's
+UUID prefix is ambiguous too, so a rename cannot capture messages addressed by that prefix.
 
 ### Lifecycle
 

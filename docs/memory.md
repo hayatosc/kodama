@@ -554,7 +554,7 @@ unfinished at a time.
 On start and on the `prune` alarm, an unfinished run continues from its state:
 
 1. **Prepare.** Fix the range and record `prepared`. If the extraction checkpoint is below the
-   range's end, enqueue an `extract` job. Pruning does not wait for it, because extraction can read
+   range's end and the applied version extracts (`memoryPolicy.extract`), enqueue an `extract` job. Pruning does not wait for it, because extraction can read
    the segment from R2 later.
 2. **Export.** Write three objects under `archive/<agentId>/<first>-<last>`:
    - the entries (`.jsonl`);
@@ -705,7 +705,9 @@ shared record with `shared_write`, and code checks it before applying it
   Two agents are independent evidence that it is not one agent's quirk or one poisoned
   conversation.
 - Reorganizing a space (merging or replacing its records) needs sources that are all active
-  records of that space.
+  records of that space, and only the `consolidate` job of that space may do it. A job of one
+  agent's scope reads that agent's records, so citing the space's records there would let one
+  agent's conversation rewrite the space.
 - `required` needs records of two agents, or sources that are already required.
 
 A write that passes is applied as one operation: a new record, or a supersede of the shared record

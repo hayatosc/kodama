@@ -32,6 +32,7 @@ export async function executeSharedWrite(deps: MemoryJobDeps, callId: string, in
     memoryDb(deps.env.MEMORY_DB),
     await jobOperationContext(running, callId, deps.now?.() ?? Date.now()),
     input,
+    running.job.scope,
   )
 }
 

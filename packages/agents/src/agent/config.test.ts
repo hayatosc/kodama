@@ -2,8 +2,9 @@
 import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
 import { newAgentId } from '../helper/management.ts'
-import { modelResponse, useMockModel } from '../helper/rpc.ts'
-import { toolCallResponse } from '../helper/model.ts'
+import { modelResponse, useMockModel, waitForAnswer } from '../helper/rpc.ts'
+import { requestBody, toolCallResponse, toolResults } from '../helper/model.ts'
+import { currentTimeTool } from '../tools/current-time.ts'
 
 useMockModel()
 
@@ -44,4 +45,22 @@ it('preserves tool argument keys rather than guessing whether they contain crede
     await exports.default.send(id, { requestId: 'unchanged-keys', content: 'Hello' }),
   ).text()
   expect(events).toContain('test-key')
+})
+
+it('does not run a registered tool that the applied version does not enable', async () => {
+  const id = await newAgentId()
+  const execute = vi.spyOn(currentTimeTool, 'execute')
+  let calls = 0
+  vi.mocked(globalThis.fetch).mockImplementation(async () =>
+    calls++ === 0
+      ? toolCallResponse({ name: 'current_time', arguments: {} })
+      : modelResponse('Done'),
+  )
+
+  await exports.default.sendMessage(id, { requestId: 'disabled-tool', content: 'Time?' })
+  await waitForAnswer(id, 'disabled-tool')
+
+  expect(execute).not.toHaveBeenCalled()
+  // The model is told the call failed rather than left waiting for it.
+  expect(toolResults(requestBody(vi.mocked(globalThis.fetch).mock.calls[1]?.[1]))).toBe(1)
 })

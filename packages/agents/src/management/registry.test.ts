@@ -99,6 +99,23 @@ describe('resolveAgentRef', () => {
     }
   })
 
+  it("does not let a slug capture another agent's UUID prefix", async () => {
+    const target = await newAgentId()
+    const squatter = await newAgentId()
+    const prefix = target.slice(0, 18)
+    const hexSlug = `cafe-${uuidv7().slice(-12)}`
+    await management.update(agents).set({ slug: prefix }).where(eq(agents.agentId, squatter))
+    const other = await newAgentId()
+    await management.update(agents).set({ slug: hexSlug }).where(eq(agents.agentId, other))
+
+    const captured = await rejection(resolveAgentRef(management, prefix))
+    expect(captured).toMatch(/Ambiguous agent prefix/)
+    expect(captured).toContain(target)
+    expect(captured).toContain(squatter)
+    // A hex slug that is no agent's prefix still names its agent.
+    expect((await resolveAgentRef(management, hexSlug)).agentId).toBe(other)
+  })
+
   it('reports an ambiguous prefix with its candidates, and unknown references', async () => {
     const now = Date.now()
     const first = await newAgentId(uuidv7(now))

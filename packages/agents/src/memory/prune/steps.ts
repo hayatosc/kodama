@@ -56,7 +56,8 @@ export async function prepare(
   const { first, last } = range
   const now = deps.now?.() ?? Date.now()
   const run = createRun(local, first, last, head, now)
-  if (deps.archive) {
+  // Extraction is off for some agents; pruning must not hand their entries over behind its back.
+  if (deps.archive && (await deps.extracts())) {
     const checkpoint = await extractionCheckpoint(memoryDb(deps.env.MEMORY_DB), deps.agentId())
     if (checkpoint < last) {
       await enqueueQuietly(deps, {

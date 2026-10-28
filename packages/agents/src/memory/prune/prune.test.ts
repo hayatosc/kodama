@@ -28,7 +28,7 @@ import {
 } from '../../helper/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../helper/management.ts'
+import { newAgentId, updateSettings } from '../../helper/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())
@@ -94,6 +94,32 @@ describe('pruning', () => {
       },
     )
     expect(jobs.map((job) => job.kind)).toContain('record_archive')
+  })
+
+  it('hands pruned entries to extraction only while the memory policy extracts', async () => {
+    const jobsOf = (agentId: string) =>
+      runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), async (_i, state) => {
+        const local = await openLocalDb(state.storage)
+        return local
+          .select({ kind: memoryJobs.kind, payloadJson: memoryJobs.payloadJson })
+          .from(memoryJobs)
+          .all()
+          .filter((job) => job.payloadJson.includes(agentId))
+          .map((job) => job.kind)
+      })
+    const [extracting, private_] = [await newAgentId(), await newAgentId()]
+    await updateSettings(private_, { memoryPolicy: { extract: false, remember: true } })
+    for (const agentId of [extracting, private_]) {
+      // Each conversation counts its own turns towards compaction.
+      mockModel({ usage: COMPACT_AFTER_TURN_7 })
+      await compactedAgent(agentId, `quokka${agentId.slice(0, 6)}`)
+      expect(await env.AGENTS.getByName(agentId).prune({ force: true })).toBe('pruned')
+    }
+
+    expect(await jobsOf(extracting)).toContain('extract')
+    expect(await jobsOf(private_)).not.toContain('extract')
+    // The archive and its summary do not depend on extraction.
+    expect(await jobsOf(private_)).toContain('record_archive')
   })
 
   it('defers the delete while a background compaction runs, then finishes it', async () => {
