@@ -76,8 +76,6 @@ export const indexSchema = v.object({
   ),
   words: wordIndexSchema,
 })
-/** The shape of a segment's `.summary.json`. */
-export const summarySchema = v.object({ summary: v.string(), words: v.array(v.string()) })
 
 /**
  * Read and validate a JSON object, with its size.

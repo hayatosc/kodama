@@ -74,31 +74,45 @@ const MIN_PREFIX_LENGTH = 4
 /** Candidates listed in an ambiguous-prefix error. */
 const MAX_CANDIDATES = 10
 
+/** Agents whose UUID starts with `prefix`, enough of them to tell one from several. */
+function prefixMatches(db: ManagementDb, prefix: string): Promise<AgentRow[]> {
+  return db
+    .select()
+    .from(agents)
+    .where(like(agents.agentId, `${prefix}%`))
+    .orderBy(agents.agentId)
+    .limit(MAX_CANDIDATES + 1)
+}
+
+function ambiguous(ref: string, rows: readonly AgentRow[]): TypeError {
+  const candidates = rows.slice(0, MAX_CANDIDATES).map((row) => row.agentId)
+  return new TypeError(`Ambiguous agent prefix ${ref}; candidates: ${candidates.join(', ')}`)
+}
+
 /**
  * The registry row a person named: a full UUID, then a slug, then a unique UUID prefix.
  *
- * @throws {@link TypeError} When nothing matches, or a prefix matches several agents (the message
- * lists them).
+ * @remarks
+ * A slug of hex digits can also read as a UUID prefix. When it is the prefix of another agent,
+ * the reference is ambiguous rather than silently the slug's agent, so renaming an agent cannot
+ * capture messages addressed to another one by prefix.
+ *
+ * @throws {@link TypeError} When nothing matches, or a reference matches several agents (the
+ * message lists them).
  */
 export async function resolveAgentRef(db: ManagementDb, ref: string): Promise<AgentRow> {
   if (isUuid(ref)) return agentRow(db, ref)
   const bySlug = await db.select().from(agents).where(eq(agents.slug, ref)).get()
-  if (bySlug !== undefined) return bySlug
-  if (ref.length < MIN_PREFIX_LENGTH || !/^[0-9a-f-]+$/.test(ref)) {
-    throw new TypeError(`Unknown agent: ${ref}`)
+  const prefix = ref.length >= MIN_PREFIX_LENGTH && /^[0-9a-f-]+$/.test(ref)
+  const matches = prefix ? await prefixMatches(db, ref) : []
+  if (bySlug !== undefined) {
+    const others = matches.filter((row) => row.agentId !== bySlug.agentId)
+    if (others.length > 0) throw ambiguous(ref, [bySlug, ...others])
+    return bySlug
   }
-  const matches = await db
-    .select()
-    .from(agents)
-    .where(like(agents.agentId, `${ref}%`))
-    .orderBy(agents.agentId)
-    .limit(MAX_CANDIDATES + 1)
   const [first, ...others] = matches
   if (first === undefined) throw new TypeError(`Unknown agent: ${ref}`)
-  if (others.length > 0) {
-    const candidates = matches.slice(0, MAX_CANDIDATES).map((row) => row.agentId)
-    throw new TypeError(`Ambiguous agent prefix ${ref}; candidates: ${candidates.join(', ')}`)
-  }
+  if (others.length > 0) throw ambiguous(ref, matches)
   return first
 }
 

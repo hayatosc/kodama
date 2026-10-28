@@ -64,6 +64,8 @@ export const memoryJobs = sqliteTable(
     outcome: text('outcome', { enum: JOB_OUTCOMES }),
     attempts: integer('attempts').notNull().default(0),
     notBefore: integer('not_before').notNull(),
+    /** When the current attempt started; its time limit counts from here, across evictions. */
+    startedAt: integer('started_at'),
     createdAt: integer('created_at').notNull(),
     settledAt: integer('settled_at'),
   },

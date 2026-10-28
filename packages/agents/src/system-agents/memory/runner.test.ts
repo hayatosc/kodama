@@ -49,11 +49,9 @@ describe('usage attribution', () => {
       {
         kind: 'remember',
         sourceAgentId,
-        origin: 'user_request',
         content: 'Usage owner',
         sourceEntries: { from: 1, to: 1 },
       },
-      { kind: 'record_archive', sourceAgentId, segmentId: `usage-${sourceAgentId}` },
       { kind: 'consolidate', scope: `agent:${sourceAgentId}`, day: '2026-10-27' },
     ]
     const statuses = await Promise.all(jobs.map((job) => memoryAgent().enqueue(job)))
@@ -161,7 +159,7 @@ describe('remember', () => {
       if (body.includes('Remember the deploy target') && toolResults(body) === 0) {
         return toolCallResponse({
           name: 'remember',
-          arguments: { content: fact, origin: 'user_request' },
+          arguments: { content: fact },
         })
       }
       return textResponse('OK')
@@ -193,7 +191,6 @@ describe('remember', () => {
     const job = {
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content: 'Prefers short answers',
       sourceEntries: { from: 3, to: 3 },
     }
@@ -221,7 +218,6 @@ describe('remember', () => {
     const jobs = candidates.map((content) => ({
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content,
       sourceEntries: { from: 1, to: 1 },
     }))
@@ -251,10 +247,11 @@ describe('retries', () => {
     const { jobId } = await memoryAgent().enqueue({
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content: 'A job the model never answers',
       sourceEntries: { from: 1, to: 1 },
     })
+    // docs/memory.md — Jobs: retried after 1 minute, 10 minutes, and 1 hour.
+    expect(JOB_RETRY_DELAYS_MS).toEqual([60_000, 10 * 60_000, 60 * 60_000])
     const attempts = JOB_RETRY_DELAYS_MS.length + 1
 
     for (let attempt = 1; attempt < attempts; attempt++) {
@@ -264,6 +261,10 @@ describe('retries', () => {
       // Make the delayed retry due now rather than waiting for its delay.
       await runInDurableObject(memoryAgent(), async (_instance, state) => {
         const local = await openLocalDb(state.storage)
+        const row = local.select().from(memoryJobs).where(eq(memoryJobs.jobId, jobId)).get()
+        const delay = JOB_RETRY_DELAYS_MS[attempt - 1] ?? 0
+        expect(row?.notBefore).toBeGreaterThan(Date.now() + delay - 10_000)
+        expect(row?.notBefore).toBeLessThanOrEqual(Date.now() + delay)
         local.update(memoryJobs).set({ notBefore: 0 }).where(eq(memoryJobs.jobId, jobId)).run()
         await setAlarm(state.storage, 'jobs', Date.now())
       })
@@ -297,7 +298,6 @@ describe('memory job recovery', () => {
     const { jobId } = await stub.enqueue({
       kind: 'remember',
       sourceAgentId,
-      origin: 'user_request',
       content,
       sourceEntries: { from: 1, to: 1 },
     })

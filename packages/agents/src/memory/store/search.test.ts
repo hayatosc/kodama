@@ -33,7 +33,7 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
           kind: 'fact',
           content: `needle ${candidate}`,
           searchVersion: SEARCH_VERSION,
-          origin: 'agent_judgment',
+          origin: 'remember',
           sourceAgentId: agentId,
           runId: 'search-boundary',
           importance: candidate / size,
@@ -252,6 +252,42 @@ describe('searching memory', () => {
       .where(eq(memoryRecords.id, id))
       .get()
     expect(used).toEqual({ useCount: 1, lastUsedAt: NOW })
+  })
+
+  it('ranks events down with a 30-day half-life, but not facts', async () => {
+    const { agentId, scope } = agentScope()
+    const day = 24 * 60 * 60 * 1000
+    const ranked = [
+      // Score (0.5 + importance) × 0.5^(age / 30 days) for events; facts never decay.
+      { id: `${agentId}-old-fact`, kind: 'fact', importance: 1, age: 60 * day },
+      { id: `${agentId}-new-event`, kind: 'event', importance: 0.3, age: 0 },
+      { id: `${agentId}-old-event`, kind: 'event', importance: 1, age: 30 * day },
+      { id: `${agentId}-older-event`, kind: 'event', importance: 1, age: 60 * day },
+    ] as const
+    await db.batch([
+      db.insert(memoryRecords).values(
+        ranked.map((candidate) => ({
+          id: candidate.id,
+          scope,
+          kind: candidate.kind,
+          content: `rollout ${candidate.id}`,
+          searchVersion: SEARCH_VERSION,
+          origin: 'remember' as const,
+          sourceAgentId: agentId,
+          runId: 'ranking',
+          importance: candidate.importance,
+          observedAt: NOW - candidate.age,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })),
+      ),
+      db.insert(memoryTerms).values(ranked.map(({ id }) => ({ recordId: id, term: 'rollout' }))),
+    ])
+
+    const found = await searchMemory(db, { query: 'rollout', scopes: [scope], now: NOW })
+
+    // 1.5, then 0.8 against 1.5 × 0.5 = 0.75, then 1.5 × 0.25.
+    expect(found.map((record) => record.id)).toEqual(ranked.map(({ id }) => id))
   })
 
   it('returns nothing for a query without words', async () => {

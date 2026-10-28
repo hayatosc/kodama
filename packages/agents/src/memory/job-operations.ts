@@ -32,6 +32,7 @@ export async function executeSharedWrite(deps: MemoryJobDeps, callId: string, in
     memoryDb(deps.env.MEMORY_DB),
     await jobOperationContext(running, callId, deps.now?.() ?? Date.now()),
     input,
+    running.job.scope,
   )
 }
 
@@ -48,14 +49,13 @@ export async function skillJobContext(deps: MemoryJobDeps, callId = '') {
 }
 
 /**
- * Enforce job permissions, prepare any idempotent side effect, then record the operation once.
+ * Enforce job permissions, then record the operation once.
  * The caller supplies a stable call ID, not a tool execution API.
  */
 export async function executeJobOperation(
   deps: MemoryJobDeps,
   callId: string,
   operation: (job: MemoryJob, now: number) => Operation,
-  prepare?: (job: MemoryJob) => Promise<void>,
 ) {
   const running = await requireMemoryJob(deps)
   const now = deps.now?.() ?? Date.now()
@@ -78,7 +78,6 @@ export async function executeJobOperation(
   if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
     throw new Error('Shared records change only through shared_write, which checks their sources')
   }
-  await prepare?.(running.job)
   return applyOperation(
     memoryDb(deps.env.MEMORY_DB),
     await jobOperationContext(running, callId, now),

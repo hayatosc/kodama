@@ -93,10 +93,29 @@ export function runningJob(local: LocalDb): RunningJob | undefined {
     : { jobId: row.jobId, job: parseMemoryJob(JSON.parse(row.payloadJson)) }
 }
 
-/** The running job to resume, else the queued job due first by priority, then age. */
+/**
+ * How long a queued job may wait past its due time before it runs ahead of higher priorities. A
+ * steady stream of `remember` and `extract` jobs would otherwise keep `consolidate` waiting forever.
+ */
+export const STARVATION_LIMIT_MS = 60 * 60_000
+
+/**
+ * The running job to resume; else the job overdue by more than {@link STARVATION_LIMIT_MS}, longest
+ * overdue first; else the queued job due first by priority, then age.
+ */
 export function nextJob(local: LocalDb, now: number): JobRow | undefined {
   const running = local.select().from(memoryJobs).where(eq(memoryJobs.status, 'running')).get()
   if (running !== undefined) return running
+  const starved = local
+    .select()
+    .from(memoryJobs)
+    .where(
+      and(eq(memoryJobs.status, 'queued'), lte(memoryJobs.notBefore, now - STARVATION_LIMIT_MS)),
+    )
+    .orderBy(asc(memoryJobs.notBefore), asc(memoryJobs.createdAt))
+    .limit(1)
+    .get()
+  if (starved !== undefined) return starved
   return local
     .select()
     .from(memoryJobs)
@@ -115,7 +134,7 @@ export function startJob(local: LocalDb, row: JobRow): { row: JobRow; job: Memor
   if (row.status === 'queued') {
     local
       .update(memoryJobs)
-      .set({ status: 'running', attempts: row.attempts + 1 })
+      .set({ status: 'running', attempts: row.attempts + 1, startedAt: Date.now() })
       .where(eq(memoryJobs.jobId, row.jobId))
       .run()
   }

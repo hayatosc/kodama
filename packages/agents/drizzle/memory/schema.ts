@@ -31,13 +31,7 @@ export const RECORD_KINDS = ['fact', 'event', 'instruction', 'task'] as const
 /** Only `active` records are searched and loaded; the others are kept for the ledger. */
 export const RECORD_STATUSES = ['active', 'superseded', 'invalid', 'archived'] as const
 /** How a record came to be written. */
-export const RECORD_ORIGINS = [
-  'user_request',
-  'agent_judgment',
-  'extraction',
-  'consolidation',
-  'shared',
-] as const
+export const RECORD_ORIGINS = ['remember', 'extraction', 'consolidation', 'shared'] as const
 
 /**
  * Memory records. A change updates a record only at the `revision` it read; superseding writes a new
@@ -175,7 +169,7 @@ export const memoryLedger = sqliteTable(
 // The catalog of archived ranges.
 
 /**
- * Catalog of archived ranges. The entries, search index, and summary are R2 objects under
+ * Catalog of archived ranges. The entries and their search index are R2 objects under
  * `r2Prefix`; pruning code writes the row after verifying them, and it lives as long as they do.
  */
 export const archiveSegments = sqliteTable(
@@ -187,13 +181,12 @@ export const archiveSegments = sqliteTable(
     firstEntry: integer('first_entry').notNull(),
     lastEntry: integer('last_entry').notNull(),
     entryCount: integer('entry_count').notNull(),
-    /** `archive/<agentId>/<first>-<last>` with `.jsonl`, `.manifest.json`, `.index.json`, `.summary.json`. */
+    /** `archive/<agentId>/<first>-<last>` with `.jsonl`, `.manifest.json`, and `.index.json`. */
     r2Prefix: text('r2_prefix').notNull(),
     sha256: text('sha256').notNull(),
     bytes: integer('bytes').notNull(),
     firstAt: integer('first_at').notNull(),
     lastAt: integer('last_at').notNull(),
-    hasSummary: integer('has_summary', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [

@@ -79,12 +79,24 @@ import type {
 } from '../protocol.ts'
 import { openLocalDb } from '../storage/local.ts'
 import type { LocalDb } from '../storage/local.ts'
-import { parseAgentId, parseInput, parseMessage, parseRequestId } from '../validation.ts'
+import {
+  parseAgentId,
+  parseInput,
+  parseMessage,
+  parseRequestId,
+  VersionSchema,
+} from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../configuration/index.ts'
 import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from '../runtime/pruning.ts'
-import { markActivity, refreshMemory, runExtraction, scheduleExtraction } from './memory.ts'
+import {
+  extracts,
+  markActivity,
+  refreshMemory,
+  runExtraction,
+  scheduleExtraction,
+} from './memory.ts'
 import { snapshotOf, submissionOf } from '../runtime/views.ts'
 
 const context = BACKGROUND_CONTEXT
@@ -352,6 +364,7 @@ export class Agent extends DurableObject<AgentEnv> {
       harness: () => this.#harness,
       exclusive: (check, mutate) => this.#exclusive(check, mutate),
       archive: this.archivesPrunedEntries(),
+      extracts: () => extracts(this.ctx.storage),
       memoryAgent: () => this.env.AGENTS.getByName(MEMORY_AGENT_NAME),
     }
   }
@@ -496,14 +509,16 @@ export class Agent extends DurableObject<AgentEnv> {
    * Apply a configuration version pushed from the registry: now when idle, otherwise at the next
    * idle moment. Idempotent by version number.
    *
-   * @throws {@link TypeError} When the settings are invalid.
+   * @throws {@link TypeError} When the settings, the agent ID, or the version number is invalid.
    */
   async applyConfig(pushed: PushedConfig): Promise<ApplyResult> {
     const settings = parseSettings(createAgentModels(), pushed.settings)
     const agentId = parseAgentId(pushed.agentId)
+    // The version orders every later push, so a malformed one must never be stored.
+    const version = parseInput(VersionSchema, pushed.version)
     const harness = await this.#harness
     const deps = this.#applyDeps(harness)
-    return this.#serial(() => applyOrHold(deps, { agentId, version: pushed.version, settings }))
+    return this.#serial(() => applyOrHold(deps, { agentId, version, settings }))
   }
 
   /**

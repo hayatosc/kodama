@@ -27,7 +27,7 @@ export const EXTRACT_IDLE_DELAY_MS = 10 * 60_000
 const EXTRACT_PENDING_KEY = 'kodama:extract-pending'
 
 /** Whether the applied version leaves extraction on; it is on until a version turns it off. */
-async function extracts(storage: DurableObjectStorage): Promise<boolean> {
+export async function extracts(storage: DurableObjectStorage): Promise<boolean> {
   return (await appliedSettings(storage))?.memoryPolicy.extract !== false
 }
 

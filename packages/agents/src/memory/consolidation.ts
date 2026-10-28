@@ -7,6 +7,7 @@
  */
 import type { MemoryJob } from './jobs.ts'
 import type { MemoryDb } from './store/db.ts'
+import type { Scope } from '../../drizzle/memory/schema.ts'
 import { curateSkills } from './store/skills.ts'
 import {
   changedScopes,
@@ -36,6 +37,9 @@ export interface DailyConsolidationDeps {
   /** Remove settled jobs older than the time given. */
   forgetSettledJobs: (before: number) => Promise<number>
   enqueue: (job: MemoryJob) => Promise<unknown>
+  /** The last scope the previous run consolidated, if any. */
+  readCursor: () => Promise<Scope | undefined>
+  writeCursor: (scope: Scope) => Promise<void>
   now: number
 }
 
@@ -57,10 +61,12 @@ export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ 
   await resegmentRecords(db)
   await invalidateOverridesOfRequired(db, runId, now)
   await curateSkills(db, runId, now)
-  const scopes = await changedScopes(db, now - DAY_MS)
+  const scopes = await changedScopes(db, now - DAY_MS, await deps.readCursor())
   for (const scope of scopes) {
     await deps.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })
   }
+  const last = scopes.at(-1)
+  if (last !== undefined) await deps.writeCursor(last)
   await recordSizes(db, runId, now)
   return { scopes: scopes.length }
 }

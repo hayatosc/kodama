@@ -76,8 +76,6 @@ export function writingTool<P extends TSchema>(
     description: string
     parameters: P
     operation: (args: Static<P>, job: MemoryJob, now: number) => Operation
-    /** Side effects before recording the operation must be idempotent. */
-    prepare?: (args: Static<P>, job: MemoryJob) => Promise<void>
   },
 ): ToolRegistration {
   return defineTool({
@@ -86,12 +84,8 @@ export function writingTool<P extends TSchema>(
     parameters: definition.parameters,
     replay: 'safe',
     execute: async (args, api: ToolExecutionApi) => {
-      const prepare = definition.prepare
-      const result = await executeJobOperation(
-        deps,
-        api.callId,
-        (job, now) => definition.operation(args, job, now),
-        prepare === undefined ? undefined : (job) => prepare(args, job),
+      const result = await executeJobOperation(deps, api.callId, (job, now) =>
+        definition.operation(args, job, now),
       )
       return text(describe(result))
     },

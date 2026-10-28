@@ -44,12 +44,6 @@ export function memorySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
 
 function formatHistory(result: HistoryResult): string {
   const lines: string[] = []
-  for (const summary of result.summaries) {
-    lines.push(
-      `Summary of ${summary.segmentId} (${new Date(summary.at).toISOString()}):`,
-      summary.summary,
-    )
-  }
   for (const hit of result.hits) {
     lines.push(
       `Entries #${hit.firstEntry}-#${hit.lastEntry} (${new Date(hit.at).toISOString()}):`,
@@ -100,8 +94,8 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
 }
 
 /**
- * `remember`: queues a memory agent job to save what the user asked to keep. The memory agent
- * decides what to write; the tool only records the request.
+ * `remember`: queues a memory agent job to save something worth keeping. The memory agent decides
+ * what to write; the tool only records the request.
  */
 export function rememberTool(
   deps: WorkingMemoryDeps,
@@ -110,23 +104,15 @@ export function rememberTool(
   return defineTool({
     name: 'remember',
     description:
-      'Keep something in long-term memory: a standing instruction or something the user asked you to remember (origin user_request), or a decision with its reason, a correction, a lesson from a failure, or a durable fact you had to look up (origin agent_judgment). Not for task progress, guesses, secrets, or one-off requests.',
+      'Keep something in long-term memory: a standing instruction or something the user asked you to remember, a decision with its reason, a correction, a lesson from a failure, or a durable fact you had to look up. Not for task progress, guesses, secrets, or one-off requests.',
     parameters: Type.Object({
       content: Type.String({ minLength: 1, maxLength: 2_000 }),
-      origin: Type.Union([Type.Literal('user_request'), Type.Literal('agent_judgment')]),
     }),
     replay: 'safe',
-    execute: async ({ content, origin }, _api, context) => {
+    execute: async ({ content }, _api, context) => {
       const inputs = await readInputs(context)
-      if (
-        inputs.some((entry) => entry.kind === 'kodama.agent-message') &&
-        origin === 'user_request'
-      )
-        throw new Error(
-          'A peer message is not a user request; use agent_judgment for your own conclusions',
-        )
       // The last input remains the quota/evidence anchor, not a claim of sole execution ownership.
-      const status = await requestRemember(deps, inputs.at(-1)?.id, content, origin)
+      const status = await requestRemember(deps, inputs.at(-1)?.id, content)
       return {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },

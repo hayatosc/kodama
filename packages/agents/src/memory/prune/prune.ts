@@ -34,6 +34,8 @@ export interface PruneDeps {
   exclusive: (check: (harness: Harness) => Promise<boolean>, mutate: () => void) => Promise<boolean>
   /** Archive the entries before deleting them; the memory agent only deletes. */
   archive: boolean
+  /** Whether the applied version hands entries to the memory agent for extraction. */
+  extracts: () => Promise<boolean>
   memoryAgent: () => { enqueue(job: unknown): Promise<unknown> }
   /** Test hook that runs after each state is recorded. */
   afterState?: (state: string) => Promise<void>

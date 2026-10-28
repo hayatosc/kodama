@@ -22,7 +22,6 @@ export async function requestRemember(
   deps: WorkingMemoryDeps,
   userEntry: number | undefined,
   content: string,
-  origin: 'user_request' | 'agent_judgment',
 ) {
   if (userEntry === undefined) throw new Error('Not saved: no user message to attribute it to')
   const local = await deps.local()
@@ -32,7 +31,6 @@ export async function requestRemember(
   return deps.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
     kind: 'remember',
     sourceAgentId: deps.agentId(),
-    origin,
     content: content.trim(),
     sourceEntries: { from: userEntry, to: userEntry },
   })

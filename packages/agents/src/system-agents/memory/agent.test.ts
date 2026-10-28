@@ -5,16 +5,89 @@
  * @module
  */
 import { uuidv7 } from '../../lib/uuid.ts'
-import { runInDurableObject } from 'cloudflare:test'
+import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
+import { eq } from 'drizzle-orm'
+import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
+import { setAlarm } from '../../runtime/alarms.ts'
+import { openLocalDb } from '../../storage/local.ts'
+import { JOB_TIME_LIMIT_MS } from './runner.ts'
 import { env, exports } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from '../../agent/agent.ts'
 import { memoryAgent } from '../../helper/memory.ts'
 import { rejectionInObject } from '../../helper/rpc.ts'
 import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
 import { MemoryAgent } from './agent.ts'
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('the memory agent', () => {
+  it('cancel stops the running job, which is queued again like a failed attempt', async () => {
+    const started = Promise.withResolvers<void>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          started.resolve()
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        }),
+    )
+    const { jobId } = await memoryAgent().enqueue({
+      kind: 'remember',
+      sourceAgentId: uuidv7(),
+      content: 'A job that is cancelled',
+      sourceEntries: { from: 1, to: 1 },
+    })
+    await started.promise
+    expect(await memoryAgent().jobStatus(jobId)).toMatchObject({ status: 'running', attempts: 1 })
+
+    await memoryAgent().cancel()
+
+    await expect
+      .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'queued', attempts: 1 })
+  })
+
+  it('stops an attempt that runs past its time limit and retries the job', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        }),
+    )
+    const { jobId } = await memoryAgent().enqueue({
+      kind: 'remember',
+      sourceAgentId: uuidv7(),
+      content: 'A job whose provider never answers',
+      sourceEntries: { from: 1, to: 1 },
+    })
+    await expect
+      .poll(() => memoryAgent().jobStatus(jobId))
+      .toMatchObject({ status: 'running', attempts: 1 })
+    const heartbeat = async (startedAt?: number) => {
+      await runInDurableObject(memoryAgent(), async (_instance, state) => {
+        if (startedAt !== undefined) {
+          const local = await openLocalDb(state.storage)
+          local.update(memoryJobs).set({ startedAt }).where(eq(memoryJobs.jobId, jobId)).run()
+        }
+        await setAlarm(state.storage, 'jobs', Date.now())
+      })
+      await runDurableObjectAlarm(memoryAgent())
+    }
+
+    // Within its limit, a heartbeat leaves the attempt running.
+    await heartbeat()
+    expect(await memoryAgent().jobStatus(jobId)).toMatchObject({ status: 'running', attempts: 1 })
+
+    await heartbeat(Date.now() - JOB_TIME_LIMIT_MS - 1)
+    await expect
+      .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'queued', attempts: 1 })
+  })
+
   it('takes input only through its job queue', async () => {
     expect(
       await rejectionInObject(memoryAgent(), (agent) =>

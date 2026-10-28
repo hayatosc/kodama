@@ -10,6 +10,7 @@ import {
   management,
   newAgentId,
   caller,
+  desiredSettings,
   updateSettings,
 } from '../helper/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
@@ -145,6 +146,30 @@ describe('convergence', () => {
       systemPrompt: 'Needs memory',
       sharedSpaces: ['team-x', 'global'],
     })
+  })
+})
+
+describe('ordering', () => {
+  it('ignores a push older than the applied version and refuses a malformed version', async () => {
+    const agentId = await newAgentId()
+    const first = await desiredSettings(agentId)
+    await updateSettings(agentId, { systemPrompt: 'Version two' })
+    const stub = env.AGENTS.getByName(agentId)
+
+    // A delayed push of version 1 arrives after version 2 was applied.
+    expect(await stub.applyConfig({ agentId, version: 1, settings: first })).toEqual({
+      state: 'stale',
+      appliedVersion: 2,
+    })
+    for (const version of [0, 1.5, Number.NaN, -3]) {
+      expect(
+        await rejectionInObject(stub, (agent) =>
+          agent.applyConfig({ agentId, version, settings: first }),
+        ),
+      ).toMatch(/version must be a positive integer/)
+    }
+    expect((await stub.getConfig()).systemPrompt).toBe('Version two')
+    expect(await versions(agentId)).toEqual({ desired: 2, applied: 2 })
   })
 })
 

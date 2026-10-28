@@ -10,10 +10,10 @@ import type { MemoryDb } from '../store/db.ts'
 import { historySegments } from '../store/archive.ts'
 import { searchWords } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
-import { indexSchema, readJson, readSegment, summarySchema } from './reader.ts'
+import { indexSchema, readJson, readSegment } from './reader.ts'
 import type { SegmentIndex } from './segment.ts'
 
-/** Bytes of index and summary objects one search reads, at most. */
+/** Bytes of index objects one search reads, at most. */
 export const HISTORY_READ_BUDGET_BYTES = 4 * 1024 * 1024
 const HIT_TEXT_LIMIT = 4_000
 const SEGMENTS_PER_SEARCH = 100
@@ -59,15 +59,6 @@ function matchChunks(index: SegmentIndex, query: string): number[] {
   return containing(merged, prefix)
 }
 
-function summaryMatches(words: readonly string[], query: string): boolean {
-  const set = new Set(words)
-  const { merged } = searchWords(query)
-  return (
-    merged.length > 0 &&
-    merged.every((word) => set.has(word) || words.some((w) => w.startsWith(word)))
-  )
-}
-
 /** A matching chunk of archived text. */
 export interface HistoryHit {
   firstEntry: number
@@ -79,7 +70,6 @@ export interface HistoryHit {
 /** What one search found, and how far back it looked. */
 export interface HistoryResult {
   hits: HistoryHit[]
-  summaries: { segmentId: string; at: number; summary: string }[]
   /** The oldest time visited, for display; equal timestamps require `nextCursor` to resume. */
   searchedBefore: number | undefined
   /** Opaque continuation for the same query; includes the original time bound. */
@@ -112,7 +102,6 @@ export async function searchHistory(
   const segments = await historySegments(db, agentId, SEGMENTS_PER_SEARCH + 1, before, cursor)
   const result: HistoryResult = {
     hits: [],
-    summaries: [],
     searchedBefore: undefined,
     nextCursor: undefined,
     complete: true,
@@ -135,24 +124,6 @@ export async function searchHistory(
         : undefined
     if (position === SEGMENTS_PER_SEARCH || read >= budget || result.hits.length >= limit) {
       return pause(segment, nextEntry)
-    }
-    // A resumed segment already contributed its summary; a bounded search must not show newer text.
-    if (
-      segment.hasSummary &&
-      nextEntry === undefined &&
-      (before === undefined || segment.lastAt < before)
-    ) {
-      const summary = await readJson(bucket, `${segment.r2Prefix}.summary.json`, summarySchema)
-      if (summary !== undefined) {
-        read += summary.bytes
-        if (summaryMatches(summary.value.words, query)) {
-          result.summaries.push({
-            segmentId: segment.id,
-            at: segment.lastAt,
-            summary: summary.value.summary,
-          })
-        }
-      }
     }
     const index = await readJson(bucket, `${segment.r2Prefix}.index.json`, indexSchema)
     if (index === undefined) {
