@@ -870,9 +870,20 @@ From `packages/agents`:
 The Worker exports one Durable Object class, `Agent`, with SQLite storage, bound as `AGENTS`; the
 memory agent is an object of it (see [Dedicated agents](#dedicated-agents)). It also exports the
 single default entrypoint `AgentService` for conversation and management RPC. Its cron trigger (`17 3 * * *`, UTC) reconciles configuration
-versions, then runs the daily memory consolidation. `workersDev` is disabled.
+versions, ingests usage from registered objects, then runs the daily memory consolidation. `workersDev` is disabled.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin; Wrangler is only
 a transitive dependency.
+
+## Usage and audit reads
+
+The same `AgentService` exposes `usage(actor, query)` for daily per-agent/per-credential catalog
+amounts and `audit(actor, query)` for descending, cursor-paged management events. Both require an
+active registered caller; they do not introduce a second administration service or owner-only ACL.
+Credential summaries include effective expiry, daily-ingested last use, committed refresh time and
+safe refresh failure health, without decrypting secrets during reads. See [usage.md](usage.md) for
+attribution, aggregation and completeness, and [credentials.md](credentials.md#usage-audit-and-credential-health)
+for audit pagination, event semantics and health fields. Management audit and daily totals remain
+in D1 indefinitely; acknowledged local usage detail expires after 30 days. No audit R2 export runs.
 
 ## Connecting a UI
 

@@ -15,6 +15,13 @@
       "when": 1793158431268,
       "tag": "0001_clammy_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793159541129,
+      "tag": "0002_omniscient_rick_jones",
+      "breakpoints": true
     }
   ]
 }

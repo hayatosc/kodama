@@ -41,6 +41,15 @@ const agentIdMessage = 'agentId must be a lowercase UUID v7'
 /** A public agent ID: a lowercase v7 UUID. Reserved names such as `kodama:memory` fail. */
 export const AgentIdSchema = v.pipe(v.string(agentIdMessage), v.regex(UUID_PATTERN, agentIdMessage))
 
+/** Descending audit pagination, capped independently of total retained history. */
+export const AuditQuerySchema = v.strictObject({
+  targetId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
+  before: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(Number.MAX_SAFE_INTEGER)),
+  ),
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(200)), 50),
+})
+
 const UsageDaySchema = v.pipe(
   v.string(),
   v.regex(/^\d{4}-\d{2}-\d{2}$/),

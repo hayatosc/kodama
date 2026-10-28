@@ -114,7 +114,7 @@ it('uses only explicit references and checks status even with a warm cache and n
 })
 
 describe('OAuth resolution', () => {
-  it.each([undefined, 'r'])(
+  it.each([undefined, 'refresh1'])(
     'refreshes an expired cached subscription and persists refresh token %s',
     async (refreshToken) => {
       const { store, advance, primary, open } = await fixture('oauth_subscription')
@@ -135,7 +135,7 @@ describe('OAuth resolution', () => {
           .get()
         expect(row?.leaseId).toEqual(expect.any(String))
         return Response.json({
-          access_token: 'a',
+          access_token: 'access12',
           token_type: 'Bearer',
           ...(refreshToken ? { refresh_token: refreshToken } : {}),
           expires_in: 3600,
@@ -144,7 +144,7 @@ describe('OAuth resolution', () => {
       const value = await store.read('openai')
       expect(value).toEqual({
         type: 'oauth',
-        access: 'a',
+        access: 'access12',
         refresh: refreshToken ?? 'refresh-token',
         expires: 4_021_000,
         clientId: 'issued-client',
@@ -162,6 +162,9 @@ describe('OAuth resolution', () => {
         status: 'active',
         leaseId: null,
         leaseExpiresAt: null,
+        expiresAt: 4_021_000,
+        lastRefreshedAt: 601_000,
+        refreshFailures: 0,
       })
       expect(row?.last4).toBe('')
       expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toHaveLength(1)
@@ -253,7 +256,16 @@ describe('OAuth resolution', () => {
       expect(await store.list()).toEqual([])
       expect(
         await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-      ).toMatchObject({ status: 'needs_reauth', revision: 1, leaseId: null, leaseExpiresAt: null })
+      ).toMatchObject({
+        status: 'needs_reauth',
+        revision: 1,
+        leaseId: null,
+        leaseExpiresAt: null,
+        refreshFailures: 1,
+        lastRefreshFailureAt: 601_000,
+        lastRefreshFailureCategory: 'rejected',
+        lastRefreshedAt: null,
+      })
       const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
       expect(audit).toHaveLength(1)
       expect(audit[0]).toMatchObject({ actorId: null, action: 'credential.needs_reauth' })
@@ -282,7 +294,14 @@ describe('OAuth resolution', () => {
       await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
       expect(
         await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-      ).toMatchObject({ status: 'active', revision: 1, leaseId: 'replacement-holder' })
+      ).toMatchObject({
+        status: 'active',
+        revision: 1,
+        leaseId: 'replacement-holder',
+        lastRefreshedAt: null,
+        refreshFailures: 0,
+        lastRefreshFailureAt: null,
+      })
       const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
       expect(audit.some((row) => row.action === 'credential.needs_reauth')).toBe(false)
     },
@@ -298,8 +317,37 @@ describe('OAuth resolution', () => {
     await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
     expect(
       await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-    ).toMatchObject({ status: 'active', revision: 1, leaseId: null })
+    ).toMatchObject({
+      status: 'active',
+      revision: 1,
+      leaseId: null,
+      lastRefreshedAt: null,
+      refreshFailures: 0,
+      lastRefreshFailureAt: null,
+    })
     expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+  })
+
+  it('records invalid JSON in a successful refresh as malformed in health and audit', async () => {
+    const { store, advance, primary } = await fixture('oauth_subscription')
+    advance(600_000)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('secret-invalid-json', { status: 200 }),
+    )
+    await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+    expect(
+      await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+    ).toMatchObject({
+      status: 'active',
+      revision: 1,
+      refreshFailures: 1,
+      lastRefreshFailureCategory: 'malformed',
+    })
+    const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+    expect(audit).toHaveLength(1)
+    expect(audit[0]).toMatchObject({ action: 'credential.refresh.failed', actorId: null })
+    expect(JSON.parse(audit[0]?.detailJson ?? '{}')).toMatchObject({ category: 'malformed' })
+    expect(JSON.stringify(audit)).not.toContain('secret-invalid-json')
   })
 
   it.each([0, 302, 400, 403, 429, 500, 503])(
@@ -325,9 +373,25 @@ describe('OAuth resolution', () => {
       await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
       expect(
         await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-      ).toEqual(before)
-      expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+      ).toEqual({
+        ...before,
+        refreshFailures: 1,
+        lastRefreshFailureAt: 601_000,
+        lastRefreshFailureCategory: 'transient',
+      })
+      const failures = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatchObject({ action: 'credential.refresh.failed', actorId: null })
+      expect(JSON.stringify(failures)).not.toContain('secret-provider-detail')
       expect(await store.read('openai')).toMatchObject({ access: 'retried-access' })
+      expect(
+        await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+      ).toMatchObject({
+        refreshFailures: 0,
+        lastRefreshedAt: 601_000,
+        expiresAt: 4_021_000,
+        lastRefreshFailureCategory: 'transient',
+      })
       expect(fetch).toHaveBeenCalledTimes(2)
     },
   )
@@ -473,14 +537,21 @@ it.each(['access', 'refresh'] as const)(
     ).rejects.toThrow('credential modification failed')
     expect(
       await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
-    ).toMatchObject({ revision: 1, leaseId: null })
-    expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
+    ).toMatchObject({
+      revision: 1,
+      leaseId: null,
+      refreshFailures: 1,
+      lastRefreshFailureCategory: 'malformed',
+    })
+    expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toMatchObject([
+      { action: 'credential.refresh.failed', actorId: null },
+    ])
   },
 )
 
 it('keeps modified credential metadata keyed and masks short OAuth tokens', async () => {
   const { store, primary } = await fixture('oauth_subscription')
-  const next = { type: 'oauth' as const, access: 'a', refresh: 'r', expires: 3000 }
+  const next = { type: 'oauth' as const, access: 'access12', refresh: 'refresh1', expires: 3000 }
   await store.modify('openai', async () => next)
   const fingerprint = await credentialFingerprint(JSON.stringify(next), kek())
   const row = await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get()

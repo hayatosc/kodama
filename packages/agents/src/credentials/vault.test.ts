@@ -126,7 +126,7 @@ it('preserves provider OAuth fields and rejects malformed payloads without echoi
 })
 
 it.each(['access', 'refresh'] as const)(
-  'accepts opaque OAuth %s values without imposing a minimum token length',
+  'requires at least eight characters in OAuth %s values',
   async (field) => {
     for (const token of ['', '   ', 'x', '1234567', '12345678']) {
       const secret = JSON.stringify({
@@ -149,7 +149,8 @@ it.each(['access', 'refresh'] as const)(
         kek,
         Date.now(),
       )
-      if (!token.trim()) await expect(insert).rejects.toThrow('invalid credential payload')
+      if (token.trim().length < 8)
+        await expect(insert).rejects.toThrow('invalid credential payload')
       else await expect(insert).resolves.toHaveProperty('statement')
     }
   },

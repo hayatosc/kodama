@@ -57,6 +57,54 @@ it('returns only metadata through RPC and records a secret-free registration aud
   expect(JSON.stringify(audits)).not.toContain(request.secret)
 })
 
+it('lists credential health from metadata without decrypting the envelope', async () => {
+  const { actor } = await caller()
+  const value = await exports.default.putCredential(actor, {
+    requestId: uuidv7(),
+    provider: 'openai',
+    kind: 'oauth_subscription',
+    secret: JSON.stringify({
+      type: 'oauth',
+      access: 'access12',
+      refresh: 'refresh1',
+      expires: 9000,
+    }),
+  })
+  expect(value).toMatchObject({
+    expiresAt: 9000,
+    lastUsedAt: null,
+    lastRefreshedAt: null,
+    refreshFailures: 0,
+  })
+  await db
+    .update(credentials)
+    .set({
+      ciphertext: 'unreadable-envelope',
+      wrappedDek: 'unreadable-envelope',
+      lastUsedAt: 1000,
+      lastRefreshedAt: 2000,
+      refreshFailures: 2,
+      lastRefreshFailureAt: 3000,
+      lastRefreshFailureCategory: 'transient',
+    })
+    .where(eq(credentials.credentialId, value.credentialId))
+  const metadata = (await exports.default.listCredentials(actor)).find(
+    (entry) => entry.credentialId === value.credentialId,
+  )
+  expect(metadata).toMatchObject({
+    status: 'active',
+    expiresAt: 9000,
+    lastUsedAt: 1000,
+    lastRefreshedAt: 2000,
+    refreshFailures: 2,
+    lastRefreshFailureAt: 3000,
+    lastRefreshFailureCategory: 'transient',
+  })
+  expect(JSON.stringify(metadata)).not.toMatch(
+    /unreadable-envelope|access12|refresh1|ciphertext|wrappedDek/,
+  )
+})
+
 it('replays credential-shaped request IDs without changing their identity', async () => {
   const { call } = await caller()
   const before = await db.select().from(credentials)

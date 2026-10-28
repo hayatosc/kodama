@@ -66,6 +66,13 @@ export interface UsageQuery {
   limit?: number
 }
 
+/** An exclusive descending sequence cursor over retained management audit rows. */
+export interface AuditQuery {
+  targetId?: string
+  before?: number
+  limit?: number
+}
+
 /** Who calls the management methods of `AgentService`, as the calling Worker authenticated them. */
 export interface ManagementActor {
   kind: 'user' | 'service' | 'agent'

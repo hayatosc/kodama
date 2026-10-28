@@ -9,7 +9,7 @@ import * as v from 'valibot'
 
 const tokenString = v.pipe(
   v.string(),
-  v.check((value) => value.trim().length > 0),
+  v.check((value) => value.trim().length >= 8),
 )
 const tokenSchema = v.object({
   access_token: tokenString,
@@ -83,8 +83,14 @@ export async function refreshChatGPT(
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       redirect: 'manual',
     })
-    body = response.ok ? await response.json() : await response.json().catch(() => undefined)
   } catch {
+    throw new Error('credential_unavailable: OAuth refresh request failed')
+  }
+  try {
+    body = response.ok ? await response.json() : await response.json().catch(() => undefined)
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new Error('credential_unavailable: invalid OAuth refresh response')
     throw new Error('credential_unavailable: OAuth refresh request failed')
   }
   if (!response.ok) {
