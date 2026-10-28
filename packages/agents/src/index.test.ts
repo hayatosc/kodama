@@ -82,6 +82,8 @@ describe('AgentService', () => {
       'configHistory',
       'sendMessage',
       'snapshot',
+      'usage',
+      'audit',
       'scheduled',
     ]) {
       expect(AgentService.prototype).toHaveProperty(method, expect.any(Function))

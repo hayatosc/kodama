@@ -328,6 +328,28 @@ describe('OAuth resolution', () => {
     expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toEqual([])
   })
 
+  it('records invalid JSON in a successful refresh as malformed in health and audit', async () => {
+    const { store, advance, primary } = await fixture('oauth_subscription')
+    advance(600_000)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('secret-invalid-json', { status: 200 }),
+    )
+    await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
+    expect(
+      await db.select().from(credentials).where(eq(credentials.credentialId, primary)).get(),
+    ).toMatchObject({
+      status: 'active',
+      revision: 1,
+      refreshFailures: 1,
+      lastRefreshFailureCategory: 'malformed',
+    })
+    const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
+    expect(audit).toHaveLength(1)
+    expect(audit[0]).toMatchObject({ action: 'credential.refresh.failed', actorId: null })
+    expect(JSON.parse(audit[0]?.detailJson ?? '{}')).toMatchObject({ category: 'malformed' })
+    expect(JSON.stringify(audit)).not.toContain('secret-invalid-json')
+  })
+
   it.each([0, 302, 400, 403, 429, 500, 503])(
     'preserves credentials on network (0) or non-terminal HTTP %s failure for a later retry',
     async (status) => {
