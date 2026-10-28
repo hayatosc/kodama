@@ -111,3 +111,6 @@ export function parseMemoryJob(value: unknown): MemoryJob {
  * The `:` makes it an invalid public agent ID, so `AgentService` and `sendTo` cannot address it.
  */
 export const MEMORY_AGENT_NAME = 'kodama:memory'
+
+/** The reserved memory agent registry identity, independent of its transport name. */
+export const MEMORY_AGENT_ID = '00000000-0000-7000-8000-00000000000a'

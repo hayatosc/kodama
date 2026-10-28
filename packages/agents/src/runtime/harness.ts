@@ -84,6 +84,16 @@ export async function isIdle(harness: Harness): Promise<boolean> {
   return tasks.length === 0 && submissions.length === 0
 }
 
+/** Drain every task, including background compaction, before changing a memory job's owner. */
+export async function waitForAllTasks(harness: Harness): Promise<void> {
+  for (;;) {
+    const { tasks, submissions } = await harness.inspect(context)
+    if (tasks.length === 0 && submissions.length === 0) return
+    await Promise.all(tasks.map((task) => harness.waitForTask(task.record.id, context)))
+    if (tasks.length === 0) await (await harness.root(context)).waitForIdle(context)
+  }
+}
+
 /**
  * With every other event held back, run `check` against the open harness; if it passes, close
  * the harness, run `mutate` in one storage transaction, and reopen it.

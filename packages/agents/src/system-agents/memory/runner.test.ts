@@ -11,7 +11,9 @@ import { exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { memoryLedger } from '../../../drizzle/memory/schema.ts'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
+import { memoryJobs, usage } from '../../../drizzle/durable-object/schema.ts'
+import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+import type { MemoryJob } from '../../memory/jobs.ts'
 import { JOB_RETRY_DELAYS_MS } from './runner.ts'
 import {
   isMemoryAgentRequest,
@@ -37,6 +39,55 @@ import '@earendil-works/pi-ai/api/openai-responses'
 import { newAgentId } from '../../helper/management.ts'
 
 afterEach(() => vi.restoreAllMocks())
+
+describe('usage attribution', () => {
+  it('charges queued requester jobs to their source, but consolidation to the system UUID', async () => {
+    const sourceAgentId = await newAgentId()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => textResponse('No changes'))
+    const jobs: MemoryJob[] = [
+      { kind: 'extract', sourceAgentId, afterEntry: 0 },
+      {
+        kind: 'remember',
+        sourceAgentId,
+        origin: 'user_request',
+        content: 'Usage owner',
+        sourceEntries: { from: 1, to: 1 },
+      },
+      { kind: 'record_archive', sourceAgentId, segmentId: `usage-${sourceAgentId}` },
+      { kind: 'consolidate', scope: `agent:${sourceAgentId}`, day: '2026-10-27' },
+    ]
+    const statuses = await Promise.all(jobs.map((job) => memoryAgent().enqueue(job)))
+    for (const status of statuses) {
+      await expect
+        .poll(async () => (await memoryAgent().jobStatus(status.jobId))?.status, {
+          timeout: 10_000,
+        })
+        .toBe('settled')
+    }
+    const rows = await runInDurableObject(memoryAgent(), async (_, state) =>
+      (await openLocalDb(state.storage)).select().from(usage).all(),
+    )
+    for (const [i, status] of statuses.entries()) {
+      const recorded = rows.filter((row) => row.jobId === status.jobId)
+      expect(recorded.length).toBeGreaterThan(0)
+      expect(
+        recorded.every(
+          (row) =>
+            row.chargedAgentId ===
+            (jobs[i]?.kind === 'consolidate' ? MEMORY_AGENT_ID : sourceAgentId),
+        ),
+      ).toBe(true)
+      expect(
+        recorded.every((row) => row.actorKind === 'system' && row.usageState === 'reported'),
+      ).toBe(true)
+    }
+    await evictDurableObject(memoryAgent())
+    const restored = await runInDurableObject(memoryAgent(), async (_, state) =>
+      (await openLocalDb(state.storage)).select().from(usage).all(),
+    )
+    expect(restored).toEqual(rows)
+  })
+})
 
 describe('extraction redelivery', () => {
   it.each(['declined', 'failed', 'progressed'] as const)(

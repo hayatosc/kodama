@@ -24,7 +24,7 @@ import { useMockModel, waitForAnswer } from '../../helper/rpc.ts'
 import { write, db } from '../../helper/memory.ts'
 import { agentScope } from '../../memory/store/db.ts'
 import { memoryRecords } from '../../../drizzle/memory/schema.ts'
-import { MEMORY_AGENT_ID } from './seed.ts'
+import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 

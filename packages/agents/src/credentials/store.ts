@@ -17,6 +17,12 @@ import { REFRESH_REJECTED, refreshChatGPT, refreshDue } from './refresh.ts'
 
 const LEASE_MS = 30_000
 
+/** Safe identity of the credential actually selected by this invocation. */
+export type CredentialSelection = Pick<typeof credentials.$inferSelect, 'credentialId' | 'kind'>
+
+/** Persist selection before a secret is released to model authentication. */
+export type ObserveCredential = (selection: CredentialSelection) => void
+
 /** Build one object-local store. The settings getter must return the applied version, not desired. */
 export function createCredentialStore(
   db: ManagementDb,
@@ -24,7 +30,7 @@ export function createCredentialStore(
   settings: () => Promise<AgentSettings | undefined>,
   kek: () => string,
   now: () => number = Date.now,
-): { store: CredentialStore; invalidate: () => void } {
+) {
   const cache = new Map<string, { revision: number; value: Credential }>()
   let generation = 0
   const invalidate = () => {
@@ -119,153 +125,158 @@ export function createCredentialStore(
     }
   }
 
-  const store: CredentialStore = {
-    async read(provider, options) {
-      options?.signal?.throwIfAborted()
-      const row = await selected(provider)
-      if (row?.status !== 'active') throw await unavailable(provider, row)
-      const cached = cache.get(row.credentialId)
-      if (cached && cached.revision !== row.revision) cache.delete(row.credentialId)
-      const before = generation
-      const value = cached?.revision === row.revision ? cached.value : await plaintext(row)
-      if (value.type === 'oauth' && refreshDue(value, now())) {
-        cache.delete(row.credentialId)
-        return store.modify(
-          provider,
-          async (current) => {
-            // modify re-reads under the lease; a previous holder may already have rotated the token.
-            if (current?.type !== 'oauth' || !refreshDue(current, now())) return undefined
-            if (provider !== 'openai')
-              throw new Error('credential_unavailable: unsupported OAuth provider')
-            return refreshChatGPT(current, now, options?.signal)
-          },
-          options,
-        )
-      }
-      if (before === generation && cached?.revision !== row.revision)
-        cache.set(row.credentialId, { revision: row.revision, value })
-      return structuredClone(value)
-    },
-    async list() {
-      const providers = Object.keys((await settings())?.credentials?.primary ?? {})
-      const entries = await Promise.all(
-        providers.map(async (providerId) => {
-          const row = await selected(providerId)
-          return row?.status === 'active'
-            ? [
-                {
-                  providerId,
-                  type: row.kind === 'api_key' ? ('api_key' as const) : ('oauth' as const),
-                },
-              ]
-            : []
-        }),
-      )
-      return entries.flat()
-    },
-    async modify(provider, fn, options) {
-      options?.signal?.throwIfAborted()
-      const selectedRow = await selected(provider)
-      if (selectedRow?.status !== 'active') throw await unavailable(provider, selectedRow)
-      const id = selectedRow.credentialId
-      const leaseId = uuidv7()
-      const leased = await acquire(provider, id, leaseId, options?.signal)
-      try {
+  function scoped(observe: ObserveCredential): CredentialStore {
+    const store: CredentialStore = {
+      async read(provider, options) {
         options?.signal?.throwIfAborted()
-        const current = await plaintext(leased)
-        const next = await fn(current)
-        if (next === undefined) return current
-        options?.signal?.throwIfAborted()
-        if ((next.type === 'api_key') !== (leased.kind === 'api_key'))
-          throw new Error('credential_unavailable: credential kind cannot change')
-        const secret = next.type === 'api_key' ? next.key : JSON.stringify(next)
-        if (!secret) throw new Error('credential_unavailable: empty credential')
-        const value = parseCredential(leased.kind, secret)
-        const fingerprint = await credentialFingerprint(secret, kek())
-        const token = value.type === 'api_key' ? value.key : value.access
-        const revision = leased.revision + 1
-        const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
-        // Record the attempted refresh in the same batch; a losing CAS must not be reported
-        // as a completed refresh. The caller retries only after acquiring a fresh lease.
-        const [updated] = await db.batch([
-          db
-            .update(credentials)
-            .set({
-              ...envelope,
-              revision,
-              fingerprint,
-              last4: token.length >= 16 ? token.slice(-4) : '',
-            })
-            .where(
-              and(
-                eq(credentials.credentialId, id),
-                eq(credentials.leaseId, leaseId),
-                eq(credentials.revision, leased.revision),
-                gt(credentials.leaseExpiresAt, now()),
-                eq(credentials.status, 'active'),
-              ),
-            )
-            .returning(),
-          auditStatement(db, {
-            opId: leaseId,
-            at: now(),
-            actorId: null,
-            action: 'credential.modify.attempt',
-            targetKind: 'system',
-            targetId: id,
-            detail: { kind: leased.kind, provider, fingerprint },
-          }),
-        ])
-        if (!updated.length)
-          throw new Error('credential_unavailable: credential changed during refresh')
-        invalidate()
-        return next
-      } catch (error) {
-        invalidate()
-        if (error instanceof Error && error.message === REFRESH_REJECTED) {
-          const at = now()
-          const held = and(
-            eq(credentials.credentialId, id),
-            eq(credentials.leaseId, leaseId),
-            eq(credentials.revision, leased.revision),
-            eq(credentials.status, 'active'),
-            gt(credentials.leaseExpiresAt, at),
+        const row = await selected(provider)
+        if (row?.status !== 'active') throw await unavailable(provider, row)
+        observe({ credentialId: row.credentialId, kind: row.kind })
+        const cached = cache.get(row.credentialId)
+        if (cached && cached.revision !== row.revision) cache.delete(row.credentialId)
+        const before = generation
+        const value = cached?.revision === row.revision ? cached.value : await plaintext(row)
+        if (value.type === 'oauth' && refreshDue(value, now())) {
+          cache.delete(row.credentialId)
+          return store.modify(
+            provider,
+            async (current) => {
+              // modify re-reads under the lease; a previous holder may already have rotated the token.
+              if (current?.type !== 'oauth' || !refreshDue(current, now())) return undefined
+              if (provider !== 'openai')
+                throw new Error('credential_unavailable: unsupported OAuth provider')
+              return refreshChatGPT(current, now, options?.signal)
+            },
+            options,
           )
-          const [, updated] = await db.batch([
-            // Audit only a transition this live lease can perform, in the same transaction.
-            db.insert(auditLog).select(
-              db
-                .select({
-                  seq: sql<null>`${null}`.as('seq'),
-                  opId: sql<string>`${leaseId}`.as('op_id'),
-                  at: sql<number>`${at}`.as('at'),
-                  actorId: sql<null>`${null}`.as('actor_id'),
-                  action: sql<string>`${'credential.needs_reauth'}`.as('action'),
-                  targetKind: sql<'system'>`${'system'}`.as('target_kind'),
-                  targetId: credentials.credentialId,
-                  detailJson: sql<string>`${JSON.stringify({ kind: leased.kind, provider })}`.as(
-                    'detail_json',
-                  ),
-                })
-                .from(credentials)
-                .where(held),
-            ),
-            db.update(credentials).set({ status: 'needs_reauth' }).where(held).returning(),
-          ])
-          const row = updated[0]
-          if (row) throw await unavailable(provider, row)
         }
-        throw new Error('credential_unavailable: credential modification failed')
-      } finally {
-        await db
-          .update(credentials)
-          .set({ leaseId: null, leaseExpiresAt: null })
-          .where(and(eq(credentials.credentialId, id), eq(credentials.leaseId, leaseId)))
-      }
-    },
-    async delete() {
-      throw new Error('forbidden: revoke credentials through management RPC')
-    },
+        if (before === generation && cached?.revision !== row.revision)
+          cache.set(row.credentialId, { revision: row.revision, value })
+        return structuredClone(value)
+      },
+      async list() {
+        const providers = Object.keys((await settings())?.credentials?.primary ?? {})
+        const entries = await Promise.all(
+          providers.map(async (providerId) => {
+            const row = await selected(providerId)
+            return row?.status === 'active'
+              ? [
+                  {
+                    providerId,
+                    type: row.kind === 'api_key' ? ('api_key' as const) : ('oauth' as const),
+                  },
+                ]
+              : []
+          }),
+        )
+        return entries.flat()
+      },
+      async modify(provider, fn, options) {
+        options?.signal?.throwIfAborted()
+        const selectedRow = await selected(provider)
+        if (selectedRow?.status !== 'active') throw await unavailable(provider, selectedRow)
+        const id = selectedRow.credentialId
+        const leaseId = uuidv7()
+        const leased = await acquire(provider, id, leaseId, options?.signal)
+        observe({ credentialId: leased.credentialId, kind: leased.kind })
+        try {
+          options?.signal?.throwIfAborted()
+          const current = await plaintext(leased)
+          const next = await fn(current)
+          if (next === undefined) return current
+          options?.signal?.throwIfAborted()
+          if ((next.type === 'api_key') !== (leased.kind === 'api_key'))
+            throw new Error('credential_unavailable: credential kind cannot change')
+          const secret = next.type === 'api_key' ? next.key : JSON.stringify(next)
+          if (!secret) throw new Error('credential_unavailable: empty credential')
+          const value = parseCredential(leased.kind, secret)
+          const fingerprint = await credentialFingerprint(secret, kek())
+          const token = value.type === 'api_key' ? value.key : value.access
+          const revision = leased.revision + 1
+          const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
+          // Record the attempted refresh in the same batch; a losing CAS must not be reported
+          // as a completed refresh. The caller retries only after acquiring a fresh lease.
+          const [updated] = await db.batch([
+            db
+              .update(credentials)
+              .set({
+                ...envelope,
+                revision,
+                fingerprint,
+                last4: token.length >= 16 ? token.slice(-4) : '',
+              })
+              .where(
+                and(
+                  eq(credentials.credentialId, id),
+                  eq(credentials.leaseId, leaseId),
+                  eq(credentials.revision, leased.revision),
+                  gt(credentials.leaseExpiresAt, now()),
+                  eq(credentials.status, 'active'),
+                ),
+              )
+              .returning(),
+            auditStatement(db, {
+              opId: leaseId,
+              at: now(),
+              actorId: null,
+              action: 'credential.modify.attempt',
+              targetKind: 'system',
+              targetId: id,
+              detail: { kind: leased.kind, provider, fingerprint },
+            }),
+          ])
+          if (!updated.length)
+            throw new Error('credential_unavailable: credential changed during refresh')
+          invalidate()
+          return next
+        } catch (error) {
+          invalidate()
+          if (error instanceof Error && error.message === REFRESH_REJECTED) {
+            const at = now()
+            const held = and(
+              eq(credentials.credentialId, id),
+              eq(credentials.leaseId, leaseId),
+              eq(credentials.revision, leased.revision),
+              eq(credentials.status, 'active'),
+              gt(credentials.leaseExpiresAt, at),
+            )
+            const [, updated] = await db.batch([
+              // Audit only a transition this live lease can perform, in the same transaction.
+              db.insert(auditLog).select(
+                db
+                  .select({
+                    seq: sql<null>`${null}`.as('seq'),
+                    opId: sql<string>`${leaseId}`.as('op_id'),
+                    at: sql<number>`${at}`.as('at'),
+                    actorId: sql<null>`${null}`.as('actor_id'),
+                    action: sql<string>`${'credential.needs_reauth'}`.as('action'),
+                    targetKind: sql<'system'>`${'system'}`.as('target_kind'),
+                    targetId: credentials.credentialId,
+                    detailJson: sql<string>`${JSON.stringify({ kind: leased.kind, provider })}`.as(
+                      'detail_json',
+                    ),
+                  })
+                  .from(credentials)
+                  .where(held),
+              ),
+              db.update(credentials).set({ status: 'needs_reauth' }).where(held).returning(),
+            ])
+            const row = updated[0]
+            if (row) throw await unavailable(provider, row)
+          }
+          throw new Error('credential_unavailable: credential modification failed')
+        } finally {
+          await db
+            .update(credentials)
+            .set({ leaseId: null, leaseExpiresAt: null })
+            .where(and(eq(credentials.credentialId, id), eq(credentials.leaseId, leaseId)))
+        }
+      },
+      async delete() {
+        throw new Error('forbidden: revoke credentials through management RPC')
+      },
+    }
+    return store
   }
-  return { store, invalidate }
+  return { store: scoped(() => {}), scoped, invalidate }
 }

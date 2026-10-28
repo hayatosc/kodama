@@ -8,6 +8,13 @@
       "when": 1793082036290,
       "tag": "0000_curly_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793156783333,
+      "tag": "0001_nappy_cerise",
+      "breakpoints": true
     }
   ]
 }
