@@ -3,6 +3,19 @@
   "categories": { "correctness": "error" },
   "ignorePatterns": ["**/.cloudflare/**", "**/.wrangler/**"],
   "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "drizzle-orm",
+            "importNames": ["sql"],
+            "message": "Use the typed helpers in packages/agents/src/lib/sql.ts."
+          }
+        ],
+        "patterns": ["drizzle-orm/sql", "drizzle-orm/sql/*"]
+      }
+    ],
     "typescript/no-explicit-any": "error",
     "typescript/ban-ts-comment": [
       "error",
@@ -14,5 +27,11 @@
     "typescript/consistent-type-imports": "error",
     "typescript/no-floating-promises": "error",
     "typescript/no-non-null-assertion": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["packages/agents/src/lib/sql.ts"],
+      "rules": { "no-restricted-imports": "off" }
+    }
+  ]
 }

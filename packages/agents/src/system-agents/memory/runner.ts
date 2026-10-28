@@ -16,7 +16,10 @@ import * as v from 'valibot'
 import { jobResults, recordJobFailure } from '../../memory/store/job-results.ts'
 import type { AgentEnv } from '../../env.ts'
 import { consolidateDaily } from '../../memory/consolidation.ts'
-import { parseMemoryJob } from '../../memory/jobs.ts'
+import { parseMemoryJob, MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+import { waitForAllTasks } from '../../runtime/harness.ts'
+import { USAGE_CONTEXT_KEY } from '../../runtime/usage.ts'
+import type { UsageAttribution } from '../../storage/usage.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from '../../memory/jobs.ts'
 import { needsPrune } from '../../memory/prune/runs.ts'
 import { memoryDb, extractionCheckpoint } from '../../memory/store/db.ts'
@@ -150,6 +153,12 @@ async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
   const started = startJob(local, queued)
   if (started === undefined) return
   const { row, job } = started
+  // This survives eviction before Pi resumes. Every stream freezes its own copy.
+  ctx.storage.kv.put(USAGE_CONTEXT_KEY, {
+    jobId: row.jobId,
+    chargedAgentId: 'sourceAgentId' in job ? job.sourceAgentId : MEMORY_AGENT_ID,
+    actorKind: 'system',
+  } satisfies UsageAttribution)
   let outcome: JobOutcome | 'retry'
   try {
     outcome = await runModelJob(
@@ -162,6 +171,9 @@ async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
     console.error('Memory job failed', row.jobId, safeFailure(error))
     outcome = 'retry'
   }
+  // Submission completion excludes background compaction. Do not change its cost owner yet.
+  await waitForAllTasks(await ctx.harness())
+  ctx.storage.kv.delete(USAGE_CONTEXT_KEY)
   if (outcome !== 'retry') return settle(ctx, row, outcome)
   const delay = JOB_RETRY_DELAYS_MS[row.attempts - 1]
   if (delay === undefined) return settle(ctx, row, 'failed')
@@ -228,7 +240,7 @@ export async function runModelJob(
   let submission: Submission | undefined =
     existing === undefined ? undefined : await harness.submission(existing.id, context)
   if (submission === undefined) {
-    await root.waitForIdle(context)
+    await waitForAllTasks(harness)
     // Placed at once while idle, so the job starts without the previous job's context.
     await root.reset(undefined, context)
     submission = await deps.admit({

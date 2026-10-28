@@ -6,7 +6,8 @@
  *
  * @module
  */
-import { and, asc, desc, eq, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, lt, or } from 'drizzle-orm'
+import { coalesce } from '../../lib/sql.ts'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import type { MemoryDb } from './db.ts'
 import { applyPlan } from './records.ts'
@@ -50,7 +51,7 @@ export async function visibleSkills(db: MemoryDb, agentId: string): Promise<Visi
     .select({ name: skills.name, description: skills.description })
     .from(skills)
     .where(and(eq(skills.agentId, agentId), eq(skills.status, 'active')))
-    .orderBy(desc(sql`coalesce(${skills.lastUsedAt}, ${skills.updatedAt})`))
+    .orderBy(desc(coalesce(skills.lastUsedAt, skills.updatedAt)))
     .limit(SKILL_LIST_LIMIT)
 }
 

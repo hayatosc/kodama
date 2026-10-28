@@ -43,6 +43,9 @@ export default defineConfig({
     setupFiles: ['vitest.setup.ts'],
     fsModuleCache: false,
     testTimeout: 15_000,
+    // Real alarms can consume their marker before asynchronous pruning finishes. Allow workerd
+    // integration polls the same bounded progress window used by the explicit RPC polls.
+    expect: { poll: { timeout: 10_000 } },
   },
   plugins: [
     cloudflareTest({

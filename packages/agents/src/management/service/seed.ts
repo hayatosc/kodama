@@ -17,13 +17,10 @@ import { memoryAgentSettings } from '../../system-agents/memory/config.ts'
 import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../configuration/index.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
 import type { DefaultModelEnv } from '../../configuration/index.ts'
-import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
+import { MEMORY_AGENT_NAME, MEMORY_AGENT_ID } from '../../memory/jobs.ts'
 import type { AgentSettings, SeedResult } from '../../protocol.ts'
 import { createAgent, pushDesired } from './agents.ts'
 import type { ManagementCall } from './agents.ts'
-
-/** The memory agent's fixed registry ID, from the reserved all-zero range; never issued. */
-export const MEMORY_AGENT_ID = '00000000-0000-7000-8000-00000000000a'
 
 /** The slug of the first agent. */
 export const FIRST_AGENT_SLUG = 'assistant'

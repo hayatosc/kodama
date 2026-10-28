@@ -5,7 +5,46 @@
  *
  * @module
  */
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+/** One outer Pi model invocation; IDs are never reused after retention deletes. */
+export const usage = sqliteTable('kodama_usage', {
+  seq: integer('seq').primaryKey({ autoIncrement: true }),
+  startedAt: integer('started_at').notNull(),
+  finishedAt: integer('finished_at'),
+  chargedAgentId: text('charged_agent_id').notNull(),
+  actorKind: text('actor_kind', { enum: ['user', 'agent', 'system'] }).notNull(),
+  jobId: text('job_id'),
+  credentialId: text('credential_id'),
+  credentialKind: text('credential_kind', { enum: ['api_key', 'oauth_subscription'] }),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  responseModel: text('response_model'),
+  status: text('status', {
+    enum: ['in_flight', 'succeeded', 'failed', 'aborted', 'interrupted'],
+  })
+    .notNull()
+    .default('in_flight'),
+  rateLimited: integer('rate_limited', { mode: 'boolean' }).notNull().default(false),
+  usageState: text('usage_state', {
+    enum: ['reported', 'partial', 'unknown', 'not_applicable'],
+  })
+    .notNull()
+    .default('unknown'),
+  input: integer('input'),
+  output: integer('output'),
+  cacheRead: integer('cache_read'),
+  cacheWrite: integer('cache_write'),
+  totalTokens: integer('total_tokens'),
+  reasoning: integer('reasoning'),
+  cacheWrite1h: integer('cache_write_1h'),
+  inputCost: real('input_cost'),
+  outputCost: real('output_cost'),
+  cacheReadCost: real('cache_read_cost'),
+  cacheWriteCost: real('cache_write_cost'),
+  totalCost: real('total_cost'),
+  aggregatedAt: integer('aggregated_at'),
+})
 
 /** Where a memory agent job is in the queue. */
 export const JOB_STATUSES = ['queued', 'running', 'settled'] as const

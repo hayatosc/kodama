@@ -21,7 +21,8 @@ import { requestBody, textResponse, toolCallResponse, toolResults } from '../../
 import { piEntries } from '../../storage/pi-tables.ts'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../../helper/rpc.ts'
-import { seed, FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, MEMORY_AGENT_ID } from './seed.ts'
+import { seed, FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG } from './seed.ts'
+import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
