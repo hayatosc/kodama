@@ -33,14 +33,14 @@ it('sends exactly Pi’s public-client refresh fields and headers', async () => 
   expect(request.headers.get('accept')).toBe('application/json')
   expect(request.headers.get('content-type')).toBe('application/x-www-form-urlencoded')
   expect(request.headers.has('authorization')).toBe(false)
-  expect([...new URLSearchParams(await request.text()).entries()].sort()).toEqual(
-    Object.entries({
-      grant_type: 'refresh_token',
-      client_id: 'issued-client',
-      refresh_token: 'stored-refresh',
-      resource: 'https://api.openai.com/v1',
-    }).sort(),
-  )
+  const form = new URLSearchParams(await request.text())
+  form.sort()
+  expect([...form.entries()]).toEqual([
+    ['client_id', 'issued-client'],
+    ['grant_type', 'refresh_token'],
+    ['refresh_token', 'stored-refresh'],
+    ['resource', 'https://api.openai.com/v1'],
+  ])
 })
 
 // RFC 6749 §§5.1, 6: rotation is optional, omitted scope retains the grant, unknown fields are ignored.

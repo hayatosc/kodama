@@ -13,8 +13,15 @@ import type { CredentialIdentity } from './encryption.ts'
 
 const oauthSchema = v.looseObject({
   type: v.literal('oauth'),
-  access: v.pipe(v.string(), v.minLength(8)),
-  refresh: v.pipe(v.string(), v.minLength(8)),
+  // RFC 6749 §5.1 leaves token sizes undefined; Pi requires nonblank opaque strings.
+  access: v.pipe(
+    v.string(),
+    v.check((value) => value.trim().length > 0),
+  ),
+  refresh: v.pipe(
+    v.string(),
+    v.check((value) => value.trim().length > 0),
+  ),
   expires: v.pipe(v.number(), v.finite()),
 })
 

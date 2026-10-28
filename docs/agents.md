@@ -448,15 +448,19 @@ any registered agent may call them, with its identity recorded in audit. See
 [credentials.md](credentials.md) for authorization, auditing, cache bounds and the KEK runbook.
 
 Working agents and the memory agent use the same D1 `CredentialStore`. Resolution uses the
-version's sole provider reference and requires a usable grant. Missing, expired, revoked or
-unassigned credentials stop the request with `credential_unavailable`. Creation and configuration updates validate
-assignments; `sendMessage` checks authentication before admitting input. No environment variable,
-local credential file, shared default or implicit provider fallback is consulted.
+version's sole provider reference and requires a usable grant. Missing, revoked, unassigned, or
+`needs_reauth` credentials stop the request with `credential_unavailable`. OAuth credentials inside
+Pi's five-minute preemptive window refresh under the D1 row lease; the holder rechecks the current
+row so concurrent resolutions refresh only once. Terminal refresh errors persist `needs_reauth`
+with an audit row; transient failures stop the request without invalidating the credential. Creation
+and configuration updates validate assignments; `sendMessage` checks authentication before admitting
+input. No environment variable, local credential file, shared default, or implicit provider fallback
+is consulted.
 
 Pi's catalog supplies additional providers without new secret bindings. The local CLI supports
 interactive ChatGPT login and encrypted registration; see [Local agent CLI](#local-agent-cli).
-Production subscription integration and refresh policy remain separate work; the lease-based store
-is ready for it.
+The ChatGPT refresh request and response contract, including RFC and provider-specific error
+classification, is documented in [OAuth refresh contract](credentials.md#oauth-refresh-contract).
 
 The memory agent's model is set by its versions like any agent's. `MEMORY_MODEL_PROVIDER` and
 `MEMORY_MODEL_ID` only give the seed's version 1; when they are empty, it uses the default model.
