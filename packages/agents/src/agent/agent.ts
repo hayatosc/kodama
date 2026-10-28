@@ -8,6 +8,7 @@
 import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
   Harness,
@@ -403,6 +404,15 @@ export class Agent extends DurableObject<AgentEnv> {
     const harness = await this.#harness
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
+      const requestId = draft.requestId
+      if (requestId !== undefined) {
+        // Let Pi validate the replay without relabeling work already in progress.
+        const existing = await harness.commit(
+          (tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestId),
+          context,
+        )
+        if (existing) return conversation.submit(draft, context)
+      }
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
       if (actorKind) {
