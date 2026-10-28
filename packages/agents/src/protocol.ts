@@ -38,18 +38,6 @@ export interface MemoryPolicy {
   remember: boolean
 }
 
-/** Spending limits; stored here, enforced by the budget work (issue #4). */
-export interface Budget {
-  /** USD per UTC day, at API prices. */
-  dailyUsd?: number
-  /** USD per UTC month, at API prices. */
-  monthlyUsd?: number
-  /** Tokens one turn may use. */
-  turnTokens?: number
-  /** What admission does over a limit. */
-  onExceed: 'refuse' | 'downgrade'
-}
-
 /** One explicit credential per Pi provider, with no alternate credential resolution. */
 export interface CredentialRefs {
   /** The credential each provider uses. */
@@ -63,10 +51,19 @@ export interface AgentSettings extends AgentConfig {
   description?: string
   labels?: string[]
   memoryPolicy: MemoryPolicy
-  budget?: Budget
   credentials?: CredentialRefs
   /** Per registered tool; a tool missing here is allowed. */
   toolPolicy?: Record<string, 'allow' | 'deny'>
+}
+
+/** A bounded day-aligned usage read, charged to the optional agent UUID. */
+export interface UsageQuery {
+  agentId?: string
+  from: string
+  to: string
+  groupBy: 'day' | 'agent' | 'credential' | 'model'
+  cursor?: string
+  limit?: number
 }
 
 /** Who calls the management methods of `AgentService`, as the calling Worker authenticated them. */

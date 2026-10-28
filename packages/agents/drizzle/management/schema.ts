@@ -17,6 +17,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
@@ -129,9 +130,50 @@ export const credentials = sqliteTable(
     leaseExpiresAt: integer('lease_expires_at'),
     createdAt: integer('created_at').notNull(),
     revokedAt: integer('revoked_at'),
+    lastUsedAt: integer('last_used_at'),
   },
   (t) => [unique('credentials_id_provider').on(t.credentialId, t.provider)],
 )
+
+/** Daily additive buckets. Explicit identity includes null credentials and completeness. */
+export const usageDaily = sqliteTable(
+  'usage_daily',
+  {
+    bucket: text('bucket').primaryKey(),
+    day: text('day').notNull(),
+    chargedAgentId: text('charged_agent_id').notNull(),
+    credentialId: text('credential_id'),
+    credentialKind: text('credential_kind', { enum: ['api_key', 'oauth_subscription'] }),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    actorKind: text('actor_kind', { enum: ['user', 'agent', 'system'] }).notNull(),
+    usageState: text('usage_state', {
+      enum: ['reported', 'partial', 'unknown', 'not_applicable'],
+    }).notNull(),
+    attempts: integer('attempts').notNull(),
+    failed: integer('failed').notNull(),
+    rateLimited: integer('rate_limited').notNull(),
+    input: integer('input').notNull(),
+    output: integer('output').notNull(),
+    cacheRead: integer('cache_read').notNull(),
+    cacheWrite: integer('cache_write').notNull(),
+    totalTokens: integer('total_tokens').notNull(),
+    reasoning: integer('reasoning').notNull(),
+    cacheWrite1h: integer('cache_write_1h').notNull(),
+    reasoningReported: integer('reasoning_reported').notNull(),
+    cacheWrite1hReported: integer('cache_write_1h_reported').notNull(),
+    costUsd: real('cost_usd').notNull(),
+  },
+  (t) => [index('usage_daily_by_day_agent').on(t.day, t.chargedAgentId)],
+)
+
+/** Monotonic acknowledgment checkpoint per executing object; retained indefinitely. */
+export const usageIngestion = sqliteTable('usage_ingestion', {
+  agentId: text('agent_id').primaryKey(),
+  lastSeq: integer('last_seq').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+  caughtUp: integer('caught_up', { mode: 'boolean' }).notNull().default(false),
+})
 
 /** Permission to use a credential, independent of immutable configuration references. */
 export const credentialGrants = sqliteTable(
@@ -189,7 +231,7 @@ export const agentMembers = sqliteTable(
 )
 
 /** Keys of `system_settings`. */
-export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor'] as const
+export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor', 'usage_sweep_cursor'] as const
 
 /**
  * Installation settings. The seed writes the installation ID once, and it never changes;

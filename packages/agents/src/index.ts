@@ -29,6 +29,10 @@ import type {
   UpdateConfigRequest,
 } from './protocol.ts'
 import { reconcileAgents } from './management/service/reconcile.ts'
+import { aggregateUsage } from './management/service/usage.ts'
+import { readUsage } from './management/usage.ts'
+import { UsageQuerySchema } from './validation.ts'
+import type { UsageQuery } from './protocol.ts'
 import { managementDb } from './management/db.ts'
 import type { AgentUse } from './management/lifecycle.ts'
 import { admitAgent } from './management/registry.ts'
@@ -93,6 +97,11 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     } catch (error) {
       console.error('Configuration reconciliation failed', safeFailure(error))
     }
+    try {
+      await aggregateUsage({ ...this.#systemCall(), now: controller.scheduledTime })
+    } catch (error) {
+      console.error('Usage sweep failed', safeFailure(error))
+    }
     await this.env.AGENTS.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
 
@@ -133,6 +142,12 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     const call = this.#systemCall()
     const principal = await principalOf(call.db, parseManagementActor(actor), call.now)
     return { ...call, principal }
+  }
+
+  /** Catalog-priced usage, with subscription references and incomplete measurements separated. */
+  async usage(actor: ManagementActor, request: UsageQuery) {
+    const call = await this.#call(actor)
+    return readUsage(call.db, parseInput(UsageQuerySchema, request), call.now)
   }
 
   /** Lazily obtain the installation identity for authentication without creating agents. */

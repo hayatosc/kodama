@@ -31,7 +31,8 @@ import {
 import { managementDb } from '../management/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
 import { admitAgent, agentRowByObjectName } from '../management/registry.ts'
-import { interruptUsage } from '../storage/usage.ts'
+import { interruptUsage, usageSince, acknowledgeUsage } from '../storage/usage.ts'
+import type { UsagePage } from '../storage/usage.ts'
 import type { UsageAttribution } from '../storage/usage.ts'
 import { usageModels, USAGE_CONTEXT_KEY } from '../runtime/usage.ts'
 import { reportApplied } from '../management/versions.ts'
@@ -562,6 +563,16 @@ export class Agent extends DurableObject<AgentEnv> {
     const origin = await contactOrigin(await this.#harness, this.#agentId())
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** Internal accounting export, including inactive and dedicated agents. */
+  async usageSince(after: number, limit: number): Promise<UsagePage> {
+    return usageSince(await this.#local, after, limit)
+  }
+
+  /** Acknowledge a D1-committed prefix and perform safe local detail retention. */
+  async acknowledgeUsage(through: number): Promise<void> {
+    acknowledgeUsage(await this.#local, through)
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */

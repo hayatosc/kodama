@@ -69,8 +69,6 @@ const DESCRIPTION_MAX_LENGTH = 1_000
 export function agentSettingsSchema(models: Models) {
   const credentialId = v.pipe(v.string(), v.regex(UUID_PATTERN, 'Credential IDs must be UUIDs'))
   const providerKey = v.pipe(v.string(), v.regex(PROVIDER_ID, 'Invalid provider ID'))
-  const positive = (name: string) =>
-    v.pipe(v.number(`${name} must be a positive number`), v.gtValue(0, `${name} must be positive`))
   return v.strictObject(
     {
       schemaVersion: v.literal(SETTINGS_SCHEMA_VERSION, 'schemaVersion must be 1'),
@@ -125,25 +123,6 @@ export function agentSettingsSchema(models: Models) {
       memoryPolicy: v.strictObject(
         { extract: v.boolean(), remember: v.boolean() },
         'memoryPolicy must have extract and remember',
-      ),
-      budget: v.optional(
-        v.strictObject(
-          {
-            dailyUsd: v.optional(positive('budget.dailyUsd')),
-            monthlyUsd: v.optional(positive('budget.monthlyUsd')),
-            turnTokens: v.optional(
-              v.pipe(
-                positive('budget.turnTokens'),
-                v.integer('budget.turnTokens must be an integer'),
-              ),
-            ),
-            onExceed: v.picklist(
-              ['refuse', 'downgrade'],
-              'budget.onExceed must be refuse or downgrade',
-            ),
-          },
-          'budget must have onExceed',
-        ),
       ),
       credentials: v.optional(
         v.strictObject(
