@@ -4,7 +4,8 @@
  *
  * @module
  */
-import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, eq, gt, isNull, lt, or } from 'drizzle-orm'
+import { literal } from '../lib/sql.ts'
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai'
 import { credentials, credentialGrants, auditLog } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
@@ -245,14 +246,14 @@ export function createCredentialStore(
               db.insert(auditLog).select(
                 db
                   .select({
-                    seq: sql<null>`${null}`.as('seq'),
-                    opId: sql<string>`${leaseId}`.as('op_id'),
-                    at: sql<number>`${at}`.as('at'),
-                    actorId: sql<null>`${null}`.as('actor_id'),
-                    action: sql<string>`${'credential.needs_reauth'}`.as('action'),
-                    targetKind: sql<'system'>`${'system'}`.as('target_kind'),
+                    seq: literal(null).as('seq'),
+                    opId: literal(leaseId).as('op_id'),
+                    at: literal(at).as('at'),
+                    actorId: literal(null).as('actor_id'),
+                    action: literal('credential.needs_reauth').as('action'),
+                    targetKind: literal('system').as('target_kind'),
                     targetId: credentials.credentialId,
-                    detailJson: sql<string>`${JSON.stringify({ kind: leased.kind, provider })}`.as(
+                    detailJson: literal(JSON.stringify({ kind: leased.kind, provider })).as(
                       'detail_json',
                     ),
                   })
