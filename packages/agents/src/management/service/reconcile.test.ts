@@ -3,16 +3,23 @@
  *
  * @module
  */
+import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agentConfigVersions, agents, systemSettings } from '../../../drizzle/management/schema.ts'
+import {
+  agentConfigVersions,
+  agents,
+  auditLog,
+  systemSettings,
+} from '../../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from '../../configuration/index.ts'
 import { management, newAgentId } from '../../helper/management.ts'
 import { modelResponse } from '../../helper/rpc.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { managementDb } from '../db.ts'
 import { createAgentModels } from '../../models/index.ts'
+import { STATUS_KEY } from '../../runtime/restrictions.ts'
 import { reconcileAgents } from './reconcile.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -93,5 +100,29 @@ describe('reconcileAgents', () => {
     const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
     expect(row).toMatchObject({ currentVersion: 1, appliedVersion: 1 })
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe('Reached at last')
+  })
+
+  it('finishes an agent stuck in provisioning: its object and registry become active', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const agentId = await newAgentId()
+    await env.AGENTS.getByName(agentId).setStatus('provisioning')
+    await management
+      .update(agents)
+      .set({ status: 'provisioning' })
+      .where(eq(agents.agentId, agentId))
+    const status = async () =>
+      (await management.select().from(agents).where(eq(agents.agentId, agentId)).get())?.status
+
+    // Earlier tests may leave failing agents ahead of the cursor; a few runs reach every agent.
+    for (let run = 0; run < 3 && (await status()) === 'provisioning'; run++) await reconcile()
+
+    expect(await status()).toBe('active')
+    expect(
+      await runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) =>
+        state.storage.kv.get(STATUS_KEY),
+      ),
+    ).toBe('active')
+    const audits = await management.select().from(auditLog).where(eq(auditLog.targetId, agentId))
+    expect(audits.filter((row) => row.action === 'agent.activate')).toHaveLength(1)
   })
 })

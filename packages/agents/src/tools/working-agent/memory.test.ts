@@ -205,4 +205,23 @@ describe('working memory tools', () => {
     expect(last.split('accepted (job ')).toHaveLength(REMEMBER_LIMIT_PER_TURN + 1)
     expect(last).toContain(`Not saved: at most ${REMEMBER_LIMIT_PER_TURN} memories per turn`)
   })
+
+  it('blocks remember when the memory policy disables it, and tools the tool policy denies', async () => {
+    const agentId = await newAgentId()
+    await updateSettings(agentId, {
+      memoryPolicy: { extract: true, remember: false },
+      toolPolicy: { memory_search: 'deny' },
+    })
+    const bodies = scriptedTurn([
+      { name: 'remember', arguments: { content: 'Prefer tabs', origin: 'user_request' } },
+      { name: 'memory_search', arguments: { query: 'tabs' } },
+    ])
+
+    await say(agentId, 'policy-blocked', 'Remember that I prefer tabs')
+
+    const last = bodies.at(-1) ?? ''
+    expect(last).toContain("remember is disabled by the agent's memory policy")
+    expect(last).toContain("tool memory_search is denied by the agent's tool policy")
+    expect(last).not.toContain('accepted (job ')
+  })
 })

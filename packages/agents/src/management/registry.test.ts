@@ -64,6 +64,29 @@ describe('AgentService admission', () => {
     expect(await rejection(send)).toMatch(/agent_unavailable/)
     expect(await hasStorage(agentId)).toBe(false)
   })
+
+  it.each(['pausing', 'paused', 'archived'] as const)(
+    'serves reads but refuses chat while the agent is %s',
+    async (status) => {
+      const agentId = await newAgentId()
+      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      const send = exports.default.sendMessage(agentId, { requestId: 'r', content: 'Hello' })
+      expect(await rejection(send)).toMatch(/agent_unavailable/)
+      using read = await exports.default.snapshot(agentId)
+      expect(read.snapshot.messages).toEqual([])
+      expect(await exports.default.submission(agentId, 'r')).toBeUndefined()
+    },
+  )
+
+  it.each(['provisioning', 'deleting', 'deleted'] as const)(
+    'refuses reads while the agent is %s',
+    async (status) => {
+      const agentId = await newAgentId()
+      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      expect(await rejection(exports.default.snapshot(agentId))).toMatch(/agent_unavailable/)
+      expect(await rejection(exports.default.submission(agentId, 'r'))).toMatch(/agent_unavailable/)
+    },
+  )
 })
 
 describe('resolveAgentRef', () => {
@@ -88,5 +111,7 @@ describe('resolveAgentRef', () => {
     expect(ambiguous).toContain(second)
     expect(await rejection(resolveAgentRef(management, 'no-such-slug'))).toMatch(/Unknown agent/)
     expect(await rejection(resolveAgentRef(management, 'ab'))).toMatch(/Unknown agent/)
+    // A prefix shorter than four characters is never read as a prefix, even when it would match.
+    expect(await rejection(resolveAgentRef(management, first.slice(0, 3)))).toMatch(/Unknown agent/)
   })
 })

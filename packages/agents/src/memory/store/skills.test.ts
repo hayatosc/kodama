@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { curateSkills, readSkill, setSkillStatus, visibleSkills, writeSkill } from './skills.ts'
+import { SKILL_LIST_LIMIT } from '../skills.ts'
 import type { SkillWrite } from '../skills.ts'
 import {
   isMemoryAgentRequest,
@@ -60,6 +61,25 @@ describe('writing skills', () => {
 })
 
 describe('skills in a working agent', () => {
+  it('lists at most 50 active skills, most recently written or used first', async () => {
+    const agentId = uuidv7()
+    for (let index = 0; index <= 50; index++) {
+      const written = await writeSkill(
+        db,
+        context(1_000 + index),
+        skill(agentId, `step-${index}`, 'Do it.'),
+      )
+      expect(written.status).toBe('applied')
+    }
+
+    const listed = (await visibleSkills(db, agentId)).map((row) => row.name)
+
+    expect(SKILL_LIST_LIMIT).toBe(50)
+    expect(listed).toHaveLength(50)
+    expect(listed[0]).toBe('step-50')
+    expect(listed).not.toContain('step-0')
+  })
+
   it('lists only its active skills and reads one with skill_read, counting the use', async () => {
     const agentId = await newAgentId()
     await create(agentId, 'deploy', 'Run wrangler deploy --env production.')

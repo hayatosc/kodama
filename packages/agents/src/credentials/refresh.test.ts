@@ -140,6 +140,48 @@ it.each([
   )
 })
 
+// Unknown errors are not proof of an unusable grant, so the stored credential is kept.
+it.each([
+  ['an empty object', '{}'],
+  ['a non-JSON body', 'do-not-expose'],
+  ['an error object without a code', '{"error":{"message":"do-not-expose"}}'],
+  ['an unknown error code', '{"error":"temporarily_unavailable"}'],
+])('treats HTTP 400 with %s as temporary', async (_label, body) => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 400 }))
+  await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
+    'credential_unavailable: OAuth refresh temporarily unavailable',
+  )
+})
+
+it.each([
+  ['a non-JSON body', 'do-not-expose', 'credential_unavailable: OAuth refresh request failed'],
+  [
+    'an infinite expires_in',
+    '{"access_token":"a","token_type":"Bearer","expires_in":1e400}',
+    'credential_unavailable: invalid OAuth refresh response',
+  ],
+  [
+    'a non-string refresh_token',
+    '{"access_token":"a","token_type":"Bearer","expires_in":60,"refresh_token":7}',
+    'credential_unavailable: invalid OAuth refresh response',
+  ],
+])('keeps the credential on a malformed success with %s', async (_label, body, message) => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(body, { headers: { 'content-type': 'application/json' } }),
+  )
+  await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(message)
+})
+
+it('reads a space-delimited scope with surrounding and repeated whitespace', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    Response.json({ ...token, scope: '  openid   chatgpt.tokens.use.direct ' }),
+  )
+  expect((await refreshChatGPT(credential, () => 1000)).scopes).toEqual([
+    'openid',
+    'chatgpt.tokens.use.direct',
+  ])
+})
+
 it('requires the HTTP 200 token response specified by RFC 6749 §5.1', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(token, { status: 201 }))
   await expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(

@@ -7,10 +7,17 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyOperation } from './store/records.ts'
-import { memoryLedger } from '../../drizzle/memory/schema.ts'
+import {
+  memoryLedger,
+  memoryRecords,
+  memoryTerms,
+  revisionClaims,
+} from '../../drizzle/memory/schema.ts'
+import { SEARCH_VERSION, storedTerms } from '../lib/search-text.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
 import { activeContents, db, memoryAgent, parameterLimitedDb } from '../helper/memory.ts'
-import { consolidateDaily } from './consolidation.ts'
+import { consolidateDaily, LEDGER_RETENTION_MS } from './consolidation.ts'
+import { searchMemory } from './store/search.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -166,5 +173,54 @@ describe('consolidation', () => {
     expect(ancient).toEqual([])
     const meta = await db.select().from(memoryLedger).where(eq(memoryLedger.action, 'meta'))
     expect(meta.length).toBeGreaterThan(0)
+  })
+
+  it('drops revision claims past 90 days and rebuilds terms of an older search version', async () => {
+    const now = Date.now()
+    const agentId = uuidv7()
+    const content = 'このリポジトリでは pnpm を使う'
+    const claim = (targetId: string, claimedAt: number) => ({
+      target: 'record' as const,
+      targetId,
+      revision: 1,
+      opId: uuidv7(),
+      claimedAt,
+    })
+    await db.batch([
+      db
+        .insert(revisionClaims)
+        .values([
+          claim(`${agentId}-expired`, now - LEDGER_RETENTION_MS - 1),
+          claim(`${agentId}-kept`, now - LEDGER_RETENTION_MS + 1),
+        ]),
+      db.insert(memoryRecords).values({
+        id: agentId,
+        scope: `agent:${agentId}`,
+        kind: 'fact',
+        content,
+        searchVersion: SEARCH_VERSION - 1,
+        origin: 'agent_judgment',
+        sourceAgentId: agentId,
+        runId: 'old-index',
+        observedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(memoryTerms).values({ recordId: agentId, term: 'stale' }),
+    ])
+
+    await consolidateDaily({ db, now, forgetSettledJobs: async () => 0, enqueue: async () => {} })
+
+    expect(LEDGER_RETENTION_MS).toBe(90 * 86400000)
+    const claims = await db.select().from(revisionClaims)
+    expect(claims.map((row) => row.targetId).filter((id) => id.startsWith(agentId))).toEqual([
+      `${agentId}-kept`,
+    ])
+    const terms = await db.select().from(memoryTerms).where(eq(memoryTerms.recordId, agentId))
+    expect(terms.map((row) => row.term).sort()).toEqual([...storedTerms(content)].sort())
+    const row = await db.select().from(memoryRecords).where(eq(memoryRecords.id, agentId)).get()
+    expect(row?.searchVersion).toBe(SEARCH_VERSION)
+    const found = await searchMemory(db, { query: '使う', scopes: [`agent:${agentId}`], now })
+    expect(found.map((record) => record.id)).toEqual([agentId])
   })
 })

@@ -7,14 +7,44 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from '../../agent/agent.ts'
 import { memoryAgent } from '../../helper/memory.ts'
 import { rejectionInObject } from '../../helper/rpc.ts'
 import { MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
 import { MemoryAgent } from './agent.ts'
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('the memory agent', () => {
+  it('cancel stops the running job, which is queued again like a failed attempt', async () => {
+    const started = Promise.withResolvers<void>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          started.resolve()
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        }),
+    )
+    const { jobId } = await memoryAgent().enqueue({
+      kind: 'remember',
+      sourceAgentId: uuidv7(),
+      origin: 'agent_judgment',
+      content: 'A job that is cancelled',
+      sourceEntries: { from: 1, to: 1 },
+    })
+    await started.promise
+    expect(await memoryAgent().jobStatus(jobId)).toMatchObject({ status: 'running', attempts: 1 })
+
+    await memoryAgent().cancel()
+
+    await expect
+      .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
+      .toMatchObject({ status: 'queued', attempts: 1 })
+  })
+
   it('takes input only through its job queue', async () => {
     expect(
       await rejectionInObject(memoryAgent(), (agent) =>
