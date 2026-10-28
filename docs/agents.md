@@ -343,12 +343,6 @@ interface AgentSettings {
   description?: string // at most 1,000 characters
   labels?: string[] // up to 16 unique labels of lowercase letters, digits, or hyphens
   memoryPolicy: { extract: boolean; remember: boolean }
-  budget?: {
-    dailyUsd?: number
-    monthlyUsd?: number
-    turnTokens?: number
-    onExceed: 'refuse' | 'downgrade'
-  }
   credentials?: { primary: Record<string, string> }
   toolPolicy?: Record<string, 'allow' | 'deny'>
 }
@@ -357,8 +351,8 @@ interface AgentSettings {
 - `memoryPolicy.extract: false` stops handing new entries to the memory agent, and
   `memoryPolicy.remember: false` blocks the `remember` tool.
 - `toolPolicy` blocks a denied tool at its call; a tool not listed is allowed.
-- Only the shape of `budget` and `credentials` (credential UUIDs by Pi provider ID) is stored so
-  far; their enforcement is later work.
+- `credentials` explicitly selects credential UUIDs by Pi provider ID; grants and revocation
+  are checked at use. No spend-budget configuration or cost-based enforcement exists.
 - The status, display name, and slug are registry columns, not version fields.
 
 A new agent's version 1 holds the defaults of its creation: the model `DEFAULT_MODEL_PROVIDER` and
@@ -407,7 +401,7 @@ be lost ([`src/runtime/config-apply.ts`](../packages/agents/src/runtime/config-a
    queue and does not enter it again.
 3. Applying covers every part of the version: the always-loaded memory rebuilt for its shared
    spaces, then Pi's model, prompt, thinking level, and tools, then one atomic write of the shared
-   spaces, the settings (memory policy, tool policy, budget, credentials), and the version number.
+   spaces, the settings (memory policy, tool policy, credentials), and the version number.
    Only then is `applied_version` reported to the registry. If any part fails, the previous version
    stays applied and reported, and the held version is retried.
 4. Missed versions converge: the object compares the registry's desired version with its own when

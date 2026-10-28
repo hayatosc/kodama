@@ -201,6 +201,6 @@ it.each([false, true])(
       lastUsedAt: null,
     })
     expect(row).not.toHaveProperty('ownerScope')
-    expect(row).not.toHaveProperty('lastUsedAt')
+    expect(row?.lastUsedAt).toBeNull()
   },
 )

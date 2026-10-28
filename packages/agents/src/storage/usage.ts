@@ -1,5 +1,5 @@
 /** Durable per-invocation usage, independent of Pi transcript commits. @module */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gt, lte, isNull, lt, asc } from 'drizzle-orm'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { usage } from '../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
@@ -86,6 +86,61 @@ export function finishUsage(local: LocalDb, seq: number, message: AssistantMessa
         : {}),
     })
     .where(and(eq(usage.seq, seq), eq(usage.status, 'in_flight')))
+    .run()
+}
+
+/** A bounded terminal prefix; more includes an unfinished invocation blocking export. */
+export interface UsagePage {
+  rows: UsageRow[]
+  through: number
+  more: boolean
+}
+
+/** Never skip an older unfinished call when exporting in start order. */
+export function usageSince(local: LocalDb, after: number, limit: number): UsagePage {
+  if (
+    !Number.isSafeInteger(after) ||
+    after < 0 ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > 20
+  )
+    throw new TypeError('Invalid usage page')
+  const candidates = local
+    .select()
+    .from(usage)
+    .where(gt(usage.seq, after))
+    .orderBy(asc(usage.seq))
+    .limit(limit + 1)
+    .all()
+  const rows: UsageRow[] = []
+  for (const row of candidates) {
+    if (row.status === 'in_flight' || rows.length === limit) break
+    rows.push(row)
+  }
+  return { rows, through: rows.at(-1)?.seq ?? after, more: candidates.length > rows.length }
+}
+
+/** Mark a committed prefix once, then prune only acknowledged details older than thirty days. */
+export function acknowledgeUsage(local: LocalDb, through: number, now = Date.now()): void {
+  if (!Number.isSafeInteger(through) || through < 0)
+    throw new TypeError('Invalid usage acknowledgment')
+  if (
+    local
+      .select({ seq: usage.seq })
+      .from(usage)
+      .where(and(lte(usage.seq, through), eq(usage.status, 'in_flight')))
+      .get()
+  )
+    throw new Error('Cannot acknowledge unfinished usage')
+  local
+    .update(usage)
+    .set({ aggregatedAt: now })
+    .where(and(lte(usage.seq, through), isNull(usage.aggregatedAt)))
+    .run()
+  local
+    .delete(usage)
+    .where(lt(usage.aggregatedAt, now - 30 * 86_400_000))
     .run()
 }
 

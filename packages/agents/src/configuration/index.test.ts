@@ -44,7 +44,6 @@ describe('agent settings schema', () => {
       description: 'Research assistant',
       labels: ['research', 'team-a'],
       memoryPolicy: { extract: false, remember: true },
-      budget: { dailyUsd: 5, monthlyUsd: 50, turnTokens: 200_000, onExceed: 'refuse' },
       credentials: { primary: { openai: credentialId } },
       toolPolicy: { current_time: 'allow', remember: 'deny' },
       sharedSpaces: Array.from({ length: 8 }, (_, index) => `space-${index}`),
@@ -61,8 +60,7 @@ describe('agent settings schema', () => {
       [{ ...valid, tools: ['unknown_tool'] }, 'Unknown tool: unknown_tool'],
       [{ ...valid, tools: ['current_time', 'current_time'] }, 'unique'],
       [{ ...valid, memoryPolicy: { extract: true } }, 'memoryPolicy'],
-      [{ ...valid, budget: { dailyUsd: 5 } }, 'onExceed'],
-      [{ ...valid, budget: { dailyUsd: -1, onExceed: 'refuse' } }, 'positive'],
+      [{ ...valid, budget: { dailyUsd: 5, onExceed: 'refuse' } }, 'schemaVersion'],
       // One accepted shape: a flat provider map is not translated.
       [{ ...valid, credentials: { openai: credentialId } }, 'only primary references'],
       [{ ...valid, credentials: { primary: { openai: 'key' } } }, 'UUIDs'],

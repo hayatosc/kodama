@@ -6,7 +6,14 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { usage } from '../../drizzle/durable-object/schema.ts'
 import { newAgentId } from '../helper/management.ts'
 import { openLocalDb } from './local.ts'
-import { startUsage, finishUsage, interruptUsage, selectUsageCredential } from './usage.ts'
+import {
+  startUsage,
+  finishUsage,
+  interruptUsage,
+  selectUsageCredential,
+  usageSince,
+  acknowledgeUsage,
+} from './usage.ts'
 
 const message: AssistantMessage = {
   role: 'assistant',
@@ -27,6 +34,39 @@ const message: AssistantMessage = {
     cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.03, total: 0.34 },
   },
 }
+
+it('exports only a terminal prefix and prunes only thirty-day-old acknowledgments', async () => {
+  const id = await newAgentId()
+  await runInDurableObject(env.AGENTS.getByName(id), async (_, state) => {
+    const local = await openLocalDb(state.storage)
+    const start = () =>
+      startUsage(
+        local,
+        { chargedAgentId: id, actorKind: 'user' },
+        { provider: 'openai', id: 'gpt-4o-mini' },
+      )
+    const slow = start()
+    const fast = start()
+    finishUsage(local, fast, message)
+    expect(usageSince(local, 0, 20)).toEqual({ rows: [], through: 0, more: true })
+    expect(() => acknowledgeUsage(local, fast)).toThrow('unfinished')
+    finishUsage(local, slow, message)
+    expect(usageSince(local, 0, 1)).toMatchObject({ through: slow, more: true })
+    expect(usageSince(local, 0, 20).rows).toHaveLength(2)
+    acknowledgeUsage(local, slow, 100)
+    acknowledgeUsage(local, slow, 100 + 30 * 86_400_000)
+    expect(local.select().from(usage).all()).toHaveLength(2)
+    acknowledgeUsage(local, slow, 101 + 30 * 86_400_000)
+    expect(
+      local
+        .select()
+        .from(usage)
+        .all()
+        .map((row) => row.seq),
+    ).toEqual([fast])
+    expect(usageSince(local, slow, 20).rows).toHaveLength(1)
+  })
+})
 
 it('never double counts a terminal result or optional subset counters', async () => {
   const id = await newAgentId()

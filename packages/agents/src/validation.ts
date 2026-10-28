@@ -41,6 +41,31 @@ const agentIdMessage = 'agentId must be a lowercase UUID v7'
 /** A public agent ID: a lowercase v7 UUID. Reserved names such as `kodama:memory` fail. */
 export const AgentIdSchema = v.pipe(v.string(agentIdMessage), v.regex(UUID_PATTERN, agentIdMessage))
 
+const UsageDaySchema = v.pipe(
+  v.string(),
+  v.regex(/^\d{4}-\d{2}-\d{2}$/),
+  v.check((day) => {
+    const date = new Date(`${day}T00:00:00.000Z`)
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === day
+  }, 'Usage dates must be valid UTC days'),
+)
+
+/** Day-aligned bounded usage reads; cursors are opaque group keys. */
+export const UsageQuerySchema = v.pipe(
+  v.object({
+    agentId: v.optional(AgentIdSchema),
+    from: UsageDaySchema,
+    to: UsageDaySchema,
+    groupBy: v.picklist(['day', 'agent', 'credential', 'model']),
+    cursor: v.optional(v.pipe(v.string(), v.maxLength(1_000))),
+    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(200)), 50),
+  }),
+  v.check((query) => {
+    const days = (Date.parse(query.to) - Date.parse(query.from)) / 86_400_000
+    return days > 0 && days <= 366
+  }, 'Usage range must contain 1–366 UTC days'),
+)
+
 const slugMessage = 'slug must contain 1–48 lowercase letters, digits, or hyphens'
 
 /** An agent's alias: 1–48 lowercase letters, digits, or hyphens, and not UUID-shaped. */

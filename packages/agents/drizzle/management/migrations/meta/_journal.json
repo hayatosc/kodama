@@ -8,6 +8,13 @@
       "when": 1793090914931,
       "tag": "0000_slim_sumo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793158431268,
+      "tag": "0001_clammy_mongoose",
+      "breakpoints": true
     }
   ]
 }

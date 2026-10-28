@@ -51,7 +51,7 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     last4: row.last4,
     createdAt: row.createdAt,
     // Preserve the outward shape; usage timestamps were never recorded.
-    lastUsedAt: null,
+    lastUsedAt: row.lastUsedAt,
   }
 }
 
