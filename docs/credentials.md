@@ -21,17 +21,18 @@ not CHECK constraints, enforce concurrency control.
 
 Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
 `assignCredential` through a trusted private service binding. API keys and OAuth subscriptions use
-the same encrypted storage and metadata-only results. OAuth access and refresh tokens must each
-contain at least eight characters, both at registration and modification; shorter values are rejected
-rather than ambiguously matched against protocol text. Metadata includes a last-four suffix only
-for tokens with at least sixteen characters. The local CLI implements OAuth login through Pi;
-Worker authentication uses the statically bundled OAuth flows and D1-backed refresh leases. There is no credential rotation RPC or automatic reassignment workflow.
+the same encrypted storage and metadata-only results. OAuth access and refresh tokens are opaque,
+nonblank strings; their lengths are not assumed. Metadata includes a last-four suffix only for tokens
+with at least sixteen characters. The local CLI implements OAuth login through Pi; the credential
+runtime refreshes ChatGPT tokens under D1-backed leases. There is no credential rotation RPC or
+automatic reassignment workflow.
 
 Unassignment removes an agent's grant and reference. Revocation affects all grants and atomically
 clears the encrypted envelope and lease while appending audit. Metadata remains; no separate
 revocation journal is written. Every read checks current status and grants, even with a warm
-plaintext cache. Missing, revoked, unassigned and expired credentials stop with
-`credential_unavailable`; no alternate credential or environment key is tried. An already-running
+plaintext cache. Missing, revoked, unassigned and `needs_reauth` credentials stop with
+`credential_unavailable`; expired OAuth credentials first attempt a lease-serialized refresh. No
+alternate credential or environment key is tried. An already-running
 provider request is not interrupted. Decrypted values are held only in the Durable Object's memory,
 never persisted in plaintext or returned through RPC, and may remain until that instance is evicted.
 Management changes invalidate the cache; every resolution still checks live D1 status, grants,
@@ -40,6 +41,42 @@ never served from a stale cache. Cross-object modifications acquire a 30-second 
 contending callers wait up to 30 seconds, honor cancellation, and recheck live permission before
 acquiring the lease. The callback reads the newest committed value, so a concurrent OAuth refresh
 can observe the first caller's update rather than refresh the same token twice.
+
+## OAuth refresh contract
+
+The runtime follows [RFC 6749 §§5.1, 5.2 and 6](https://www.rfc-editor.org/rfc/rfc6749.html),
+Pi's bundled ChatGPT public-client flow, and OpenAI's
+[token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
+and [refresh error guidance](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
+The [discovery document](https://auth.openai.com/.well-known/openid-configuration) confirms the token
+endpoint, refresh grant, and support for public clients (`none` authentication).
+
+Refresh uses a form-encoded POST to `https://auth.openai.com/api/accounts/oauth/token` with exactly
+`grant_type=refresh_token`, the saved `refresh_token`, its saved issued `client_id`, and
+`resource=https://api.openai.com/v1`. The resource field comes from Pi's endpoint-specific contract,
+not RFC 6749 alone. No client secret, Authorization header, guessed client ID, or scope is sent.
+
+A successful HTTP 200 response must contain a nonblank `access_token`, case-insensitive Bearer
+`token_type`, and positive finite `expires_in`. Expiry is required by this endpoint's documented
+contract and Pi, although RFC 6749 only recommends the field. A returned `refresh_token` replaces
+the old one; an omitted refresh token or unchanged scope retains its stored value, as allowed by
+the RFC. Unrecognized response fields are ignored. The grant must still include
+`chatgpt.tokens.use.direct`; expiry retains Pi's three-minute clock/network margin. Reads enter the
+lease within Pi's five-minute preemptive window and recheck the current row after acquisition.
+
+All six RFC token-error codes (`invalid_request`, `invalid_client`, `invalid_grant`,
+`unauthorized_client`, `unsupported_grant_type`, `invalid_scope`) are terminal for an unchanged
+request. OpenAI's `invalid_refresh_token`, `token_expired`, `refresh_token_expired`,
+`refresh_token_invalidated`, and `refresh_token_reused` are also terminal. Both the RFC string
+`error` and the provider-style `error.code` object are recognized. HTTP 401 is an authentication
+failure; a bare or unrecognized HTTP 403 is not proof of invalid credentials. Network failures,
+HTTP 429 and 5xx, unknown errors, and malformed success bodies preserve the stored credential rather
+than guessing that it is invalid. They surface an unavailable error without an automatic retry loop.
+
+Terminal failures atomically set `needs_reauth` and append `credential.needs_reauth` audit under the
+live lease. Subsequent reads do not contact the token endpoint. The error carries structured
+`code`, `status`, `provider`, `credentialId`, and `agentId` facts; command guidance belongs outside
+the runtime. Client/request configuration errors require repair, not merely another login.
 
 ## Worker Secret boundary
 

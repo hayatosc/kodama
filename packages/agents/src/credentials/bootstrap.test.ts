@@ -9,7 +9,7 @@ import { credentialFingerprint } from './encryption.ts'
 
 it('bootstraps idempotently without returning the key', async () => {
   const request = () =>
-    new Request('http://localhost/cli/dev/seed-credentials', {
+    new Request('http://localhost', {
       method: 'POST',
       body: JSON.stringify({ openai: 'local-provider-test-key' }),
     })

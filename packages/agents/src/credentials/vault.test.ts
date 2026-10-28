@@ -68,7 +68,7 @@ it.each(['api_key', 'oauth_subscription'] as const)(
   },
 )
 
-it('does not expose an offline secret verifier or a suffix of a minimum-length OAuth token', async () => {
+it('does not expose an offline secret verifier or a suffix of a short OAuth token', async () => {
   const secret = JSON.stringify({
     type: 'oauth',
     access: 'abcdefgh',
@@ -126,15 +126,15 @@ it('preserves provider OAuth fields and rejects malformed payloads without echoi
 })
 
 it.each(['access', 'refresh'] as const)(
-  'enforces the OAuth %s boundary before encrypted registration',
+  'accepts opaque OAuth %s values without imposing a minimum token length',
   async (field) => {
-    for (const length of [5, 7, 8]) {
+    for (const token of ['', '   ', 'x', '1234567', '12345678']) {
       const secret = JSON.stringify({
         type: 'oauth',
         access: 'access12',
         refresh: 'refresh1',
         expires: 123,
-        [field]: 'x'.repeat(length),
+        [field]: token,
       })
       const insert = credentialInsert(
         db,
@@ -149,7 +149,7 @@ it.each(['access', 'refresh'] as const)(
         kek,
         Date.now(),
       )
-      if (length < 8) await expect(insert).rejects.toThrow('invalid credential payload')
+      if (!token.trim()) await expect(insert).rejects.toThrow('invalid credential payload')
       else await expect(insert).resolves.toHaveProperty('statement')
     }
   },
