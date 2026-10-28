@@ -85,15 +85,17 @@ describe('pruning', () => {
     const sizeAfter = await runInDurableObject(stub, (_i, state) => state.storage.sql.databaseSize)
     expect(sizeAfter).toBeLessThanOrEqual(sizeBefore)
 
-    // The memory agent got the archived range to summarize.
+    // The memory agent gets the range only to extract from; nothing summarizes the archive.
     const jobs = await runInDurableObject(
       env.AGENTS.getByName(MEMORY_AGENT_NAME),
       async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return local.select({ kind: memoryJobs.kind }).from(memoryJobs).all()
+        return local.select().from(memoryJobs).all()
       },
     )
-    expect(jobs.map((job) => job.kind)).toContain('record_archive')
+    expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
+      'extract',
+    ])
   })
 
   it('hands pruned entries to extraction only while the memory policy extracts', async () => {
@@ -117,9 +119,8 @@ describe('pruning', () => {
     }
 
     expect(await jobsOf(extracting)).toContain('extract')
-    expect(await jobsOf(private_)).not.toContain('extract')
-    // The archive and its summary do not depend on extraction.
-    expect(await jobsOf(private_)).toContain('record_archive')
+    // Nothing else reads the archived entries, so the memory agent never sees them.
+    expect(await jobsOf(private_)).toEqual([])
   })
 
   it('defers the delete while a background compaction runs, then finishes it', async () => {
@@ -200,15 +201,19 @@ describe('pruning', () => {
     await compactedAgent(agentId, 'scheduled')
     const head = (await headOf(agentId)) ?? 0
 
-    await expect
-      .poll(() => runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune')))
-      .toBeDefined()
-    await runInDurableObject(stub, (_i, state) =>
-      state.storage.put('kodama:alarm:prune', Date.now() - 1),
-    )
-    await runDurableObjectAlarm(stub)
+    const alarm = () =>
+      runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune'))
+    const pruned = async () => (await storedEntryIds(agentId)).every((id) => id >= head)
+    // The alarm is due at once, so the platform may already have run it.
+    await expect.poll(async () => (await alarm()) !== undefined || (await pruned())).toBe(true)
+    if ((await alarm()) !== undefined) {
+      await runInDurableObject(stub, (_i, state) =>
+        state.storage.put('kodama:alarm:prune', Date.now() - 1),
+      )
+      await runDurableObjectAlarm(stub)
+    }
 
-    expect((await storedEntryIds(agentId)).every((id) => id >= head)).toBe(true)
+    await expect.poll(pruned).toBe(true)
   })
 
   it('refuses input above the hard limit with a retryable error', async () => {
@@ -250,7 +255,6 @@ describe('memory agent pruning', () => {
         const status = await stub.enqueue({
           kind: 'remember',
           sourceAgentId: uuidv7(),
-          origin: 'agent_judgment',
           content,
           sourceEntries: { from: 1, to: 1 },
         })

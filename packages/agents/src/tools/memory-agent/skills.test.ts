@@ -75,7 +75,6 @@ describe('skill tools', () => {
       {
         kind: 'remember',
         sourceAgentId,
-        origin: 'user_request',
         content: 'Keep a deploy skill',
         sourceEntries: { from: 1, to: 1 },
       },

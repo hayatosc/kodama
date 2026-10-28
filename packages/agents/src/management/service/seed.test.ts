@@ -186,7 +186,6 @@ describe('seed', () => {
     const job = await memoryAgent().enqueue({
       kind: 'remember',
       sourceAgentId,
-      origin: 'user_request',
       content: fact,
       sourceEntries: { from: 1, to: 1 },
     })

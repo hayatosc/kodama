@@ -1,14 +1,13 @@
 /**
- * Plans of the operations that record progress: extraction checkpoints, archive summaries, and
- * declined candidates.
+ * Plans of the operations that record progress: extraction checkpoints and declined candidates.
  *
  * @module
  */
 import { and, eq } from 'drizzle-orm'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
-import { archiveSegments, extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
-import { claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
+import { extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
+import { claimRevision, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
 
 /** Plan advancing an agent's extraction checkpoint; a checkpoint already past it stays. */
@@ -54,32 +53,6 @@ export async function planCheckpoint(
   return {
     result,
     statements: [insertOp(db, context, op.type, result), ...advance],
-  }
-}
-
-/** Plan marking that a segment's summary is in R2. */
-export async function planArchiveSummary(
-  db: MemoryDb,
-  context: OperationContext,
-  op: Extract<Operation, { type: 'archive_summary' }>,
-): Promise<Plan> {
-  const segment = await db
-    .select({ id: archiveSegments.id })
-    .from(archiveSegments)
-    .where(eq(archiveSegments.id, op.segmentId))
-    .get()
-  if (segment === undefined) return conflict(db, context, op.segmentId, 'missing_segment')
-  const result: OperationResult = { status: 'applied', recordId: op.segmentId }
-  return {
-    result,
-    statements: [
-      insertOp(db, context, op.type, result),
-      // Segments are never removed while memory runs, so the row read above is still there.
-      db
-        .update(archiveSegments)
-        .set({ hasSummary: true })
-        .where(eq(archiveSegments.id, op.segmentId)),
-    ],
   }
 }
 

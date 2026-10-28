@@ -31,7 +31,6 @@ describe('the memory agent', () => {
     const { jobId } = await memoryAgent().enqueue({
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content: 'A job that is cancelled',
       sourceEntries: { from: 1, to: 1 },
     })

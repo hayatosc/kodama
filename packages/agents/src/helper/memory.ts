@@ -80,7 +80,7 @@ export function context(now = Date.now()): OperationContext {
 export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): Promise<string> {
   const result = await applyOperation(db, context(), {
     type: 'write',
-    record: { origin: 'agent_judgment', observedAt: Date.now(), ...record },
+    record: { origin: 'remember', observedAt: Date.now(), ...record },
   })
   if (result.status !== 'applied') throw new Error(`write ${result.status}`)
   return result.recordId

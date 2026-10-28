@@ -50,7 +50,6 @@ function job(kind: 'remember' | 'extract', sourceAgentId: string): MemoryJob {
     ? {
         kind,
         sourceAgentId,
-        origin: 'user_request',
         content: 'Forget the old instruction',
         sourceEntries: { from: 100, to: 100 },
       }
@@ -209,7 +208,6 @@ describe('consolidation tools', () => {
   const remember = (sourceAgentId: string): MemoryJob => ({
     kind: 'remember',
     sourceAgentId,
-    origin: 'user_request',
     content: 'Tidy the shared rules',
     sourceEntries: { from: 1, to: 1 },
   })

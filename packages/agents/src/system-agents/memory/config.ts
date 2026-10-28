@@ -29,7 +29,7 @@ import type { CredentialStore } from '@earendil-works/pi-ai'
 import { createAgentModels } from '../../models/index.ts'
 import type { AgentConfig, AgentSettings } from '../../protocol.ts'
 import type { RunningJob, MemoryJobDeps } from '../../memory/job-context.ts'
-import { archiveTools, extractionTools } from '../../tools/memory-agent/entries.ts'
+import { extractionTools } from '../../tools/memory-agent/entries.ts'
 import { recordTools, sharedTools } from '../../tools/memory-agent/records.ts'
 import { skillTools } from '../../tools/memory-agent/skills.ts'
 import type { MemoryJob } from '../../memory/jobs.ts'
@@ -111,13 +111,7 @@ export function memoryHarnessOptions(
 
 /** The tools the memory agent's model may call. Working agents never get them. */
 export function createMemoryAgentTools(deps: MemoryJobDeps): ToolRegistration[] {
-  return [
-    ...sharedTools(deps),
-    ...skillTools(deps),
-    ...recordTools(deps),
-    ...extractionTools(deps),
-    ...archiveTools(deps),
-  ]
+  return [...sharedTools(deps), ...skillTools(deps), ...recordTools(deps), ...extractionTools(deps)]
 }
 
 /** The memory agent's instructions. */
@@ -143,9 +137,7 @@ export function jobPrompt(job: MemoryJob): string {
     case 'remember':
       return [
         `Job: remember, from agent ${job.sourceAgentId}, entries ${job.sourceEntries.from}-${job.sourceEntries.to}.`,
-        job.origin === 'user_request'
-          ? 'The user asked for this to be remembered. Write it as asked unless it duplicates an active record.'
-          : 'The agent judged this worth keeping. Decline it when it is a duplicate or of little lasting value.',
+        'The agent asked for this to be kept. Write it, superseding a record it updates, unless it duplicates an active record or has no lasting value.',
         `Candidate: ${quote(job.content)}`,
       ].join('\n')
     case 'extract':
@@ -153,11 +145,6 @@ export function jobPrompt(job: MemoryJob): string {
         `Job: extract, from agent ${job.sourceAgentId}, entries after ${job.afterEntry}.`,
         'Call read_entries to page through the entries. For each lasting fact, instruction, event, or task, cite the entries it rests on and write, supersede, or skip it. Keep only what the cited entries support.',
         'When the last page is done, call finish_extraction with the last entry ID you read.',
-      ].join('\n')
-    case 'record_archive':
-      return [
-        `Job: record_archive, segment ${job.segmentId} of agent ${job.sourceAgentId}.`,
-        'Call read_archive, then call write_archive_summary with a summary of the decisions, results, and open questions in the segment.',
       ].join('\n')
     case 'consolidate':
       return [

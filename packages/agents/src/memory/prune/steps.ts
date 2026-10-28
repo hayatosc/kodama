@@ -102,7 +102,7 @@ export async function exportRun(
 }
 
 /**
- * Insert the segment's catalog row, read it back, record `indexed`, and queue its summary job.
+ * Insert the segment's catalog row, read it back, and record `indexed`.
  *
  * @throws When the catalog row cannot be read back.
  */
@@ -128,7 +128,5 @@ export async function catalog(
     lastAt: run.lastAt ?? now,
     createdAt: now,
   })
-  const indexed = setState(local, run, { state: 'indexed' }, now)
-  await enqueueQuietly(deps, { kind: 'record_archive', sourceAgentId: agentId, segmentId: id })
-  return indexed
+  return setState(local, run, { state: 'indexed' }, now)
 }

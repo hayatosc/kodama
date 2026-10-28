@@ -18,7 +18,7 @@ sections of this document by name.
 | Agent Durable Object        | `AGENTS`    | Pi Durable session; always-loaded copy and skill list; pruning state; alarm schedule |
 | Memory agent Durable Object | `AGENTS`    | the memory agent: a `MemoryAgent` object named `kodama:memory`, with its job queue   |
 | D1 database                 | `MEMORY_DB` | memory records, applied operations, revisions, archive catalog, skills, ledger       |
-| R2 bucket                   | `ARCHIVE`   | archived entries, their search indexes, and their summaries (`archive/`)             |
+| R2 bucket                   | `ARCHIVE`   | archived entries and their search indexes (`archive/`)                               |
 
 ```text
 AgentService (public RPC entrypoint)
@@ -28,11 +28,11 @@ Agent DO (agentId)
   |-- reads ----------------------> D1 MEMORY_DB         memory_search, always-loaded query, revisions
   |-- writes ---------------------> D1 MEMORY_DB         usage counters, archive catalog (pruning)
   |-- reads and writes -----------> R2 ARCHIVE           archived entries and indexes, history_search
-  `-- AGENTS enqueue -------------> memory agent         remember, extract, record_archive
+  `-- AGENTS enqueue -------------> memory agent         remember, extract
 
 MemoryAgent DO "kodama:memory" (the memory agent)
   |-- reads and writes -----------> D1 MEMORY_DB
-  |-- reads and writes -----------> R2 ARCHIVE           archived entries and summaries
+  |-- reads ----------------------> R2 ARCHIVE           archived entries, for a lagging extraction
   |-- AGENTS readEntries ---------> Agent DO             paged entries for extraction
   `-- AGENTS memoryChanged -------> Agent DO             refresh hint; revisions are the record
 
@@ -103,10 +103,9 @@ shared record.
 | `task`        | dropped when done                                                  |
 
 A record's status is `active`, `superseded`, `invalid`, or `archived`. Its `origin` is
-`user_request`, `agent_judgment`, `extraction`, `consolidation`, or `shared`. The code that
-builds a record from a job sets the scope, origin, source agent, and cited entries, so the model
-never chooses them. Summaries of archived entries are not memory records; they live next to the
-archived entries in R2. Hard deletion is an operator action.
+`remember`, `extraction`, `consolidation`, or `shared`. The code that builds a record from a job
+sets the scope, origin, source agent, and cited entries, so the model never chooses them. Hard
+deletion is an operator action.
 
 ### D1 schema
 
@@ -286,23 +285,21 @@ in `src/memory/consolidation.ts`, backed by queries in `src/memory/store/mainten
 
 The memory agent's tools are registered only in its own harness, so working agents never get them:
 
-| Tool                    | Jobs                      | Effect                                                        |
-| ----------------------- | ------------------------- | ------------------------------------------------------------- |
-| `memory_search`         | all model jobs            | search the job's scope and `shared:global`; ids and revisions |
-| `memory_write`          | all model jobs            | write a new record                                            |
-| `memory_supersede`      | all model jobs            | replace an active record named by id and revision             |
-| `memory_invalidate`     | all model jobs            | mark an active record as no longer true                       |
-| `memory_decline`        | all model jobs            | decline the job's candidate, with the reason                  |
-| `read_entries`          | `extract`                 | page through the source agent's entries after the checkpoint  |
-| `finish_extraction`     | `extract`                 | advance the checkpoint through the last entry covered         |
-| `read_archive`          | `record_archive`          | read the entries of the archived segment                      |
-| `write_archive_summary` | `record_archive`          | store the segment's summary                                   |
-| `list_records`          | `consolidate`             | the scope's active records, by kind and then most used        |
-| `list_skills`           | `consolidate` of an agent | the agent's skills with status and revision                   |
-| `read_skill`            | `consolidate` of an agent | the body and evidence of one skill                            |
-| `skill_write`           | `consolidate` of an agent | create or overwrite a skill                                   |
-| `skill_archive`         | `consolidate` of an agent | archive or restore a skill                                    |
-| `shared_write`          | `consolidate`             | write a shared record, checked first                          |
+| Tool                | Jobs                      | Effect                                                        |
+| ------------------- | ------------------------- | ------------------------------------------------------------- |
+| `memory_search`     | all model jobs            | search the job's scope and `shared:global`; ids and revisions |
+| `memory_write`      | all model jobs            | write a new record                                            |
+| `memory_supersede`  | all model jobs            | replace an active record named by id and revision             |
+| `memory_invalidate` | all model jobs            | mark an active record as no longer true                       |
+| `memory_decline`    | all model jobs            | decline the job's candidate, with the reason                  |
+| `read_entries`      | `extract`                 | page through the source agent's entries after the checkpoint  |
+| `finish_extraction` | `extract`                 | advance the checkpoint through the last entry covered         |
+| `list_records`      | `consolidate`             | the scope's active records, by kind and then most used        |
+| `list_skills`       | `consolidate` of an agent | the agent's skills with status and revision                   |
+| `read_skill`        | `consolidate` of an agent | the body and evidence of one skill                            |
+| `skill_write`       | `consolidate` of an agent | create or overwrite a skill                                   |
+| `skill_archive`     | `consolidate` of an agent | archive or restore a skill                                    |
+| `shared_write`      | `consolidate`             | write a shared record, checked first                          |
 
 Each writing tool applies its change as an operation (see [Applying a write](#applying-a-write)).
 During a `consolidate` job of a shared scope, every record write but a decline is refused, so that
@@ -325,12 +322,11 @@ the memory agent's own SQLite outside Pi's tables
 The same job delivered twice gets the same ID, so a repeated `enqueue` returns the existing row.
 `jobStatus(jobId)` reads a row.
 
-| Kind             | Priority | Payload                                |
-| ---------------- | -------- | -------------------------------------- |
-| `remember`       | 0        | source agent, origin, content, entries |
-| `record_archive` | 1        | source agent, segment ID               |
-| `extract`        | 2        | source agent, entry to start after     |
-| `consolidate`    | 3        | scope, UTC day                         |
+| Kind          | Priority | Payload                            |
+| ------------- | -------- | ---------------------------------- |
+| `remember`    | 0        | source agent, content, entries     |
+| `extract`     | 1        | source agent, entry to start after |
+| `consolidate` | 2        | scope, UTC day                     |
 
 One runner keeps at most one job in progress:
 
@@ -377,22 +373,20 @@ It also lists what not to keep: task progress, guesses, secrets, and one-off req
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
 `kodama_remember_turns`. Attribution uses the active execution's full durable input set, not the
-newest transcript entry. If any input is from a peer, `remember(origin: user_request)` is rejected,
-including when human steering and peer follow-up share the execution. `agent_judgment` remains
-available, anchored to the last execution input for quota and evidence.
+newest transcript entry: the last execution input, human or peer, is the request's anchor for quota
+and evidence. A remember request has no origin of its own; the memory agent treats every one the
+same way, whether the user asked for it or the agent judged it worth keeping.
 
 ## Write paths
 
 ### Remember
 
 1. Validate the input and cap its size at 2,000 characters.
-2. Enqueue a `remember` job with the content, its origin (`user_request` or `agent_judgment`), and
-   the source entry IDs. Return `accepted`.
-3. The memory agent classifies the content, reconciles it with existing records, and writes it:
-   - `user_request` is written as asked, superseding an earlier record it replaces. It starts with
-     importance 0.7.
-   - `agent_judgment` may be declined as a duplicate or of low value, which is logged in the
-     ledger. It starts with importance 0.4.
+2. Enqueue a `remember` job with the content and the source entry IDs. Return `accepted`.
+3. The memory agent classifies the content, reconciles it with existing records, and writes it,
+   superseding an earlier record it replaces. It may decline a duplicate or something of no
+   lasting value, which is logged in the ledger. The record starts with the default importance
+   (0.5) unless the memory agent sets one.
 4. The job settles, and the working agent receives `memoryChanged`.
 
 ### Extract
@@ -564,8 +558,7 @@ On start and on the `prune` alarm, an unfinished run continues from its state:
    Read them back to verify, and record `exported`. The keys depend only on the range, so a
    repeated export overwrites the same objects.
 
-3. **Catalog.** Insert the `archive_segments` row, read it back, and record `indexed`. Then enqueue
-   `record_archive` for the summary.
+3. **Catalog.** Insert the `archive_segments` row, read it back, and record `indexed`.
 4. **Delete.** Inside `blockConcurrencyWhile`, check again:
    - `harness.inspect()` reports no live task, background compaction included. A background
      compaction rereads entries from its recorded `tail` when it resumes.
@@ -586,8 +579,8 @@ Steps 1–3 run while the agent keeps working; only step 4 needs it to be idle.
 
 Above the hard limit, `sendMessage` rejects new input with a retryable `storage_maintenance` error
 until a run reaches `deleted`. A busy agent therefore drains, and pruning gets its idle moment.
-Pruning needs only R2 and D1, so a stopped memory agent delays extraction and summaries but not
-reclaiming storage.
+Pruning needs only R2 and D1, so a stopped memory agent delays extraction but not reclaiming
+storage.
 
 `readEntries` reads a range below the pruned boundary from its archived segment, so an extraction
 that fell behind still sees every entry.
@@ -610,10 +603,12 @@ Each archived range has its search index in R2, next to its entries
   the first 2,000 characters of each tool result. For each chunk, the index stores the entry range
   and the byte range in the `.jsonl` object. For each normalized word from the search-text
   function, it lists the chunks that contain the word. It also records its `search_version`.
-- **`.summary.json`** is written by the `record_archive` job: the summary and its normalized
-  words. Writing it sets `has_summary` on the catalog row.
-- **The `archive_segments` row** in D1 is the catalog: range, times, size, SHA-256, and whether
-  the summary is done. It is one small row per range.
+- **The `archive_segments` row** in D1 is the catalog: range, times, size, and SHA-256. It is one
+  small row per range.
+
+Archived ranges have no summaries. A summary would need the memory agent's model to read the
+raw entries, and the word index already finds them; it is the details a summary leaves out that
+need to be found again.
 
 The objects and the row are deleted only together, by an operator. Consolidation never expires
 them.
@@ -622,16 +617,14 @@ them.
 
 1. List this agent's catalog rows newest first, with entry IDs breaking equal-time ties. A numeric
    `before` is an exclusive timestamp bound on chunks; overlapping segments remain eligible.
-   Summaries are included only when their whole segment precedes the bound.
-2. Read their `.summary.json` and `.index.json` objects in that order, until 4 MiB have been read.
+2. Read their `.index.json` objects in that order, until 4 MiB have been read.
 3. Match the query against the chunks. A chunk matches when it contains every query word, tried
    in the same order as in [Search text](#search-text): the merged words, then the original
-   segments, then each merged word as a prefix. A summary matches the same way. At most five
-   matches are returned, newest first.
+   segments, then each merged word as a prefix. At most five matches are returned, newest first.
 4. Read the matched byte ranges from the `.jsonl` objects and return them with their entry IDs and
    times. When a result, read, or catalog-page limit stops the search, return an opaque `cursor`
    for the next unvisited segment or chunk. Pass it with the same query to continue; it preserves
-   the original `before` bound. A resumed segment does not repeat its summary. Entry IDs keep
+   the original `before` bound. Entry IDs keep
    continuation lossless even when several chunks or segments have the same timestamp.
 
 The internal result's `searchedBefore` remains the oldest visited time for display, not a
@@ -747,22 +740,22 @@ Memory is tested in workerd with a mocked model, like the rest of the agent (see
 setup lives in `src/helper/memory.ts`. Paths below are relative to
 `src/memory/` unless they start with `src/`.
 
-| Test file                                 | Covers                                                               |
-| ----------------------------------------- | -------------------------------------------------------------------- |
-| `store/records.test.ts`                   | operations: replays, conflicts, freshness, revision claims, checks   |
-| `store/search.test.ts`                    | Japanese and English queries, scopes, precedence, usage counts       |
-| `src/system-agents/memory/runner.test.ts` | jobs, `remember`, redelivery, retries, recovery after eviction       |
-| `src/system-agents/memory/agent.test.ts`  | the role's RPC limits, the default model, its class                  |
-| `consolidation.test.ts`                   | merging duplicates and dropping old ledger rows                      |
-| `src/agent/memory.test.ts`                | extraction, the always-loaded copy, revision checks                  |
-| `src/runtime/alarms.test.ts`              | purposes coexist in one alarm                                        |
-| `prune/prune.test.ts`                     | pruning states, stops, delete checks, the hard limit; evaluation     |
-| `archive/history.test.ts`                 | the `record_archive` summary of a segment, found by `history_search` |
-| `store/skills.test.ts`                    | writes and conflicts, `skill_read`, curation, the consolidate job    |
-| `shared.test.ts`                          | shared spaces, overrides, required records, checked shared writes    |
-| `src/runtime/harness.test.ts`             | behavior of Pi Durable that this design relies on                    |
-| `store/db.test.ts`                        | behavior of D1 that this design relies on                            |
-| `drizzle/*/schema.test.ts`                | each schema matches its generated migrations                         |
+| Test file                                 | Covers                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `store/records.test.ts`                   | operations: replays, conflicts, freshness, revision claims, checks |
+| `store/search.test.ts`                    | Japanese and English queries, scopes, precedence, usage counts     |
+| `src/system-agents/memory/runner.test.ts` | jobs, `remember`, redelivery, retries, recovery after eviction     |
+| `src/system-agents/memory/agent.test.ts`  | the role's RPC limits, the default model, its class                |
+| `consolidation.test.ts`                   | merging duplicates and dropping old ledger rows                    |
+| `src/agent/memory.test.ts`                | extraction, the always-loaded copy, revision checks                |
+| `src/runtime/alarms.test.ts`              | purposes coexist in one alarm                                      |
+| `prune/prune.test.ts`                     | pruning states, stops, delete checks, the hard limit; evaluation   |
+| `archive/history.test.ts`                 | `history_search` pages, time bounds, and continuation cursors      |
+| `store/skills.test.ts`                    | writes and conflicts, `skill_read`, curation, the consolidate job  |
+| `shared.test.ts`                          | shared spaces, overrides, required records, checked shared writes  |
+| `src/runtime/harness.test.ts`             | behavior of Pi Durable that this design relies on                  |
+| `store/db.test.ts`                        | behavior of D1 that this design relies on                          |
+| `drizzle/*/schema.test.ts`                | each schema matches its generated migrations                       |
 
 ### Evaluation
 
@@ -858,7 +851,7 @@ Memory systems accumulate errors during extraction, and any user can try to inje
 rules follow:
 
 - candidates must cite the entries that support them;
-- unrequested saves start with lower importance and may be declined.
+- the memory agent may decline a remember request it finds duplicated or of no lasting value.
 
 ### Four kinds; facts are superseded, events decay
 

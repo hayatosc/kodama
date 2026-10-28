@@ -18,19 +18,17 @@ const consolidate: MemoryJob = { kind: 'consolidate', scope: `agent:${agentId}`,
 const remember: MemoryJob = {
   kind: 'remember',
   sourceAgentId: agentId,
-  origin: 'user_request',
   content: 'Prefer tabs',
   sourceEntries: { from: 1, to: 1 },
 }
 const jobs: readonly MemoryJob[] = [
   consolidate,
   { kind: 'extract', sourceAgentId: agentId, afterEntry: 1 },
-  { kind: 'record_archive', sourceAgentId: agentId, segmentId: 'segment' },
   remember,
 ]
 
 describe('nextJob', () => {
-  it('takes remember, record_archive, extract, then consolidate, and the oldest within a kind', async () => {
+  it('takes remember, extract, then consolidate, and the oldest within a kind', async () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       // Queued in reverse priority order, so age alone would invert the order.
@@ -51,13 +49,7 @@ describe('nextJob', () => {
           .where(eq(memoryJobs.jobId, next.jobId))
           .run()
       }
-      expect(order).toEqual([
-        'remember',
-        'record_archive',
-        'extract',
-        'consolidate (oldest)',
-        'consolidate',
-      ])
+      expect(order).toEqual(['remember', 'extract', 'consolidate (oldest)', 'consolidate'])
     })
   })
 

@@ -16,12 +16,11 @@ import { sha256Hex } from '../lib/hash.ts'
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')
 const EntryIdSchema = v.pipe(v.number(), v.integer(), v.minValue(0))
 
-/** Every job the memory agent takes: `remember`, `extract`, `record_archive`, and `consolidate`. */
+/** Every job the memory agent takes: `remember`, `extract`, and `consolidate`. */
 export const MemoryJobSchema = v.variant('kind', [
   v.object({
     kind: v.literal('remember'),
     sourceAgentId: AgentIdSchema,
-    origin: v.picklist(['user_request', 'agent_judgment']),
     content: v.pipe(v.string(), v.minLength(1), v.maxLength(2_000)),
     sourceEntries: v.object({ from: EntryIdSchema, to: EntryIdSchema }),
   }),
@@ -30,11 +29,6 @@ export const MemoryJobSchema = v.variant('kind', [
     sourceAgentId: AgentIdSchema,
     /** Extract entries after this one. */
     afterEntry: EntryIdSchema,
-  }),
-  v.object({
-    kind: v.literal('record_archive'),
-    sourceAgentId: AgentIdSchema,
-    segmentId: v.pipe(v.string(), v.maxLength(200)),
   }),
   v.object({
     kind: v.literal('consolidate'),
@@ -66,9 +60,8 @@ export interface JobStatus {
 /** Queue priority per kind; lower runs first. */
 export const JOB_PRIORITY: Record<JobKind, number> = {
   remember: 0,
-  record_archive: 1,
-  extract: 2,
-  consolidate: 3,
+  extract: 1,
+  consolidate: 2,
 }
 
 /**
@@ -85,8 +78,6 @@ export function jobId(job: MemoryJob): Promise<string> {
       )
     case 'extract':
       return sha256Hex(JSON.stringify([job.kind, job.sourceAgentId, job.afterEntry]))
-    case 'record_archive':
-      return sha256Hex(JSON.stringify([job.kind, job.segmentId]))
     case 'consolidate':
       return sha256Hex(JSON.stringify([job.kind, job.scope, job.day]))
   }

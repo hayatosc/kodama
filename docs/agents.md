@@ -374,7 +374,8 @@ policies on. Changing the defaults later changes no existing agent.
   `expectedVersion + 1`. One `batch()` inserts the version, moves `current_version`, and appends the
   audit row. The version's primary key is the optimistic lock: of two updates from the same
   version, exactly one succeeds, and the other fails with `version_conflict:` and leaves nothing
-  behind. Reusing `requestId` returns the first write.
+  behind. Reusing `requestId` returns the first write, even when the settings differ, so each
+  intended change needs its own `requestId`.
 - `rollbackConfig(actor, agentId, { requestId, toVersion, expectedVersion })` writes the content of
   `toVersion` as a new version; versions are never changed or removed.
 - `configHistory(actor, agentId, { before, limit })` lists versions newest first, with author,
@@ -520,7 +521,10 @@ few more methods, for other Durable Objects and for `AgentService`:
   ([`src/validation.ts`](../packages/agents/src/validation.ts)).
 - Request IDs are scoped to the receiving agent's root conversation. To retry a delivery, reuse the
   same request ID and content; a completed retry returns the first result without running the
-  model again. Use a new request ID for a new turn.
+  model again. Use a new request ID for a new turn. The content of a retry is not compared: a
+  reused request ID returns its first submission even when the content differs, and the new
+  content is dropped without an error. Generate a fresh ID, such as a UUID v7, for every message,
+  and never derive it from a conversation or session alone.
 - Input that arrives while an agent is busy is queued by Pi Durable. `whenBusy` controls how:
   - `followUp` (the default) waits for the current run to answer and then starts the next run;
   - `steer` joins the current run after its current tool round.
@@ -592,10 +596,8 @@ If any input is a peer message, the next hop inherits the maximum peer hop; inpu
 reset the chain. Only a purely human execution starts a fresh chain at zero incoming hops.
 Idle, non-model `sendTo` calls retain the latest durable input's provenance. The cap bounds chain
 depth, not total fan-out or the number of independent human requests. Other agents' text remains
-data, not trusted instructions. An execution containing any peer input, including a mixed
-human/peer execution, cannot label a `remember` call as `user_request`. Its own conclusions may
-use `agent_judgment`; the last execution input remains its evidence/quota anchor, not an assertion
-that this input alone caused the tool call.
+data, not trusted instructions. A `remember` call takes the last execution input, human or peer,
+as its evidence and quota anchor, not as an assertion that this input alone caused the call.
 
 ## Events
 

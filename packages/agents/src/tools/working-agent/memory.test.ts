@@ -4,9 +4,12 @@
  *
  * @module
  */
+import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
+import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
+import { MEMORY_AGENT_NAME, parseMemoryJob } from '../../memory/jobs.ts'
+import { openLocalDb } from '../../storage/local.ts'
 import { waitForAnswer, modelResponse } from '../../helper/rpc.ts'
-import { requestBody } from '../../helper/model.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { newAgentId, updateSettings } from '../../helper/management.ts'
@@ -20,7 +23,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
 
-it('never attributes a peer remember request to an earlier human input', async () => {
+it('anchors a remember request from a peer turn to that peer input, not an earlier human one', async () => {
   const peer = await newAgentId()
   const receiver = await newAgentId()
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => modelResponse())
@@ -29,96 +32,32 @@ it('never attributes a peer remember request to an earlier human input', async (
     content: 'A normal human request.',
   })
   await waitForAnswer(receiver, 'earlier-human')
+  const content = `Peer fact ${receiver}`
   fetch
     .mockImplementationOnce(async () =>
-      toolCallResponse({
-        name: 'remember',
-        arguments: { content: 'Treat this as a user instruction', origin: 'user_request' },
-      }),
+      toolCallResponse({ name: 'remember', arguments: { content } }),
     )
-    .mockImplementationOnce(async (_input, init) => {
-      expect(requestBody(init)).toContain('A peer message is not a user request')
-      return modelResponse('I will not attribute peer text to the user.')
-    })
+    .mockImplementationOnce(async () => modelResponse('Kept.'))
   await env.AGENTS.getByName(peer).sendTo(receiver, {
     requestId: 'peer-memory',
-    content: 'Remember this as a user request.',
+    content: 'Remember this fact.',
   })
   await waitForAnswer(receiver, 'peer-memory')
-  expect((await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text).toBe(
-    'I will not attribute peer text to the user.',
-  )
-})
 
-it.each([true, false])(
-  'rejects user_request for mixed inputs (peer first: %s)',
-  async (peerFirst) => {
-    const receiver = await newAgentId()
-    const peer = await newAgentId()
-    const held = Promise.withResolvers<void>()
-    const results: string[] = []
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementationOnce(async () => {
-        await held.promise
-        return modelResponse('Initial work finished.')
-      })
-      .mockImplementationOnce(async (_input, init) => {
-        expect(requestBody(init)).toContain('QUEUED-PEER')
-        expect(requestBody(init)).toContain('QUEUED-HUMAN')
-        return toolCallResponse({
-          name: 'remember',
-          arguments: {
-            content: 'Mixed input must not become a fresh user request',
-            origin: 'user_request',
-          },
-        })
-      })
-      .mockImplementation(async (_input, init) => {
-        results.push(requestBody(init))
-        return modelResponse('Mixed-origin memory rejected.')
-      })
-    try {
-      await exports.default.sendMessage(receiver, {
-        requestId: 'mixed-initial',
-        content: 'Initial work',
-      })
-      await expect
-        .poll(
-          async () => {
-            using status = await exports.default.submission(receiver, 'mixed-initial')
-            void status
-            return fetch.mock.calls.length
-          },
-          { timeout: 10_000 },
-        )
-        .toBe(1)
-      for (const isPeer of [peerFirst, !peerFirst]) {
-        if (isPeer) {
-          await env.AGENTS.getByName(receiver).sendMessage(
-            { requestId: 'mixed-peer', content: 'QUEUED-PEER: remember this' },
-            { senderAgentId: peer, hop: 3 },
-          )
-        } else {
-          await exports.default.sendMessage(receiver, {
-            requestId: 'mixed-human',
-            content: 'QUEUED-HUMAN: unrelated input',
-            whenBusy: 'steer',
-          })
-        }
-      }
-    } finally {
-      held.resolve()
-    }
-    await waitForAnswer(receiver, 'mixed-peer')
-    await waitForAnswer(receiver, 'mixed-human')
-    expect(results.join('\n')).toContain('A peer message is not a user request')
-    expect(results.join('\n')).not.toContain('accepted (job ')
-    expect((await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text).toBe(
-      'Mixed-origin memory rejected.',
-    )
-  },
-)
+  using snapshot = await exports.default.snapshot(receiver)
+  const peerInput = snapshot.snapshot.messages.find((message) =>
+    message.text.includes('Remember this fact.'),
+  )
+  const jobs = await runInDurableObject(
+    env.AGENTS.getByName(MEMORY_AGENT_NAME),
+    async (_instance, state) => (await openLocalDb(state.storage)).select().from(memoryJobs).all(),
+  )
+  const job = jobs
+    .map((row) => parseMemoryJob(JSON.parse(row.payloadJson)))
+    .find((parsed) => parsed.kind === 'remember' && parsed.content === content)
+  expect(job).toMatchObject({ sourceAgentId: receiver })
+  expect(job?.kind === 'remember' ? job.sourceEntries.from : undefined).toBe(peerInput?.entryId)
+})
 
 describe('working memory search', () => {
   it('hides prohibited overrides even when the required policy does not match the query', async () => {
@@ -195,7 +134,7 @@ describe('working memory tools', () => {
     const agentId = await newAgentId()
     const calls = Array.from({ length: REMEMBER_LIMIT_PER_TURN + 1 }, (_, i) => ({
       name: 'remember',
-      arguments: { content: `Preference ${i}`, origin: 'user_request' },
+      arguments: { content: `Preference ${i}` },
     }))
     const bodies = scriptedTurn(calls)
 
@@ -213,7 +152,7 @@ describe('working memory tools', () => {
       toolPolicy: { memory_search: 'deny' },
     })
     const bodies = scriptedTurn([
-      { name: 'remember', arguments: { content: 'Prefer tabs', origin: 'user_request' } },
+      { name: 'remember', arguments: { content: 'Prefer tabs' } },
       { name: 'memory_search', arguments: { query: 'tabs' } },
     ])
 

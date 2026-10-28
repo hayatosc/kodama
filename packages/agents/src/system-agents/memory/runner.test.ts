@@ -110,7 +110,7 @@ describe('remember', () => {
       if (body.includes('Remember the deploy target') && toolResults(body) === 0) {
         return toolCallResponse({
           name: 'remember',
-          arguments: { content: fact, origin: 'user_request' },
+          arguments: { content: fact },
         })
       }
       return textResponse('OK')
@@ -142,7 +142,6 @@ describe('remember', () => {
     const job = {
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content: 'Prefers short answers',
       sourceEntries: { from: 3, to: 3 },
     }
@@ -170,7 +169,6 @@ describe('remember', () => {
     const jobs = candidates.map((content) => ({
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content,
       sourceEntries: { from: 1, to: 1 },
     }))
@@ -200,7 +198,6 @@ describe('retries', () => {
     const { jobId } = await memoryAgent().enqueue({
       kind: 'remember',
       sourceAgentId: uuidv7(),
-      origin: 'agent_judgment',
       content: 'A job the model never answers',
       sourceEntries: { from: 1, to: 1 },
     })
@@ -252,7 +249,6 @@ describe('memory job recovery', () => {
     const { jobId } = await stub.enqueue({
       kind: 'remember',
       sourceAgentId,
-      origin: 'user_request',
       content,
       sourceEntries: { from: 1, to: 1 },
     })
