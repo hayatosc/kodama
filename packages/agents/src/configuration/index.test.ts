@@ -47,6 +47,7 @@ describe('agent settings schema', () => {
       budget: { dailyUsd: 5, monthlyUsd: 50, turnTokens: 200_000, onExceed: 'refuse' },
       credentials: { primary: { openai: credentialId } },
       toolPolicy: { current_time: 'allow', remember: 'deny' },
+      sharedSpaces: Array.from({ length: 8 }, (_, index) => `space-${index}`),
     }
     expect(parseInput(schema, settings)).toEqual(settings)
   })
@@ -71,6 +72,10 @@ describe('agent settings schema', () => {
       ],
       [{ ...valid, toolPolicy: { current_time: 'ask' } }, 'allow or deny'],
       [{ ...valid, labels: ['Team A'] }, 'Labels'],
+      [
+        { ...valid, sharedSpaces: Array.from({ length: 9 }, (_, index) => `space-${index}`) },
+        'sharedSpaces has at most 8 spaces',
+      ],
     ] as const) {
       expect(() => parseInput(schema, invalid)).toThrow(TypeError)
       expect(() => parseInput(schema, invalid)).toThrow(message)

@@ -43,12 +43,21 @@ export const parameterLimitedDb = drizzle(env.MEMORY_DB, {
     },
   },
 })
-/** Interleave one write after the next real record query has captured its rows. */
-export function afterNextMemoryRecordsRead(database: D1Database, write: () => Promise<void>): void {
+/**
+ * Interleave one write after a real record query has captured its rows: the next one, or the one
+ * after `skip` others.
+ */
+export function afterNextMemoryRecordsRead(
+  database: D1Database,
+  write: () => Promise<void>,
+  skip = 0,
+): void {
   const prepare = database.prepare.bind(database)
+  let remaining = skip
   const prepareSpy = vi.spyOn(database, 'prepare').mockImplementation((query) => {
     const statement = prepare(query)
     if (!query.startsWith('select ') || !query.includes('from "memory_records"')) return statement
+    if (remaining-- > 0) return statement
     prepareSpy.mockRestore()
     const bind = statement.bind.bind(statement)
     vi.spyOn(statement, 'bind').mockImplementation((...values) => {
@@ -80,7 +89,7 @@ export function context(now = Date.now()): OperationContext {
 export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): Promise<string> {
   const result = await applyOperation(db, context(), {
     type: 'write',
-    record: { origin: 'agent_judgment', observedAt: Date.now(), ...record },
+    record: { origin: 'remember', observedAt: Date.now(), ...record },
   })
   if (result.status !== 'applied') throw new Error(`write ${result.status}`)
   return result.recordId

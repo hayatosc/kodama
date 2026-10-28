@@ -5,9 +5,8 @@
  *
  * @module
  */
-import { and, eq, gte, inArray, lt, ne, notExists, or } from 'drizzle-orm'
-import { alias } from 'drizzle-orm/sqlite-core'
-import { agentScope } from './db.ts'
+import { and, eq, gte, inArray, lt } from 'drizzle-orm'
+import { effectiveForAgent } from './queries.ts'
 import type { MemoryDb, MemoryRecord } from './db.ts'
 import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
 import type { Scope } from '../../../drizzle/memory/schema.ts'
@@ -39,39 +38,6 @@ function score(record: MemoryRecord, now: number): number {
 const CANDIDATES_PER_WORD = 500
 /** One ID is one binding; D1 allows at most 100 parameters per statement. */
 const RECORDS_PER_FETCH = 100
-
-/** Resolve precedence independently of query words, before the candidate cap and ranking. */
-function effectiveForAgent(db: MemoryDb, agentId: string, scopes: readonly Scope[]) {
-  const own = agentScope(agentId)
-  const target = alias(memoryRecords, 'required_target')
-  const override = alias(memoryRecords, 'agent_override')
-  const requiredTarget = db
-    .select({ id: target.id })
-    .from(target)
-    .where(
-      and(
-        eq(target.id, memoryRecords.overrides),
-        eq(target.status, 'active'),
-        eq(target.required, true),
-        ne(target.scope, own),
-        inArray(target.scope, [...scopes]),
-      ),
-    )
-  const ownOverride = db
-    .select({ id: override.id })
-    .from(override)
-    .where(
-      and(
-        eq(override.overrides, memoryRecords.id),
-        eq(override.scope, own),
-        eq(override.status, 'active'),
-      ),
-    )
-  return or(
-    and(eq(memoryRecords.scope, own), notExists(requiredTarget)),
-    and(ne(memoryRecords.scope, own), or(eq(memoryRecords.required, true), notExists(ownOverride))),
-  )
-}
 
 /** Active records of the scopes that have `term`, or a term starting with it. */
 async function recordsWithTerm(

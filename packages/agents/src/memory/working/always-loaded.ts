@@ -30,6 +30,15 @@ function budgetLine(label: string, used: number, budget: number): string {
   return `${label} [${percent}% — ${format(used)}/${format(budget)} chars]`
 }
 
+/**
+ * The most lines a block of `budget` characters can hold: each takes at least four, `- `, one
+ * character, and its newline. A row past this many adds a line only when a longer row ahead of it
+ * was skipped, which the bound gives up for a read that stays small.
+ */
+function maxLines(budget: number): number {
+  return Math.floor(budget / 4)
+}
+
 /** Lines of `records` that fit `budget` characters, in order. */
 function fit(records: readonly MemoryRecord[], budget: number): string[] {
   const lines: string[] = []
@@ -51,6 +60,10 @@ function blockText(label: string, lines: readonly string[], budget: number): str
 /**
  * Active instructions and facts of the agent and its shared spaces, with overrides applied: an
  * agent record replaces the shared record it overrides, unless that one is required.
+ *
+ * @remarks
+ * Overrides are resolved in the query, so each block reads only as many rows as could fit its
+ * budget, however large the scopes grow.
  */
 export async function renderAlwaysLoaded(
   db: ReturnType<typeof memoryDb>,
@@ -62,19 +75,21 @@ export async function renderAlwaysLoaded(
   // Capture revisions first: a write during rendering must remain visible to the next check,
   // rather than tagging old content with a newer revision and keeping it indefinitely.
   const revisions = await memoryRevisions(db, scopes)
-  const records = await promptRecords(db, scopes)
-  const shared = records.filter((record) => record.scope !== own)
-  const sharedById = new Map(shared.map((record) => [record.id, record]))
-  const agentRecords = records.filter((record) => {
-    if (record.scope !== own) return false
-    const target = record.overrides === null ? undefined : sharedById.get(record.overrides)
-    return target?.required !== true
-  })
-  const overridden = new Set(agentRecords.map((record) => record.overrides))
+  const shared = scopes.filter((scope) => scope !== own)
+  const agentRecords = await promptRecords(
+    db,
+    agentId,
+    [own],
+    scopes,
+    maxLines(AGENT_MEMORY_BUDGET),
+  )
   const spaceOrder = (record: MemoryRecord) => scopes.indexOf(record.scope)
-  const sharedRecords = shared
-    .filter((record) => record.required || !overridden.has(record.id))
-    .sort((a, b) => spaceOrder(a) - spaceOrder(b))
+  const sharedRecords =
+    shared.length === 0
+      ? []
+      : (await promptRecords(db, agentId, shared, scopes, maxLines(SHARED_MEMORY_BUDGET))).sort(
+          (a, b) => spaceOrder(a) - spaceOrder(b),
+        )
 
   const skills = await visibleSkills(db, agentId)
   if (agentRecords.length === 0 && sharedRecords.length === 0)

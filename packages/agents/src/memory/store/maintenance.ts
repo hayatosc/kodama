@@ -5,7 +5,8 @@
  *
  * @module
  */
-import { and, count, desc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import { applyOperation } from './records.ts'
 import { termStatements } from './statements.ts'
 import type { MemoryDb, MemoryRecord } from './db.ts'
@@ -19,18 +20,37 @@ import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 /** Records one `consolidate` job reads. */
 export const CONSOLIDATION_RECORD_LIMIT = 200
-/** Scopes consolidated per day; the rest wait for their next change. */
-const SCOPES_PER_DAY = 200
+/** Scopes consolidated per day; the rest wait for a later run. */
+export const SCOPES_PER_DAY = 200
 /** Rows one maintenance step touches, to stay within one invocation's limits. */
 const BATCH_ROWS = 500
-/** Scopes with a record written or changed since `since`. */
-export async function changedScopes(db: MemoryDb, since: number): Promise<Scope[]> {
-  const rows = await db
-    .selectDistinct({ scope: memoryRecords.scope })
-    .from(memoryRecords)
-    .where(gte(memoryRecords.updatedAt, since))
-    .limit(SCOPES_PER_DAY)
-  return rows.map((row) => row.scope)
+/**
+ * Up to `limit` scopes with a record written or changed since `since`, in scope order, starting
+ * after `after` and wrapping around to the first.
+ *
+ * @remarks
+ * The caller passes the last scope of the previous run as `after`, so when more than `limit`
+ * scopes change every day, each run continues where the last one stopped instead of taking the
+ * same scopes again.
+ */
+export async function changedScopes(
+  db: MemoryDb,
+  since: number,
+  after: Scope | undefined,
+  limit = SCOPES_PER_DAY,
+): Promise<Scope[]> {
+  const page = (bound: SQL | undefined, size: number) =>
+    db
+      .selectDistinct({ scope: memoryRecords.scope })
+      .from(memoryRecords)
+      .where(and(gte(memoryRecords.updatedAt, since), bound))
+      .orderBy(asc(memoryRecords.scope))
+      .limit(size)
+  if (after === undefined) return (await page(undefined, limit)).map((row) => row.scope)
+  const rest = await page(gt(memoryRecords.scope, after), limit)
+  const wrapped =
+    rest.length === limit ? [] : await page(lte(memoryRecords.scope, after), limit - rest.length)
+  return [...rest, ...wrapped].map((row) => row.scope)
 }
 
 /** Active records of a scope for a `consolidate` job, most used first within each kind. */

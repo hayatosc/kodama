@@ -1,6 +1,5 @@
 /**
- * Archived ranges of entries in R2: building and exporting a segment, its search index, and its
- * summary.
+ * Archived ranges of entries in R2: building and exporting a segment and its search index.
  *
  * @see docs/memory.md — Pruning, Archive index
  *
@@ -204,14 +203,4 @@ export async function exportSegment(
   if (stored?.size !== files.manifest.bytes || index === null || manifest === null) {
     throw new Error(`Archive export of ${prefix} could not be verified`)
   }
-}
-
-/** Store a segment's summary and its search words, written by a `record_archive` job. */
-export async function writeSummary(
-  bucket: R2Bucket,
-  prefix: string,
-  summary: string,
-): Promise<void> {
-  const words = [...new Set(storedSearchText(summary).split(' '))].filter((word) => word.length > 0)
-  await bucket.put(`${prefix}.summary.json`, JSON.stringify({ summary, words }))
 }

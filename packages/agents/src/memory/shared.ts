@@ -48,11 +48,18 @@ export interface SharedWrite {
 /**
  * Why a write may not change the space, or undefined when it may. Bringing a record into a space
  * needs active records of two agents; reorganizing a space needs sources that are all its own
- * active records. A required record needs two agents, or sources that are already required.
+ * active records, in a consolidate job of that space. A required record needs two agents, or
+ * sources that are already required.
+ *
+ * @remarks
+ * Reorganizing is limited to the space's own job because its content is not bound to its sources:
+ * a job of one agent's scope, which reads that agent's records, could otherwise cite any record of
+ * the space and write what that agent alone wants.
  */
 async function rejection(
   db: MemoryDb,
   scope: Scope,
+  jobScope: Scope,
   write: SharedWrite,
 ): Promise<string | undefined> {
   if (write.sourceIds.length === 0) return 'cite the records the write rests on'
@@ -60,9 +67,9 @@ async function rejection(
   if (sources.length !== new Set(write.sourceIds).size)
     return 'every source must be an active record'
   const agents = new Set(sources.filter((r) => r.scope.startsWith('agent:')).map((r) => r.scope))
-  const reorganizes = sources.every((record) => record.scope === scope)
+  const reorganizes = jobScope === scope && sources.every((record) => record.scope === scope)
   if (agents.size < MIN_SOURCE_AGENTS && !reorganizes) {
-    return `a shared record needs records of ${MIN_SOURCE_AGENTS} agents, or only records of ${scope}`
+    return `a shared record needs records of ${MIN_SOURCE_AGENTS} agents, or only records of ${scope} in its own consolidate job`
   }
   if (write.required === true && agents.size < MIN_SOURCE_AGENTS) {
     if (!sources.every((record) => record.required)) {
@@ -75,6 +82,7 @@ async function rejection(
 /**
  * Check a shared write and apply it as one operation.
  *
+ * @param jobScope - The scope of the consolidate job that writes.
  * @returns `rejected` with the reason when a check fails; the write then changes nothing but the
  * ledger.
  * @throws {@link TypeError} When the space name is invalid.
@@ -83,10 +91,11 @@ export async function writeShared(
   db: MemoryDb,
   context: OperationContext,
   input: SharedWrite,
+  jobScope: Scope,
 ): Promise<(OperationResult & { replayed: boolean }) | { status: 'rejected'; reason: string }> {
   const scope = sharedScope(input.space)
   const write = { ...input, content: input.content.trim() }
-  const reason = await rejection(db, scope, write)
+  const reason = await rejection(db, scope, jobScope, write)
   if (reason !== undefined) {
     await recordSharedRejection(db, context, scope, write.content, reason)
     return { status: 'rejected', reason }

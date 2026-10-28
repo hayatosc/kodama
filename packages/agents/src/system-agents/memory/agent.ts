@@ -22,7 +22,7 @@ import { appliedSettings } from '../../runtime/config-apply.ts'
 import { toolGuardExtension } from '../../runtime/restrictions.ts'
 import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
 import { jobStatus, runningJob } from '../../storage/memory-jobs.ts'
-import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS } from './runner.ts'
+import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS, stopOverdueJob } from './runner.ts'
 import type { MemoryAgentContext } from './runner.ts'
 
 /**
@@ -89,10 +89,14 @@ export class MemoryAgent extends Agent {
   /** Nothing to do: it extracts nothing, and the drain prunes between jobs. */
   protected override async onIdle(): Promise<void> {}
 
-  /** Resume the drain; while a job runs, keep waking so it resumes after an eviction. */
+  /**
+   * Resume the drain; while a job runs, keep waking so it resumes after an eviction, and stop an
+   * attempt that has run past its time limit.
+   */
   protected override async onAlarm(purpose: AlarmPurpose): Promise<void> {
     if (purpose === 'jobs' && this.#jobs.running()) {
       await setAlarm(this.ctx.storage, 'jobs', Date.now() + HEARTBEAT_MS)
+      await stopOverdueJob(this.#context(), Date.now())
     }
     // Pruning closes the harness, so the drain runs it between jobs.
     this.#jobs.start()

@@ -6,7 +6,7 @@
  * @module
  */
 import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
-import { planArchiveSummary, planCheckpoint, planDecline } from './progress-plans.ts'
+import { planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'
 import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { errorText } from '../../lib/errors.ts'
@@ -50,8 +50,6 @@ export type Operation =
   | { type: 'decline'; candidate: string; reason: string }
   /** Record that extraction has covered an agent's entries through `lastEntryId`. */
   | { type: 'checkpoint'; agentId: string; lastEntryId: number }
-  /** Record that the summary of an archived segment is in R2. */
-  | { type: 'archive_summary'; segmentId: string }
 
 async function plan(db: MemoryDb, context: OperationContext, op: Operation): Promise<Plan> {
   switch (op.type) {
@@ -63,8 +61,6 @@ async function plan(db: MemoryDb, context: OperationContext, op: Operation): Pro
       return planInvalidate(db, context, op)
     case 'checkpoint':
       return planCheckpoint(db, context, op)
-    case 'archive_summary':
-      return planArchiveSummary(db, context, op)
     case 'decline':
       return planDecline(db, context, op)
   }

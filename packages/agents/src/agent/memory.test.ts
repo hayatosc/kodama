@@ -192,7 +192,7 @@ describe('always-loaded memory', () => {
             scope: `agent:${agentId}`,
             kind: 'instruction',
             content: 'Answer in Japanese',
-            origin: 'user_request',
+            origin: 'remember',
             sourceAgentId: agentId,
             sourceEntries: { from: 1, to: 1 },
             observedAt: clock,

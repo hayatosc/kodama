@@ -8,7 +8,7 @@ import { searchHistory } from '../archive/history.ts'
 import { applyOperation } from '../store/records.ts'
 import type { NewRecord } from '../store/records.ts'
 import type { ToolCall } from '../../helper/model.ts'
-import { toolCallResponse } from '../../helper/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import { PRUNE_LIMITS_KEY } from './runs.ts'
 import { prunedThrough } from '../../storage/pruning.ts'
 import { memoryDb } from '../store/db.ts'
@@ -28,7 +28,7 @@ import {
 } from '../../helper/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../helper/management.ts'
+import { newAgentId, updateSettings } from '../../helper/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())
@@ -85,15 +85,42 @@ describe('pruning', () => {
     const sizeAfter = await runInDurableObject(stub, (_i, state) => state.storage.sql.databaseSize)
     expect(sizeAfter).toBeLessThanOrEqual(sizeBefore)
 
-    // The memory agent got the archived range to summarize.
+    // The memory agent gets the range only to extract from; nothing summarizes the archive.
     const jobs = await runInDurableObject(
       env.AGENTS.getByName(MEMORY_AGENT_NAME),
       async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return local.select({ kind: memoryJobs.kind }).from(memoryJobs).all()
+        return local.select().from(memoryJobs).all()
       },
     )
-    expect(jobs.map((job) => job.kind)).toContain('record_archive')
+    expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
+      'extract',
+    ])
+  })
+
+  it('hands pruned entries to extraction only while the memory policy extracts', async () => {
+    const jobsOf = (agentId: string) =>
+      runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), async (_i, state) => {
+        const local = await openLocalDb(state.storage)
+        return local
+          .select({ kind: memoryJobs.kind, payloadJson: memoryJobs.payloadJson })
+          .from(memoryJobs)
+          .all()
+          .filter((job) => job.payloadJson.includes(agentId))
+          .map((job) => job.kind)
+      })
+    const [extracting, private_] = [await newAgentId(), await newAgentId()]
+    await updateSettings(private_, { memoryPolicy: { extract: false, remember: true } })
+    for (const agentId of [extracting, private_]) {
+      // Each conversation counts its own turns towards compaction.
+      mockModel({ usage: COMPACT_AFTER_TURN_7 })
+      await compactedAgent(agentId, `quokka${agentId.slice(0, 6)}`)
+      expect(await env.AGENTS.getByName(agentId).prune({ force: true })).toBe('pruned')
+    }
+
+    expect(await jobsOf(extracting)).toContain('extract')
+    // Nothing else reads the archived entries, so the memory agent never sees them.
+    expect(await jobsOf(private_)).toEqual([])
   })
 
   it('defers the delete while a background compaction runs, then finishes it', async () => {
@@ -174,15 +201,19 @@ describe('pruning', () => {
     await compactedAgent(agentId, 'scheduled')
     const head = (await headOf(agentId)) ?? 0
 
-    await expect
-      .poll(() => runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune')))
-      .toBeDefined()
-    await runInDurableObject(stub, (_i, state) =>
-      state.storage.put('kodama:alarm:prune', Date.now() - 1),
-    )
-    await runDurableObjectAlarm(stub)
+    const alarm = () =>
+      runInDurableObject(stub, (_i, state) => state.storage.get('kodama:alarm:prune'))
+    const pruned = async () => (await storedEntryIds(agentId)).every((id) => id >= head)
+    // The alarm is due at once, so the platform may already have run it.
+    await expect.poll(async () => (await alarm()) !== undefined || (await pruned())).toBe(true)
+    if ((await alarm()) !== undefined) {
+      await runInDurableObject(stub, (_i, state) =>
+        state.storage.put('kodama:alarm:prune', Date.now() - 1),
+      )
+      await runDurableObjectAlarm(stub)
+    }
 
-    expect((await storedEntryIds(agentId)).every((id) => id >= head)).toBe(true)
+    await expect.poll(pruned).toBe(true)
   })
 
   it('refuses input above the hard limit with a retryable error', async () => {
@@ -224,7 +255,6 @@ describe('memory agent pruning', () => {
         const status = await stub.enqueue({
           kind: 'remember',
           sourceAgentId: uuidv7(),
-          origin: 'agent_judgment',
           content,
           sourceEntries: { from: 1, to: 1 },
         })
@@ -248,6 +278,58 @@ describe('memory agent pruning', () => {
       expect(segments).toEqual([])
     } finally {
       await runInDurableObject(stub, (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))
+    }
+  })
+
+  it('prunes between jobs while the queue never empties', async () => {
+    // A fresh stub per call: continuations after the model's promises run in another context.
+    const stub = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
+    const pruned = () =>
+      runInDurableObject(stub(), async (_i, state) =>
+        prunedThrough(await openLocalDb(state.storage)),
+      )
+    const job = (content: string) =>
+      stub().enqueue({
+        kind: 'remember',
+        sourceAgentId: uuidv7(),
+        content,
+        sourceEntries: { from: 1, to: 1 },
+      })
+    const status = (jobId: string) => async () => (await stub().jobStatus(jobId))?.status
+    const releaseHeld = Promise.withResolvers<void>()
+    const nextStarted = Promise.withResolvers<void>()
+    const releaseNext = Promise.withResolvers<void>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = requestBody(init)
+      if (body.includes('held-job') && toolResults(body) === 0) await releaseHeld.promise
+      if (body.includes('next-job') && toolResults(body) === 0) {
+        nextStarted.resolve()
+        await releaseNext.promise
+      }
+      return textResponse('Done.')
+    })
+    await runInDurableObject(stub(), (_i, state) =>
+      state.storage.put(PRUNE_LIMITS_KEY, { thresholdBytes: 0 }),
+    )
+    try {
+      // Leave entries of a finished job behind, then keep the queue busy.
+      const warmUp = await job('warm-up-job')
+      await expect.poll(status(warmUp.jobId), { timeout: 10_000 }).toBe('settled')
+      const before = await pruned()
+      const held = await job('held-job')
+      const next = await job('next-job')
+      releaseHeld.resolve()
+      await nextStarted.promise
+
+      // The next job is running, so the queue never emptied; pruning ran in between anyway.
+      expect(await stub().jobStatus(held.jobId)).toMatchObject({ status: 'settled' })
+      expect(await pruned()).toBeGreaterThan(before)
+      releaseNext.resolve()
+      await expect.poll(status(next.jobId), { timeout: 10_000 }).toBe('settled')
+    } finally {
+      releaseHeld.resolve()
+      releaseNext.resolve()
+      await runInDurableObject(stub(), (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))
     }
   })
 })

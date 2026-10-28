@@ -56,7 +56,8 @@ export async function prepare(
   const { first, last } = range
   const now = deps.now?.() ?? Date.now()
   const run = createRun(local, first, last, head, now)
-  if (deps.archive) {
+  // Extraction is off for some agents; pruning must not hand their entries over behind its back.
+  if (deps.archive && (await deps.extracts())) {
     const checkpoint = await extractionCheckpoint(memoryDb(deps.env.MEMORY_DB), deps.agentId())
     if (checkpoint < last) {
       await enqueueQuietly(deps, {
@@ -101,7 +102,7 @@ export async function exportRun(
 }
 
 /**
- * Insert the segment's catalog row, read it back, record `indexed`, and queue its summary job.
+ * Insert the segment's catalog row, read it back, and record `indexed`.
  *
  * @throws When the catalog row cannot be read back.
  */
@@ -127,7 +128,5 @@ export async function catalog(
     lastAt: run.lastAt ?? now,
     createdAt: now,
   })
-  const indexed = setState(local, run, { state: 'indexed' }, now)
-  await enqueueQuietly(deps, { kind: 'record_archive', sourceAgentId: agentId, segmentId: id })
-  return indexed
+  return setState(local, run, { state: 'indexed' }, now)
 }

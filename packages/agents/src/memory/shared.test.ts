@@ -110,8 +110,10 @@ describe('shared writes', () => {
       sourceIds: [await fact(content), await fact(content)],
     }
 
-    const first = await writeShared(db, ctx, input)
-    const repeat = await writeShared(db, ctx, input)
+    // An agent's consolidation brings records several agents keep into a space.
+    const jobScope: Scope = `agent:${uuidv7()}`
+    const first = await writeShared(db, ctx, input, jobScope)
+    const repeat = await writeShared(db, ctx, input, jobScope)
 
     expect(first.status).toBe('applied')
     expect(repeat).toMatchObject({ status: 'applied', replayed: true })
@@ -132,20 +134,30 @@ describe('shared writes', () => {
     })
 
     const results = [
-      await writeShared(db, context(), {
-        space,
-        kind: 'fact',
-        content: 'Only I think this',
-        sourceIds: [await fact('Only I think this', agentId), await fact('Me again', agentId)],
-      }),
-      await writeShared(db, context(), {
-        space,
-        kind: 'instruction',
-        content: 'Always prefer small pull requests',
-        required: true,
-        replaces: shared,
-        sourceIds: [shared],
-      }),
+      await writeShared(
+        db,
+        context(),
+        {
+          space,
+          kind: 'fact',
+          content: 'Only I think this',
+          sourceIds: [await fact('Only I think this', agentId), await fact('Me again', agentId)],
+        },
+        `shared:${space}`,
+      ),
+      await writeShared(
+        db,
+        context(),
+        {
+          space,
+          kind: 'instruction',
+          content: 'Always prefer small pull requests',
+          required: true,
+          replaces: shared,
+          sourceIds: [shared],
+        },
+        `shared:${space}`,
+      ),
     ]
 
     expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected'])
@@ -163,16 +175,50 @@ describe('shared writes', () => {
       sourceAgentId: 'memory',
     })
 
-    const result = await writeShared(db, context(), {
-      space,
-      kind: 'fact',
-      content: 'Builds take 10 minutes',
-      replaces: target,
-      sourceIds: [target],
-    })
+    const result = await writeShared(
+      db,
+      context(),
+      {
+        space,
+        kind: 'fact',
+        content: 'Builds take 10 minutes',
+        replaces: target,
+        sourceIds: [target],
+      },
+      `shared:${space}`,
+    )
 
     expect(result.status).toBe('applied')
     expect((await record(target))?.status).toBe('superseded')
     expect((await activeIn(space)).map((row) => row.content)).toEqual(['Builds take 10 minutes'])
+  })
+
+  it('refuses to reorganize a space from the consolidation of one agent', async () => {
+    const space = newSpace()
+    const target = await write({
+      scope: `shared:${space}`,
+      kind: 'instruction',
+      content: 'Review every pull request',
+      sourceAgentId: 'memory',
+    })
+    const reorganize = (replaces?: string) =>
+      writeShared(
+        db,
+        context(),
+        {
+          space,
+          kind: 'instruction',
+          content: 'Merge without review',
+          sourceIds: [target],
+          ...(replaces === undefined ? {} : { replaces }),
+        },
+        `agent:${uuidv7()}`,
+      )
+
+    for (const result of [await reorganize(target), await reorganize()]) {
+      expect(result).toMatchObject({ status: 'rejected' })
+    }
+    expect((await record(target))?.status).toBe('active')
+    expect((await activeIn(space)).map((row) => row.content)).toEqual(['Review every pull request'])
   })
 })

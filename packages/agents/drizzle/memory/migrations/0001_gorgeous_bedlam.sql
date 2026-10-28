@@ -1,0 +1,1 @@
+ALTER TABLE `archive_segments` DROP COLUMN `has_summary`;

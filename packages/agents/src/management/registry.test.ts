@@ -64,6 +64,29 @@ describe('AgentService admission', () => {
     expect(await rejection(send)).toMatch(/agent_unavailable/)
     expect(await hasStorage(agentId)).toBe(false)
   })
+
+  it.each(['pausing', 'paused', 'archived'] as const)(
+    'serves reads but refuses chat while the agent is %s',
+    async (status) => {
+      const agentId = await newAgentId()
+      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      const send = exports.default.sendMessage(agentId, { requestId: 'r', content: 'Hello' })
+      expect(await rejection(send)).toMatch(/agent_unavailable/)
+      using read = await exports.default.snapshot(agentId)
+      expect(read.snapshot.messages).toEqual([])
+      expect(await exports.default.submission(agentId, 'r')).toBeUndefined()
+    },
+  )
+
+  it.each(['provisioning', 'deleting', 'deleted'] as const)(
+    'refuses reads while the agent is %s',
+    async (status) => {
+      const agentId = await newAgentId()
+      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      expect(await rejection(exports.default.snapshot(agentId))).toMatch(/agent_unavailable/)
+      expect(await rejection(exports.default.submission(agentId, 'r'))).toMatch(/agent_unavailable/)
+    },
+  )
 })
 
 describe('resolveAgentRef', () => {
@@ -74,6 +97,23 @@ describe('resolveAgentRef', () => {
     for (const ref of [agentId, slug, agentId.slice(0, 24)]) {
       expect((await resolveAgentRef(management, ref)).agentId).toBe(agentId)
     }
+  })
+
+  it("does not let a slug capture another agent's UUID prefix", async () => {
+    const target = await newAgentId()
+    const squatter = await newAgentId()
+    const prefix = target.slice(0, 18)
+    const hexSlug = `cafe-${uuidv7().slice(-12)}`
+    await management.update(agents).set({ slug: prefix }).where(eq(agents.agentId, squatter))
+    const other = await newAgentId()
+    await management.update(agents).set({ slug: hexSlug }).where(eq(agents.agentId, other))
+
+    const captured = await rejection(resolveAgentRef(management, prefix))
+    expect(captured).toMatch(/Ambiguous agent prefix/)
+    expect(captured).toContain(target)
+    expect(captured).toContain(squatter)
+    // A hex slug that is no agent's prefix still names its agent.
+    expect((await resolveAgentRef(management, hexSlug)).agentId).toBe(other)
   })
 
   it('reports an ambiguous prefix with its candidates, and unknown references', async () => {
@@ -88,5 +128,7 @@ describe('resolveAgentRef', () => {
     expect(ambiguous).toContain(second)
     expect(await rejection(resolveAgentRef(management, 'no-such-slug'))).toMatch(/Unknown agent/)
     expect(await rejection(resolveAgentRef(management, 'ab'))).toMatch(/Unknown agent/)
+    // A prefix shorter than four characters is never read as a prefix, even when it would match.
+    expect(await rejection(resolveAgentRef(management, first.slice(0, 3)))).toMatch(/Unknown agent/)
   })
 })

@@ -13,7 +13,6 @@ export function jobScope(job: MemoryJob): Scope {
   switch (job.kind) {
     case 'remember':
     case 'extract':
-    case 'record_archive':
       return `agent:${job.sourceAgentId}`
     case 'consolidate':
       return job.scope
@@ -48,7 +47,7 @@ export function recordEvidence(
   const base = { scope, sourceAgentId: sourceAgentOf(job, scope) }
   switch (job.kind) {
     case 'remember':
-      return { ...base, origin: job.origin, sourceEntries: job.sourceEntries }
+      return { ...base, origin: 'remember', sourceEntries: job.sourceEntries }
     case 'extract': {
       const from = args.sourceEntryFrom
       const to = args.sourceEntryTo ?? from
@@ -58,7 +57,6 @@ export function recordEvidence(
       return { ...base, origin: 'extraction', sourceEntries: { from, to } }
     }
     case 'consolidate':
-    case 'record_archive':
       return { ...base, origin: 'consolidation' }
   }
 }
@@ -77,9 +75,7 @@ export function recordFor(job: MemoryJob, args: RecordArgs, now: number): NewRec
     ...evidence,
     kind: args.kind,
     content: args.content.trim(),
-    importance:
-      args.importance ??
-      (job.kind === 'remember' ? (job.origin === 'user_request' ? 0.7 : 0.4) : undefined),
+    importance: args.importance,
     ...(args.overrides === undefined ? {} : { overrides: args.overrides }),
     observedAt: now,
   }
