@@ -1,5 +1,6 @@
 /** Lease-guarded refresh health and safe failure audit, independent of secret persistence. @module */
-import { and, eq, gt, sql } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
+import { increment, literal } from '../lib/sql.ts'
 import { auditLog, credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import { REFRESH_REJECTED } from './refresh.ts'
@@ -43,20 +44,18 @@ export async function recordRefreshFailure(
     db.insert(auditLog).select(
       db
         .select({
-          seq: sql<null>`${null}`.as('seq'),
-          opId: sql<string>`${leaseId}`.as('op_id'),
-          at: sql<number>`${at}`.as('at'),
-          actorId: sql<null>`${null}`.as('actor_id'),
-          action:
-            sql<string>`${failure === 'rejected' ? 'credential.needs_reauth' : 'credential.refresh.failed'}`.as(
-              'action',
-            ),
-          targetKind: sql<'system'>`${'system'}`.as('target_kind'),
+          seq: literal(null).as('seq'),
+          opId: literal(leaseId).as('op_id'),
+          at: literal(at).as('at'),
+          actorId: literal(null).as('actor_id'),
+          action: literal(
+            failure === 'rejected' ? 'credential.needs_reauth' : 'credential.refresh.failed',
+          ).as('action'),
+          targetKind: literal('system').as('target_kind'),
           targetId: credentials.credentialId,
-          detailJson:
-            sql<string>`${JSON.stringify({ kind: leased.kind, provider: leased.provider, category: failure })}`.as(
-              'detail_json',
-            ),
+          detailJson: literal(
+            JSON.stringify({ kind: leased.kind, provider: leased.provider, category: failure }),
+          ).as('detail_json'),
         })
         .from(credentials)
         .where(held),
@@ -65,7 +64,7 @@ export async function recordRefreshFailure(
       .update(credentials)
       .set({
         ...(failure === 'rejected' ? { status: 'needs_reauth' as const } : {}),
-        refreshFailures: sql`${credentials.refreshFailures} + 1`,
+        refreshFailures: increment(credentials.refreshFailures, 1),
         lastRefreshFailureAt: at,
         lastRefreshFailureCategory: failure,
       })

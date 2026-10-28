@@ -156,7 +156,7 @@ it.each([
 })
 
 it.each([
-  ['a non-JSON body', 'do-not-expose', 'credential_unavailable: OAuth refresh request failed'],
+  ['a non-JSON body', 'do-not-expose', 'credential_unavailable: invalid OAuth refresh response'],
   [
     'an infinite expires_in',
     '{"access_token":"a","token_type":"Bearer","expires_in":1e400}',
