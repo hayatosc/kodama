@@ -50,7 +50,7 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     fingerprint: row.fingerprint,
     last4: row.last4,
     createdAt: row.createdAt,
-    // Preserve the outward shape; usage timestamps were never recorded.
+    // Latest observed selection start from ingestion, not proof of an accepted or billed call.
     lastUsedAt: row.lastUsedAt,
   }
 }
