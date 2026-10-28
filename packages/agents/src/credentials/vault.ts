@@ -13,14 +13,14 @@ import type { CredentialIdentity } from './encryption.ts'
 
 const oauthSchema = v.looseObject({
   type: v.literal('oauth'),
-  // RFC 6749 §5.1 leaves token sizes undefined; Pi requires nonblank opaque strings.
+  // Owner policy: opaque tokens contain at least eight non-padding characters.
   access: v.pipe(
     v.string(),
-    v.check((value) => value.trim().length > 0),
+    v.check((value) => value.trim().length >= 8),
   ),
   refresh: v.pipe(
     v.string(),
-    v.check((value) => value.trim().length > 0),
+    v.check((value) => value.trim().length >= 8),
   ),
   expires: v.pipe(v.number(), v.finite()),
 })
@@ -52,6 +52,11 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     createdAt: row.createdAt,
     // Latest observed selection start from ingestion, not proof of an accepted or billed call.
     lastUsedAt: row.lastUsedAt,
+    expiresAt: row.expiresAt,
+    lastRefreshedAt: row.lastRefreshedAt,
+    refreshFailures: row.refreshFailures,
+    lastRefreshFailureAt: row.lastRefreshFailureAt,
+    lastRefreshFailureCategory: row.lastRefreshFailureCategory,
   }
 }
 
@@ -77,6 +82,7 @@ export async function credentialInsert(
         fingerprint: await credentialFingerprint(secret, kek),
         last4: token.length >= 16 ? token.slice(-4) : '',
         createdAt: now,
+        expiresAt: value.type === 'oauth' ? value.expires : null,
       })
       .returning(),
   }

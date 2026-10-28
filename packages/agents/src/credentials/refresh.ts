@@ -9,7 +9,7 @@ import * as v from 'valibot'
 
 const tokenString = v.pipe(
   v.string(),
-  v.check((value) => value.trim().length > 0),
+  v.check((value) => value.trim().length >= 8),
 )
 const tokenSchema = v.object({
   access_token: tokenString,

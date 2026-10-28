@@ -5,16 +5,16 @@
  * @module
  */
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm'
-import { literal } from '../lib/sql.ts'
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai'
-import { credentials, credentialGrants, auditLog } from '../../drizzle/management/schema.ts'
+import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../management/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { auditStatement } from '../management/audit.ts'
 import { parseCredential } from './vault.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
-import { REFRESH_REJECTED, refreshChatGPT, refreshDue } from './refresh.ts'
+import { refreshChatGPT, refreshDue } from './refresh.ts'
+import { recordRefreshFailure } from './health.ts'
 
 const LEASE_MS = 30_000
 
@@ -180,9 +180,11 @@ export function createCredentialStore(
         const leaseId = uuidv7()
         const leased = await acquire(provider, id, leaseId, options?.signal)
         observe({ credentialId: leased.credentialId, kind: leased.kind })
+        let refreshing = false
         try {
           options?.signal?.throwIfAborted()
           const current = await plaintext(leased)
+          refreshing = leased.kind === 'oauth_subscription'
           const next = await fn(current)
           if (next === undefined) return current
           options?.signal?.throwIfAborted()
@@ -191,6 +193,7 @@ export function createCredentialStore(
           const secret = next.type === 'api_key' ? next.key : JSON.stringify(next)
           if (!secret) throw new Error('credential_unavailable: empty credential')
           const value = parseCredential(leased.kind, secret)
+          refreshing = false
           const fingerprint = await credentialFingerprint(secret, kek())
           const token = value.type === 'api_key' ? value.key : value.access
           const revision = leased.revision + 1
@@ -205,6 +208,13 @@ export function createCredentialStore(
                 revision,
                 fingerprint,
                 last4: token.length >= 16 ? token.slice(-4) : '',
+                ...(value.type === 'oauth'
+                  ? {
+                      expiresAt: value.expires,
+                      lastRefreshedAt: now(),
+                      refreshFailures: 0,
+                    }
+                  : {}),
               })
               .where(
                 and(
@@ -232,38 +242,9 @@ export function createCredentialStore(
           return next
         } catch (error) {
           invalidate()
-          if (error instanceof Error && error.message === REFRESH_REJECTED) {
-            const at = now()
-            const held = and(
-              eq(credentials.credentialId, id),
-              eq(credentials.leaseId, leaseId),
-              eq(credentials.revision, leased.revision),
-              eq(credentials.status, 'active'),
-              gt(credentials.leaseExpiresAt, at),
-            )
-            const [, updated] = await db.batch([
-              // Audit only a transition this live lease can perform, in the same transaction.
-              db.insert(auditLog).select(
-                db
-                  .select({
-                    seq: literal(null).as('seq'),
-                    opId: literal(leaseId).as('op_id'),
-                    at: literal(at).as('at'),
-                    actorId: literal(null).as('actor_id'),
-                    action: literal('credential.needs_reauth').as('action'),
-                    targetKind: literal('system').as('target_kind'),
-                    targetId: credentials.credentialId,
-                    detailJson: literal(JSON.stringify({ kind: leased.kind, provider })).as(
-                      'detail_json',
-                    ),
-                  })
-                  .from(credentials)
-                  .where(held),
-              ),
-              db.update(credentials).set({ status: 'needs_reauth' }).where(held).returning(),
-            ])
-            const row = updated[0]
-            if (row) throw await unavailable(provider, row)
+          if (refreshing && !options?.signal?.aborted) {
+            const row = await recordRefreshFailure(db, leased, leaseId, now(), error)
+            if (row?.status === 'needs_reauth') throw await unavailable(provider, row)
           }
           throw new Error('credential_unavailable: credential modification failed')
         } finally {

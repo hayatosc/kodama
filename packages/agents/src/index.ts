@@ -31,8 +31,9 @@ import type {
 import { reconcileAgents } from './management/service/reconcile.ts'
 import { aggregateUsage } from './management/service/usage.ts'
 import { readUsage } from './management/usage.ts'
-import { UsageQuerySchema } from './validation.ts'
-import type { UsageQuery } from './protocol.ts'
+import { UsageQuerySchema, AuditQuerySchema } from './validation.ts'
+import type { UsageQuery, AuditQuery } from './protocol.ts'
+import { readAudit } from './management/audit.ts'
 import { managementDb } from './management/db.ts'
 import type { AgentUse } from './management/lifecycle.ts'
 import { admitAgent } from './management/registry.ts'
@@ -142,6 +143,12 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     const call = this.#systemCall()
     const principal = await principalOf(call.db, parseManagementActor(actor), call.now)
     return { ...call, principal }
+  }
+
+  /** Read retained management events without exposing credential envelopes or appending read events. */
+  async audit(actor: ManagementActor, request: AuditQuery) {
+    const call = await this.#call(actor)
+    return readAudit(call.db, parseInput(AuditQuerySchema, request))
   }
 
   /** Catalog-priced usage, with subscription references and incomplete measurements separated. */

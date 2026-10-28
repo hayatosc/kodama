@@ -7,8 +7,9 @@ contain metadata, fingerprints and last four characters only. Never paste secret
 configuration, shell argument or log. There is no public management HTTP endpoint.
 
 Ownership is stored only as `owner_id`: NULL means installation, otherwise principal. Both outward
-`ownerScope` and encryption AAD derive that scope from the ID. Usage timestamps are not tracked;
-metadata retains `lastUsedAt: null`. Coverage reference versions come from the agent's current
+`ownerScope` and encryption AAD derive that scope from the ID. `lastUsedAt` is the latest start time
+of a credential-associated outer model invocation, updated by daily usage ingestion; null means
+none has been aggregated. It is not an exact per-HTTP-dispatch timestamp. Coverage reference versions come from the agent's current
 version, not a second stored copy in the reverse index.
 
 The schemas do not duplicate application invariants as SQL CHECK constraints. Primary keys,
@@ -22,7 +23,7 @@ not CHECK constraints, enforce concurrency control.
 Register credentials with `putCredential`, grant access with `grantCredential`, and select them with
 `assignCredential` through a trusted private service binding. API keys and OAuth subscriptions use
 the same encrypted storage and metadata-only results. OAuth access and refresh tokens are opaque,
-nonblank strings; their lengths are not assumed. Metadata includes a last-four suffix only for tokens
+strings with at least eight non-padding characters, an application policy rather than an RFC token-size rule. Metadata includes a last-four suffix only for tokens
 with at least sixteen characters. The local CLI implements OAuth login through Pi; the credential
 runtime refreshes ChatGPT tokens under D1-backed leases. There is no credential rotation RPC or
 automatic reassignment workflow.
@@ -56,7 +57,7 @@ Refresh uses a form-encoded POST to `https://auth.openai.com/api/accounts/oauth/
 `resource=https://api.openai.com/v1`. The resource field comes from Pi's endpoint-specific contract,
 not RFC 6749 alone. No client secret, Authorization header, guessed client ID, or scope is sent.
 
-A successful HTTP 200 response must contain a nonblank `access_token`, case-insensitive Bearer
+A successful HTTP 200 response must contain an `access_token` meeting the eight-character minimum, case-insensitive Bearer
 `token_type`, and positive finite `expires_in`. Expiry is required by this endpoint's documented
 contract and Pi, although RFC 6749 only recommends the field. A returned `refresh_token` replaces
 the old one; an omitted refresh token or unchanged scope retains its stored value, as allowed by
@@ -77,6 +78,40 @@ Terminal failures atomically set `needs_reauth` and append `credential.needs_rea
 live lease. Subsequent reads do not contact the token endpoint. The error carries structured
 `code`, `status`, `provider`, `credentialId`, and `agentId` facts; command guidance belongs outside
 the runtime. Client/request configuration errors require repair, not merely another login.
+
+## Usage, audit and credential health
+
+`AgentService.usage(actor, query)` reads daily catalog-priced USD, keeping pay-as-you-go cost separate
+from subscription API-equivalent reference amounts. Unknown/partial measurements and daily freshness
+are explicit; these are not provider invoices. See [Usage accounting](usage.md).
+
+`AgentService.audit(actor, { targetId?, before?, limit? })` lists management events newest first.
+`before` is an exclusive sequence cursor, default page size is 50, maximum 200. A returned
+`nextCursor` continues the same target filter; null ends the current page sequence. Audit reads use
+the same active registered-caller contract as other management methods, not per-owner ACLs, and do
+not append audit events. Human/agent actions carry a principal ID; system actions carry null.
+Registration, grant, assignment/unassignment, revocation and configuration events retain their
+existing metadata-only detail. `credential.modify.attempt` denotes an attempted modification, not
+proof that its refresh committed. No rotation/KEK-replacement events exist.
+
+Credential summaries return health from D1 metadata only, without decrypting envelopes:
+
+- `expiresAt`: effective OAuth expiry (including Pi's safety margin on refresh), null for API keys.
+- `lastRefreshedAt`: most recent successful refresh CAS, not a refresh attempt; null before any success.
+- `refreshFailures`: consecutive failed refreshes; a committed success resets it to zero.
+- `lastRefreshFailureAt` and `lastRefreshFailureCategory`: latest failure history, retained after a
+  later success. Categories are `rejected`, `transient`, `malformed`, or `failed`; never remote bodies.
+- `status`: stored `active`, `revoked` or `needs_reauth`; active is not a claim that OAuth expiry is future.
+
+Refresh health and failure audit commit together under the live lease/revision. Terminal rejection
+uses one `credential.needs_reauth` event and one failure increment; other failed refreshes use
+`credential.refresh.failed`. Canceled, stale, expired-lease or revoked writers cannot overwrite
+health; a CAS conflict is not a provider failure. No-op reads do not update refresh health.
+
+Management `audit_log` rows are retained indefinitely in D1, including the operation IDs used for
+idempotent retries. There is no audit expiry, separate operation-receipt table, or R2 audit export.
+Daily usage totals are also retained; only acknowledged local usage details are pruned, 30 days
+after acknowledgment. Existing memory transcript archives are independent of this policy.
 
 ## Worker Secret boundary
 

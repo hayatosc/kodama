@@ -131,6 +131,13 @@ export const credentials = sqliteTable(
     createdAt: integer('created_at').notNull(),
     revokedAt: integer('revoked_at'),
     lastUsedAt: integer('last_used_at'),
+    expiresAt: integer('expires_at'),
+    lastRefreshedAt: integer('last_refreshed_at'),
+    refreshFailures: integer('refresh_failures').notNull().default(0),
+    lastRefreshFailureAt: integer('last_refresh_failure_at'),
+    lastRefreshFailureCategory: text('last_refresh_failure_category', {
+      enum: ['rejected', 'transient', 'malformed', 'failed'],
+    }),
   },
   (t) => [unique('credentials_id_provider').on(t.credentialId, t.provider)],
 )

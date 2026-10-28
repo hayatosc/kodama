@@ -53,17 +53,17 @@ it.each([
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(
     Response.json({
       ...token,
-      access_token: 'a',
+      access_token: 'access12',
       token_type: 'bEaReR',
-      ...(options.rotation ? { refresh_token: 'r' } : {}),
+      ...(options.rotation ? { refresh_token: 'refresh1' } : {}),
       ...(options.scope ? { scope: 'openid chatgpt.tokens.use.direct' } : {}),
       extension_parameter: 'ignored',
     }),
   )
   expect(await refreshChatGPT(credential, () => 1000)).toEqual({
     ...credential,
-    access: 'a',
-    refresh: options.rotation ? 'r' : credential.refresh,
+    access: 'access12',
+    refresh: options.rotation ? 'refresh1' : credential.refresh,
     expires: 3_421_000,
     scopes: options.scope ? ['openid', 'chatgpt.tokens.use.direct'] : credential.scopes,
   })
@@ -124,6 +124,7 @@ it.each([
   { access_token: undefined },
   { access_token: '' },
   { access_token: '   ' },
+  { access_token: '1234567' },
   { token_type: undefined },
   { token_type: 'MAC' },
   { expires_in: undefined },
@@ -132,6 +133,7 @@ it.each([
   { expires_in: '3600' },
   { refresh_token: '' },
   { refresh_token: '   ' },
+  { refresh_token: '1234567' },
   { scope: [] },
 ])('rejects malformed or unsupported success fields: %j', async (fields) => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ...token, ...fields }))
