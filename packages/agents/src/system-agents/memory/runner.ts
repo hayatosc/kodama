@@ -21,6 +21,7 @@ import type { JobOutcome, JobStatus, MemoryJob } from '../../memory/jobs.ts'
 import { needsPrune } from '../../memory/prune/runs.ts'
 import { memoryDb, extractionCheckpoint } from '../../memory/store/db.ts'
 import type { MemoryDb } from '../../memory/store/db.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
 import type { LocalDb } from '../../storage/local.ts'
 import { setAlarm, setAlarmNoLaterThan } from '../../runtime/alarms.ts'
 import { jobPrompt } from './config.ts'
@@ -43,6 +44,14 @@ export const HEARTBEAT_MS = 60_000
  * Waits before the second, third, and fourth attempt; a job that fails a fourth time settles `failed`.
  */
 export const JOB_RETRY_DELAYS_MS: readonly number[] = [60_000, 10 * 60_000, 60 * 60_000]
+/**
+ * How long one attempt may run. Provider failures are retried without limit inside an attempt, so
+ * without this a failing provider would hold the one job in progress, and every job behind it,
+ * forever. An attempt over its limit is stopped and retried like a failure.
+ */
+export const JOB_TIME_LIMIT_MS = 15 * 60_000
+/** Where the daily consolidation continues: the last scope it consolidated. */
+const CONSOLIDATE_CURSOR_KEY = 'kodama:consolidate-cursor'
 
 /** What the job functions need from the `MemoryAgent` object they run in. */
 export interface MemoryAgentContext {
@@ -85,6 +94,8 @@ export function consolidate(
     db: memoryDb(ctx.env.MEMORY_DB),
     forgetSettledJobs: async (before) => forgetSettledJobs(await ctx.local(), before),
     enqueue,
+    readCursor: () => ctx.storage.get<Scope>(CONSOLIDATE_CURSOR_KEY),
+    writeCursor: (scope) => ctx.storage.put(CONSOLIDATE_CURSOR_KEY, scope),
     now,
   })
 }
@@ -93,8 +104,9 @@ export function consolidate(
  * Run jobs one at a time until none is due, then set the alarm for the next delayed one.
  *
  * @remarks
- * Pruning closes the harness, so it runs here, between jobs. The caller never runs two drains at
- * once.
+ * Pruning closes the harness, so it runs here, after each job and before the next. Under a steady
+ * stream of jobs the queue may never empty, so waiting for the end would let the session grow
+ * without bound. The caller never runs two drains at once.
  */
 export async function drainJobs(ctx: MemoryAgentContext): Promise<void> {
   await ctx.harness()
@@ -103,10 +115,34 @@ export async function drainJobs(ctx: MemoryAgentContext): Promise<void> {
     if (row === undefined) break
     await setAlarm(ctx.storage, 'jobs', Date.now() + HEARTBEAT_MS)
     await runJob(ctx, row)
+    await pruneIfNeeded(ctx)
   }
-  const local = await ctx.local()
-  if (await needsPrune(ctx.storage, local)) await ctx.prune()
+  // Also when no job ran: a deferred pruning run resumes through this drain.
+  await pruneIfNeeded(ctx)
   await setAlarm(ctx.storage, 'jobs', nextDueAt(await ctx.local()))
+}
+
+/**
+ * Stop the attempt in progress once it has run past {@link JOB_TIME_LIMIT_MS}; its submission then
+ * settles unanswered, and the drain retries the job like a failure.
+ *
+ * @remarks
+ * The heartbeat alarm calls it every minute while a job runs. The limit counts from the attempt's
+ * stored start, so an eviction does not restart it.
+ *
+ * @returns Whether an attempt was stopped.
+ */
+export async function stopOverdueJob(ctx: MemoryAgentContext, now: number): Promise<boolean> {
+  const row = nextJob(await ctx.local(), now)
+  if (row?.status !== 'running' || row.startedAt === null) return false
+  if (row.startedAt + JOB_TIME_LIMIT_MS > now) return false
+  const harness = await ctx.harness()
+  await (await harness.root(context)).abort(context)
+  return true
+}
+
+async function pruneIfNeeded(ctx: MemoryAgentContext): Promise<void> {
+  if (await needsPrune(ctx.storage, await ctx.local())) await ctx.prune()
 }
 
 async function runJob(ctx: MemoryAgentContext, queued: JobRow): Promise<void> {
@@ -169,7 +205,8 @@ function outcomeOf(results: readonly string[]): JobOutcome {
 /**
  * Run one attempt of a job as a Pi input, and derive its outcome from the operations it applied.
  *
- * @returns `retry` when the submission did not finish with an answer.
+ * @returns `retry` when the submission did not finish with an answer, including when
+ * {@link stopOverdueJob} stopped it.
  *
  * @remarks
  * The conversation is reset while idle first, so the job starts without the previous job's

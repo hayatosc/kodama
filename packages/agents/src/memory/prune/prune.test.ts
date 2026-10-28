@@ -8,7 +8,7 @@ import { searchHistory } from '../archive/history.ts'
 import { applyOperation } from '../store/records.ts'
 import type { NewRecord } from '../store/records.ts'
 import type { ToolCall } from '../../helper/model.ts'
-import { toolCallResponse } from '../../helper/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
 import { PRUNE_LIMITS_KEY } from './runs.ts'
 import { prunedThrough } from '../../storage/pruning.ts'
 import { memoryDb } from '../store/db.ts'
@@ -278,6 +278,58 @@ describe('memory agent pruning', () => {
       expect(segments).toEqual([])
     } finally {
       await runInDurableObject(stub, (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))
+    }
+  })
+
+  it('prunes between jobs while the queue never empties', async () => {
+    // A fresh stub per call: continuations after the model's promises run in another context.
+    const stub = () => env.AGENTS.getByName(MEMORY_AGENT_NAME)
+    const pruned = () =>
+      runInDurableObject(stub(), async (_i, state) =>
+        prunedThrough(await openLocalDb(state.storage)),
+      )
+    const job = (content: string) =>
+      stub().enqueue({
+        kind: 'remember',
+        sourceAgentId: uuidv7(),
+        content,
+        sourceEntries: { from: 1, to: 1 },
+      })
+    const status = (jobId: string) => async () => (await stub().jobStatus(jobId))?.status
+    const releaseHeld = Promise.withResolvers<void>()
+    const nextStarted = Promise.withResolvers<void>()
+    const releaseNext = Promise.withResolvers<void>()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = requestBody(init)
+      if (body.includes('held-job') && toolResults(body) === 0) await releaseHeld.promise
+      if (body.includes('next-job') && toolResults(body) === 0) {
+        nextStarted.resolve()
+        await releaseNext.promise
+      }
+      return textResponse('Done.')
+    })
+    await runInDurableObject(stub(), (_i, state) =>
+      state.storage.put(PRUNE_LIMITS_KEY, { thresholdBytes: 0 }),
+    )
+    try {
+      // Leave entries of a finished job behind, then keep the queue busy.
+      const warmUp = await job('warm-up-job')
+      await expect.poll(status(warmUp.jobId), { timeout: 10_000 }).toBe('settled')
+      const before = await pruned()
+      const held = await job('held-job')
+      const next = await job('next-job')
+      releaseHeld.resolve()
+      await nextStarted.promise
+
+      // The next job is running, so the queue never emptied; pruning ran in between anyway.
+      expect(await stub().jobStatus(held.jobId)).toMatchObject({ status: 'settled' })
+      expect(await pruned()).toBeGreaterThan(before)
+      releaseNext.resolve()
+      await expect.poll(status(next.jobId), { timeout: 10_000 }).toBe('settled')
+    } finally {
+      releaseHeld.resolve()
+      releaseNext.resolve()
+      await runInDurableObject(stub(), (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))
     }
   })
 })

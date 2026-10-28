@@ -231,8 +231,9 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
 ### Queries
 
 - **Always-loaded memory**: the active `instruction` and `fact` records of the agent's scope and
-  its shared spaces, with overrides applied. They are ordered by `pinned`, `importance`, and
-  `last_used_at`, then cut to a character budget in code. See
+  its shared spaces, with overrides applied in the query. They are ordered by `pinned`,
+  `importance`, and `last_used_at`, and each block reads at most as many rows as lines could fit
+  its budget (one line takes at least four characters), then is cut to the budget in code. See
   [Always-loaded memory](#always-loaded-memory).
 - **`memory_search`**
   ([`store/search.ts`](../packages/agents/src/memory/store/search.ts)):
@@ -331,14 +332,16 @@ The same job delivered twice gets the same ID, so a repeated `enqueue` returns t
 One runner keeps at most one job in progress:
 
 1. Take the queued job with the lowest priority number, then the oldest, whose `not_before` has
-   passed, and mark it `running`.
+   passed, and mark it `running` with the time the attempt started. A job whose `not_before`
+   passed more than an hour ago goes first, longest waiting first, whatever its priority, so a
+   steady stream of `remember` and `extract` jobs cannot keep `consolidate` waiting forever.
 2. Wait until the conversation is idle and call `reset()`, which Pi places at once while idle.
    Then submit the job prompt with the request ID `<jobId>-<attempt>`. Each job starts in a fresh
    context.
 3. When the submission settles, derive the outcome from the job's `memory_ops` rows and mark the
    job `settled`. Then send `memoryChanged` to the source agent, if there is one.
-4. Only then take the next job. After the last due job, prune the memory agent's own session if
-   needed, and set the `jobs` alarm for the next delayed job.
+4. Prune the memory agent's own session if needed, and only then take the next job. After the
+   last due job, set the `jobs` alarm for the next delayed job.
 
 While a job runs, the `jobs` alarm wakes the object every minute, so a job interrupted by eviction
 resumes. A resumed attempt finds its submission in Pi by request ID and waits for it instead of
@@ -346,6 +349,12 @@ submitting again. The job queue does not keep a second submission ID: Pi owns su
 and task recovery, while Kodama owns job priority, retry timing, and the platform wakeup. A job
 whose Pi submission already finished is settled from its stored operations without another model
 call.
+
+An attempt may run for 15 minutes. Provider failures are retried without limit inside an
+attempt, so without a limit a failing provider would hold the one job in progress, and every job
+behind it, forever. The heartbeat alarm stops an attempt past its limit, counted from its stored
+start so an eviction does not restart it; its submission settles unanswered, and the job is
+retried like a failure.
 
 A failed job is retried after 1 minute, 10 minutes, and 1 hour. After that it settles `failed` with
 a ledger row.
@@ -425,7 +434,9 @@ In code, it does the following, deleting in small batches:
 - rebuilds the terms of records with an old `search_version`;
 - invalidates agent records that override a `required` shared record;
 - archives skills unused for 30 days;
-- enqueues one `consolidate` job for each scope changed in the last day, up to 200 scopes;
+- enqueues one `consolidate` job for each scope changed in the last day, up to 200 scopes, in
+  scope order starting after the last scope of the previous run and wrapping around, so the same
+  scopes are not taken every day when more change;
 - records the database size and the active records per scope in the ledger.
 
 Settled-job and ledger deletion each repeat until no expired rows remain, up to 20 batches of
@@ -586,8 +597,9 @@ storage.
 that fell behind still sees every entry.
 
 The memory agent prunes its own session the same way, without an archive. Its entries are the
-scratch work of finished jobs, and its records are already in D1. It prunes between jobs, at the
-end of each drain, because closing the harness mid-job would fail the job.
+scratch work of finished jobs, and its records are already in D1. It prunes after each job,
+before taking the next, because closing the harness mid-job would fail the job, and waiting for
+an empty queue would let the session grow without bound under a steady stream of jobs.
 
 Pruning writes to Pi's internal tables, described in
 [`src/storage/pi-tables.ts`](../packages/agents/src/storage/pi-tables.ts). The Pi Durable version
@@ -720,6 +732,8 @@ tool tells the memory agent why. Shared records are never rewritten in place.
 | `remember` content                 | at most 2,000 characters                                                               | `jobs.ts`                                       |
 | event half-life                    | 30 days                                                                                | `store/search.ts`                               |
 | job retries                        | 1 minute, 10 minutes, 1 hour                                                           | `src/system-agents/memory/runner.ts`            |
+| job attempt time limit             | 15 minutes                                                                             | `src/system-agents/memory/runner.ts`            |
+| job starvation limit               | 1 hour past its due time                                                               | `src/storage/memory-jobs.ts`                    |
 | consolidation job size             | one scope, 200 records; 200 scopes a day                                               | `consolidation.ts`                              |
 | ledger and claim retention         | 90 days                                                                                | `consolidation.ts`                              |
 | settled job retention              | 30 days                                                                                | `consolidation.ts`                              |

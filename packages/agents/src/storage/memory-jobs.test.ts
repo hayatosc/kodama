@@ -11,7 +11,7 @@ import { memoryJobs } from '../../drizzle/durable-object/schema.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { MemoryJob } from '../memory/jobs.ts'
 import { openLocalDb } from './local.ts'
-import { nextJob, retryJob, startJob, storeJob } from './memory-jobs.ts'
+import { nextJob, retryJob, STARVATION_LIMIT_MS, startJob, storeJob } from './memory-jobs.ts'
 
 const agentId = uuidv7()
 const consolidate: MemoryJob = { kind: 'consolidate', scope: `agent:${agentId}`, day: '2026-01-01' }
@@ -50,6 +50,22 @@ describe('nextJob', () => {
           .run()
       }
       expect(order).toEqual(['remember', 'extract', 'consolidate (oldest)', 'consolidate'])
+    })
+  })
+
+  it('runs a job overdue by more than the starvation limit ahead of higher priorities', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const waiting = await storeJob(local, consolidate, undefined)
+      const fresh = await storeJob(local, remember, undefined)
+      const now = Date.now()
+      const dueAt = (notBefore: number) =>
+        local.update(memoryJobs).set({ notBefore }).where(eq(memoryJobs.jobId, waiting.jobId)).run()
+
+      dueAt(now - STARVATION_LIMIT_MS + 1)
+      expect(nextJob(local, now)?.jobId).toBe(fresh.jobId)
+      dueAt(now - STARVATION_LIMIT_MS)
+      expect(nextJob(local, now)?.jobId).toBe(waiting.jobId)
     })
   })
 

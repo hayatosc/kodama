@@ -10,6 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { afterNextMemoryRecordsRead, context, db, write } from '../../helper/memory.ts'
 import { openLocalDb } from '../../storage/local.ts'
 import { applyOperation } from '../store/records.ts'
+import { memoryRecords } from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../../../drizzle/memory/schema.ts'
+import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
   AGENT_MEMORY_BUDGET,
   refreshAlwaysLoaded,
@@ -44,24 +47,29 @@ describe('always-loaded cache revisions', () => {
         sharedSpaces: () => Promise.resolve([space]),
         now: () => clock,
       }
-      // Return the rows already read, but commit a real D1 replacement before rendering resumes.
-      afterNextMemoryRecordsRead(env.MEMORY_DB, async () => {
-        const result = await applyOperation(db, context(clock), {
-          type: 'supersede',
-          oldId,
-          oldRevision: 1,
-          record: {
-            scope: `shared:${space}`,
-            kind: 'instruction',
-            content: 'Deploy to the new region',
-            origin: 'consolidation',
-            sourceAgentId: agentId,
-            observedAt: clock,
-            required: true,
-          },
-        })
-        expect(result.status).toBe('applied')
-      })
+      // Return the shared rows already read (after the agent's own), but commit a real D1
+      // replacement before rendering resumes.
+      afterNextMemoryRecordsRead(
+        env.MEMORY_DB,
+        async () => {
+          const result = await applyOperation(db, context(clock), {
+            type: 'supersede',
+            oldId,
+            oldRevision: 1,
+            record: {
+              scope: `shared:${space}`,
+              kind: 'instruction',
+              content: 'Deploy to the new region',
+              origin: 'consolidation',
+              sourceAgentId: agentId,
+              observedAt: clock,
+              required: true,
+            },
+          })
+          expect(result.status).toBe('applied')
+        },
+        1,
+      )
       await refreshAlwaysLoaded(memory)
       const initial = await storedMemoryText(memory)
       clock += REVISION_CHECK_INTERVAL_MS - 1
@@ -131,5 +139,45 @@ describe('always-loaded budgets', () => {
     expect(text).not.toContain('Agent fact 8.')
     expect(shared.body[0]).toBe(`- ${padded('Shared fact 14')}`)
     expect(text).not.toContain('Shared fact 5.')
+  })
+
+  it('applies overrides before limiting the rows a block reads', async () => {
+    const agentId = uuidv7()
+    const space = uuidv7()
+    const now = Date.now()
+    const row = (id: string, scope: Scope, importance: number, overrides?: string) => ({
+      id,
+      scope,
+      kind: 'fact' as const,
+      content: 'x',
+      searchVersion: SEARCH_VERSION,
+      origin: 'remember' as const,
+      sourceAgentId: agentId,
+      runId: 'override-limit',
+      importance,
+      ...(overrides === undefined ? {} : { overrides }),
+      observedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    // 255 one-character shared lines, of which the ten most important are overridden.
+    const sharedRows = Array.from({ length: 255 }, (_, index) =>
+      row(`${space}-${index}`, `shared:${space}`, 1 - index / 1000),
+    )
+    const overrides = sharedRows
+      .slice(0, 10)
+      .map((target, index) => row(`${agentId}-${index}`, `agent:${agentId}`, 0.5, target.id))
+    const rows = [...sharedRows, ...overrides]
+    const inserts = []
+    for (let offset = 0; offset < rows.length; offset += 5) {
+      inserts.push(db.insert(memoryRecords).values(rows.slice(offset, offset + 5)))
+    }
+    const [first, ...rest] = inserts
+    if (first !== undefined) await db.batch([first, ...rest])
+
+    const { text } = await renderAlwaysLoaded(db, agentId, [space])
+
+    // The block holds 250 such lines, so overridden rows must not use up its reads.
+    expect(block(text, 'SHARED', SHARED_MEMORY_BUDGET).body).toHaveLength(245)
   })
 })
