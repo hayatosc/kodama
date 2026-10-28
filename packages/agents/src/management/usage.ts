@@ -1,6 +1,7 @@
 /** Atomic daily ingestion and usage reads in the management database. @module */
-import { and, eq, exists, sql, asc, gt, gte, lt } from 'drizzle-orm'
-import type { SQL } from 'drizzle-orm'
+import { and, eq, exists, asc, gt, gte, lt, isNull, or, sum, count, min } from 'drizzle-orm'
+import type { AnyColumn } from 'drizzle-orm'
+import { sumWhen, groupKey, increment, literal } from '../lib/sql.ts'
 import { agents } from '../../drizzle/management/schema.ts'
 import type { UsageQuery } from '../protocol.ts'
 import {
@@ -12,29 +13,29 @@ import type { UsagePage, UsageRow } from '../storage/usage.ts'
 import type { ManagementDb } from './db.ts'
 
 function amounts(state: 'reported' | 'partial') {
-  const sum = (value: SQL) =>
-    sql<number>`coalesce(sum(case when ${daily.usageState} = ${state} then ${value} else 0 end), 0)`.mapWith(
-      Number,
-    )
+  const sum = (value: AnyColumn<{ data: number }>) => sumWhen(eq(daily.usageState, state), value)
   return {
-    attempts: sum(sql`${daily.attempts}`),
-    input: sum(sql`${daily.input}`),
-    output: sum(sql`${daily.output}`),
-    cacheRead: sum(sql`${daily.cacheRead}`),
-    cacheWrite: sum(sql`${daily.cacheWrite}`),
-    totalTokens: sum(sql`${daily.totalTokens}`),
-    reasoning: sum(sql`${daily.reasoning}`),
-    cacheWrite1h: sum(sql`${daily.cacheWrite1h}`),
-    reasoningReported: sum(sql`${daily.reasoningReported}`),
-    cacheWrite1hReported: sum(sql`${daily.cacheWrite1hReported}`),
-    payAsYouGoCatalogCostUsd: sum(
-      sql`case when ${daily.credentialKind} = 'api_key' then ${daily.costUsd} else 0 end`,
+    attempts: sum(daily.attempts),
+    input: sum(daily.input),
+    output: sum(daily.output),
+    cacheRead: sum(daily.cacheRead),
+    cacheWrite: sum(daily.cacheWrite),
+    totalTokens: sum(daily.totalTokens),
+    reasoning: sum(daily.reasoning),
+    cacheWrite1h: sum(daily.cacheWrite1h),
+    reasoningReported: sum(daily.reasoningReported),
+    cacheWrite1hReported: sum(daily.cacheWrite1hReported),
+    payAsYouGoCatalogCostUsd: sumWhen(
+      and(eq(daily.usageState, state), eq(daily.credentialKind, 'api_key')),
+      daily.costUsd,
     ),
-    subscriptionApiEquivalentUsd: sum(
-      sql`case when ${daily.credentialKind} = 'oauth_subscription' then ${daily.costUsd} else 0 end`,
+    subscriptionApiEquivalentUsd: sumWhen(
+      and(eq(daily.usageState, state), eq(daily.credentialKind, 'oauth_subscription')),
+      daily.costUsd,
     ),
-    unattributedCatalogCostUsd: sum(
-      sql`case when ${daily.credentialKind} is null then ${daily.costUsd} else 0 end`,
+    unattributedCatalogCostUsd: sumWhen(
+      and(eq(daily.usageState, state), isNull(daily.credentialKind)),
+      daily.costUsd,
     ),
   }
 }
@@ -47,26 +48,20 @@ export async function readUsage(
 ) {
   const key =
     query.groupBy === 'day'
-      ? sql<string>`json_array(${daily.day})`
+      ? groupKey(daily.day)
       : query.groupBy === 'agent'
-        ? sql<string>`json_array(${daily.chargedAgentId})`
+        ? groupKey(daily.chargedAgentId)
         : query.groupBy === 'credential'
-          ? sql<string>`json_array(${daily.credentialId}, ${daily.credentialKind})`
-          : sql<string>`json_array(${daily.provider}, ${daily.model})`
+          ? groupKey(daily.credentialId, daily.credentialKind)
+          : groupKey(daily.provider, daily.model)
   const rows = await db
     .select({
       key: key.as('group_key'),
-      attempts: sql<number>`sum(${daily.attempts})`.mapWith(Number),
-      failed: sql<number>`sum(${daily.failed})`.mapWith(Number),
-      rateLimited: sql<number>`sum(${daily.rateLimited})`.mapWith(Number),
-      unknown:
-        sql<number>`sum(case when ${daily.usageState} = 'unknown' then ${daily.attempts} else 0 end)`.mapWith(
-          Number,
-        ),
-      notApplicable:
-        sql<number>`sum(case when ${daily.usageState} = 'not_applicable' then ${daily.attempts} else 0 end)`.mapWith(
-          Number,
-        ),
+      attempts: sum(daily.attempts).mapWith(Number),
+      failed: sum(daily.failed).mapWith(Number),
+      rateLimited: sum(daily.rateLimited).mapWith(Number),
+      unknown: sumWhen(eq(daily.usageState, 'unknown'), daily.attempts),
+      notApplicable: sumWhen(eq(daily.usageState, 'not_applicable'), daily.attempts),
       reported: amounts('reported'),
       partial: amounts('partial'),
     })
@@ -84,12 +79,16 @@ export async function readUsage(
     .limit(query.limit + 1)
   const freshness = await db
     .select({
-      sources: sql<number>`count(*)`.mapWith(Number),
-      pendingSources:
-        sql<number>`coalesce(sum(case when ${ingestion.updatedAt} is null or ${ingestion.updatedAt} < ${now - 26 * 3_600_000} or ${ingestion.caughtUp} = 0 then 1 else 0 end), 0)`.mapWith(
-          Number,
+      sources: count(),
+      pendingSources: sumWhen(
+        or(
+          isNull(ingestion.updatedAt),
+          lt(ingestion.updatedAt, now - 26 * 3_600_000),
+          eq(ingestion.caughtUp, false),
         ),
-      oldestCheckedAt: sql<number | null>`min(${ingestion.updatedAt})`,
+        1,
+      ),
+      oldestCheckedAt: min(ingestion.updatedAt),
     })
     .from(agents)
     .leftJoin(ingestion, eq(agents.agentId, ingestion.agentId))
@@ -126,36 +125,36 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
     row.usageState,
   ])
   const counts = {
-    attempts: sql<number>`1`,
-    failed: sql<number>`${row.status === 'failed' || row.status === 'aborted' || row.status === 'interrupted' ? 1 : 0}`,
-    rateLimited: sql<number>`${row.rateLimited ? 1 : 0}`,
-    input: sql<number>`${row.input ?? 0}`,
-    output: sql<number>`${row.output ?? 0}`,
-    cacheRead: sql<number>`${row.cacheRead ?? 0}`,
-    cacheWrite: sql<number>`${row.cacheWrite ?? 0}`,
-    totalTokens: sql<number>`${row.totalTokens ?? 0}`,
-    reasoning: sql<number>`${row.reasoning ?? 0}`,
-    cacheWrite1h: sql<number>`${row.cacheWrite1h ?? 0}`,
-    reasoningReported: sql<number>`${row.reasoning === null ? 0 : 1}`,
-    cacheWrite1hReported: sql<number>`${row.cacheWrite1h === null ? 0 : 1}`,
-    costUsd: sql<number>`${row.totalCost ?? 0}`,
+    attempts: literal(1),
+    failed: literal(
+      row.status === 'failed' || row.status === 'aborted' || row.status === 'interrupted' ? 1 : 0,
+    ),
+    rateLimited: literal(row.rateLimited ? 1 : 0),
+    input: literal(row.input ?? 0),
+    output: literal(row.output ?? 0),
+    cacheRead: literal(row.cacheRead ?? 0),
+    cacheWrite: literal(row.cacheWrite ?? 0),
+    totalTokens: literal(row.totalTokens ?? 0),
+    reasoning: literal(row.reasoning ?? 0),
+    cacheWrite1h: literal(row.cacheWrite1h ?? 0),
+    reasoningReported: literal(row.reasoning === null ? 0 : 1),
+    cacheWrite1hReported: literal(row.cacheWrite1h === null ? 0 : 1),
+    costUsd: literal(row.totalCost ?? 0),
   }
   return db
     .insert(daily)
     .select(
       db
         .select({
-          bucket: sql<string>`${bucket}`.as('bucket'),
-          day: sql<string>`${day}`.as('day'),
-          chargedAgentId: sql<string>`${row.chargedAgentId}`.as('charged_agent_id'),
-          credentialId: sql<string | null>`${row.credentialId}`.as('credential_id'),
-          credentialKind: sql<typeof row.credentialKind>`${row.credentialKind}`.as(
-            'credential_kind',
-          ),
-          provider: sql<string>`${row.provider}`.as('provider'),
-          model: sql<string>`${row.model}`.as('model'),
-          actorKind: sql<typeof row.actorKind>`${row.actorKind}`.as('actor_kind'),
-          usageState: sql<typeof row.usageState>`${row.usageState}`.as('usage_state'),
+          bucket: literal(bucket).as('bucket'),
+          day: literal(day).as('day'),
+          chargedAgentId: literal(row.chargedAgentId).as('charged_agent_id'),
+          credentialId: literal(row.credentialId).as('credential_id'),
+          credentialKind: literal(row.credentialKind).as('credential_kind'),
+          provider: literal(row.provider).as('provider'),
+          model: literal(row.model).as('model'),
+          actorKind: literal(row.actorKind).as('actor_kind'),
+          usageState: literal(row.usageState).as('usage_state'),
           attempts: counts.attempts.as('attempts'),
           failed: counts.failed.as('failed'),
           rateLimited: counts.rateLimited.as('rate_limited'),
@@ -176,19 +175,19 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
     .onConflictDoUpdate({
       target: daily.bucket,
       set: {
-        attempts: sql`${daily.attempts} + 1`,
-        failed: sql`${daily.failed} + ${counts.failed}`,
-        rateLimited: sql`${daily.rateLimited} + ${counts.rateLimited}`,
-        input: sql`${daily.input} + ${counts.input}`,
-        output: sql`${daily.output} + ${counts.output}`,
-        cacheRead: sql`${daily.cacheRead} + ${counts.cacheRead}`,
-        cacheWrite: sql`${daily.cacheWrite} + ${counts.cacheWrite}`,
-        totalTokens: sql`${daily.totalTokens} + ${counts.totalTokens}`,
-        reasoning: sql`${daily.reasoning} + ${counts.reasoning}`,
-        cacheWrite1h: sql`${daily.cacheWrite1h} + ${counts.cacheWrite1h}`,
-        reasoningReported: sql`${daily.reasoningReported} + ${counts.reasoningReported}`,
-        cacheWrite1hReported: sql`${daily.cacheWrite1hReported} + ${counts.cacheWrite1hReported}`,
-        costUsd: sql`${daily.costUsd} + ${counts.costUsd}`,
+        attempts: increment(daily.attempts, 1),
+        failed: increment(daily.failed, counts.failed),
+        rateLimited: increment(daily.rateLimited, counts.rateLimited),
+        input: increment(daily.input, counts.input),
+        output: increment(daily.output, counts.output),
+        cacheRead: increment(daily.cacheRead, counts.cacheRead),
+        cacheWrite: increment(daily.cacheWrite, counts.cacheWrite),
+        totalTokens: increment(daily.totalTokens, counts.totalTokens),
+        reasoning: increment(daily.reasoning, counts.reasoning),
+        cacheWrite1h: increment(daily.cacheWrite1h, counts.cacheWrite1h),
+        reasoningReported: increment(daily.reasoningReported, counts.reasoningReported),
+        cacheWrite1hReported: increment(daily.cacheWrite1hReported, counts.cacheWrite1hReported),
+        costUsd: increment(daily.costUsd, counts.costUsd),
       },
     })
 }
