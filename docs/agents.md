@@ -604,8 +604,10 @@ before sending. Native errors never retry, fall back, or change a later call's r
 keys may incur inference and search charges; there is no budget or billing approval mechanism.
 
 Keyless order is Exa → Firecrawl → Parallel → Tavily, skipping durable cooldowns. Only verified
-HTTP 429 responses rotate. Attempts and cooldowns survive eviction; Parallel's session is reused
-privately. Shared egress means even the first request can be limited. `retryAt` is a best-effort
+HTTP 429 responses rotate. Ordered attempts live on the logical `kodama_usage` tool row, whose
+provider identifies the final answering provider on success. Cooldowns are derived from that
+history, not a separate provider-state ledger; attempts and limits survive eviction. Parallel's
+session is reused privately from its successful usage row. Shared egress means even the first request can be limited. `retryAt` is a best-effort
 indication, not quota availability or permission to retry. Fixed anonymous protocols remain
 owner-live verification gates, not claims of confirmed service availability.
 

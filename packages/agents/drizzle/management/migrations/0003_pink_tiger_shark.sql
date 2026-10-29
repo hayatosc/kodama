@@ -1,3 +1,5 @@
+ALTER TABLE `usage_daily` ADD `kind` text DEFAULT 'model' NOT NULL;--> statement-breakpoint
+ALTER TABLE `usage_daily` ADD `tool` text;--> statement-breakpoint
 ALTER TABLE `usage_daily` ADD `api` text;--> statement-breakpoint
 ALTER TABLE `usage_daily` ADD `count_kind` text;--> statement-breakpoint
 ALTER TABLE `usage_daily` ADD `search_count` integer;--> statement-breakpoint

@@ -71,7 +71,7 @@ export async function extractHtml(html: string, maximum: number, signal: AbortSi
       },
     })
     rewriter.on(
-      `${key} p,${key} h1,${key} h2,${key} h3,${key} h4,${key} li,${key} pre,${key} br,${key} div`,
+      `${key} p,${key} h1,${key} h2,${key} h3,${key} h4,${key} h5,${key} h6,${key} li,${key} pre,${key} br,${key} div`,
       {
         element(element) {
           collected[key] += '\n'

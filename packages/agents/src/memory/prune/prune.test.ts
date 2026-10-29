@@ -98,11 +98,23 @@ describe('pruning', () => {
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
       'extract',
     ])
-    // A queued job's archive scan still advances after contact, but returns no excluded text.
-    await runInDurableObject(stub, async (_instance, state) => {
+    // Contact while an archive page is in flight excludes its text, not its scan progress.
+    const excluded = await runInDurableObject(stub, async (agent, state) => {
+      const reached = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const get = env.ARCHIVE.get.bind(env.ARCHIVE)
+      const spy = vi.spyOn(env.ARCHIVE, 'get').mockImplementationOnce(async (...args) => {
+        const object = await get(...args)
+        reached.resolve()
+        await release.promise
+        return object
+      })
+      const reading = agent.readEntries({ after: 0, limit: 5 })
+      await reached.promise
       markContact(await openLocalDb(state.storage), String(ROOT_CONVERSATION_ID), 'peer', 0)
+      release.resolve()
+      return reading.finally(() => spy.mockRestore())
     })
-    const excluded = await stub.readEntries({ after: 0, limit: 5 })
     expect(excluded.entries).toEqual([])
     expect(excluded.through).toBe(page.through)
     expect(excluded.end).toBe(false)

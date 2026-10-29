@@ -19,7 +19,7 @@ export interface KeylessAttempt {
   status: number
   reason: string
   cooldown: number | null
-  bytes: number
+  bytes: number | null
 }
 
 const endpoints = {
@@ -99,7 +99,7 @@ export async function keylessSearch(
   query: string,
   signal: AbortSignal,
   state: (provider: KeylessProvider) => ProviderState | undefined,
-  beforeSend: (provider: KeylessProvider) => Promise<void>,
+  beforeSend: (provider: KeylessProvider, signal: AbortSignal) => Promise<void>,
   finish: (attempt: KeylessAttempt, next: ProviderState | undefined) => void,
   sessionId?: string,
   skip: (provider: KeylessProvider) => void = () => {},
@@ -118,15 +118,17 @@ export async function keylessSearch(
       skip(provider)
       continue
     }
+    const request = keylessRequest(provider, normalized, sessionId)
+    await beforeSend(provider, deadline)
+    // Admission checks the logical deadline before recording a send. The transport
+    // budget starts only afterward, so queue time cannot create a phantom attempt.
     using attemptLimit = timed(5_000, deadline)
     const attemptSignal = attemptLimit.signal
-    const request = keylessRequest(provider, normalized, sessionId)
-    await beforeSend(provider)
-    attemptSignal.throwIfAborted()
     const startedAt = Date.now()
     let settled = false
     let status = 0
-    let received = 0
+    let received: number | null = null
+    let blockedUntil: number | null = null
     try {
       const response = await fetch(request.endpoint, {
         method: 'POST',
@@ -136,10 +138,21 @@ export async function keylessSearch(
         signal: attemptSignal,
       })
       status = response.status
+      if (status === 429)
+        blockedUntil = cooldown(
+          provider,
+          previous?.consecutive429 ?? 0,
+          response.headers.get('retry-after'),
+          null,
+          Date.now(),
+        )
       const bytes = await readBody(
         response,
         Math.min(256 * 1_024, 512 * 1_024 - totalBytes),
         attemptSignal,
+        (bytes) => {
+          received = bytes
+        },
       )
       received = bytes.byteLength
       totalBytes += bytes.byteLength
@@ -154,12 +167,15 @@ export async function keylessSearch(
             /* HTTP 429 remains authoritative. */
           }
         }
-        const until = cooldown(
-          provider,
-          previous?.consecutive429 ?? 0,
-          response.headers.get('retry-after'),
-          wait,
-          Date.now(),
+        const until = Math.max(
+          blockedUntil ?? 0,
+          cooldown(
+            provider,
+            previous?.consecutive429 ?? 0,
+            response.headers.get('retry-after'),
+            wait,
+            Date.now(),
+          ),
         )
         const attempt = {
           provider,
@@ -241,10 +257,15 @@ export async function keylessSearch(
             finishedAt: Date.now(),
             status,
             reason: attemptSignal.aborted ? 'timeout' : 'provider_response_invalid',
-            cooldown: null,
+            cooldown: blockedUntil,
             bytes: received,
           },
-          undefined,
+          blockedUntil === null
+            ? undefined
+            : {
+                blockedUntil,
+                consecutive429: (previous?.consecutive429 ?? 0) + 1,
+              },
         )
     }
   }

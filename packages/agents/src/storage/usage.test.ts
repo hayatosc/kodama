@@ -1,19 +1,109 @@
 /** Terminal idempotency, incomplete measurements and interrupted invocation recovery. @module */
-import { runInDurableObject } from 'cloudflare:test'
+import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
+import { eq } from 'drizzle-orm'
+import { auditLog, usageDaily } from '../../drizzle/management/schema.ts'
+import { ingestUsage } from '../management/usage.ts'
+import { managementDb } from '../management/db.ts'
+import { admitWeb } from './external-data.ts'
+import { finishSearchAttempt, searchProviderState, startSearchAttempt } from './web-search.ts'
 import { usage } from '../../drizzle/durable-object/schema.ts'
 import { newAgentId } from '../helper/management.ts'
 import { openLocalDb } from './local.ts'
 import {
   startUsage,
+  startToolUsage,
   finishUsage,
   interruptUsage,
   selectUsageCredential,
   usageSince,
   acknowledgeUsage,
 } from './usage.ts'
+
+it('recovers ordered 429 and pending attempts after eviction and ingests their audit exactly once', async () => {
+  const id = await newAgentId()
+  const stub = env.AGENTS.getByName(id)
+  const until = Date.now() + 86_400_000
+  await runInDurableObject(stub, async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    const seq = startToolUsage(
+      local,
+      { chargedAgentId: id, actorKind: 'user' },
+      'interrupted-search',
+      'web_search',
+    )
+    admitWeb(local, {
+      seq,
+      root: 'root',
+      run: 'run',
+      inputs: [],
+      tool: 'web_search',
+      argument: 'q',
+      keyless: true,
+      eligibleThrough: 0,
+    })
+    startSearchAttempt(local, seq, 'exa')
+    finishSearchAttempt(
+      local,
+      seq,
+      {
+        provider: 'exa',
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        status: 429,
+        reason: 'rate_limited',
+        cooldown: until,
+        bytes: 7,
+      },
+      { blockedUntil: until, consecutive429: 1 },
+    )
+    startSearchAttempt(local, seq, 'firecrawl')
+  })
+  await evictDurableObject(stub)
+  const page = await stub.usageSince(0, 20)
+  expect(page.rows).toMatchObject([
+    {
+      status: 'interrupted',
+      searchCount: 2,
+      countKind: 'provider_requests',
+      httpCount: 2,
+      receivedBytes: null,
+    },
+  ])
+  const audit = page.rows[0]?.auditJson
+  if (!audit) throw new Error('Missing recovered audit')
+  const parsed: unknown = JSON.parse(audit)
+  expect(parsed).toMatchObject({
+    status: 'interrupted',
+    attempts: [
+      expect.stringContaining('"status":429'),
+      expect.stringContaining('"reason":"interrupted"'),
+    ],
+  })
+  expect(audit).toContain('\\"bytes\\":7')
+  expect(audit).toContain('\\"bytes\\":null')
+  expect(audit).toContain(String(until))
+  await runInDurableObject(stub, async (_instance, state) => {
+    expect(searchProviderState(await openLocalDb(state.storage), 'exa')?.blockedUntil).toBe(until)
+  })
+  const db = managementDb(env.MANAGEMENT_DB)
+  await Promise.all([
+    ingestUsage(db, id, 0, page, Date.now()),
+    ingestUsage(db, id, 0, page, Date.now()),
+  ])
+  await ingestUsage(db, id, 0, page, Date.now())
+  const audits = await db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.opId, `tool:${id}:1`))
+  expect(audits).toHaveLength(1)
+  expect(audits[0]?.detailJson).toBe(audit)
+  expect(await db.select().from(usageDaily).where(eq(usageDaily.chargedAgentId, id))).toMatchObject(
+    [{ attempts: 1, searchCount: 2, httpCount: 2, receivedBytes: null }],
+  )
+})
 
 const message: AssistantMessage = {
   role: 'assistant',

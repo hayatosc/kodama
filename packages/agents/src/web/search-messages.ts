@@ -44,9 +44,13 @@ export function readMessages(events: readonly string[]) {
   const calls = new Set<string>()
   const results = new Set<string>()
   const sources: SearchSource[] = []
+  const blocks = new Map<number, string>()
+  let nextIndex = 0
+  let terminal = false
   for (const data of events) {
     const event = record(parseJson(data))
-    if (stopped) throw new Error('provider_response_invalid')
+    if (stopped || (!started && !['message_start', 'ping'].includes(text(event['type']))))
+      throw new Error('provider_response_invalid')
     switch (event['type']) {
       case 'error':
         throw new Error('provider_response_invalid')
@@ -59,12 +63,24 @@ export function readMessages(events: readonly string[]) {
         break
       }
       case 'content_block_start': {
+        const index = count(event['index'])
+        if (terminal || index !== nextIndex || blocks.size)
+          throw new Error('provider_response_invalid')
         const block = record(event['content_block'])
-        if (block['type'] === 'text') answer += text(block['text'])
-        if (block['type'] === 'server_tool_use' && block['name'] === 'web_search')
-          calls.add(text(block['id']))
-        if (block['type'] === 'web_search_tool_result') {
-          results.add(text(block['tool_use_id']))
+        const type = text(block['type'])
+        blocks.set(index, type)
+        nextIndex++
+        if (type === 'text') answer += text(block['text'])
+        if (type === 'server_tool_use') {
+          const id = text(block['id'])
+          if (block['name'] !== 'web_search' || !id || calls.has(id))
+            throw new Error('provider_response_invalid')
+          calls.add(id)
+        }
+        if (type === 'web_search_tool_result') {
+          const id = text(block['tool_use_id'])
+          if (!calls.has(id) || results.has(id)) throw new Error('provider_response_invalid')
+          results.add(id)
           for (const item of array(block['content'])) {
             const source = record(item)
             if (source['type'] !== 'web_search_result') throw new Error('provider_response_invalid')
@@ -74,7 +90,19 @@ export function readMessages(events: readonly string[]) {
         break
       }
       case 'content_block_delta': {
+        const index = count(event['index'])
+        const type = index === null ? undefined : blocks.get(index)
         const delta = record(event['delta'])
+        const expected =
+          delta['type'] === 'input_json_delta'
+            ? 'server_tool_use'
+            : delta['type'] === 'thinking_delta' || delta['type'] === 'signature_delta'
+              ? 'thinking'
+              : delta['type'] === 'text_delta' || delta['type'] === 'citations_delta'
+                ? 'text'
+                : undefined
+        if (!type || !expected || type !== expected || terminal)
+          throw new Error('provider_response_invalid')
         if (delta['type'] === 'text_delta') answer += text(delta['text'])
         if (delta['type'] === 'citations_delta') {
           const citation = record(delta['citation'])
@@ -83,7 +111,15 @@ export function readMessages(events: readonly string[]) {
         }
         break
       }
+      case 'content_block_stop': {
+        const index = count(event['index'])
+        if (index === null || !blocks.delete(index) || terminal)
+          throw new Error('provider_response_invalid')
+        break
+      }
       case 'message_delta': {
+        if (blocks.size || terminal) throw new Error('provider_response_invalid')
+        terminal = true
         reason = record(event['delta'])['stop_reason']
         const usage = record(event['usage'] ?? {})
         outputTokens = count(usage['output_tokens'])
@@ -91,14 +127,20 @@ export function readMessages(events: readonly string[]) {
         break
       }
       case 'message_stop':
+        if (!terminal || blocks.size) throw new Error('provider_response_invalid')
         stopped = true
         break
+      case 'ping':
+        break
+      default:
+        throw new Error('provider_response_invalid')
     }
   }
   if (!started || !stopped || reason !== 'end_turn' || !answer.trim())
     throw new Error('provider_response_invalid')
-  if (!calls.size || !results.size || [...results].some((id) => !calls.has(id)))
-    throw new Error('search_not_performed')
+  if (!calls.size) throw new Error('search_not_performed')
+  if (calls.size !== results.size || [...calls].some((id) => !results.has(id)))
+    throw new Error('provider_response_invalid')
   return boundedSearch({
     answer,
     sources,

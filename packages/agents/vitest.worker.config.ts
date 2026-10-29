@@ -59,6 +59,7 @@ export default defineConfig({
           TEST_MANAGEMENT_MIGRATED_COLUMNS: migratedColumns('drizzle/management/migrations'),
           TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
         },
+        d1Databases: ['TEST_UPGRADE_DB'],
         // The test runner renames the Worker; bind its local class rather than the production name.
         durableObjects: {
           AGENTS: { className: 'Agent', useSQLite: true },

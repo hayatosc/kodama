@@ -29,7 +29,98 @@ const fixtures = {
   },
   tavily: { results: [source] },
 }
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
+
+it.each(['oversized', 'stalled', 'interrupted'] as const)(
+  'persists an observed 429 cooldown and measured bytes after a %s body without rotation',
+  async (mode) => {
+    vi.useFakeTimers()
+    const states = new Map<KeylessProvider, ProviderState>()
+    const attempts: KeylessAttempt[] = []
+    const controller = new AbortController()
+    const bytes = mode === 'oversized' ? 262_145 : 17
+    const body =
+      mode === 'oversized'
+        ? 'x'.repeat(bytes)
+        : new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(new Uint8Array(bytes))
+            },
+          })
+    const fetch = vi.fn(
+      async () => new Response(body, { status: 429, headers: { 'retry-after': '172800' } }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const now = Date.now()
+    const operation = keylessSearch(
+      'q',
+      controller.signal,
+      (provider) => states.get(provider),
+      async () => {},
+      (attempt, next) => {
+        attempts.push(attempt)
+        if (next) states.set(attempt.provider, next)
+      },
+    )
+    const rejected = expect(operation).rejects.toThrow()
+    await vi.advanceTimersByTimeAsync(mode === 'stalled' ? 5_001 : 0)
+    if (mode === 'interrupted') controller.abort()
+    await rejected
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0]).toMatchObject({ status: 429, bytes, cooldown: now + 172_800_000 })
+    expect(states.get('exa')).toMatchObject({ blockedUntil: now + 172_800_000, consecutive429: 1 })
+  },
+)
+
+it('starts the transport budget after delayed admission and finalizes the actual send', async () => {
+  vi.useFakeTimers()
+  const fetch = vi.fn(async () => new Response(JSON.stringify(fixtures.exa)))
+  vi.stubGlobal('fetch', fetch)
+  const finish = vi.fn()
+  const operation = keylessSearch(
+    'q',
+    new AbortController().signal,
+    () => undefined,
+    async (_provider, signal) => {
+      await new Promise((resolve) => setTimeout(resolve, 5_100))
+      signal.throwIfAborted()
+    },
+    finish,
+  )
+  await vi.advanceTimersByTimeAsync(5_100)
+  await operation
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(finish).toHaveBeenCalledOnce()
+})
+
+it('does not record or finalize an attempt when queued admission outlasts the logical deadline', async () => {
+  vi.useFakeTimers()
+  const fetch = vi.fn()
+  const admitted = vi.fn()
+  const finish = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  const operation = keylessSearch(
+    'q',
+    new AbortController().signal,
+    () => undefined,
+    async (_provider, signal) => {
+      await new Promise((resolve) => setTimeout(resolve, 15_100))
+      signal.throwIfAborted()
+      admitted()
+    },
+    finish,
+  )
+  const rejected = expect(operation).rejects.toThrow()
+  await vi.advanceTimersByTimeAsync(15_100)
+  await rejected
+  expect(fetch).not.toHaveBeenCalled()
+  expect(admitted).not.toHaveBeenCalled()
+  expect(finish).not.toHaveBeenCalled()
+})
 
 it.each(['exa', 'firecrawl', 'parallel', 'tavily'] as const)(
   'normalizes the fixed %s schema without credentials',

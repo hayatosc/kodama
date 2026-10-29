@@ -66,6 +66,17 @@ describe('fetchPage', () => {
       truncated: true,
     })
   })
+  it('preserves breaks between all six heading levels', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        '<body><h1>One</h1><h2>Two</h2><h3>Three</h3><h4>Four</h4><h5>Five</h5><h6>Six</h6></body>',
+        { headers: { 'content-type': 'text/html' } },
+      ),
+    )
+    expect((await fetchPage('https://example.org/')).text).toBe(
+      'One\n\nTwo\n\nThree\n\nFour\n\nFive\n\nSix',
+    )
+  })
   it('never sends after cancellation', async () => {
     const request = vi.spyOn(globalThis, 'fetch')
     await expect(fetchPage('https://example.org/', 1_000, AbortSignal.abort())).rejects.toThrow()

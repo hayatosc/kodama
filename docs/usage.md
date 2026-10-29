@@ -96,4 +96,10 @@ credential last-use. Retries and lost acknowledgments have one effect. Owner-vis
 permission provenance, ordered attempts/cooldowns and skipped providers may be audited; keys,
 Authorization, session IDs, raw provider errors, answer/page text and suggestion HTML never are.
 Interrupted measurements remain unknown; no-traffic rejection has zero HTTP/provider attempts.
-The usual acknowledgment/30-day detail retention applies, with indefinite aggregates/audit.
+The usage row owns its ordered pending/completed keyless attempts and private Parallel session;
+there is no separate attempt or provider-state table. Cooldowns are derived from these attempts.
+A 429 attempt retains its deadline and streak count; success resets the streak. Recovery closes
+pending attempts before creating the terminal audit and preserves known counts/bytes.
+Acknowledgment/30-day detail retention applies, except rows needed for still-effective cooldowns,
+the latest per-provider streak checkpoint, or the latest private session remain until superseded.
+Aggregates/audit remain indefinite.

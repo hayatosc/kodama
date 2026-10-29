@@ -2,6 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { nativeSearch } from './search.ts'
 import { searchRoute, requireSearchCredential } from './search-route.ts'
+import { readResponses } from './search-responses.ts'
+import { readMessages } from './search-messages.ts'
 
 const models = [
   {
@@ -38,7 +40,11 @@ const response = {
       {
         type: 'web_search_call',
         status: 'completed',
-        action: { sources: [{ url: 'https://example.org/#fragment', title: 'Source' }] },
+        action: {
+          type: 'search',
+          query: 'question',
+          sources: [{ url: 'https://example.org/#fragment', title: 'Source' }],
+        },
       },
       { type: 'message', content: [{ type: 'output_text', text: 'Answer', annotations: [] }] },
     ],
@@ -49,17 +55,28 @@ const messages = [
   { type: 'message_start', message: { usage: { input_tokens: 8 } } },
   {
     type: 'content_block_start',
-    content_block: { type: 'server_tool_use', id: 'search', name: 'web_search' },
+    index: 0,
+    content_block: { type: 'server_tool_use', id: 'search', name: 'web_search', input: {} },
   },
   {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'input_json_delta', partial_json: '{"query":"question"}' },
+  },
+  { type: 'content_block_stop', index: 0 },
+  {
     type: 'content_block_start',
+    index: 1,
     content_block: {
       type: 'web_search_tool_result',
       tool_use_id: 'search',
       content: [{ type: 'web_search_result', url: 'https://example.org/', title: 'Source' }],
     },
   },
-  { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Answer' } },
+  { type: 'content_block_stop', index: 1 },
+  { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } },
+  { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: 'Answer' } },
+  { type: 'content_block_stop', index: 2 },
   {
     type: 'message_delta',
     delta: { stop_reason: 'end_turn' },
@@ -88,6 +105,73 @@ function stream(events: unknown[]) {
   })
 }
 afterEach(() => vi.unstubAllGlobals())
+
+it.each([
+  undefined,
+  {},
+  { type: 'search' },
+  { type: 'search', queries: [] },
+  { type: 'search', query: '' },
+  { type: 'open_page', url: 'https://example.org/' },
+  { type: 'find', url: 'https://example.org/', pattern: 'word' },
+])('rejects Responses calls without actual query-search evidence: %j', (action) => {
+  const event = {
+    ...response,
+    response: {
+      ...response.response,
+      output: [
+        { type: 'web_search_call', status: 'completed', action },
+        { type: 'message', content: [{ type: 'output_text', text: 'Answer', annotations: [] }] },
+      ],
+    },
+  }
+  expect(() => readResponses([JSON.stringify(event)])).toThrow('provider_response_invalid')
+})
+
+it.each([
+  [
+    'orphan delta',
+    messages.filter((event) => !(event.type === 'content_block_start' && event.index === 2)),
+  ],
+  [
+    'unclosed block',
+    messages.filter((event) => !(event.type === 'content_block_stop' && event.index === 2)),
+  ],
+  [
+    'missing result',
+    messages.map((event) =>
+      event.type === 'content_block_start' && event.index === 1
+        ? {
+            ...event,
+            content_block: {
+              type: 'server_tool_use',
+              id: 'unmatched',
+              name: 'web_search',
+              input: {},
+            },
+          }
+        : event,
+    ),
+  ],
+  [
+    'unknown result',
+    messages.map((event) =>
+      event.type === 'content_block_start' && event.index === 1
+        ? { ...event, content_block: { ...event.content_block, tool_use_id: 'unknown' } }
+        : event,
+    ),
+  ],
+  [
+    'wrong delta index',
+    messages.map((event) =>
+      event.type === 'content_block_delta' ? { ...event, index: 99 } : event,
+    ),
+  ],
+] as const)('rejects malformed Messages lifecycle: %s', (_name, events) => {
+  expect(() => readMessages(events.map((event) => JSON.stringify(event)))).toThrow(
+    'provider_response_invalid',
+  )
+})
 
 it.each(models)(
   'pins $provider transport, model, search evidence and nullable costs',

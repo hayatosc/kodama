@@ -25,6 +25,7 @@ import {
   startSearchAttempt,
   finishSearchAttempt,
   saveSearchSession,
+  searchSession,
   searchAttempts,
 } from '../storage/web-search.ts'
 import { normalizeQuery, normalizeUrl } from '../web/url.ts'
@@ -182,7 +183,9 @@ export async function executeWeb(
               adoptPermissions(local, String(ROOT_CONVERSATION_ID), run, input.id, permissions)
           }
           const eligibleThrough = (await latestEntryId(harness)) ?? 0
+          const currentSettings = await settings()
           signal.throwIfAborted()
+          requireWebEnabled(currentSettings, tool, refusal())
           permission = admitWeb(local, {
             seq,
             root: String(ROOT_CONVERSATION_ID),
@@ -221,11 +224,12 @@ export async function executeWeb(
             normalized,
             signal,
             (provider) => searchProviderState(local, provider),
-            async (provider) => {
+            async (provider, attemptSignal) => {
               await admit()
               await serial(async () => {
-                signal.throwIfAborted()
-                requireWebEnabled(await settings(), tool, refusal())
+                const currentSettings = await settings()
+                attemptSignal.throwIfAborted()
+                requireWebEnabled(currentSettings, tool, refusal())
                 startSearchAttempt(local, seq, provider)
                 observeToolUsage(local, seq, {
                   httpCount: ++httpCount,
@@ -235,7 +239,7 @@ export async function executeWeb(
               })
             },
             (attempt, next) => finishSearchAttempt(local, seq, attempt, next),
-            searchProviderState(local, 'parallel')?.sessionId ?? undefined,
+            searchSession(local),
             (provider) => skipped.push(provider),
           )
     if ('skippedProviders' in result) skipped = result.skippedProviders
@@ -253,7 +257,7 @@ export async function executeWeb(
         triedProviders: result.attempts.map((attempt) => attempt.provider),
       })
     }
-    if ('sessionId' in result && result.sessionId) saveSearchSession(local, result.sessionId)
+    if ('sessionId' in result && result.sessionId) saveSearchSession(local, seq, result.sessionId)
     const attempts = searchAttempts(local, seq)
     const bytes =
       'receivedBytes' in result

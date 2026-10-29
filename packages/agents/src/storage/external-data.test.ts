@@ -122,7 +122,10 @@ it('serializes concurrency and rate limits and retains interrupted sends and aud
     interruptUsage(local)
     expect(usageSince(local, 0, 20).rows.find((row) => row.seq === first)).toMatchObject({
       status: 'interrupted',
-      httpCount: 0,
+      httpCount: 10,
+      searchCount: 10,
+      countKind: 'provider_requests',
+      receivedBytes: null,
       totalCost: null,
       auditJson: expect.stringContaining('interrupted'),
     })

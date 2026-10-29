@@ -5,9 +5,11 @@ export async function readBody(
   response: Response,
   maximum: number,
   signal: AbortSignal,
+  observeBytes: (bytes: number) => void = () => {},
 ): Promise<Uint8Array> {
   signal.throwIfAborted()
   const reader = response.body?.getReader()
+  observeBytes(0)
   if (!reader) return new Uint8Array()
   const chunks: Uint8Array[] = []
   let bytes = 0
@@ -19,9 +21,12 @@ export async function readBody(
     while (true) {
       signal.throwIfAborted()
       const chunk = await reader.read()
+      if (!chunk.done) {
+        bytes += chunk.value.byteLength
+        observeBytes(bytes)
+      }
       signal.throwIfAborted()
       if (chunk.done) break
-      bytes += chunk.value.byteLength
       if (bytes > maximum) throw new Error('response_too_large')
       chunks.push(chunk.value)
     }

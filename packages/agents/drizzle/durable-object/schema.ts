@@ -7,7 +7,19 @@
  */
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
-/** One outer Pi model invocation; IDs are never reused after retention deletes. */
+/** Ordered actual sends owned by one logical tool invocation, including interrupted observations. */
+export interface StoredSearchAttempt {
+  provider: string
+  startedAt: number
+  finishedAt: number | null
+  status: number | null
+  reason: string | null
+  cooldown: number | null
+  consecutive429: number | null
+  bytes: number | null
+}
+
+/** One model or logical tool invocation; IDs are never reused after retention deletes. */
 export const usage = sqliteTable('kodama_usage', {
   seq: integer('seq').primaryKey({ autoIncrement: true }),
   startedAt: integer('started_at').notNull(),
@@ -34,6 +46,12 @@ export const usage = sqliteTable('kodama_usage', {
   httpCount: integer('http_count'),
   receivedBytes: integer('received_bytes'),
   auditJson: text('audit_json'),
+  searchAttempts: text('search_attempts', { mode: 'json' })
+    .$type<StoredSearchAttempt[]>()
+    .notNull()
+    .default([]),
+  /** Private Parallel coordination metadata, excluded from terminal audit. */
+  searchSessionId: text('search_session_id'),
   provider: text('provider'),
   model: text('model'),
   responseModel: text('response_model'),
@@ -146,27 +164,4 @@ export const webPermissions = sqliteTable('kodama_web_permissions', {
   tool: text('tool', { enum: ['web_search', 'web_fetch'] }).notNull(),
   argument: text('argument').notNull(),
   consumedAt: integer('consumed_at'),
-})
-
-/** Anonymous provider cooldown and root-lifetime session, never exported in audit. */
-export const webSearchProviderState = sqliteTable('web_search_provider_state', {
-  provider: text('provider').primaryKey(),
-  blockedUntil: integer('blocked_until').notNull().default(0),
-  consecutive429: integer('consecutive_429').notNull().default(0),
-  reason: text('reason').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-  sessionId: text('session_id'),
-})
-
-/** Actual anonymous sends, including failures and interrupted requests. */
-export const webSearchAttempts = sqliteTable('kodama_web_search_attempts', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  usageSeq: integer('usage_seq').notNull(),
-  provider: text('provider').notNull(),
-  startedAt: integer('started_at').notNull(),
-  finishedAt: integer('finished_at'),
-  status: integer('status'),
-  reason: text('reason'),
-  cooldown: integer('cooldown'),
-  bytes: integer('bytes'),
 })

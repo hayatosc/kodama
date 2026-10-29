@@ -21,6 +21,8 @@ export function usageRecord(overrides: Partial<UsageRow> = {}): UsageRow {
     httpCount: null,
     receivedBytes: null,
     auditJson: null,
+    searchAttempts: [],
+    searchSessionId: null,
     startedAt: Date.parse('2026-10-26T23:59:59Z'),
     finishedAt: Date.parse('2026-10-27T00:00:01Z'),
     chargedAgentId: uuidv7(),

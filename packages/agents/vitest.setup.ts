@@ -15,6 +15,7 @@ declare global {
       /** Columns per table in the newest drizzle-kit snapshots, read by vitest.config.ts. */
       TEST_MIGRATED_COLUMNS: Record<string, string[]>
       TEST_LOCAL_MIGRATED_COLUMNS: Record<string, string[]>
+      TEST_UPGRADE_DB: D1Database
       TEST_MANAGEMENT_MIGRATIONS: D1Migration[]
       TEST_MANAGEMENT_MIGRATED_COLUMNS: Record<string, string[]>
     }

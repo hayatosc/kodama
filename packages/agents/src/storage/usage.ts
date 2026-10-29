@@ -1,7 +1,8 @@
 /** Durable per-invocation usage, independent of Pi transcript commits. @module */
-import { and, eq, gt, lte, isNull, lt, asc } from 'drizzle-orm'
+import { and, eq, gt, lte, isNull, lt, asc, notInArray } from 'drizzle-orm'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
-import { usage, webSearchAttempts } from '../../drizzle/durable-object/schema.ts'
+import { usage } from '../../drizzle/durable-object/schema.ts'
+import { retainedSearchUsage } from './web-search.ts'
 import type { LocalDb } from './local.ts'
 
 /** An invocation's frozen cost owner; never contains message content. */
@@ -121,7 +122,7 @@ export function usageSince(local: LocalDb, after: number, limit: number): UsageP
   return { rows, through: rows.at(-1)?.seq ?? after, more: candidates.length > rows.length }
 }
 
-/** Mark a committed prefix once, then prune only acknowledged details older than thirty days. */
+/** Prune thirty-day acknowledged details, preserving usage-owned cooldown/streak/session checkpoints. */
 export function acknowledgeUsage(local: LocalDb, through: number, now = Date.now()): void {
   if (!Number.isSafeInteger(through) || through < 0)
     throw new TypeError('Invalid usage acknowledgment')
@@ -138,28 +139,31 @@ export function acknowledgeUsage(local: LocalDb, through: number, now = Date.now
     .set({ aggregatedAt: now })
     .where(and(lte(usage.seq, through), isNull(usage.aggregatedAt)))
     .run()
-  local
-    .delete(webSearchAttempts)
-    .where(lt(webSearchAttempts.startedAt, now - 30 * 86_400_000))
-    .run()
+  const retained = [...retainedSearchUsage(local, now)]
   local
     .delete(usage)
-    .where(lt(usage.aggregatedAt, now - 30 * 86_400_000))
+    .where(and(lt(usage.aggregatedAt, now - 30 * 86_400_000), notInArray(usage.seq, retained)))
     .run()
 }
 
 /** Only call before opening a new harness epoch, never while old calls can still finish. */
 export function interruptUsage(local: LocalDb): void {
   local.transaction((tx) => {
-    tx.update(webSearchAttempts)
-      .set({ finishedAt: Date.now(), reason: 'interrupted' })
-      .where(isNull(webSearchAttempts.finishedAt))
-      .run()
     for (const row of tx
       .select()
       .from(usage)
       .where(and(eq(usage.kind, 'tool'), eq(usage.status, 'in_flight')))
       .all()) {
+      tx.update(usage)
+        .set({
+          searchAttempts: row.searchAttempts.map((attempt) =>
+            attempt.finishedAt === null
+              ? { ...attempt, finishedAt: Date.now(), reason: 'interrupted' }
+              : attempt,
+          ),
+        })
+        .where(eq(usage.seq, row.seq))
+        .run()
       finishToolUsage(tx, row.seq, 'interrupted', { reason: 'interrupted' })
     }
   })
@@ -226,9 +230,21 @@ export function finishToolUsage(
 ): void {
   const row = local.select().from(usage).where(eq(usage.seq, seq)).get()
   if (!row || row.status !== 'in_flight') return
+  const attempts = row.searchAttempts
+  const observations = row.keyless
+    ? {
+        searchCount: attempts.length,
+        countKind: 'provider_requests',
+        httpCount: attempts.length,
+        receivedBytes: attempts.some((attempt) => attempt.bytes === null)
+          ? null
+          : attempts.reduce((sum, attempt) => sum + (attempt.bytes ?? 0), 0),
+      }
+    : {}
   local
     .update(usage)
     .set({
+      ...observations,
       status,
       finishedAt: Date.now(),
       usageState: row.admittedAt === null ? 'not_applicable' : 'unknown',
@@ -246,6 +262,11 @@ export function finishToolUsage(
         provider: row.provider,
         api: row.api,
         httpCount: row.httpCount,
+        searchCount: row.searchCount,
+        countKind: row.countKind,
+        receivedBytes: row.receivedBytes,
+        ...observations,
+        attempts: attempts.map((attempt) => JSON.stringify(attempt)),
       }),
     })
     .where(and(eq(usage.seq, seq), eq(usage.status, 'in_flight')))
