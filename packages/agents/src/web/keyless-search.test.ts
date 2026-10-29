@@ -76,6 +76,82 @@ it.each(['oversized', 'stalled', 'interrupted'] as const)(
   },
 )
 
+it.each([
+  { previous: 0, header: null, wait: 120, seconds: 120 },
+  { previous: 4, header: null, wait: 120, seconds: 120 },
+  { previous: 4, header: '300', wait: 120, seconds: 300 },
+  { previous: 4, header: '90', wait: 120, seconds: 120 },
+  { previous: 4, header: '1', wait: 2, seconds: 60 },
+])('uses actual Tavily reset data instead of provisional backoff: %j', async (fixture) => {
+  vi.useFakeTimers()
+  const now = Date.now()
+  const states = new Map<KeylessProvider, ProviderState>([
+    ['exa', { blockedUntil: now + 86_400_000, consecutive429: 1 }],
+    ['firecrawl', { blockedUntil: now + 86_400_000, consecutive429: 1 }],
+    ['parallel', { blockedUntil: now + 86_400_000, consecutive429: 1 }],
+    ['tavily', { blockedUntil: now - 1, consecutive429: fixture.previous }],
+  ])
+  const fetch = vi.fn(async () => {
+    const headers = new Headers()
+    if (fixture.header !== null) headers.set('retry-after', fixture.header)
+    return new Response(JSON.stringify({ error: { retry_after_seconds: fixture.wait } }), {
+      status: 429,
+      headers,
+    })
+  })
+  vi.stubGlobal('fetch', fetch)
+  const attempts: KeylessAttempt[] = []
+  const result = await keylessSearch(
+    'q',
+    new AbortController().signal,
+    (provider) => states.get(provider),
+    async () => {},
+    (attempt, next) => {
+      attempts.push(attempt)
+      if (next) states.set(attempt.provider, next)
+    },
+  )
+  const until = now + fixture.seconds * 1_000
+  expect(result).toMatchObject({
+    error: 'search_rate_limited',
+    retryAt: until,
+    skippedProviders: ['exa', 'firecrawl', 'parallel'],
+  })
+  expect(attempts).toMatchObject([
+    { provider: 'tavily', status: 429, reason: 'rate_limited', cooldown: until },
+  ])
+  expect(states.get('tavily')).toEqual({
+    blockedUntil: until,
+    consecutive429: fixture.previous + 1,
+  })
+  expect(fetch).toHaveBeenCalledOnce()
+})
+
+it('retains Tavily fallback backoff when the 429 body fails before reset data is read', async () => {
+  vi.useFakeTimers()
+  const now = Date.now()
+  const finish = vi.fn()
+  const fetch = vi.fn(async () => new Response('x'.repeat(262_145), { status: 429 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(
+    keylessSearch(
+      'q',
+      new AbortController().signal,
+      (provider) => ({
+        blockedUntil: provider === 'tavily' ? now - 1 : now + 86_400_000,
+        consecutive429: 2,
+      }),
+      async () => {},
+      finish,
+    ),
+  ).rejects.toThrow()
+  expect(finish).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ provider: 'tavily', status: 429, cooldown: now + 14_400_000 }),
+    { blockedUntil: now + 14_400_000, consecutive429: 3 },
+  )
+  expect(fetch).toHaveBeenCalledOnce()
+})
+
 it('starts the transport budget after delayed admission and finalizes the actual send', async () => {
   vi.useFakeTimers()
   const fetch = vi.fn(async () => new Response(JSON.stringify(fixtures.exa)))

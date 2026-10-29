@@ -746,6 +746,15 @@ shared spaces, the applied configuration (`kodama:config-version`, `kodama:appli
 
 ## Development
 
+Issue #26's web-tool migrations are undeployed. Their feature migrations are regenerated from
+base migrations 0000–0002 for fresh databases; existing development state is disposable. Start
+with fresh local state for both Durable Objects and management D1 together, rather than carrying
+an old usage sequence or ingestion cursor into the regenerated schema. Data transfer, populated
+or pruned legacy upgrades, and old-version compatibility are out of scope by the owner's decision,
+not validated preservation paths. Do not use this replacement strategy on deployed databases.
+Current-runtime persistence, permanent external contact, cooldown retention, atomic permissions,
+and interruption recovery remain required.
+
 Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 
 ```sh

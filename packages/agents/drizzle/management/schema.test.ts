@@ -1,46 +1,20 @@
-/** Management schema parity, constraints and populated pre-web upgrades. @module */
-import { applyD1Migrations } from 'cloudflare:test'
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+/** Fresh management schema parity, defaults and constraints. @module */
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
 import { managementDb } from '../../src/management/db.ts'
 import * as schema from './schema.ts'
 
-const legacyUsage = sqliteTable('usage_daily', {
-  bucket: text('bucket').primaryKey(),
-  day: text('day').notNull(),
-  chargedAgentId: text('charged_agent_id').notNull(),
-  provider: text('provider').notNull(),
-  model: text('model').notNull(),
-  actorKind: text('actor_kind').notNull(),
-  usageState: text('usage_state').notNull(),
-  attempts: integer('attempts').notNull(),
-  failed: integer('failed').notNull(),
-  rateLimited: integer('rate_limited').notNull(),
-  input: integer('input').notNull(),
-  output: integer('output').notNull(),
-  cacheRead: integer('cache_read').notNull(),
-  cacheWrite: integer('cache_write').notNull(),
-  totalTokens: integer('total_tokens').notNull(),
-  reasoning: integer('reasoning').notNull(),
-  cacheWrite1h: integer('cache_write_1h').notNull(),
-  reasoningReported: integer('reasoning_reported').notNull(),
-  cacheWrite1hReported: integer('cache_write_1h_reported').notNull(),
-  costUsd: real('cost_usd').notNull(),
-})
-
-it('preserves populated model aggregates and new defaults through the web rebuild', async () => {
-  await applyD1Migrations(env.TEST_UPGRADE_DB, env.TEST_MANAGEMENT_MIGRATIONS.slice(0, 3))
-  const db = managementDb(env.TEST_UPGRADE_DB)
-  await db.insert(legacyUsage).values({
+it('stores fresh model defaults and nullable tool aggregate providers', async () => {
+  const db = managementDb(env.MANAGEMENT_DB)
+  const aggregate = {
     bucket: 'existing',
     day: '2026-10-26',
     chargedAgentId: 'agent',
     provider: 'openai',
     model: 'model',
-    actorKind: 'user',
-    usageState: 'reported',
+    actorKind: 'user' as const,
+    usageState: 'reported' as const,
     attempts: 2,
     failed: 0,
     rateLimited: 0,
@@ -54,8 +28,8 @@ it('preserves populated model aggregates and new defaults through the web rebuil
     reasoningReported: 0,
     cacheWrite1hReported: 0,
     costUsd: 0.5,
-  })
-  await applyD1Migrations(env.TEST_UPGRADE_DB, env.TEST_MANAGEMENT_MIGRATIONS)
+  }
+  await db.insert(schema.usageDaily).values(aggregate)
   expect(await db.select().from(schema.usageDaily)).toMatchObject([
     {
       bucket: 'existing',
@@ -74,6 +48,17 @@ it('preserves populated model aggregates and new defaults through the web rebuil
       receivedBytes: null,
     },
   ])
+  const tool = await db
+    .insert(schema.usageDaily)
+    .values({
+      ...aggregate,
+      bucket: 'tool',
+      kind: 'tool',
+      provider: null,
+      model: null,
+    })
+    .returning()
+  expect(tool).toMatchObject([{ kind: 'tool', provider: null, model: null }])
 })
 
 const tables = Object.values(schema).filter((value) => value instanceof SQLiteTable)

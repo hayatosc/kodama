@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a50d3db5-e63f-4b89-a94b-152d9ec06cb2",
+  "id": "d5300c76-d18e-4dbb-8bd5-2b2bcb0385df",
   "prevId": "f18f1285-4998-4b2f-aca5-285627deb55a",
   "tables": {
     "kodama_always_loaded": {
@@ -492,14 +492,14 @@
           "name": "provider",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "model": {
           "name": "model",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "response_model": {
@@ -625,7 +625,13 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "kodama_usage_task_unique": {
+          "name": "kodama_usage_task_unique",
+          "columns": ["task"],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

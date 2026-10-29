@@ -1,47 +1,28 @@
-/** Schema parity and populated pre-web upgrade regression. @module */
-import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { migrate } from 'drizzle-orm/durable-sqlite/migrator'
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+/** Fresh schema parity, usage defaults and task uniqueness. @module */
 import { uuidv7 } from '../../src/lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
-import { localMigrations, openLocalDb } from '../../src/storage/local.ts'
+import { openLocalDb } from '../../src/storage/local.ts'
 import * as schema from './schema.ts'
 
-const legacyUsage = sqliteTable('kodama_usage', {
-  startedAt: integer('started_at').notNull(),
-  chargedAgentId: text('charged_agent_id').notNull(),
-  actorKind: text('actor_kind').notNull(),
-  provider: text('provider').notNull(),
-  model: text('model').notNull(),
-  input: integer('input'),
-})
-
-it('upgrades multiple existing model rows without corrupting defaults or task uniqueness', async () => {
+it('stores fresh model defaults and nullable tool providers with unique tasks', async () => {
   await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
-    await state.storage.deleteAll()
-    const db = drizzle(state.storage)
-    await migrate(db, {
-      ...localMigrations,
-      journal: {
-        entries: localMigrations.journal.entries.slice(0, 3),
-      },
-    })
-    db.insert(legacyUsage)
+    const local = await openLocalDb(state.storage)
+    local
+      .insert(schema.usage)
       .values(
         [1, 2].map((input) => ({
           startedAt: 1,
           chargedAgentId: 'agent',
-          actorKind: 'user',
+          actorKind: 'user' as const,
           provider: 'openai',
           model: 'model',
           input,
         })),
       )
       .run()
-    const local = await openLocalDb(state.storage)
     const rows = local.select().from(schema.usage).all()
     expect(rows).toHaveLength(2)
     expect(rows.map((row) => row.input)).toEqual([1, 2])
@@ -65,7 +46,8 @@ it('upgrades multiple existing model rows without corrupting defaults or task un
       chargedAgentId: 'agent',
       actorKind: 'user' as const,
     }
-    local.insert(schema.usage).values(tool).run()
+    const inserted = local.insert(schema.usage).values(tool).returning().get()
+    expect(inserted).toMatchObject({ kind: 'tool', provider: null, model: null })
     expect(() => local.insert(schema.usage).values(tool).run()).toThrow()
   })
 })

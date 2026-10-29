@@ -26,15 +26,8 @@
     {
       "idx": 3,
       "version": "6",
-      "when": 1793256636905,
-      "tag": "0003_pink_tiger_shark",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1793256663083,
-      "tag": "0004_free_wendigo",
+      "when": 1793269920737,
+      "tag": "0003_heavy_shen",
       "breakpoints": true
     }
   ]

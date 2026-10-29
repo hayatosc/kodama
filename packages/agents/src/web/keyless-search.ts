@@ -167,15 +167,12 @@ export async function keylessSearch(
             /* HTTP 429 remains authoritative. */
           }
         }
-        const until = Math.max(
-          blockedUntil ?? 0,
-          cooldown(
-            provider,
-            previous?.consecutive429 ?? 0,
-            response.headers.get('retry-after'),
-            wait,
-            Date.now(),
-          ),
+        const until = cooldown(
+          provider,
+          previous?.consecutive429 ?? 0,
+          response.headers.get('retry-after'),
+          wait,
+          Date.now(),
         )
         const attempt = {
           provider,

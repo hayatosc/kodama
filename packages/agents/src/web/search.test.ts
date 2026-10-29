@@ -109,9 +109,15 @@ afterEach(() => vi.unstubAllGlobals())
 it.each([
   undefined,
   {},
-  { type: 'search' },
   { type: 'search', queries: [] },
+  { type: 'search', queries: [''] },
+  { type: 'search', queries: 'question' },
+  { type: 'search', queries: [null] },
   { type: 'search', query: '' },
+  { type: 'search', query: null },
+  { type: 'search', query: 1 },
+  { type: 'search', query: '', queries: ['question'] },
+  { type: 'search', query: 'question', queries: [] },
   { type: 'open_page', url: 'https://example.org/' },
   { type: 'find', url: 'https://example.org/', pattern: 'word' },
 ])('rejects Responses calls without actual query-search evidence: %j', (action) => {
@@ -127,6 +133,51 @@ it.each([
   }
   expect(() => readResponses([JSON.stringify(event)])).toThrow('provider_response_invalid')
 })
+
+it.each(models.slice(0, 2))(
+  'accepts completed $provider search evidence without optional query disclosure',
+  async (model) => {
+    const route = searchRoute(model)
+    if (!route) throw new Error('Missing native route')
+    const fetch = vi.fn(async () =>
+      stream([
+        {
+          ...response,
+          response: {
+            ...response.response,
+            output: [
+              {
+                type: 'web_search_call',
+                status: 'completed',
+                action: {
+                  type: 'search',
+                  sources: [{ url: 'https://example.org/', title: 'Source' }],
+                },
+              },
+              ...response.response.output.slice(1),
+            ],
+          },
+        },
+      ]),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const result = await nativeSearch(
+      route,
+      model,
+      'question',
+      'fixture-key',
+      new AbortController().signal,
+      async () => {},
+    )
+    expect(result.result).toMatchObject({
+      answer: 'Answer',
+      sources: [{ url: 'https://example.org/', title: 'Source' }],
+      searchCount: 1,
+      countKind: 'search_calls',
+    })
+    expect(fetch).toHaveBeenCalledOnce()
+  },
+)
 
 it.each([
   [

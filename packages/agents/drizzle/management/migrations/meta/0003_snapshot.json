@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "11ae7498-7737-4fbb-a00d-7bee5a2ccf13",
+  "id": "967686ee-cd88-4612-a7cf-1309b1601e07",
   "prevId": "b5e9154d-b633-4992-b02e-3a1145ba4e21",
   "tables": {
     "agent_config_versions": {
@@ -849,14 +849,14 @@
           "name": "provider",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "model": {
           "name": "model",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "actor_kind": {

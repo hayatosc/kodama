@@ -42,12 +42,13 @@ export function readResponses(events: readonly string[]) {
       const action = record(output['action'])
       // This validates returned evidence, not provider-side retrieval prevention.
       if (action['type'] !== 'search') throw new Error('provider_response_invalid')
-      const queries =
-        action['queries'] === undefined
-          ? [text(action['query'])]
-          : array(action['queries']).map(text)
-      if (!queries.length || queries.some((query) => !query.trim()))
+      if (action['query'] !== undefined && !text(action['query']).trim())
         throw new Error('provider_response_invalid')
+      if (action['queries'] !== undefined) {
+        const queries = array(action['queries']).map(text)
+        if (!queries.length || queries.some((query) => !query.trim()))
+          throw new Error('provider_response_invalid')
+      }
       searches++
       for (const entry of array(action['sources'] ?? [])) {
         const source = record(entry)

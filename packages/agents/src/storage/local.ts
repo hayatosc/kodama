@@ -12,8 +12,7 @@ import journal from '../../drizzle/durable-object/migrations/meta/_journal.json'
 import m0000 from '../../drizzle/durable-object/migrations/0000_curly_mandroid.sql?raw'
 import m0001 from '../../drizzle/durable-object/migrations/0001_omniscient_agent_brand.sql?raw'
 import m0002 from '../../drizzle/durable-object/migrations/0002_lovely_carnage.sql?raw'
-import m0003 from '../../drizzle/durable-object/migrations/0003_warm_dexter_bennett.sql?raw'
-import m0004 from '../../drizzle/durable-object/migrations/0004_curvy_hulk.sql?raw'
+import m0003 from '../../drizzle/durable-object/migrations/0003_complex_titanium_man.sql?raw'
 import * as schema from '../../drizzle/durable-object/schema.ts'
 
 /** Drizzle handle of one object's local tables. */
@@ -26,7 +25,7 @@ export type LocalDb = DrizzleSqliteDODatabase<typeof schema>
  * Add each new migration file here. A migration that the journal lists but this map lacks makes
  * {@link openLocalDb} throw.
  */
-export const localMigrations = { journal, migrations: { m0000, m0001, m0002, m0003, m0004 } }
+export const localMigrations = { journal, migrations: { m0000, m0001, m0002, m0003 } }
 
 /** Open the object's local tables, migrated to the current schema. */
 export async function openLocalDb(storage: DurableObjectStorage): Promise<LocalDb> {
