@@ -2,7 +2,7 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Cursor, EntryRecord, Harness } from '@earendil-works/pi-durable'
-import { currentRunInputs } from '../runtime/inputs.ts'
+import { currentRunInputs } from './runtime/inputs.ts'
 import type { AgentOrigin } from '../protocol.ts'
 
 /** Legacy provenance cap; permanent contact restrictions additionally forbid forwarding peers. */

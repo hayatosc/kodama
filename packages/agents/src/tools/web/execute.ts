@@ -4,27 +4,27 @@ import type { Harness } from '@earendil-works/pi-durable'
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Context } from '@earendil-works/chord/context'
 import { deadline } from '../../lib/deadline.ts'
-import { currentRunInputs } from '../../runtime/inputs.ts'
+import { currentRunInputs } from '../../agent/runtime/inputs.ts'
 import type { AgentSettings } from '../../protocol.ts'
 import type { ObserveCredential } from '../../credentials/store.ts'
-import { createAgentModels } from '../../models/index.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
 import { latestEntryId } from '../../memory/transcript.ts'
 import { parseMessage } from '../../validation.ts'
-import type { LocalDb } from '../../storage/local.ts'
+import type { LocalDb } from '../../agent/local-db/local.ts'
 import {
   adoptPermissions,
   admitWeb,
   grantSources,
   reserveWeb,
-} from '../../storage/external-data.ts'
+} from '../../agent/local-db/external-data.ts'
 import {
   startToolUsage,
   finishToolUsage,
   observeToolUsage,
   selectUsageCredential,
   toolUsageActive,
-} from '../../storage/usage.ts'
-import type { UsageAttribution } from '../../storage/usage.ts'
+} from '../../agent/local-db/usage.ts'
+import type { UsageAttribution } from '../../agent/local-db/usage.ts'
 import {
   searchProviderState,
   startSearchAttempt,
@@ -32,11 +32,11 @@ import {
   saveSearchSession,
   searchSession,
   searchAttempts,
-} from '../../storage/web-search.ts'
+} from '../../agent/local-db/web-search.ts'
 import { normalizeQuery, normalizeUrl } from './url.ts'
 import { searchRoute, requireSearchCredential } from './search-route.ts'
 import { nativeSearch } from './search.ts'
-import { keylessSearch } from './keyless-search.ts'
+import { keylessSearch } from './providers/keyless.ts'
 import { fetchPage } from './fetch.ts'
 import { externalEnvelope } from './search-result.ts'
 

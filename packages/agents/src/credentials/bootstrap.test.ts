@@ -2,7 +2,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
 import { seedLocalCredentials } from './bootstrap.ts'
-import { management, newAgentId } from '../helper/management.ts'
+import { management, newAgentId } from '../testing/management.ts'
 import { auditLog, agentConfigVersions, credentialGrants } from '../../drizzle/management/schema.ts'
 import { sha256Hex } from '../lib/hash.ts'
 import { credentialFingerprint } from './encryption.ts'

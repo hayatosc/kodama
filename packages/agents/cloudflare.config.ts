@@ -16,7 +16,7 @@ const agentWorker = defineWorker({
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
   },
-  // Daily reconciliation (src/management/service/reconcile.ts), then memory consolidation
+  // Daily reconciliation (src/control-plane/workflows/reconcile.ts), then memory consolidation
   // (src/memory/consolidation.ts).
   triggers: [triggers.scheduled({ schedule: '17 3 * * *' })],
   workersDev: false,

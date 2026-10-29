@@ -18,11 +18,11 @@ import {
   textResponse,
   toolCallResponse,
   toolResults,
-} from '../../helper/model.ts'
-import { context, db } from '../../helper/memory.ts'
+} from '../../testing/model.ts'
+import { context, db } from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../helper/management.ts'
+import { newAgentId } from '../../testing/management.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 

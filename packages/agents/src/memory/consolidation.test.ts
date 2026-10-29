@@ -15,8 +15,8 @@ import {
   revisionClaims,
 } from '../../drizzle/memory/schema.ts'
 import { SEARCH_VERSION, storedTerms } from '../lib/search-text.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../helper/model.ts'
-import { activeContents, db, memoryAgent, parameterLimitedDb } from '../helper/memory.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../testing/model.ts'
+import { activeContents, db, memoryAgent, parameterLimitedDb } from '../testing/memory.ts'
 import { consolidateDaily, LEDGER_RETENTION_MS } from './consolidation.ts'
 import { changedScopes } from './store/maintenance.ts'
 import { searchMemory } from './store/search.ts'

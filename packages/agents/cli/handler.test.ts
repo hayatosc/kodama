@@ -1,11 +1,11 @@
 /** Authenticated local adapter routes registry references without implicit seeding. @module */
 import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
-import { newAgentId } from '../src/helper/management.ts'
-import { seedOnce } from '../src/helper/management.ts'
+import { newAgentId } from '../src/testing/management.ts'
+import { seedOnce } from '../src/testing/management.ts'
 import { CLI_ACTOR } from './credentials.ts'
 import { handleCli } from './handler.ts'
-import { decodeEvents, useMockModel } from '../src/helper/rpc.ts'
+import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

@@ -8,15 +8,15 @@
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import { configure, createRegistry, defineExtension, section } from '@earendil-works/pi-durable'
 import type { Extension, HarnessOptions } from '@earendil-works/pi-durable'
-import { agentChange, defaultAgentConfig } from '../configuration/index.ts'
-import type { DefaultModelEnv } from '../configuration/index.ts'
-import { createAgentModels } from '../models/index.ts'
+import { agentChange, defaultAgentConfig } from '../control-plane/config.ts'
+import type { DefaultModelEnv } from '../control-plane/config.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 import { createAgentTools } from '../tools/index.ts'
 import type { WebCall } from '../tools/web/search-tool.ts'
-import type { ContactAgent } from '../tools/contact-agent.ts'
-import { harnessSettings } from '../runtime/harness.ts'
-import { guardedModels } from '../runtime/restrictions.ts'
-import type { Refusal } from '../runtime/restrictions.ts'
+import type { ContactAgent } from '../tools/contact.ts'
+import { harnessSettings } from './runtime/harness.ts'
+import { guardedModels } from './runtime/restrictions.ts'
+import type { Refusal } from './runtime/restrictions.ts'
 
 /**
  * Register the working agent's optional tools alongside its always-enabled extensions.

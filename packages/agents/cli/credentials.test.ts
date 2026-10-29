@@ -1,7 +1,7 @@
 /** Local credential commands use only the authenticated write-only adapter. @module */
 import { exports } from 'cloudflare:workers'
 import { expect, it } from 'vitest'
-import { useMockModel } from '../src/helper/rpc.ts'
+import { useMockModel } from '../src/testing/rpc.ts'
 import { uuidv7 } from '../src/lib/uuid.ts'
 import { handleCli } from './handler.ts'
 

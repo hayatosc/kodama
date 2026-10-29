@@ -15,24 +15,24 @@ packages/
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
     drizzle/              Drizzle schemas and their generated migrations, per database
     src/index.ts          Service-binding RPC entrypoint (AgentService)
-    src/management/       The management database: registry, admission, versions, lifecycle
-    src/management/service/
+    src/control-plane/    The management database: registry, admission, versions, lifecycle, config, models
+    src/control-plane/workflows/
                           AgentService management: registry, configuration versions, seed, reconciliation
+    src/credentials/      Encrypted vault, OAuth token refresh, assignments, and resolution
     src/lib/              Generic helpers that import nothing else from src/
-    src/agent/            Agent RPC, working-agent options, and memory integration
-    src/runtime/          Shared execution: Pi harness, SSE, alarms, configuration, pruning
-    src/system-agents/    Internal agents that support Kodama; memory/ manages long-term memory
-    src/agent-object.ts   Selects the working or system agent in the single AGENTS namespace
-    src/configuration/    Configuration versions: settings, validation, and the applied parts
-    src/models/           Pi provider catalog and Worker credential resolution
+    src/agent/            Agent RPC and Durable Object runtime
+      runtime/            Shared execution: Pi harness, SSE, alarms, configuration, pruning
+      local-db/           Object SQLite: prompt cache, quotas, job queue, pruning, and migrations
+      dedicated/          Internal agents that support Kodama; memory/ manages long-term memory
+    src/agent-object.ts   Selects the working or dedicated agent in the single AGENTS namespace
     src/tools/            Model-facing tool schemas, descriptions, and result formatting
-      working-agent/      Memory tools available to working agents
-      memory-agent/       Dedicated memory-agent tools and their helpers
-    src/memory/           Memory workflows: job permissions, prompts, pruning, archive, skill rules
-    src/memory/store/     D1 queries and writes for memory, skills, and the archive catalog
-    src/storage/          Object SQLite: prompt cache, quotas, job queue, pruning, and migrations
+      memory/             Memory tools for working and dedicated agents
+      web/                Web search and page fetch tools and external providers
+    src/memory/           Memory workflows: extraction permissions, prompts, pruning, archive, skill rules
+      store/              D1 queries and writes for memory, skills, and the archive catalog
+      extraction/         Entry reads, record evidence, and permission-checked writes
     src/protocol.ts       Transport data types (safe to import as types in a UI)
-    src/helper/           Shared test helpers; tests sit next to their modules as *.test.ts
+    src/testing/          Shared test helpers; tests sit next to their modules as *.test.ts
   ui/                     Planned: web UI and its server Worker
 ```
 
@@ -272,7 +272,7 @@ exactly one succeeds. `rollbackConfig` writes an old version's content as a new 
 default tool list is empty. Add tool implementations in `src/tools/` and register them in
 `src/tools/index.ts`; agents enable registered tools by name.
 
-`src/models/index.ts` registers Pi's built-in providers and model catalogs. Provider credentials
+`src/control-plane/models.ts` registers Pi's built-in providers and model catalogs. Provider credentials
 are encrypted in the management D1 credential store; agents select credential IDs in configuration.
 There is no environment or local-file authentication fallback in the Worker.
 

@@ -4,7 +4,7 @@
  * @module
  */
 import type { AgentEnv } from '../../env.ts'
-import type { LocalDb } from '../../storage/local.ts'
+import type { LocalDb } from '../../agent/local-db/local.ts'
 
 /** What a working agent's memory needs from the agent object. */
 export interface WorkingMemoryDeps {

@@ -9,15 +9,15 @@
 import { safeFailure } from '../../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import type { LocalDb } from '../../storage/local.ts'
+import type { LocalDb } from '../../agent/local-db/local.ts'
 import {
   createRun,
   measureRange,
   prunedThrough,
   runEntries,
   setState,
-} from '../../storage/pruning.ts'
-import type { Run } from '../../storage/pruning.ts'
+} from '../../agent/local-db/pruning.ts'
+import type { Run } from '../../agent/local-db/pruning.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from '../archive/segment.ts'
 import { extractionCheckpoint, memoryDb } from '../store/db.ts'
 import { catalogSegment } from '../store/archive.ts'

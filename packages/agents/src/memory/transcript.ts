@@ -10,11 +10,11 @@ import type { EntryRecord, EntryId, Harness } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { readArchivedText } from './archive/reader.ts'
-import { contactBoundary } from '../storage/external-data.ts'
-import { prunedThrough } from '../storage/pruning.ts'
+import { contactBoundary } from '../agent/local-db/external-data.ts'
+import { prunedThrough } from '../agent/local-db/pruning.ts'
 import type { MemoryDb } from './store/db.ts'
 import { nextArchivedSegment } from './store/archive.ts'
-import type { LocalDb } from '../storage/local.ts'
+import type { LocalDb } from '../agent/local-db/local.ts'
 
 /** Characters of tool output kept in text; the archive keeps the full entry. */
 export const TOOL_RESULT_TEXT_LIMIT = 2_000

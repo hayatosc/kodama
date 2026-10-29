@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { auditLog, credentials } from '../../drizzle/management/schema.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { managementDb } from '../management/db.ts'
+import { managementDb } from '../control-plane/db.ts'
 import { recordRefreshFailure } from './health.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)

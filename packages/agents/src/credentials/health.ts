@@ -2,7 +2,7 @@
 import { and, eq, gt } from 'drizzle-orm'
 import { increment, literal } from '../lib/sql.ts'
 import { auditLog, credentials } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../management/db.ts'
+import type { ManagementDb } from '../control-plane/db.ts'
 import { REFRESH_REJECTED } from './refresh.ts'
 
 type FailureCategory = NonNullable<typeof credentials.$inferSelect.lastRefreshFailureCategory>

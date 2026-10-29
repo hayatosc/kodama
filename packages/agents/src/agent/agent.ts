@@ -6,9 +6,9 @@
  * @module
  */
 import { executeWeb } from '../tools/web/execute.ts'
-import { startToolUsage, finishToolUsage, observeToolUsage } from '../storage/usage.ts'
+import { startToolUsage, finishToolUsage, observeToolUsage } from './local-db/usage.ts'
 import { normalizeQuery, normalizeUrl } from '../tools/web/url.ts'
-import { contactBoundary, markContact, requireTrusted } from '../storage/external-data.ts'
+import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
 import { latestEntryId } from '../memory/transcript.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { Operation } from '../memory/store/records.ts'
@@ -26,8 +26,8 @@ import type {
   TaskId,
 } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import { takeDueAlarms, armRecovery, refreshRecovery } from '../runtime/alarms.ts'
-import type { AlarmPurpose } from '../runtime/alarms.ts'
+import { takeDueAlarms, armRecovery, refreshRecovery } from './runtime/alarms.ts'
+import type { AlarmPurpose } from './runtime/alarms.ts'
 import {
   agentChange,
   defaultAgentConfig,
@@ -35,22 +35,17 @@ import {
   parseSettings,
   readSharedSpaces,
   readConfig,
-} from '../configuration/index.ts'
-import { managementDb } from '../management/db.ts'
+} from '../control-plane/config.ts'
+import { managementDb } from '../control-plane/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
-import { admitAgent, agentRowByObjectName } from '../management/registry.ts'
-import { interruptUsage, usageSince, acknowledgeUsage } from '../storage/usage.ts'
-import type { UsagePage } from '../storage/usage.ts'
-import type { UsageAttribution } from '../storage/usage.ts'
-import { usageModels, USAGE_CONTEXT_KEY } from '../runtime/usage.ts'
-import { reportApplied } from '../management/versions.ts'
-import {
-  applyOrHold,
-  applyPending,
-  appliedSettings,
-  pullIfBehind,
-} from '../runtime/config-apply.ts'
-import type { ApplyDeps, PushedConfig } from '../runtime/config-apply.ts'
+import { admitAgent, agentRowByObjectName } from '../control-plane/registry.ts'
+import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.ts'
+import type { UsagePage } from './local-db/usage.ts'
+import type { UsageAttribution } from './local-db/usage.ts'
+import { usageModels, USAGE_CONTEXT_KEY } from './runtime/usage.ts'
+import { reportApplied } from '../control-plane/versions.ts'
+import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './runtime/config-apply.ts'
+import type { ApplyDeps, PushedConfig } from './runtime/config-apply.ts'
 import {
   anyRefusal,
   assertAllowed,
@@ -58,16 +53,16 @@ import {
   STATUS_KEY,
   statusRefusal,
   toolGuardExtension,
-} from '../runtime/restrictions.ts'
-import type { Refusal } from '../runtime/restrictions.ts'
+} from './runtime/restrictions.ts'
+import type { Refusal } from './runtime/restrictions.ts'
 import { refreshAlwaysLoaded } from '../memory/working/always-loaded.ts'
 import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
-import { sendEvents, subscribeEvents } from '../runtime/events.ts'
-import { exclusiveSection, isIdle, openHarness } from '../runtime/harness.ts'
+import { sendEvents, subscribeEvents } from './runtime/events.ts'
+import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
 import { createAgentOptions } from './config.ts'
 import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
-import { contactAgent } from '../tools/contact-execute.ts'
+import { contactAgent } from '../tools/contact.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
@@ -75,7 +70,7 @@ import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { JobStatus } from '../memory/jobs.ts'
 import { createWorkingMemoryExtension } from './memory-extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
-import { createAgentModels } from '../models/index.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 import { agentCredentialStore } from '../credentials/runtime.ts'
 import type {
   AgentConfig,
@@ -87,8 +82,8 @@ import type {
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
-import { openLocalDb } from '../storage/local.ts'
-import type { LocalDb } from '../storage/local.ts'
+import { openLocalDb } from './local-db/local.ts'
+import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
   parseInput,
@@ -98,8 +93,8 @@ import {
 } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
-import type { ConfigStore } from '../configuration/index.ts'
-import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from '../runtime/pruning.ts'
+import type { ConfigStore } from '../control-plane/config.ts'
+import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
 import {
   extracts,
   markActivity,
@@ -107,7 +102,7 @@ import {
   runExtraction,
   scheduleExtraction,
 } from './memory.ts'
-import { snapshotOf, submissionOf } from '../runtime/views.ts'
+import { snapshotOf, submissionOf } from './runtime/views.ts'
 
 const context = BACKGROUND_CONTEXT
 

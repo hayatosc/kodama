@@ -1,11 +1,11 @@
 /** Local-only registration through the same credential operations as trusted RPC callers. @module */
 import * as v from 'valibot'
-import type { ManagementEnv } from '../management/service/agents.ts'
+import type { ManagementEnv } from '../control-plane/workflows/agents.ts'
 import type { AgentEnv } from '../env.ts'
 import type { CredentialRefs, SeedResult } from '../protocol.ts'
-import { managementDb } from '../management/db.ts'
-import { principalOf } from '../management/principals.ts'
-import { createAgentModels } from '../models/index.ts'
+import { managementDb } from '../control-plane/db.ts'
+import { principalOf } from '../control-plane/principals.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 import { putCredential } from './management.ts'
 import { credentialFingerprint } from './encryption.ts'
 

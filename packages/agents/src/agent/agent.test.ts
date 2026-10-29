@@ -3,9 +3,9 @@ import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import AgentService from '../index.ts'
-import { newAgentId } from '../helper/management.ts'
+import { newAgentId } from '../testing/management.ts'
 import { parseMessage } from '../validation.ts'
-import { modelResponse, readEvents, useMockModel, waitForAnswer } from '../helper/rpc.ts'
+import { modelResponse, readEvents, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

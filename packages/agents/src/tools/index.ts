@@ -5,8 +5,8 @@
  * @module
  */
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { createContactAgentTool } from './contact-agent.ts'
-import type { ContactAgent } from './contact-agent.ts'
+import { createContactAgentTool } from './contact.ts'
+import type { ContactAgent } from './contact.ts'
 import { createWebSearchTool } from './web/search-tool.ts'
 import type { WebCall } from './web/search-tool.ts'
 import { createWebFetchTool } from './web/fetch-tool.ts'

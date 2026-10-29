@@ -2,8 +2,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { nativeSearch } from './search.ts'
 import { searchRoute, requireSearchCredential } from './search-route.ts'
-import { readResponses } from './search-responses.ts'
-import { readMessages } from './search-messages.ts'
+import { readResponses } from './providers/openai.ts'
+import { readMessages } from './providers/anthropic.ts'
 
 const models = [
   {

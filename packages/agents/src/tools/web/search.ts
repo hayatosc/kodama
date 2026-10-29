@@ -1,8 +1,8 @@
 /** One native HTTP request; callers own scoped authentication, admission and accounting. @module */
 import type { NativeRoute, SearchModel } from './search-route.ts'
-import { responsesRequest, readResponses } from './search-responses.ts'
-import { messagesRequest, readMessages } from './search-messages.ts'
-import { googleRequest, readGoogle } from './search-google.ts'
+import { responsesRequest, readResponses } from './providers/openai.ts'
+import { messagesRequest, readMessages } from './providers/anthropic.ts'
+import { googleRequest, readGoogle } from './providers/google.ts'
 import { decodeUtf8, readBody, sseData } from './stream.ts'
 import { normalizeQuery } from './url.ts'
 

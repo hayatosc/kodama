@@ -15,7 +15,7 @@ import {
   memorySearchTool,
   rememberTool,
   skillReadTool,
-} from '../tools/working-agent/memory.ts'
+} from '../tools/memory/working.ts'
 
 function skillsText(skills: readonly VisibleSkill[]): string | undefined {
   if (skills.length === 0) return undefined

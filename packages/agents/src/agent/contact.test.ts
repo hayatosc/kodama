@@ -5,12 +5,12 @@ import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
 import { agents } from '../../drizzle/management/schema.ts'
-import { newAgentId, management, updateSettings } from '../helper/management.ts'
-import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../helper/rpc.ts'
-import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
-import { withHarness } from '../helper/harness.ts'
+import { newAgentId, management, updateSettings } from '../testing/management.ts'
+import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../testing/rpc.ts'
+import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
+import { withHarness } from '../testing/harness.ts'
 import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
-import { contactAgent, CONTACT_WAIT_MS } from '../tools/contact-execute.ts'
+import { contactAgent, CONTACT_WAIT_MS } from '../tools/contact.ts'
 
 useMockModel()
 

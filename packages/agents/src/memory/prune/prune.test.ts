@@ -3,20 +3,20 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'c
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STORAGE_MAINTENANCE_ERROR } from '../../runtime/pruning.ts'
+import { STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
 import { searchHistory } from '../archive/history.ts'
 import { applyOperation } from '../store/records.ts'
 import type { NewRecord } from '../store/records.ts'
-import type { ToolCall } from '../../helper/model.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
+import type { ToolCall } from '../../testing/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
 import { PRUNE_LIMITS_KEY } from './runs.ts'
-import { prunedThrough } from '../../storage/pruning.ts'
+import { prunedThrough } from '../../agent/local-db/pruning.ts'
 import { memoryDb } from '../store/db.ts'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
-import { openLocalDb } from '../../storage/local.ts'
-import { markContact } from '../../storage/external-data.ts'
+import { openLocalDb } from '../../agent/local-db/local.ts'
+import { markContact } from '../../agent/local-db/external-data.ts'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import {
   BACKGROUND_USAGE,
@@ -27,10 +27,10 @@ import {
   mockModel,
   say,
   storedEntryIds,
-} from '../../helper/conversation.ts'
+} from '../../testing/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId, updateSettings } from '../../helper/management.ts'
+import { newAgentId, updateSettings } from '../../testing/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())

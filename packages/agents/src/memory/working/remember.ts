@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { claimRememberTurn } from '../../storage/memory.ts'
+import { claimRememberTurn } from '../../agent/local-db/memory.ts'
 import type { JobStatus } from '../jobs.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import type { WorkingMemoryDeps } from './deps.ts'

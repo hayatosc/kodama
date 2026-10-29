@@ -4,7 +4,7 @@ import { UUID_PATTERN } from '../lib/uuid.ts'
 import { parseInput } from '../validation.ts'
 import { and, eq } from 'drizzle-orm'
 import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../management/db.ts'
+import type { ManagementDb } from '../control-plane/db.ts'
 import type { AgentSettings, CredentialRefs } from '../protocol.ts'
 
 /** Resolve explicitly supplied credential IDs from metadata; never choose an implicit credential. */

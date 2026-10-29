@@ -1,9 +1,9 @@
 /** Provider content and request identities pass through without credential redaction. @module */
 import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
-import { newAgentId } from '../helper/management.ts'
-import { modelResponse, useMockModel, waitForAnswer } from '../helper/rpc.ts'
-import { requestBody, toolCallResponse, toolResults } from '../helper/model.ts'
+import { newAgentId } from '../testing/management.ts'
+import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import { requestBody, toolCallResponse, toolResults } from '../testing/model.ts'
 import { currentTimeTool } from '../tools/current-time.ts'
 
 useMockModel()

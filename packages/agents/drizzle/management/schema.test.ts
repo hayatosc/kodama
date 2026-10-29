@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
-import { managementDb } from '../../src/management/db.ts'
+import { managementDb } from '../../src/control-plane/db.ts'
 import * as schema from './schema.ts'
 
 it('stores fresh model defaults and nullable tool aggregate providers', async () => {

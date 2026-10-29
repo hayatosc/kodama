@@ -9,7 +9,7 @@
 import type { AgentEnv } from './env.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { Agent } from './agent/agent.ts'
-import { MemoryAgent } from './system-agents/memory/agent.ts'
+import { MemoryAgent } from './agent/dedicated/memory/agent.ts'
 
 /** The class each reserved name is constructed as. Reserved names are not public agent IDs. */
 const DEDICATED_AGENTS: ReadonlyMap<string, typeof Agent> = new Map([

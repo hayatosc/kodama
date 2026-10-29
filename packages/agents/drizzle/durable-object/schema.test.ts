@@ -4,7 +4,7 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
-import { openLocalDb } from '../../src/storage/local.ts'
+import { openLocalDb } from '../../src/agent/local-db/local.ts'
 import * as schema from './schema.ts'
 
 it('stores fresh model defaults and nullable tool providers with unique tasks', async () => {

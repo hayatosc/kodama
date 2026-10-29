@@ -9,7 +9,7 @@
 import * as v from 'valibot'
 import { visibleSkills } from '../store/skills.ts'
 import { memoryRevisions, promptRecords } from '../store/queries.ts'
-import { markMemoryChecked, saveMemoryCopy, storedMemoryCopy } from '../../storage/memory.ts'
+import { markMemoryChecked, saveMemoryCopy, storedMemoryCopy } from '../../agent/local-db/memory.ts'
 import type { VisibleSkill } from '../skills.ts'
 import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
