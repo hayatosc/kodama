@@ -14,7 +14,10 @@ const credential: OAuthCredential = {
 }
 const token = { access_token: 'renewed-access', token_type: 'Bearer', expires_in: 3600 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 it('refreshes inside Pi auth’s preemptive window', () => {
   expect(refreshDue({ ...credential, expires: 301_000 }, 1000)).toBe(true)
@@ -200,7 +203,7 @@ it('does not echo network exception details', async () => {
 
 it('combines caller cancellation with a timeout below the lease duration', async () => {
   const abort = new AbortController()
-  const timeout = vi.spyOn(AbortSignal, 'timeout')
+  vi.useFakeTimers()
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
     await new Promise<void>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
@@ -210,7 +213,64 @@ it('combines caller cancellation with a timeout below the lease duration', async
   const refresh = expect(refreshChatGPT(credential, Date.now, abort.signal)).rejects.toThrow(
     'credential_unavailable',
   )
-  expect(timeout).toHaveBeenCalledWith(10_000)
+  expect(vi.getTimerCount()).toBe(1)
   abort.abort()
   await refresh
+  expect(vi.getTimerCount()).toBe(0)
 })
+
+it.each(['success', 'rejected', 'malformed', 'network'] as const)(
+  'releases the refresh deadline after %s',
+  async (outcome) => {
+    vi.useFakeTimers()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      if (outcome === 'network') throw new Error('private network detail')
+      if (outcome === 'rejected') return Response.json({ error: 'invalid_grant' }, { status: 400 })
+      if (outcome === 'malformed') return new Response('not JSON')
+      return Response.json(token)
+    })
+    const refresh = refreshChatGPT(credential, Date.now)
+    expect(vi.getTimerCount()).toBe(1)
+    if (outcome === 'success')
+      await expect(refresh).resolves.toMatchObject({ access: token.access_token })
+    else await expect(refresh).rejects.toThrow('credential_')
+    expect(vi.getTimerCount()).toBe(0)
+  },
+)
+
+it.each(['headers', 'body'] as const)(
+  'bounds stalled refresh %s reads to ten seconds',
+  async (stage) => {
+    vi.useFakeTimers()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const signal = init?.signal
+      if (!signal) throw new Error('Missing refresh signal')
+      if (stage === 'headers') {
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('private network detail')), {
+            once: true,
+          })
+        })
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            signal.addEventListener(
+              'abort',
+              () => controller.error(new Error('private body detail')),
+              { once: true },
+            )
+          },
+        }),
+      )
+    })
+    const refresh = expect(refreshChatGPT(credential, Date.now)).rejects.toThrow(
+      'credential_unavailable: OAuth refresh request failed',
+    )
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    await refresh
+    expect(vi.getTimerCount()).toBe(0)
+  },
+)
