@@ -1,5 +1,5 @@
 /** Anonymous search with durable cooldown callbacks, bounded serial attempts, and 429-only rotation. @module */
-import { deadline as timed } from '../lib/deadline.ts'
+import { deadline as timed } from '../../lib/deadline.ts'
 import { KEYLESS_PROVIDERS, keylessResults } from './keyless-results.ts'
 import type { KeylessProvider } from './keyless-results.ts'
 import { boundedSearch } from './search-result.ts'

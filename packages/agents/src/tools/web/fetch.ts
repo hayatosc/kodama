@@ -1,5 +1,5 @@
 /** Public GET only: URL validation at every hop, no DNS preflight, retries or subresources. @module */
-import { deadline as timed } from '../lib/deadline.ts'
+import { deadline as timed } from '../../lib/deadline.ts'
 import { decodeDocument, extractHtml } from './extract.ts'
 import { readBody } from './stream.ts'
 import { limitText, normalizeUrl } from './url.ts'

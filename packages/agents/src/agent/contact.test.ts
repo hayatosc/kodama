@@ -9,7 +9,8 @@ import { newAgentId, management, updateSettings } from '../helper/management.ts'
 import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../helper/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../helper/model.ts'
 import { withHarness } from '../helper/harness.ts'
-import { contactAgent, contactOrigin, CONTACT_WAIT_MS, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactAgent, CONTACT_WAIT_MS } from '../tools/contact-execute.ts'
 
 useMockModel()
 

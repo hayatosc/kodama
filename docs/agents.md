@@ -138,23 +138,23 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                                                                                                                           | May import                                    |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| lib                | `src/lib/`                                                                                                                                                      | nothing in `src/`                             |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib                                           |
-| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, contracts, tool registry                 |
-| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                    | lib                                           |
-| storage            | `drizzle/`, `src/storage/`                                                                                                                                      | lib, memory contracts                         |
-| management         | `src/management/`, except `service/`                                                                                                                            | lib, contracts, settings, storage             |
-| credential storage | `src/credentials/`, except the management flows below                                                                                                           | lib, contracts, settings, storage, management |
-| memory store       | `src/memory/store/`                                                                                                                                             | lib, storage, memory contracts                |
-| memory             | the rest of `src/memory/`                                                                                                                                       | lib, contracts, storage, memory store         |
-| tool adapters      | `src/tools/`                                                                                                                                                    | lib, contracts, memory, memory store          |
-| runtime            | `src/runtime/`                                                                                                                                                  | all of the above                              |
-| agent              | `src/agent/`                                                                                                                                                    | all of the above                              |
-| system agents      | `src/system-agents/`                                                                                                                                            | all of the above, including Agent             |
-| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts`, `src/credentials/bootstrap.ts` | all of the above                              |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                           | all of the above                              |
+| Layer              | Paths                                                                                                                                                           | May import                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| lib                | `src/lib/`                                                                                                                                                      | nothing in `src/`                                                                       |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                            | lib                                                                                     |
+| settings           | `src/configuration/`, `src/models/`                                                                                                                             | lib, contracts, tool registry                                                           |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                    | lib                                                                                     |
+| storage            | `drizzle/`, `src/storage/`                                                                                                                                      | lib, memory contracts                                                                   |
+| management         | `src/management/`, except `service/`                                                                                                                            | lib, contracts, settings, storage                                                       |
+| credential storage | `src/credentials/`, except the management flows below                                                                                                           | lib, contracts, settings, storage, management                                           |
+| memory store       | `src/memory/store/`                                                                                                                                             | lib, storage, memory contracts                                                          |
+| memory             | the rest of `src/memory/`                                                                                                                                       | lib, contracts, storage, memory store                                                   |
+| runtime            | `src/runtime/`                                                                                                                                                  | lib, contracts, settings, storage, management, credential storage, memory store, memory |
+| tools              | `src/tools/`                                                                                                                                                    | all of the above                                                                        |
+| agent              | `src/agent/`                                                                                                                                                    | all of the above                                                                        |
+| system agents      | `src/system-agents/`                                                                                                                                            | all of the above, including Agent                                                       |
+| management service | `src/management/service/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts`, `src/credentials/bootstrap.ts` | all of the above                                                                        |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                           | all of the above                                                                        |
 
 Some consequences:
 
@@ -169,10 +169,16 @@ Some consequences:
   The lower management layer never imports credential storage.
 - Credential code stays in `src/credentials/`; contracts, settings, and memory stores do not depend
   on credential storage or inspect credentials to rewrite content.
-- `src/tools/` is the model-facing adapter layer: tool names, schemas, descriptions, and result
-  formatting. `src/tools/working-agent/memory.ts` serves working agents;
-  `src/tools/memory-agent/` serves only the memory agent. Neither tool set imports the other's
-  adapters. They call memory workflows or store functions, never construct Drizzle queries.
+- `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
+  descriptions, admission orchestration, external transport, and result formatting. Web definitions,
+  execution, and provider protocols live together in `src/tools/web/`; `contact-execute.ts` resolves
+  contact targets and observes replies through the supplied `sendTo` operation.
+  `src/tools/working-agent/memory.ts` serves working agents; `src/tools/memory-agent/` serves only
+  the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
+  store functions, never construct Drizzle queries or import agent classes. Agents supply shared
+  state and operations; prompt refresh, extraction scheduling, and peer delivery remain outside tools.
+  Pure argument normalization in `src/tools/web/url.ts` is also used by RPC validation; storage may
+  import web protocol types with type-only imports, but never tool execution.
   `src/tools/index.ts` registers optional general tools; memory tools are wired by the working agent's
   extension or the system agent's configuration, not by settings.
 - `src/memory/` owns job permissions, extraction, shared-write validation, prompt assembly, and
@@ -574,7 +580,7 @@ message text. Peer input is always queued as `followUp`, never injected into an 
 turn. Self-contact is refused.
 
 The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
-Its workflow in `src/agent/contact.ts` resolves the registry reference and calls this same `sendTo`
+Its workflow in `src/tools/contact-execute.ts` resolves the registry reference and calls this same `sendTo`
 path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
 the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
 `answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked

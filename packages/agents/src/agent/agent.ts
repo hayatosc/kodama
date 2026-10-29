@@ -5,9 +5,9 @@
  *
  * @module
  */
-import { executeWeb } from './web.ts'
+import { executeWeb } from '../tools/web/execute.ts'
 import { startToolUsage, finishToolUsage, observeToolUsage } from '../storage/usage.ts'
-import { normalizeQuery, normalizeUrl } from '../web/url.ts'
+import { normalizeQuery, normalizeUrl } from '../tools/web/url.ts'
 import { contactBoundary, markContact, requireTrusted } from '../storage/external-data.ts'
 import { latestEntryId } from '../memory/transcript.ts'
 import { applyOperation } from '../memory/store/records.ts'
@@ -66,7 +66,8 @@ import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from '../runtime/events.ts'
 import { exclusiveSection, isIdle, openHarness } from '../runtime/harness.ts'
 import { createAgentOptions } from './config.ts'
-import { contactAgent, contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactAgent } from '../tools/contact-execute.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'

@@ -5,7 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { normalizeQuery, normalizeUrl } from './web/url.ts'
+import { normalizeQuery, normalizeUrl } from './tools/web/url.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'

@@ -1,7 +1,7 @@
 /** Optional inert public-page reader; redirects never grant reusable permissions. @module */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
-import type { WebCall } from './web-search.ts'
+import type { WebCall } from './search-tool.ts'
 
 /** The model cannot supply headers, credentials, methods, or request bodies. */
 export function createWebFetchTool(call?: WebCall) {

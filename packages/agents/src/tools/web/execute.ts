@@ -3,23 +3,28 @@ import { AgentDoc, LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-dura
 import type { Harness } from '@earendil-works/pi-durable'
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Context } from '@earendil-works/chord/context'
-import { deadline } from '../lib/deadline.ts'
-import { currentRunInputs } from '../runtime/inputs.ts'
-import type { AgentSettings } from '../protocol.ts'
-import type { ObserveCredential } from '../credentials/store.ts'
-import { createAgentModels } from '../models/index.ts'
-import { latestEntryId } from '../memory/transcript.ts'
-import { parseMessage } from '../validation.ts'
-import type { LocalDb } from '../storage/local.ts'
-import { adoptPermissions, admitWeb, grantSources, reserveWeb } from '../storage/external-data.ts'
+import { deadline } from '../../lib/deadline.ts'
+import { currentRunInputs } from '../../runtime/inputs.ts'
+import type { AgentSettings } from '../../protocol.ts'
+import type { ObserveCredential } from '../../credentials/store.ts'
+import { createAgentModels } from '../../models/index.ts'
+import { latestEntryId } from '../../memory/transcript.ts'
+import { parseMessage } from '../../validation.ts'
+import type { LocalDb } from '../../storage/local.ts'
+import {
+  adoptPermissions,
+  admitWeb,
+  grantSources,
+  reserveWeb,
+} from '../../storage/external-data.ts'
 import {
   startToolUsage,
   finishToolUsage,
   observeToolUsage,
   selectUsageCredential,
   toolUsageActive,
-} from '../storage/usage.ts'
-import type { UsageAttribution } from '../storage/usage.ts'
+} from '../../storage/usage.ts'
+import type { UsageAttribution } from '../../storage/usage.ts'
 import {
   searchProviderState,
   startSearchAttempt,
@@ -27,13 +32,13 @@ import {
   saveSearchSession,
   searchSession,
   searchAttempts,
-} from '../storage/web-search.ts'
-import { normalizeQuery, normalizeUrl } from '../web/url.ts'
-import { searchRoute, requireSearchCredential } from '../web/search-route.ts'
-import { nativeSearch } from '../web/search.ts'
-import { keylessSearch } from '../web/keyless-search.ts'
-import { fetchPage } from '../web/fetch.ts'
-import { externalEnvelope } from '../web/search-result.ts'
+} from '../../storage/web-search.ts'
+import { normalizeQuery, normalizeUrl } from './url.ts'
+import { searchRoute, requireSearchCredential } from './search-route.ts'
+import { nativeSearch } from './search.ts'
+import { keylessSearch } from './keyless-search.ts'
+import { fetchPage } from './fetch.ts'
+import { externalEnvelope } from './search-result.ts'
 
 /** Current restrictions override exact permissions, including before each redirect/rotation. */
 export function requireWebEnabled(

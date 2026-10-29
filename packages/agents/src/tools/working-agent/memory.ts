@@ -7,8 +7,8 @@
  */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
-import type { EntryRecord, ToolRegistration } from '@earendil-works/pi-durable'
-import type { Context } from '@earendil-works/chord/context'
+import type { Harness, ToolRegistration } from '@earendil-works/pi-durable'
+import { currentRunInputs } from '../../runtime/inputs.ts'
 import { searchHistory } from '../../memory/archive/history.ts'
 import type { HistoryResult } from '../../memory/archive/history.ts'
 import { isSkillName } from '../../memory/skills.ts'
@@ -100,7 +100,7 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
  */
 export function rememberTool(
   deps: WorkingMemoryDeps,
-  readInputs: (context: Context) => Promise<readonly EntryRecord[]>,
+  harness: () => Promise<Harness>,
 ): ToolRegistration {
   return defineTool({
     name: 'remember',
@@ -111,7 +111,8 @@ export function rememberTool(
     }),
     replay: 'safe',
     execute: async ({ content }, _api, context) => {
-      const inputs = await readInputs(context)
+      const inputs = await currentRunInputs(await harness(), context)
+      if (!inputs) throw new Error('Remember requires an active execution')
       // The last input remains the quota/evidence anchor, not a claim of sole execution ownership.
       const status = await requestRemember(deps, inputs.at(-1)?.id, content)
       return {

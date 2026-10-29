@@ -1,4 +1,4 @@
-/** Optional, non-replayable web search; the agent layer owns admission and accounting. @module */
+/** Optional, non-replayable web search backed by the shared web execution workflow. @module */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { Context } from '@earendil-works/chord/context'
