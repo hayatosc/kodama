@@ -1,8 +1,8 @@
 /** Atomic daily ingestion and usage reads in the management database. @module */
 import { and, eq, exists, asc, gt, gte, lt, isNull, or, sum, count, min } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
-import { sumWhen, groupKey, increment, literal } from '../lib/sql.ts'
-import { agents } from '../../drizzle/management/schema.ts'
+import { sumWhen, groupKey, increment, literal, addObservation } from '../lib/sql.ts'
+import { agents, auditLog } from '../../drizzle/management/schema.ts'
 import type { UsageQuery } from '../protocol.ts'
 import {
   usageDaily as daily,
@@ -46,14 +46,19 @@ export async function readUsage(
   query: UsageQuery & { limit: number },
   now: number,
 ) {
-  const key =
+  const dimensions: [AnyColumn, ...AnyColumn[]] =
     query.groupBy === 'day'
-      ? groupKey(daily.day)
+      ? [daily.day]
       : query.groupBy === 'agent'
-        ? groupKey(daily.chargedAgentId)
+        ? [daily.chargedAgentId]
         : query.groupBy === 'credential'
-          ? groupKey(daily.credentialId, daily.credentialKind)
-          : groupKey(daily.provider, daily.model)
+          ? [daily.credentialId, daily.credentialKind]
+          : [daily.provider, daily.model]
+  // Provider queries, server search calls and keyless attempts are different units.
+  const key =
+    query.kind === 'tool'
+      ? groupKey(...dimensions, daily.tool, daily.api, daily.countKind)
+      : groupKey(...dimensions)
   const rows = await db
     .select({
       key: key.as('group_key'),
@@ -62,6 +67,17 @@ export async function readUsage(
       rateLimited: sum(daily.rateLimited).mapWith(Number),
       unknown: sumWhen(eq(daily.usageState, 'unknown'), daily.attempts),
       notApplicable: sumWhen(eq(daily.usageState, 'not_applicable'), daily.attempts),
+      toolObservations: {
+        tool: daily.tool,
+        api: daily.api,
+        countKind: daily.countKind,
+        input: sum(daily.toolInput).mapWith(Number),
+        output: sum(daily.toolOutput).mapWith(Number),
+        searchCount: sum(daily.searchCount).mapWith(Number),
+        resultCount: sum(daily.resultCount).mapWith(Number),
+        httpCount: sum(daily.httpCount).mapWith(Number),
+        receivedBytes: sum(daily.receivedBytes).mapWith(Number),
+      },
       reported: amounts('reported'),
       partial: amounts('partial'),
     })
@@ -69,6 +85,8 @@ export async function readUsage(
     .where(
       and(
         gte(daily.day, query.from),
+        eq(daily.kind, query.kind ?? 'model'),
+        query.tool ? eq(daily.tool, query.tool) : undefined,
         lt(daily.day, query.to),
         query.agentId ? eq(daily.chargedAgentId, query.agentId) : undefined,
         query.cursor ? gt(key, query.cursor) : undefined,
@@ -121,13 +139,22 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
     row.credentialKind,
     row.provider,
     row.model,
+    row.kind,
+    row.tool,
+    row.api,
+    row.countKind,
     row.actorKind,
     row.usageState,
   ])
   const counts = {
     attempts: literal(1),
     failed: literal(
-      row.status === 'failed' || row.status === 'aborted' || row.status === 'interrupted' ? 1 : 0,
+      row.status === 'failed' ||
+        row.status === 'aborted' ||
+        row.status === 'interrupted' ||
+        row.status === 'blocked'
+        ? 1
+        : 0,
     ),
     rateLimited: literal(row.rateLimited ? 1 : 0),
     input: literal(row.input ?? 0),
@@ -151,6 +178,16 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
           chargedAgentId: literal(row.chargedAgentId).as('charged_agent_id'),
           credentialId: literal(row.credentialId).as('credential_id'),
           credentialKind: literal(row.credentialKind).as('credential_kind'),
+          kind: literal(row.kind).as('kind'),
+          tool: literal(row.tool).as('tool'),
+          api: literal(row.api).as('api'),
+          countKind: literal(row.countKind).as('count_kind'),
+          searchCount: literal(row.searchCount).as('search_count'),
+          resultCount: literal(row.resultCount).as('result_count'),
+          httpCount: literal(row.httpCount).as('http_count'),
+          receivedBytes: literal(row.receivedBytes).as('received_bytes'),
+          toolInput: literal(row.kind === 'tool' ? row.input : null).as('tool_input'),
+          toolOutput: literal(row.kind === 'tool' ? row.output : null).as('tool_output'),
           provider: literal(row.provider).as('provider'),
           model: literal(row.model).as('model'),
           actorKind: literal(row.actorKind).as('actor_kind'),
@@ -175,6 +212,12 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
     .onConflictDoUpdate({
       target: daily.bucket,
       set: {
+        searchCount: addObservation(daily.searchCount, row.searchCount),
+        resultCount: addObservation(daily.resultCount, row.resultCount),
+        httpCount: addObservation(daily.httpCount, row.httpCount),
+        receivedBytes: addObservation(daily.receivedBytes, row.receivedBytes),
+        toolInput: addObservation(daily.toolInput, row.kind === 'tool' ? row.input : null),
+        toolOutput: addObservation(daily.toolOutput, row.kind === 'tool' ? row.output : null),
         attempts: increment(daily.attempts, 1),
         failed: increment(daily.failed, counts.failed),
         rateLimited: increment(daily.rateLimited, counts.rateLimited),
@@ -221,6 +264,27 @@ export async function ingestUsage(
   await db.batch([
     db.insert(ingestion).values({ agentId, updatedAt: 0 }).onConflictDoNothing(),
     ...page.rows.map((row) => bucketStatement(db, row, agentId, after)),
+    ...page.rows
+      .filter((row) => row.kind === 'tool')
+      .map((row) =>
+        db.insert(auditLog).select(
+          db
+            .select({
+              seq: literal(null).as('seq'),
+              opId: literal(`tool:${agentId}:${row.seq}`).as('op_id'),
+              at: literal(row.finishedAt ?? now).as('at'),
+              actorId: literal(null).as('actor_id'),
+              action: literal(`tool.${row.tool}`).as('action'),
+              targetKind: literal('agent').as('target_kind'),
+              targetId: literal(row.chargedAgentId).as('target_id'),
+              detailJson: literal(
+                row.auditJson ?? JSON.stringify({ status: row.status, task: row.task }),
+              ).as('detail_json'),
+            })
+            .from(ingestion)
+            .where(and(eq(ingestion.agentId, agentId), eq(ingestion.lastSeq, after))),
+        ),
+      ),
     ...page.rows.flatMap((row) =>
       row.credentialId === null
         ? []

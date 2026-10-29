@@ -33,13 +33,13 @@ const THINKING_LEVELS = [
 ] as const satisfies readonly ModelThinkingLevel[]
 const SYSTEM_PROMPT_MAX_LENGTH = 64_000
 
-/** The configuration of a new agent: the default model and prompt, no tools, the `global` space. */
+/** The configuration of a new agent: the default model and prompt, web tools, the `global` space. */
 export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
   return {
     model: { provider: env.DEFAULT_MODEL_PROVIDER, modelId: env.DEFAULT_MODEL_ID },
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     thinkingLevel: 'off',
-    tools: [],
+    tools: ['web_search', 'web_fetch'],
     sharedSpaces: [...DEFAULT_SHARED_SPACES],
   }
 }
@@ -98,6 +98,7 @@ export function agentSettingsSchema(models: Models) {
           (issue) => `Unknown tool: ${issue.input.find((name) => !isRegisteredTool(name))}`,
         ),
       ),
+      webSearchRoute: v.optional(v.picklist(['auto', 'keyless'])),
       sharedSpaces: sharedSpacesSchema,
       description: v.optional(
         v.pipe(
@@ -200,6 +201,7 @@ function selectedTools(stored: string[] | { remove: string[] }): string[] {
 export async function initializeAgentConfig(
   harness: Harness,
   defaults: AgentConfig,
+  applied?: AgentSettings,
 ): Promise<void> {
   await harness.commit(async (tx) => {
     const state = await tx.doc(AgentDoc, ROOT_CONVERSATION_ID)
@@ -207,7 +209,9 @@ export async function initializeAgentConfig(
       await configure(tx, ROOT_CONVERSATION_ID, { instructions: defaults.systemPrompt })
     }
     // Agents stored before long-term memory list their tools; keep memory tools enabled.
-    if (Array.isArray(state.tools)) {
+    if (applied) {
+      await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(applied.tools) })
+    } else if (Array.isArray(state.tools)) {
       await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(selectedTools(state.tools)) })
     }
   }, BACKGROUND_CONTEXT)

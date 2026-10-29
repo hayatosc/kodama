@@ -173,3 +173,18 @@ KEK loss does not require an elaborate backup-location or recovery-custody schem
 lost, re-register the provider credentials rather than plan recovery of the encrypted values.
 Backup location, custody/access rules and per-key usage limits are not outstanding policy decisions.
 Kodama is not deployed; no legacy credential formats or provider-secret migration paths are supported.
+
+## Native web-search authentication
+
+Web search uses the applied conversation model and existing `credentials.primary[provider]`
+assignment for `openai`, `xai`, `anthropic`, `deepseek`, or `google`. API keys retain kind `api_key`;
+OpenAI subscription retains `oauth_subscription`. Other native subscription kinds are rejected,
+not switched to another billing route. There is no search credential kind or ambient fallback.
+
+An invocation-scoped D1 observer records credential UUID/kind in the existing usage row before
+releasing plaintext. `Models.getAuth(model, {signal})` receives the tool's 15-second deadline,
+including lease wait and refresh; restriction/cancellation checks run again before sending.
+Native requests use fixed official endpoints, never Codex, proxies or identity impersonation.
+API-key requests can incur both inference and search charges. Unknown costs remain null; there
+are no budgets, billing approvals or failure-triggered anonymous fallbacks. Anonymous providers
+receive no credentials/cookies, and fetch accepts no supplied authentication.

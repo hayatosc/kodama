@@ -1,0 +1,188 @@
+/** Anonymous protocol fixtures and cooldown-only rotation; no live quotas. @module */
+import { afterEach, expect, it, vi } from 'vitest'
+import { cooldown, keylessRequest, keylessSearch } from './keyless-search.ts'
+import type { KeylessAttempt, ProviderState } from './keyless-search.ts'
+import type { KeylessProvider } from './keyless-results.ts'
+import { keylessResults } from './keyless-results.ts'
+
+const source = {
+  url: 'https://example.org/#fragment',
+  title: 'Source',
+  highlights: ['Excerpt'],
+  description: 'Excerpt',
+  excerpts: ['Excerpt'],
+  content: 'Excerpt',
+}
+const fixtures = {
+  exa: { jsonrpc: '2.0', id: 1, result: { structuredContent: { results: [source] } } },
+  firecrawl: {
+    jsonrpc: '2.0',
+    id: 1,
+    result: {
+      content: [{ type: 'text', text: JSON.stringify({ success: true, data: { web: [source] } }) }],
+    },
+  },
+  parallel: {
+    jsonrpc: '2.0',
+    id: 1,
+    result: { structuredContent: { session_id: 'fixture-session', results: [source] } },
+  },
+  tavily: { results: [source] },
+}
+afterEach(() => vi.unstubAllGlobals())
+
+it.each(['exa', 'firecrawl', 'parallel', 'tavily'] as const)(
+  'normalizes the fixed %s schema without credentials',
+  (provider) => {
+    expect(
+      keylessResults(provider, JSON.stringify(fixtures[provider]), 'application/json').results,
+    ).toEqual([{ url: 'https://example.org/', title: 'Source', excerpt: 'Excerpt' }])
+    const request = keylessRequest(provider, 'question', 'fixture-session')
+    expect(request.headers.has('authorization')).toBe(false)
+    expect(request.headers.has('cookie')).toBe(false)
+    expect(request.body).not.toContain('api_key')
+    expect(request.headers.get('user-agent')).toBe('kodama/0.0.0')
+    if (provider === 'parallel') expect(request.body).toContain('fixture-session')
+  },
+)
+
+it('rotates only 429 in fixed order, persists before sending and reuses session privately', async () => {
+  const states = new Map<KeylessProvider, ProviderState>()
+  const attempts: KeylessAttempt[] = []
+  const sends: KeylessProvider[] = []
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'retry-after': '120' } }))
+    .mockResolvedValueOnce(new Response(JSON.stringify(fixtures.firecrawl)))
+  vi.stubGlobal('fetch', fetch)
+  const result = await keylessSearch(
+    'question',
+    new AbortController().signal,
+    (provider) => states.get(provider),
+    async (provider) => {
+      if (provider === 'firecrawl')
+        expect(states.get('exa')?.blockedUntil).toBeGreaterThan(Date.now())
+      sends.push(provider)
+    },
+    (attempt, next) => {
+      attempts.push(attempt)
+      if (next) states.set(attempt.provider, next)
+    },
+  )
+  expect(sends).toEqual(['exa', 'firecrawl'])
+  expect(attempts.map((attempt) => attempt.status)).toEqual([429, 200])
+  expect(result).toMatchObject({
+    provider: 'firecrawl',
+    result: { searchCount: 2 },
+    skippedProviders: [],
+  })
+})
+
+it.each([401, 500, 302])(
+  'does not rotate HTTP %i and records a terminal attempt',
+  async (status) => {
+    const fetch = vi.fn(async () => new Response('{}', { status }))
+    vi.stubGlobal('fetch', fetch)
+    const finish = vi.fn()
+    const skip = vi.fn()
+    await expect(
+      keylessSearch(
+        'q',
+        new AbortController().signal,
+        (provider) =>
+          provider === 'exa' ? { blockedUntil: Date.now() + 60_000, consecutive429: 1 } : undefined,
+        async () => {},
+        finish,
+        undefined,
+        skip,
+      ),
+    ).rejects.toThrow('provider_failed')
+    expect(skip).toHaveBeenCalledExactlyOnceWith('exa')
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(finish).toHaveBeenCalledOnce()
+  },
+)
+
+it('fails malformed/all-invalid results rather than rotating or inventing empty success', async () => {
+  const fetch = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { structuredContent: { results: [{ url: 'http://127.0.0.1/', text: 'bad' }] } },
+        }),
+      ),
+  )
+  vi.stubGlobal('fetch', fetch)
+  const finish = vi.fn()
+  await expect(
+    keylessSearch(
+      'q',
+      new AbortController().signal,
+      () => undefined,
+      async () => {},
+      finish,
+    ),
+  ).rejects.toThrow('provider_response_invalid')
+  expect(fetch).toHaveBeenCalledOnce()
+  expect(finish).toHaveBeenCalledOnce()
+  expect(
+    keylessResults(
+      'exa',
+      JSON.stringify({ jsonrpc: '2.0', id: 1, result: { structuredContent: { results: [] } } }),
+      'application/json',
+    ).results,
+  ).toEqual([])
+})
+
+it('skips cooling providers without attempts and honors floors, dates and exponential fallback', async () => {
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  const now = Date.now()
+  const finish = vi.fn()
+  const result = await keylessSearch(
+    'q',
+    new AbortController().signal,
+    () => ({ blockedUntil: now + 120000, consecutive429: 1 }),
+    async () => {},
+    finish,
+  )
+  expect(result).toMatchObject({
+    error: 'search_rate_limited',
+    attempts: [],
+    retryAt: now + 120000,
+    skippedProviders: ['exa', 'firecrawl', 'parallel', 'tavily'],
+  })
+  expect(fetch).not.toHaveBeenCalled()
+  expect(finish).not.toHaveBeenCalled()
+  expect(cooldown('tavily', 0, '1', 120, now)).toBe(now + 120000)
+  expect(cooldown('parallel', 1, null, null, now)).toBe(now + 7200000)
+  expect(cooldown('exa', 0, null, null, now)).toBe(now + 86400000)
+  expect(cooldown('exa', 0, new Date(now + 2 * 86400000).toUTCString(), null, now)).toBeGreaterThan(
+    now + 86400000,
+  )
+})
+
+it('correlates multiline MCP SSE IDs and refuses RPC errors and prose URL guessing', () => {
+  const event =
+    'data: {"jsonrpc":"2.0","id":1,\ndata: "result":{"structuredContent":{"results":[]}}}\n\n'
+  expect(keylessResults('exa', event, 'text/event-stream').results).toEqual([])
+  expect(() =>
+    keylessResults('exa', '{"jsonrpc":"2.0","id":2,"result":{}}', 'application/json'),
+  ).toThrow()
+  expect(() =>
+    keylessResults('exa', '{"jsonrpc":"2.0","id":1,"error":{"code":429}}', 'application/json'),
+  ).toThrow()
+  expect(() =>
+    keylessResults(
+      'exa',
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { content: [{ type: 'text', text: 'Try https://example.org' }] },
+      }),
+      'application/json',
+    ),
+  ).toThrow()
+})

@@ -73,3 +73,27 @@ are retained indefinitely. There is no audit expiry, operation-receipt table or 
 Subscription usage is an API-equivalent reference amount, separate from pay-as-you-go catalog
 cost; neither implies subscription fees. No budgets, caps, reservations or cost-driven model
 changes exist. Subscription limits never authorize falling back to an API key.
+
+## Web-tool observations and audit
+
+The same durable ledger now discriminates `kind: 'model' | 'tool'`; default reads remain
+model-only. Request `kind: 'tool'` and optionally `tool: 'web_search' | 'web_fetch'` through the
+existing usage RPC for tool groups. Aggregate identity includes kind/tool, native dialect and
+count unit. `toolObservations` reports nullable search/result/HTTP/byte/input/output observations;
+missing observations are not free or complete measurements. Tool dollar amounts are unknown,
+not fabricated from the model catalog; subscription/keyless do not imply zero billing.
+
+Each logical tool task has one idempotent row, including early guard rejection, blocked, failed,
+aborted and interrupted outcomes. Native HTTP creates no second model row. Selected credential
+identity is observed before auth release and existing ingestion advances its last-use timestamp.
+Keyless/fetch have no credential. Search counts distinguish completed calls, provider requests
+and Google query count (not necessarily billable searches). Fetch records only HTTP counts,
+not fictitious DNS preflight traffic.
+
+The local terminal result stores content-free audit metadata atomically. Cursor-guarded D1
+batches ingest `tool.web_search` / `tool.web_fetch` audit rows together with aggregation and
+credential last-use. Retries and lost acknowledgments have one effect. Owner-visible arguments,
+permission provenance, ordered attempts/cooldowns and skipped providers may be audited; keys,
+Authorization, session IDs, raw provider errors, answer/page text and suggestion HTML never are.
+Interrupted measurements remain unknown; no-traffic rejection has zero HTTP/provider attempts.
+The usual acknowledgment/30-day detail retention applies, with indefinite aggregates/audit.

@@ -17,11 +17,28 @@ export const usage = sqliteTable('kodama_usage', {
   jobId: text('job_id'),
   credentialId: text('credential_id'),
   credentialKind: text('credential_kind', { enum: ['api_key', 'oauth_subscription'] }),
-  provider: text('provider').notNull(),
-  model: text('model').notNull(),
+  kind: text('kind', { enum: ['model', 'tool'] })
+    .notNull()
+    .default('model'),
+  tool: text('tool', { enum: ['web_search', 'web_fetch'] }),
+  root: text('root'),
+  run: text('run'),
+  task: text('task').unique(),
+  api: text('api'),
+  argument: text('argument'),
+  admittedAt: integer('admitted_at'),
+  keyless: integer('keyless', { mode: 'boolean' }).notNull().default(false),
+  searchCount: integer('search_count'),
+  countKind: text('count_kind'),
+  resultCount: integer('result_count'),
+  httpCount: integer('http_count'),
+  receivedBytes: integer('received_bytes'),
+  auditJson: text('audit_json'),
+  provider: text('provider'),
+  model: text('model'),
   responseModel: text('response_model'),
   status: text('status', {
-    enum: ['in_flight', 'succeeded', 'failed', 'aborted', 'interrupted'],
+    enum: ['in_flight', 'succeeded', 'failed', 'aborted', 'interrupted', 'blocked'],
   })
     .notNull()
     .default('in_flight'),
@@ -111,3 +128,45 @@ export const pruneRuns = sqliteTable(
   },
   (t) => [index('kodama_prune_runs_by_state').on(t.state)],
 )
+
+/** Permanent first external contact for a root conversation. */
+export const externalData = sqliteTable('kodama_external_data', {
+  root: text('root').primaryKey(),
+  reason: text('reason').notNull(),
+  contactedAt: integer('contacted_at').notNull(),
+  eligibleThrough: integer('eligible_through').notNull(),
+})
+
+/** Exact permissions are consumed once and never transferred between runs. */
+export const webPermissions = sqliteTable('kodama_web_permissions', {
+  key: text('key').primaryKey(),
+  root: text('root').notNull(),
+  run: text('run'),
+  input: integer('input'),
+  tool: text('tool', { enum: ['web_search', 'web_fetch'] }).notNull(),
+  argument: text('argument').notNull(),
+  consumedAt: integer('consumed_at'),
+})
+
+/** Anonymous provider cooldown and root-lifetime session, never exported in audit. */
+export const webSearchProviderState = sqliteTable('web_search_provider_state', {
+  provider: text('provider').primaryKey(),
+  blockedUntil: integer('blocked_until').notNull().default(0),
+  consecutive429: integer('consecutive_429').notNull().default(0),
+  reason: text('reason').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  sessionId: text('session_id'),
+})
+
+/** Actual anonymous sends, including failures and interrupted requests. */
+export const webSearchAttempts = sqliteTable('kodama_web_search_attempts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  usageSeq: integer('usage_seq').notNull(),
+  provider: text('provider').notNull(),
+  startedAt: integer('started_at').notNull(),
+  finishedAt: integer('finished_at'),
+  status: integer('status'),
+  reason: text('reason'),
+  cooldown: integer('cooldown'),
+  bytes: integer('bytes'),
+})

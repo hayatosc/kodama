@@ -339,6 +339,7 @@ interface AgentSettings {
   systemPrompt: string // at most 64,000 characters
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   tools: string[] // unique names of registered tools
+  webSearchRoute?: 'auto' | 'keyless' // absent means auto
   sharedSpaces: string[] // shared memory spaces read by this agent, earliest first
   description?: string // at most 1,000 characters
   labels?: string[] // up to 16 unique labels of lowercase letters, digits, or hyphens
@@ -357,7 +358,7 @@ interface AgentSettings {
 
 A new agent's version 1 holds the defaults of its creation: the model `DEFAULT_MODEL_PROVIDER` and
 `DEFAULT_MODEL_ID` from `cloudflare.config.ts`, the prompt `DEFAULT_SYSTEM_PROMPT` in
-`src/configuration/index.ts`, thinking off, no tools, `sharedSpaces` `["global"]`, and both memory
+`src/configuration/index.ts`, thinking off, `web_search` and `web_fetch` enabled, `sharedSpaces` `["global"]`, and both memory
 policies on. Changing the defaults later changes no existing agent.
 
 ### Configuration versions
@@ -469,7 +470,7 @@ To add a tool:
 2. Register it in [`src/tools/index.ts`](../packages/agents/src/tools/index.ts).
 
 Agents enable registered tools by name in `tools`, and the default list is empty. Optional tools
-are `current_time` and `contact_agent`. The memory tools come from the memory extension, not from
+are `current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory extension, not from
 this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
@@ -580,18 +581,75 @@ unavailable. Timeout or sender cancellation does not cancel the receiver. Pendin
 to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
 delivery. Its delivery request ID is scoped to the sender and tool task.
 
-`MAX_CONTACT_HOPS = 3` is defined once in `src/agent/contact.ts`: A→B→C→D is allowed, but D cannot
-deliver another message from that chain. This permits two intermediary delegates while bounding
-cycles; replies collected by the initiating tool do not consume hops. The next hop comes from
-persisted input metadata, not editable message text, and survives eviction. An execution can own
-multiple inputs: a final boundary may place both human steering and peer follow-up, and later
-steering joins the active input set. `src/runtime/inputs.ts` resolves that complete durable set.
-If any input is a peer message, the next hop inherits the maximum peer hop; input order cannot
-reset the chain. Only a purely human execution starts a fresh chain at zero incoming hops.
-Idle, non-model `sendTo` calls retain the latest durable input's provenance. The cap bounds chain
-depth, not total fan-out or the number of independent human requests. Other agents' text remains
-data, not trusted instructions. A `remember` call takes the last execution input, human or peer,
-as its evidence and quota anchor, not as an assertion that this input alone caused the call.
+`MAX_CONTACT_HOPS = 3` remains a defensive provenance cap, but the permanent external-contact
+boundary is stricter: receiving any peer message or sending a peer request prevents subsequent
+`contact_agent` and `remember` calls for that root. A new owner message, steering, compaction,
+cancellation or eviction never clears contact. Both the early tool guard and the serialized
+side-effect boundary enforce the refusal. Delivery commits sender contact before crossing the
+object boundary and never holds its serial queue while waiting on another object.
+
+## Public web tools
+
+New working agents enable `web_search` and `web_fetch`; explicit applied `tools: []` disables
+both. Reopening reconciles the optional-tool complement from the applied immutable settings,
+not the desired version. Missing applied settings fail closed; policy deny wins. Memory tools
+remain separately registered and system agents never receive web tools. Both web adapters are
+replay-unsafe: interrupted traffic is accounted for, never automatically repeated.
+
+Search accepts only `{query}`. In auto mode the applied model's provider/API and exact official
+base select OpenAI/xAI Responses, Anthropic Messages, DeepSeek's explicit catalog-completions
+to Messages adapter, or Gemini GenerateContent SSE. The same model ID is retained. Unsupported
+provider/API/base combinations and explicit `webSearchRoute: 'keyless'` select anonymous search
+before sending. Native errors never retry, fall back, or change a later call's route. Native API
+keys may incur inference and search charges; there is no budget or billing approval mechanism.
+
+Keyless order is Exa → Firecrawl → Parallel → Tavily, skipping durable cooldowns. Only verified
+HTTP 429 responses rotate. Attempts and cooldowns survive eviction; Parallel's session is reused
+privately. Shared egress means even the first request can be limited. `retryAt` is a best-effort
+indication, not quota availability or permission to retry. Fixed anonymous protocols remain
+owner-live verification gates, not claims of confirmed service availability.
+
+Fetch accepts `{url, max_chars?}` and returns inert HTML/plain/Markdown text, not a browser.
+Only public HTTP(S), standard ports and no userinfo/IP/internal names are accepted. Up to three
+redirects are checked individually; loops and HTTPS downgrade fail. There is no DNS preflight,
+JS, subresource loading, login, cookies, page-link permission harvesting or arbitrary headers.
+`global_fetch_strictly_public` is required for connection-time public egress. Local URL fixtures
+do not prove resolved-destination/rebinding protection; that remains an owner-only release gate.
+
+Each call has a cancellable 15-second deadline beginning before scoped vault auth. Per object,
+at most two calls (one keyless) run concurrently; rolling 60-second limits are 10 search
+admissions, 30 fetch admissions and 10 actual anonymous sends. Native responses are bounded to
+512 KiB; anonymous attempts to 256 KiB/5 seconds with a 512 KiB total; fetch transfer/decoded text
+to 2 MiB. Envelopes are valid JSON ≤128 KiB marked `untrusted_external_data`, not instructions.
+
+Immediately before the first outbound web send, SQLite atomically commits first contact,
+admission and any permission consumption. Failed traffic never clears contact. Later web
+traffic requires an exact owner permission from an input actually adopted into this run:
+
+```sh
+nr agent send assistant "Research the release" --web-query "exact release query" \
+  --web-url "https://example.org/release"
+```
+
+Each repeatable permission array has at most 20 entries. Queries are trim-only; URLs share the
+tool's normalization including IDNA/default port/fragment removal while preserving path/query.
+Prose, peer inputs and model output cannot mint permissions. Permissions bind root, the logical
+run's first adopted submission, input, tool and exact argument and consume once. Pi's generation
+task ID changes after tool rounds, so it is recorded separately rather than used as run identity.
+Successful search sources grant one fetch per validated URL in that same run; edited URLs,
+page links, another run and repeated consumption do not. Redirects grant nothing reusable.
+
+A non-removable system section marks web, peer and history content as evidence, not approval.
+Read tools and final answers remain available after contact; remember and peer delivery do not.
+Wrong answers, persuasion and disclosure of pre-contact generated queries remain residual risks.
+Exact permissions are authorization, not sanitization.
+
+All five native routes have mocked transport/schema fixtures, not universal model compatibility
+claims. The owner personally must verify real native dialect/auth/grounding, anonymous endpoints
+and Workers egress in an environment the owner deploys. Agents do not deploy or run live checks.
+Google native search is required. Google display (viewer, suggestions rendering, retention,
+cleanup and browser tests) is explicitly out of scope, not passed; suggestion HTML is discarded
+and is neither a readiness prerequisite nor model/ledger content.
 
 ## Events
 

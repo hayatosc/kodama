@@ -34,3 +34,8 @@ export function increment(column: AnyColumn<{ data: number }>, by: NumericExpres
 export function groupKey(...columns: [AnyColumn, ...AnyColumn[]]): SQL<string> {
   return sql<string>`json_array(${sql.join(columns, sql`, `)})`
 }
+
+/** Add a known observation without converting entirely unknown measurements into zero. */
+export function addObservation(column: AnyColumn<{ data: number }>, value: number | null) {
+  return value === null ? sql`${column}` : sql<number>`coalesce(${column}, 0) + ${value}`
+}

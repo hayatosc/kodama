@@ -92,22 +92,57 @@ export type AppliedSettings = () => Promise<AgentSettings | undefined>
  * The extension that checks every tool call: `refusal` first, then the applied version's
  * `toolPolicy`, and `memoryPolicy.remember` for the `remember` tool.
  */
-export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings): Extension {
+export function toolGuardExtension(
+  refusal: Refusal,
+  settings: AppliedSettings,
+  trusted: () => Promise<void> = async () => {},
+  webIntent?: (
+    tool: 'web_search' | 'web_fetch',
+    task: string,
+    reason?: string,
+    argument?: unknown,
+  ) => Promise<void>,
+): Extension {
   return defineExtension({
     name: 'kodama-restrictions',
     hooks: [
       hook(ToolTask, {
-        beforeTool: async (call) => {
-          const reason = refusal()
-          if (reason !== undefined) return { block: reason }
+        beforeTool: async (call, api) => {
+          let reason = refusal()
           const applied = await settings()
-          if (applied?.toolPolicy?.[call.name] === 'deny') {
-            return { block: `tool ${call.name} is denied by the agent's tool policy` }
+          if (!reason && (call.name === 'remember' || call.name === 'contact_agent')) {
+            try {
+              await trusted()
+            } catch {
+              reason = 'untrusted_context'
+            }
           }
-          if (call.name === 'remember' && applied?.memoryPolicy.remember === false) {
-            return { block: "remember is disabled by the agent's memory policy" }
-          }
-          return undefined
+          if (
+            (call.name === 'web_search' || call.name === 'web_fetch') &&
+            !applied?.tools.includes(call.name)
+          )
+            reason ??= 'tool_disabled'
+          if (applied?.toolPolicy?.[call.name] === 'deny')
+            reason ??= `tool ${call.name} is denied by the agent's tool policy`
+          if (call.name === 'remember' && applied?.memoryPolicy.remember === false)
+            reason ??= "remember is disabled by the agent's memory policy"
+          if (call.name === 'web_search' || call.name === 'web_fetch')
+            await webIntent?.(
+              call.name,
+              String(api.taskId),
+              reason,
+              call.arguments[call.name === 'web_search' ? 'query' : 'url'],
+            )
+          return reason ? { block: reason } : undefined
+        },
+        afterTool: async (call, result, api) => {
+          if ((call.name === 'web_search' || call.name === 'web_fetch') && result.isError)
+            await webIntent?.(
+              call.name,
+              String(api.taskId),
+              'tool_failed',
+              call.arguments[call.name === 'web_search' ? 'query' : 'url'],
+            )
         },
       }),
     ],

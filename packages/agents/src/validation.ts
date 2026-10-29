@@ -5,6 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
+import { normalizeQuery, normalizeUrl } from './web/url.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
@@ -62,6 +63,8 @@ const UsageDaySchema = v.pipe(
 /** Day-aligned bounded usage reads; cursors are opaque group keys. */
 export const UsageQuerySchema = v.pipe(
   v.object({
+    kind: v.optional(v.picklist(['model', 'tool'])),
+    tool: v.optional(v.picklist(['web_search', 'web_fetch'])),
     agentId: v.optional(AgentIdSchema),
     from: UsageDaySchema,
     to: UsageDaySchema,
@@ -202,6 +205,16 @@ export const SendMessageRequestSchema = v.object(
       v.string(contentMessage),
       v.check((content) => content.trim().length > 0, contentMessage),
       v.maxLength(MESSAGE_CONTENT_MAX_LENGTH, contentMessage),
+    ),
+    webPermissions: v.optional(
+      v.strictObject({
+        queries: v.optional(
+          v.pipe(v.array(v.pipe(v.string(), v.transform(normalizeQuery))), v.maxLength(20)),
+        ),
+        urls: v.optional(
+          v.pipe(v.array(v.pipe(v.string(), v.transform(normalizeUrl))), v.maxLength(20)),
+        ),
+      }),
     ),
     whenBusy: v.optional(v.picklist(['followUp', 'steer'], 'whenBusy must be followUp or steer')),
   },

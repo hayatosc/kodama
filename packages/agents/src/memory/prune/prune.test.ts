@@ -16,6 +16,8 @@ import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../../storage/local.ts'
+import { markContact } from '../../storage/external-data.ts'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import {
   BACKGROUND_USAGE,
   COMPACT_AFTER_TURN_7,
@@ -96,6 +98,14 @@ describe('pruning', () => {
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
       'extract',
     ])
+    // A queued job's archive scan still advances after contact, but returns no excluded text.
+    await runInDurableObject(stub, async (_instance, state) => {
+      markContact(await openLocalDb(state.storage), String(ROOT_CONVERSATION_ID), 'peer', 0)
+    })
+    const excluded = await stub.readEntries({ after: 0, limit: 5 })
+    expect(excluded.entries).toEqual([])
+    expect(excluded.through).toBe(page.through)
+    expect(excluded.end).toBe(false)
   })
 
   it('hands pruned entries to extraction only while the memory policy extracts', async () => {

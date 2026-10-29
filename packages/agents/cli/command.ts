@@ -26,7 +26,7 @@ export const USAGE = `Usage:
   nr agent credentials assign <credential-id> <agent>
   nr agent credentials unassign <credential-id> <agent>
   nr agent credentials revoke <credential-id>
-  nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
+  nr agent send <agent> "message" [--request-id ID] [--steer] [--events] [--web-query QUERY ...] [--web-url URL ...]
   nr agent snapshot <agent>
   nr agent cancel <agent>
 
@@ -66,6 +66,8 @@ export type Command =
 export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
   'request-id': { type: 'string' },
+  'web-query': { type: 'string', multiple: true },
+  'web-url': { type: 'string', multiple: true },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
   name: { type: 'string' },
@@ -79,6 +81,8 @@ export interface ParsedArgs {
   values: {
     help?: boolean
     'request-id'?: string
+    'web-query'?: string[]
+    'web-url'?: string[]
     steer?: boolean
     events?: boolean
     name?: string
@@ -126,7 +130,7 @@ export function toCommand(
     if (rawAgentRef === 'list' && positionals.length === 2) return { action: 'credentials/list' }
     if ((rawAgentRef === 'add' || rawAgentRef === 'login') && positionals.length === 2) {
       const provider = values.provider
-      if (!provider || !['openai', 'anthropic', 'google', 'xai'].includes(provider))
+      if (!provider || !['openai', 'anthropic', 'google', 'xai', 'deepseek'].includes(provider))
         throw new Error('Choose a supported provider with --provider')
       const requestId = parseRequestId(values['request-id'] ?? newRequestId())
       if (rawAgentRef === 'login') {
@@ -167,6 +171,9 @@ export function toCommand(
   const message = parseMessage({
     requestId: values['request-id'] ?? newRequestId(),
     content,
+    ...(values['web-query'] || values['web-url']
+      ? { webPermissions: { queries: values['web-query'], urls: values['web-url'] } }
+      : {}),
     whenBusy: values.steer ? 'steer' : 'followUp',
   })
   return { action, agentRef, message, events: values.events === true }

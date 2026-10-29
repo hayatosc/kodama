@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import {
+  auditLog,
   credentials,
   principals,
   usageDaily,
@@ -154,4 +155,47 @@ it('rejects a nonterminal or out-of-order page before writing any checkpoint', a
   expect(await db.select().from(usageIngestion).where(eq(usageIngestion.agentId, agentId))).toEqual(
     [],
   )
+})
+
+it('ingests tool audit exactly once and excludes tools from default model reports', async () => {
+  const agentId = await newAgentId()
+  const row = usageRecord({
+    chargedAgentId: agentId,
+    kind: 'tool',
+    tool: 'web_fetch',
+    task: 'task',
+    provider: null,
+    model: null,
+    credentialId: null,
+    credentialKind: null,
+    usageState: 'unknown',
+    input: null,
+    output: null,
+    totalCost: null,
+    auditJson: JSON.stringify({
+      task: 'task',
+      status: 'succeeded',
+      argument: 'https://example.org/',
+    }),
+  })
+  const page = { rows: [row], through: row.seq, more: false }
+  await Promise.all([ingestUsage(db, agentId, 0, page, 1), ingestUsage(db, agentId, 0, page, 2)])
+  await ingestUsage(db, agentId, 0, page, 3)
+  const query = {
+    agentId,
+    from: '2026-10-26',
+    to: '2026-10-28',
+    groupBy: 'day' as const,
+    limit: 20,
+  }
+  expect((await readUsage(db, query, 3)).groups).toEqual([])
+  expect(
+    (await readUsage(db, { ...query, kind: 'tool', tool: 'web_fetch' }, 3)).groups,
+  ).toMatchObject([{ attempts: 1, unknown: 1 }])
+  const audit = await db
+    .select()
+    .from(auditLog)
+    .where(eq(auditLog.opId, `tool:${agentId}:1`))
+  expect(audit).toHaveLength(1)
+  expect(audit[0]).toMatchObject({ action: 'tool.web_fetch', targetId: agentId })
 })

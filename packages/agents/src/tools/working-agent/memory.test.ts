@@ -23,7 +23,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
 
-it('anchors a remember request from a peer turn to that peer input, not an earlier human one', async () => {
+it('refuses a peer remember request before enqueue despite an earlier human input', async () => {
   const peer = await newAgentId()
   const receiver = await newAgentId()
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => modelResponse())
@@ -55,8 +55,9 @@ it('anchors a remember request from a peer turn to that peer input, not an earli
   const job = jobs
     .map((row) => parseMemoryJob(JSON.parse(row.payloadJson)))
     .find((parsed) => parsed.kind === 'remember' && parsed.content === content)
-  expect(job).toMatchObject({ sourceAgentId: receiver })
-  expect(job?.kind === 'remember' ? job.sourceEntries.from : undefined).toBe(peerInput?.entryId)
+  expect(peerInput).toBeDefined()
+  expect(job).toBeUndefined()
+  expect(JSON.stringify(fetch.mock.calls.at(-1))).toContain('untrusted_context')
 })
 
 describe('working memory search', () => {

@@ -18,13 +18,13 @@ import type {
   SubmissionStatus,
 } from '../protocol.ts'
 
-/** Allow A→B→C→D, but refuse D's next delivery; human input starts a new chain. */
+/** Legacy provenance cap; permanent contact restrictions additionally forbid forwarding peers. */
 export const MAX_CONTACT_HOPS = 3
 /** Keep the sender responsive even when the receiver is queued or slow. */
 export const CONTACT_WAIT_MS = 30_000
 
 function inputHop(entry: EntryRecord): number {
-  if (entry.kind === 'pi.user') return 0
+  if (entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message') return 0
   const data = entry.data
   if (
     entry.kind !== 'kodama.agent-message' ||
@@ -55,7 +55,11 @@ export async function contactOrigin(harness: Harness, senderAgentId: string): Pr
               cursor,
             )
             for (const entry of page.items) {
-              if (entry.kind === 'pi.user' || entry.kind === 'kodama.agent-message')
+              if (
+                entry.kind === 'pi.user' ||
+                entry.kind === 'kodama.owner-message' ||
+                entry.kind === 'kodama.agent-message'
+              )
                 return inputHop(entry)
             }
             cursor = page.next

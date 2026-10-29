@@ -12,6 +12,7 @@ const agentWorker = defineWorker({
   name: 'kodama-agents',
   entrypoint,
   compatibilityDate: '2026-10-01',
+  compatibilityFlags: ['global_fetch_strictly_public'],
   exports: {
     Agent: exports.durableObject({ storage: 'sqlite' }),
   },

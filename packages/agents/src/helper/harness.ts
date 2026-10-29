@@ -12,7 +12,7 @@ import { newAgentId } from './management.ts'
 /** Keep the object's own harness passive; submit only through the supplied harness. */
 export async function withHarness<T>(
   settings: HarnessOptions['settings'],
-  run: (harness: Harness) => Promise<T>,
+  run: (harness: Harness, state: DurableObjectState) => Promise<T>,
 ): Promise<T> {
   const agentId = await newAgentId()
   return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
@@ -24,7 +24,7 @@ export async function withHarness<T>(
       BACKGROUND_CONTEXT,
     )
     try {
-      return await run(harness)
+      return await run(harness, state)
     } finally {
       await harness.close(BACKGROUND_CONTEXT)
     }

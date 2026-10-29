@@ -21,5 +21,10 @@ export async function readExtractionEntries(deps: MemoryJobDeps, after?: number,
     limit: limit ?? 50,
   })
   await advanceExtractionProgress(deps.storage, running.jobId, through, page.through)
-  return page
+  return {
+    ...page,
+    entries: page.entries.filter(
+      (entry) => job.eligibleThrough === undefined || entry.id <= job.eligibleThrough,
+    ),
+  }
 }

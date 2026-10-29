@@ -324,51 +324,44 @@ it('preserves the hop cap across eviction independently of peer message text', a
     await rejectionInObject(stub, (agent) =>
       agent.sendTo(receiver, { requestId: 'excess', content: 'Must not arrive.' }),
     ),
-  ).toContain('delegation hop limit 3 reached')
+  ).toContain('untrusted_context')
   expect((await exports.default.snapshot(receiver)).snapshot.messages).toEqual([])
 })
 
-it('permits multi-stage delegation, caps the chain, and returns replies without another hop', async () => {
+it('refuses peer forwarding and never resets contact after owner input or eviction', async () => {
   expect(MAX_CONTACT_HOPS).toBe(3)
-  const chain = await Promise.all(Array.from({ length: 5 }, () => enabled()))
-  for (const target of chain.slice(1)) {
-    vi.mocked(fetch).mockImplementationOnce(async () =>
+  const sender = await enabled()
+  const receiver = await enabled()
+  const last = await enabled()
+  vi.mocked(fetch)
+    .mockImplementationOnce(async () =>
       toolCallResponse({
         name: 'contact_agent',
-        arguments: { target, message: 'Continue the delegation.' },
+        arguments: { target: receiver, message: 'Ask the last agent.' },
       }),
     )
-  }
-  vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
-    expect(requestBody(init)).toContain('delegation hop limit 3 reached')
-    return textResponse('Reached the delegation limit.')
-  })
-  vi.mocked(fetch).mockImplementation(async () => textResponse('Chain completed.'))
-  const first = chain[0]
-  const last = chain[4]
-  if (!first || !last) throw new Error('Missing chain fixture')
-  await exports.default.sendMessage(first, { requestId: 'chain', content: 'Start the chain.' })
-  await waitForAnswer(first, 'chain')
-  expect((await exports.default.snapshot(first)).snapshot.messages.at(-1)?.text).toBe(
-    'Chain completed.',
-  )
-  expect((await exports.default.snapshot(last)).snapshot.messages).toEqual([])
-  for (const [index, id] of chain.slice(1, 4).entries()) {
-    expect((await exports.default.snapshot(id)).snapshot.messages[0]?.text).toContain(
-      `delegation hop ${index + 1}/3`,
+    .mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'contact_agent',
+        arguments: { target: last, message: 'Must not arrive.' },
+      }),
     )
-  }
-  // A new human turn starts a new chain, rather than permanently disabling the agent.
-  const deepest = chain[3]
-  if (!deepest) throw new Error('Missing deepest agent')
-  await exports.default.sendMessage(deepest, { requestId: 'human', content: 'New human request.' })
-  await waitForAnswer(deepest, 'human')
-  await env.AGENTS.getByName(deepest).sendTo(last, {
-    requestId: 'new-chain',
-    content: 'Fresh delegation.',
-  })
-  await waitForAnswer(last, 'new-chain')
-  expect((await exports.default.snapshot(last)).snapshot.messages[0]?.text).toContain(
-    'delegation hop 1/3',
-  )
+    .mockImplementationOnce(async (_input, init) => {
+      expect(requestBody(init)).toContain('untrusted_context')
+      return textResponse('Cannot forward a peer request.')
+    })
+    .mockImplementation(async () => textResponse('Finished.'))
+  await exports.default.sendMessage(sender, { requestId: 'chain', content: 'Ask the peer.' })
+  await waitForAnswer(sender, 'chain')
+  expect((await exports.default.snapshot(last)).snapshot.messages).toEqual([])
+  await exports.default.sendMessage(receiver, { requestId: 'owner', content: 'New owner turn.' })
+  await waitForAnswer(receiver, 'owner')
+  const stub = env.AGENTS.getByName(receiver)
+  await evictDurableObject(stub)
+  expect(
+    await rejectionInObject(stub, (agent) =>
+      agent.sendTo(last, { requestId: 'retry', content: 'Still forbidden.' }),
+    ),
+  ).toContain('untrusted_context')
+  expect((await exports.default.snapshot(last)).snapshot.messages).toEqual([])
 })

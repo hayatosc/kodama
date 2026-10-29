@@ -5,10 +5,18 @@
  *
  * @module
  */
+import { executeWeb } from './web.ts'
+import { startToolUsage, finishToolUsage, observeToolUsage } from '../storage/usage.ts'
+import { normalizeQuery, normalizeUrl } from '../web/url.ts'
+import { contactBoundary, markContact, requireTrusted } from '../storage/external-data.ts'
+import { latestEntryId } from '../memory/transcript.ts'
+import { applyOperation } from '../memory/store/records.ts'
+import type { Operation } from '../memory/store/records.ts'
+import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
   Harness,
@@ -185,7 +193,11 @@ export class Agent extends DurableObject<AgentEnv> {
     )
     return openHarness(this.ctx, { ...options, models }, async (harness) => {
       await harness.root(context)
-      await initializeAgentConfig(harness, this.defaultConfig())
+      await initializeAgentConfig(
+        harness,
+        this.defaultConfig(),
+        await appliedSettings(this.ctx.storage),
+      )
       await this.#catchUp(harness)
       await this.prepare(harness)
       await this.#refreshRecovery(harness)
@@ -272,7 +284,33 @@ export class Agent extends DurableObject<AgentEnv> {
       this.env,
       [
         createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
-        toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
+        toolGuardExtension(
+          this.#refusal,
+          () => appliedSettings(this.ctx.storage),
+          async () => requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID)),
+          async (tool, task, reason, argument) => {
+            const local = await this.#local
+            const seq = startToolUsage(local, this.#toolAttribution(), task, tool)
+            const live = await (
+              await this.#harness
+            ).snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
+            let normalized: string | null = null
+            if (typeof argument === 'string') {
+              try {
+                normalized =
+                  tool === 'web_search' ? normalizeQuery(argument) : normalizeUrl(argument)
+              } catch {
+                // Invalid arguments never become unbounded audit text or authorize traffic.
+              }
+            }
+            observeToolUsage(local, seq, {
+              root: String(ROOT_CONVERSATION_ID),
+              run: live?.run?.inputs[0] === undefined ? null : String(live.run.inputs[0]),
+              argument: normalized,
+            })
+            if (reason) finishToolUsage(local, seq, 'blocked', { reason })
+          },
+        ),
       ],
       this.#refusal,
       this.credentialStore(),
@@ -285,6 +323,30 @@ export class Agent extends DurableObject<AgentEnv> {
           `${this.#agentId()}-${requestId}`,
           context,
         ),
+      async (tool, argument, task, context, maximum) =>
+        executeWeb(
+          await this.#local,
+          await this.#harness,
+          () => appliedSettings(this.ctx.storage),
+          this.#credentials.scoped,
+          this.#serial,
+          this.#refusal,
+          this.#toolAttribution(),
+          tool,
+          argument,
+          task,
+          context,
+          maximum,
+        ),
+    )
+  }
+
+  #toolAttribution(): UsageAttribution {
+    return (
+      this.ctx.storage.kv.get<UsageAttribution>(USAGE_CONTEXT_KEY) ?? {
+        chargedAgentId: this.#agentId(),
+        actorKind: 'system',
+      }
     )
   }
 
@@ -335,6 +397,12 @@ export class Agent extends DurableObject<AgentEnv> {
   #workingMemory(): WorkingMemoryDeps {
     return {
       env: this.env,
+      trusted: (operation) =>
+        this.#serial(async () => {
+          requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
+          return operation()
+        }),
+      contact: () => this.#serial(async () => this.#contact('history')),
       agentId: () => this.#agentId(),
       local: () => this.#local,
       sharedSpaces: () => this.#sharedSpaces(),
@@ -427,6 +495,7 @@ export class Agent extends DurableObject<AgentEnv> {
         )
         if (existing) return conversation.submit(draft, context)
       }
+      if (actorKind === 'agent') await this.#contact('peer')
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
       if (actorKind) {
@@ -454,6 +523,7 @@ export class Agent extends DurableObject<AgentEnv> {
   async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
+      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       parseAgentId(origin.senderAgentId)
       if (!Number.isInteger(origin.hop) || origin.hop < 1 || origin.hop > MAX_CONTACT_HOPS)
         throw new TypeError('Invalid delegation hop')
@@ -479,7 +549,19 @@ export class Agent extends DurableObject<AgentEnv> {
                 data: { senderAgentId: origin.senderAgentId, hop: origin.hop },
               },
             }
-          : {}),
+          : {
+              entry: {
+                kind: 'kodama.owner-message',
+                data: {
+                  webPermissions: {
+                    ...(message.webPermissions?.queries
+                      ? { queries: message.webPermissions.queries }
+                      : {}),
+                    ...(message.webPermissions?.urls ? { urls: message.webPermissions.urls } : {}),
+                  },
+                },
+              },
+            }),
       },
       origin ? 'agent' : 'user',
     )
@@ -498,7 +580,12 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** The stored configuration. */
   async getConfig(): Promise<AgentConfig> {
-    return readConfig(await this.#config())
+    const config = await readConfig(await this.#config())
+    const applied = await appliedSettings(this.ctx.storage)
+    return {
+      ...config,
+      ...(applied?.webSearchRoute ? { webSearchRoute: applied.webSearchRoute } : {}),
+    }
   }
 
   /** An SSE stream of this agent's events, starting with a snapshot. */
@@ -560,9 +647,47 @@ export class Agent extends DurableObject<AgentEnv> {
     assertAllowed(this.#refusal)
     const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     if (agentId === this.#agentId()) throw new TypeError('Cannot contact this agent itself')
-    const origin = await contactOrigin(await this.#harness, this.#agentId())
+    const origin = await this.#serial(async () => {
+      requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
+      assertAllowed(this.#refusal)
+      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
+      const origin = await contactOrigin(await this.#harness, this.#agentId())
+      await this.#contact('peer')
+      return origin
+    })
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** Capture the last eligible entry before admitting or exposing external data. */
+  async #contact(reason: string): Promise<void> {
+    markContact(
+      await this.#local,
+      String(ROOT_CONVERSATION_ID),
+      reason,
+      (await latestEntryId(await this.#harness)) ?? 0,
+    )
+  }
+
+  /** Source-owned write authorization serializes D1 commit with contact admission. */
+  async applyExtractionOperation(context: OperationContext, operation: Operation) {
+    return this.#serial(async () => {
+      const boundary = contactBoundary(await this.#local, String(ROOT_CONVERSATION_ID))
+      const end =
+        operation.type === 'write' || operation.type === 'supersede'
+          ? operation.record.sourceEntries?.to
+          : operation.type === 'invalidate'
+            ? operation.evidence.sourceEntries?.to
+            : undefined
+      if (
+        boundary !== undefined &&
+        operation.type !== 'checkpoint' &&
+        operation.type !== 'decline' &&
+        (end === undefined || end > boundary)
+      )
+        throw new Error('untrusted_context')
+      return applyOperation(memoryDb(this.env.MEMORY_DB), context, operation)
+    })
   }
 
   /** Internal accounting export, including inactive and dedicated agents. */

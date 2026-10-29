@@ -382,8 +382,8 @@ It also lists what not to keep: task progress, guesses, secrets, and one-off req
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
 `kodama_remember_turns`. Attribution uses the active execution's full durable input set, not the
-newest transcript entry: the last execution input, human or peer, is the request's anchor for quota
-and evidence. A remember request has no origin of its own; the memory agent treats every one the
+newest transcript entry: the last adopted owner input anchors quota and evidence. Peer inputs
+permanently establish external contact, so they cannot authorize remember requests. A remember request has no origin of its own; the memory agent treats every one the
 same way, whether the user asked for it or the agent judged it worth keeping.
 
 ## Write paths
@@ -928,3 +928,18 @@ turns it into a `conflict` instead of being undone.
 - How long must archived entries be kept, and who may delete them?
 - Which model should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
+
+## External-contact extraction boundary
+
+A root's first web, peer or history contact persists the last extraction-eligible entry ID in
+object SQLite. `remember` is refused both before execution and in the serialized quota/enqueue
+section. There is no post-contact human-only escape hatch or automatic reset.
+
+Extraction enqueue freezes any known upper bound; source entry reads reapply the current bound
+for both live SQLite and archived R2 pages. All post-boundary text (including owner messages,
+tools, assistants and compaction summaries) is excluded. Page `through` still advances over
+excluded entries so checkpoints do not stall. The source object serializes final extraction
+writes with contact admission and rechecks evidence against its current boundary, protecting
+already queued/running jobs and reads that raced contact. A checkpoint is scan progress, not
+permission to write unread evidence. Reading archived history marks contact before exposing its
+result to the model. Memory layers remain independent of runtime orchestration.

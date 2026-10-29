@@ -71,6 +71,13 @@ export async function executeJobOperation(
           : op.type === 'invalidate'
             ? op.evidence.sourceEntries?.to
             : undefined
+    if (
+      op.type !== 'checkpoint' &&
+      job.eligibleThrough !== undefined &&
+      end !== undefined &&
+      end > job.eligibleThrough
+    )
+      throw new Error('untrusted_context')
     if (end !== undefined && end > through) {
       throw new Error(`Entry ${end} exceeds the job's read range through ${through}`)
     }
@@ -78,9 +85,8 @@ export async function executeJobOperation(
   if (job.kind === 'consolidate' && job.scope.startsWith('shared:') && op.type !== 'decline') {
     throw new Error('Shared records change only through shared_write, which checks their sources')
   }
-  return applyOperation(
-    memoryDb(deps.env.MEMORY_DB),
-    await jobOperationContext(running, callId, now),
-    op,
-  )
+  const context = await jobOperationContext(running, callId, now)
+  if (job.kind === 'extract')
+    return deps.env.AGENTS.getByName(job.sourceAgentId).applyExtractionOperation(context, op)
+  return applyOperation(memoryDb(deps.env.MEMORY_DB), context, op)
 }

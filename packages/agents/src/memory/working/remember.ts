@@ -6,6 +6,7 @@
  * @module
  */
 import { claimRememberTurn } from '../../storage/memory.ts'
+import type { JobStatus } from '../jobs.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
@@ -22,7 +23,9 @@ export async function requestRemember(
   deps: WorkingMemoryDeps,
   userEntry: number | undefined,
   content: string,
-) {
+): Promise<JobStatus> {
+  if (deps.trusted)
+    return deps.trusted(() => requestRemember({ ...deps, trusted: undefined }, userEntry, content))
   if (userEntry === undefined) throw new Error('Not saved: no user message to attribute it to')
   const local = await deps.local()
   if (!claimRememberTurn(local, userEntry, REMEMBER_LIMIT_PER_TURN)) {
