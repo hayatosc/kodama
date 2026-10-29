@@ -2,8 +2,11 @@
 import { and, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm'
 import { usage } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
-import type { KeylessProvider } from '../../tools/web/providers/keyless-results.ts'
-import type { KeylessAttempt, ProviderState } from '../../tools/web/providers/keyless.ts'
+import type {
+  KeylessAttempt,
+  KeylessProvider,
+  ProviderState,
+} from '../../tools/web/providers/keyless.ts'
 
 /** Derive limits from the newest authoritative attempt, without a second provider ledger. */
 export function searchProviderState(

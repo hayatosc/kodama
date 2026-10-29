@@ -1,9 +1,7 @@
 /** Anonymous protocol fixtures and cooldown-only rotation; no live quotas. @module */
 import { afterEach, expect, it, vi } from 'vitest'
-import { cooldown, keylessRequest, keylessSearch } from './keyless.ts'
-import type { KeylessAttempt, ProviderState } from './keyless.ts'
-import type { KeylessProvider } from './keyless-results.ts'
-import { keylessResults } from './keyless-results.ts'
+import { cooldown, keylessRequest, keylessResults, keylessSearch } from './keyless.ts'
+import type { KeylessAttempt, KeylessProvider, ProviderState } from './keyless.ts'
 
 const source = {
   url: 'https://example.org/#fragment',

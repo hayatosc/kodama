@@ -1,4 +1,10 @@
-/** Common bounded search data, separate from application-only Google display artifacts. @module */
+/**
+ * Common bounded search data and untrusted external data envelopes, separate from
+ * application-only Google display artifacts.
+ *
+ * @see docs/agents.md — Web Tools
+ * @module
+ */
 import { limitText, normalizeUrl } from './url.ts'
 
 /** A validated source is a candidate for a one-shot same-run fetch permission. */
@@ -19,20 +25,35 @@ export interface SearchResult {
   sourcesTruncated: boolean
 }
 
-/** Normalize, deduplicate and bound sources without truncating a URL into another destination. */
+/**
+ * Normalize, deduplicate, and bound sources without truncating a URL into another destination.
+ * When a later duplicate URL supplies a non-empty title for an earlier untitled source, upgrade
+ * the title in place.
+ */
 export function searchSources(sources: readonly SearchSource[]): SearchSource[] {
-  const seen = new Set<string>()
-  return sources.flatMap((source) => {
+  const seen = new Map<string, { index: number; hasTitle: boolean }>()
+  const normalized: SearchSource[] = []
+  for (const source of sources) {
     let url: string
     try {
       url = normalizeUrl(source.url)
     } catch {
-      return []
+      continue
     }
-    if (seen.has(url)) return []
-    seen.add(url)
-    return [{ url, title: limitText(source.title || url, 300) }]
-  })
+    const rawTitle = limitText(source.title.trim(), 300)
+    const existing = seen.get(url)
+    if (existing !== undefined) {
+      const target = normalized[existing.index]
+      if (target && !existing.hasTitle && rawTitle !== '') {
+        target.title = rawTitle
+        existing.hasTitle = true
+      }
+      continue
+    }
+    seen.set(url, { index: normalized.length, hasTitle: rawTitle !== '' })
+    normalized.push({ url, title: rawTitle || limitText(url, 300) })
+  }
+  return normalized
 }
 
 /** Assemble a valid JSON envelope after limiting fields; never slice serialized JSON. */

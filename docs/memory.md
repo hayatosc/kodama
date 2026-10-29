@@ -501,7 +501,7 @@ everything.
 
 ## Alarms
 
-A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/agent/runtime/alarms.ts) stores a due
+A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/runtime/alarms.ts) stores a due
 time per purpose under `kodama:alarm:<purpose>` and sets the platform alarm to the earliest one.
 
 | Purpose    | Object       | Set by                                                        |

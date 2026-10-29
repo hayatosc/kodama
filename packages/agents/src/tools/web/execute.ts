@@ -34,8 +34,7 @@ import {
   searchAttempts,
 } from '../../agent/local-db/web-search.ts'
 import { normalizeQuery, normalizeUrl } from './url.ts'
-import { searchRoute, requireSearchCredential } from './search-route.ts'
-import { nativeSearch } from './search.ts'
+import { nativeSearch, requireSearchCredential, searchRoute } from './search.ts'
 import { keylessSearch } from './providers/keyless.ts'
 import { fetchPage } from './fetch.ts'
 import { externalEnvelope } from './search-result.ts'

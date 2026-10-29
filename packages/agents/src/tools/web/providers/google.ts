@@ -1,7 +1,12 @@
-/** Gemini GenerateContent grounding, with suggestions isolated from model-facing data. @module */
-import { array, count, parseJson, record, text } from '../stream.ts'
+/**
+ * Gemini GenerateContent grounding, with suggestions isolated from model-facing data.
+ *
+ * @see docs/agents.md — Web Tools
+ * @module
+ */
 import { boundedSearch } from '../search-result.ts'
 import type { SearchSource } from '../search-result.ts'
+import { array, count, parseJson, record, text } from '../stream.ts'
 
 /** Query-only GenerateContent, not the Interactions API. */
 export function googleRequest(query: string) {
@@ -20,17 +25,19 @@ export function readGoogle(events: readonly string[]) {
     if (event['usageMetadata'] !== undefined) usage = record(event['usageMetadata'])
     for (const value of array(event['candidates'] ?? [])) {
       const candidate = record(value)
-      if (candidate['index'] !== undefined && candidate['index'] !== 0)
+      if (candidate['index'] !== undefined && candidate['index'] !== 0) {
         throw new Error('provider_response_invalid')
+      }
       if (candidate['content'] !== undefined) {
-        for (const value of array(record(candidate['content'])['parts'])) {
-          const part = record(value)
+        for (const partValue of array(record(candidate['content'])['parts'])) {
+          const part = record(partValue)
           if (part['thought'] === true) continue
           if (part['text'] !== undefined) answer += text(part['text'])
         }
       }
-      if (candidate['groundingMetadata'] !== undefined)
+      if (candidate['groundingMetadata'] !== undefined) {
         grounding = record(candidate['groundingMetadata'])
+      }
       if (candidate['finishReason'] !== undefined) {
         if (candidate['finishReason'] !== 'STOP') throw new Error('provider_response_invalid')
         finished = true

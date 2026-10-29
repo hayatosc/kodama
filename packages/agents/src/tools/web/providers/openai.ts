@@ -1,10 +1,15 @@
-/** OpenAI and xAI Responses search dialects; query-only and no continuation. @module */
-import { array, count, parseJson, record, text } from '../stream.ts'
+/**
+ * OpenAI and xAI Responses search dialects; query-only and no continuation.
+ *
+ * @see docs/agents.md — Web Tools
+ * @module
+ */
 import { boundedSearch } from '../search-result.ts'
-import type { SearchSource } from '../search-result.ts'
+import type { SearchResult, SearchSource } from '../search-result.ts'
+import { array, count, parseJson, record, text } from '../stream.ts'
 
 /** Build a fixed search request without history, reasoning parameters, or other tools. */
-export function responsesRequest(provider: 'openai' | 'xai', model: string, query: string) {
+export function responsesRequest(model: string, query: string) {
   return {
     model,
     input: query,
@@ -12,26 +17,27 @@ export function responsesRequest(provider: 'openai' | 'xai', model: string, quer
     store: false,
     tools: [{ type: 'web_search' }],
     tool_choice: 'required',
-    include:
-      provider === 'xai' ? ['web_search_call.action.sources'] : ['web_search_call.action.sources'],
+    include: ['web_search_call.action.sources'],
   }
 }
 
 /** Require a complete response and completed search calls; never accept answer-only output. */
-export function readResponses(events: readonly string[]) {
+export function readResponses(events: readonly string[]): SearchResult {
   let completed: Record<string, unknown> | undefined
   for (const data of events) {
     if (data === '[DONE]') continue
     const event = record(parseJson(data))
-    if (['error', 'response.failed', 'response.incomplete'].includes(text(event['type'])))
+    if (['error', 'response.failed', 'response.incomplete'].includes(text(event['type']))) {
       throw new Error('provider_response_invalid')
+    }
     if (event['type'] === 'response.completed') {
       if (completed) throw new Error('provider_response_invalid')
       completed = record(event['response'])
     }
   }
-  if (!completed || completed['status'] !== 'completed')
+  if (!completed || completed['status'] !== 'completed') {
     throw new Error('provider_response_invalid')
+  }
   let answer = ''
   let searches = 0
   const sources: SearchSource[] = []
@@ -42,12 +48,14 @@ export function readResponses(events: readonly string[]) {
       const action = record(output['action'])
       // This validates returned evidence, not provider-side retrieval prevention.
       if (action['type'] !== 'search') throw new Error('provider_response_invalid')
-      if (action['query'] !== undefined && !text(action['query']).trim())
+      if (action['query'] !== undefined && !text(action['query']).trim()) {
         throw new Error('provider_response_invalid')
+      }
       if (action['queries'] !== undefined) {
         const queries = array(action['queries']).map(text)
-        if (!queries.length || queries.some((query) => !query.trim()))
+        if (!queries.length || queries.some((query) => !query.trim())) {
           throw new Error('provider_response_invalid')
+        }
       }
       searches++
       for (const entry of array(action['sources'] ?? [])) {
@@ -60,10 +68,11 @@ export function readResponses(events: readonly string[]) {
         const block = record(entry)
         if (block['type'] !== 'output_text') continue
         answer += text(block['text'])
-        for (const entry of array(block['annotations'] ?? [])) {
-          const citation = record(entry)
-          if (citation['type'] === 'url_citation')
+        for (const annotation of array(block['annotations'] ?? [])) {
+          const citation = record(annotation)
+          if (citation['type'] === 'url_citation') {
             sources.push({ url: text(citation['url']), title: text(citation['title'] ?? '') })
+          }
         }
       }
     }

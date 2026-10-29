@@ -7,9 +7,9 @@
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { createContactAgentTool } from './contact.ts'
 import type { ContactAgent } from './contact.ts'
-import { createWebSearchTool } from './web/search-tool.ts'
-import type { WebCall } from './web/search-tool.ts'
-import { createWebFetchTool } from './web/fetch-tool.ts'
+import { createWebSearchTool } from './web/search.ts'
+import type { WebCall } from './web/search.ts'
+import { createWebFetchTool } from './web/fetch.ts'
 import { currentTimeTool } from './current-time.ts'
 
 /** Every registered tool. Add a tool here; each agent enables an explicit subset by name. */

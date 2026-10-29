@@ -199,7 +199,7 @@ Some consequences:
 
 ## Harness
 
-[`src/agent/agent/runtime/harness.ts`](../packages/agents/src/agent/agent/runtime/harness.ts) opens Pi and provides shared execution settings.
+[`src/agent/runtime/harness.ts`](../packages/agents/src/agent/runtime/harness.ts) opens Pi and provides shared execution settings.
 Working-agent model and tool composition lives in `src/agent/config.ts`; the memory agent's is in
 `src/agent/dedicated/memory/config.ts`. Both use these settings:
 
@@ -398,7 +398,7 @@ await env.AGENT_SERVICE.updateConfig(actor, agentId, {
 ### Applying versions
 
 Writing the version in D1 is the commitment; pushing it to the object is a notification that may
-be lost ([`src/agent/agent/runtime/config-apply.ts`](../packages/agents/src/agent/agent/runtime/config-apply.ts)):
+be lost ([`src/agent/runtime/config-apply.ts`](../packages/agents/src/agent/runtime/config-apply.ts)):
 
 1. `AgentService` writes the version, then calls `Agent.applyConfig({ agentId, version, settings })`
    on `AGENTS.getByName(object_name)`. The call is idempotent by version number.
@@ -424,7 +424,7 @@ be lost ([`src/agent/agent/runtime/config-apply.ts`](../packages/agents/src/agen
 ### Restrictions
 
 Configuration waits for idle; restrictions do not
-([`src/agent/agent/runtime/restrictions.ts`](../packages/agents/src/agent/agent/runtime/restrictions.ts)). The object holds a
+([`src/agent/runtime/restrictions.ts`](../packages/agents/src/agent/runtime/restrictions.ts)). The object holds a
 copy of its registry state under `kodama:status`, set with `Agent.setStatus(status)`, and checks it
 before every external call:
 
@@ -662,7 +662,7 @@ and is neither a readiness prerequisite nor model/ledger content.
 
 ## Events
 
-[`src/agent/agent/runtime/events.ts`](../packages/agents/src/agent/agent/runtime/events.ts) turns Pi's observation API into SSE byte
+[`src/agent/runtime/events.ts`](../packages/agents/src/agent/runtime/events.ts) turns Pi's observation API into SSE byte
 streams over Cloudflare RPC. The JSON payloads are typed as `AgentSendEvent` and `AgentEvent` in
 `@kodama/agents/protocol`. `AgentEvent` is Pi's experimental event contract, pinned by the package
 version.
@@ -703,7 +703,7 @@ Delivery works like this:
 
 ## Alarms and recovery
 
-A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/agent/runtime/alarms.ts) stores one due
+A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/runtime/alarms.ts) stores one due
 time per purpose and sets the platform alarm to the earliest. It reads and writes the times with the
 synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
 

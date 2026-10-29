@@ -42,4 +42,19 @@ it('bounds Unicode fields, drops unsafe sources and deduplicates normalized URLs
   expect(result.sources[0]?.url).toBe('https://example.org/')
   expect(result.sources[1]?.title).toBe('https://example.org/0')
   expect(result).toMatchObject({ answerTruncated: true, sourcesTruncated: true, searchCount: null })
+
+  const upgraded = boundedSearch({
+    answer: 'Answer',
+    sources: [
+      { url: 'https://example.org/article#top', title: '' },
+      { url: 'https://example.org/article#cite', title: 'Upgraded Title' },
+    ],
+    searchCount: 1,
+    countKind: 'search_calls',
+    inputTokens: 1,
+    outputTokens: 1,
+  })
+  expect(upgraded.sources).toEqual([
+    { url: 'https://example.org/article', title: 'Upgraded Title' },
+  ])
 })
