@@ -469,9 +469,10 @@ To add a tool:
 1. Implement it in `src/tools/`, in a lowercase hyphenated file such as `current-time.ts`.
 2. Register it in [`src/tools/index.ts`](../packages/agents/src/tools/index.ts).
 
-Agents enable registered tools by name in `tools`, and the default list is empty. Optional tools
-are `current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory extension, not from
-this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
+Agents enable registered tools by name in `tools`. New working agents default to `web_search`
+and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
+`current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory
+extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
 Locally, `nr agent tools assistant current_time contact_agent` replaces the optional tool selection
