@@ -6,16 +6,14 @@
  * @module
  */
 import { AgentDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import type { EntryRecord, Harness } from '@earendil-works/pi-durable'
+import type { Harness } from '@earendil-works/pi-durable'
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Context } from '@earendil-works/chord/context'
 import { deadline } from '../../lib/deadline.ts'
-import { currentRunInputs } from '../../agent/runtime/inputs.ts'
 import type { AgentSettings } from '../../protocol.ts'
 import type { ObserveCredential } from '../../credentials/store.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import { latestEntryId } from '../../memory/transcript.ts'
-import { OwnerMessageDataSchema, parseInput } from '../../validation.ts'
 import type { LocalDb } from '../../agent/local-db/local.ts'
 import { admitWeb, contactBoundary, grantUrls } from '../../agent/local-db/external-data.ts'
 import { containsUrl, normalizeQuery, normalizeUrl } from './url.ts'
@@ -128,15 +126,6 @@ export function requireWebEnabled(
   if (settings.toolPolicy?.[tool] === 'deny') throw new Error('tool_denied')
 }
 
-/** URLs named by the owner inputs among `inputs`; peer and other inputs name none. */
-function ownerUrls(inputs: readonly EntryRecord[]): string[] {
-  return inputs.flatMap((input) =>
-    input.kind === 'kodama.owner-message'
-      ? (parseInput(OwnerMessageDataSchema, input.data ?? {}).webPermissions?.urls ?? [])
-      : [],
-  )
-}
-
 const errors = new Set([
   'untrusted_context',
   'unverified_url',
@@ -167,6 +156,14 @@ const errors = new Set([
   'invalid_url',
   'result_too_large',
 ])
+
+/** How the model continues after a refusal that guards data leaving through a URL. */
+const hints: Partial<Record<string, string>> = {
+  unverified_url:
+    'This URL did not come from the owner, a search result or a fetched page. Find the page with web_search, then fetch a URL from its results.',
+  query_contains_url:
+    'After external content, a search query may not contain a URL. Search with words instead, or fetch a URL from earlier results.',
+}
 
 /** Stable error codes only, never exception bodies from authentication or external transports. */
 export function webFailure(error: unknown, signal: AbortSignal): string {
@@ -236,7 +233,6 @@ export async function executeWeb(
         if (attemptSignal) checkSearchAttemptRate(webState, Date.now())
         if (!admitted) {
           const root = String(ROOT_CONVERSATION_ID)
-          const named = ownerUrls((await currentRunInputs(harness, context)) ?? [])
           const eligibleThrough = (await latestEntryId(harness)) ?? 0
           const currentSettings = await settings()
           signal.throwIfAborted()
@@ -251,7 +247,6 @@ export async function executeWeb(
             throw new Error('query_contains_url')
           const now = Date.now()
           checkAdmissionRate(webState, tool, now)
-          grantUrls(local, root, 'owner', named, now)
           admitWeb(local, { root, tool, argument: normalized, eligibleThrough })
           recordAdmission(webState, tool, now)
           admitted = true
@@ -266,7 +261,9 @@ export async function executeWeb(
       const result = await fetchPage(normalized, maximum, signal, async () => {
         await admit()
       })
-      return externalEnvelope(tool, normalized, result)
+      const output = externalEnvelope(tool, normalized, result)
+      grantUrls(local, String(ROOT_CONVERSATION_ID), 'page', result.links)
+      return output
     }
     const auth = route ? await models.getAuth(model, { signal }) : undefined
     signal.throwIfAborted()
@@ -308,7 +305,8 @@ export async function executeWeb(
     return output
   } catch (error) {
     const reason = credentialRefusal ?? webFailure(error, signal)
-    return JSON.stringify({ error: reason })
+    const hint = hints[reason]
+    return JSON.stringify(hint ? { error: reason, hint } : { error: reason })
   } finally {
     releaseSlot?.()
   }

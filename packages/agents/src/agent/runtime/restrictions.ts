@@ -90,7 +90,7 @@ export type AppliedSettings = () => Promise<AgentSettings | undefined>
 
 /**
  * The extension that checks every tool call: `refusal` first, then the applied version's
- * `toolPolicy`, and `memoryPolicy.remember` for the `remember` tool.
+ * `toolPolicy`, and for the `remember` tool `trusted` and `memoryPolicy.remember`.
  */
 export function toolGuardExtension(
   refusal: Refusal,
@@ -104,7 +104,7 @@ export function toolGuardExtension(
         beforeTool: async (call) => {
           let reason = refusal()
           const applied = await settings()
-          if (!reason && (call.name === 'remember' || call.name === 'contact_agent')) {
+          if (!reason && call.name === 'remember') {
             try {
               await trusted()
             } catch {

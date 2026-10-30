@@ -13,7 +13,7 @@ import m0000 from '../../../drizzle/durable-object/migrations/0000_curly_mandroi
 import m0001 from '../../../drizzle/durable-object/migrations/0001_omniscient_agent_brand.sql?raw'
 import m0002 from '../../../drizzle/durable-object/migrations/0002_lovely_carnage.sql?raw'
 import m0003 from '../../../drizzle/durable-object/migrations/0003_bizarre_black_bird.sql?raw'
-import m0004 from '../../../drizzle/durable-object/migrations/0004_classy_wolf_cub.sql?raw'
+import m0004 from '../../../drizzle/durable-object/migrations/0004_hesitant_blink.sql?raw'
 import * as schema from '../../../drizzle/durable-object/schema.ts'
 
 /** Drizzle handle of one object's local tables. */

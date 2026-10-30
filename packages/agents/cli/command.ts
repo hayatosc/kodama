@@ -26,7 +26,7 @@ export const USAGE = `Usage:
   nr agent credentials assign <credential-id> <agent>
   nr agent credentials unassign <credential-id> <agent>
   nr agent credentials revoke <credential-id>
-  nr agent send <agent> "message" [--request-id ID] [--steer] [--events] [--web-url URL ...]
+  nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
   nr agent snapshot <agent>
   nr agent cancel <agent>
 
@@ -66,7 +66,6 @@ export type Command =
 export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
   'request-id': { type: 'string' },
-  'web-url': { type: 'string', multiple: true },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
   name: { type: 'string' },
@@ -80,7 +79,6 @@ export interface ParsedArgs {
   values: {
     help?: boolean
     'request-id'?: string
-    'web-url'?: string[]
     steer?: boolean
     events?: boolean
     name?: string
@@ -169,7 +167,6 @@ export function toCommand(
   const message = parseMessage({
     requestId: values['request-id'] ?? newRequestId(),
     content,
-    ...(values['web-url'] ? { webPermissions: { urls: values['web-url'] } } : {}),
     whenBusy: values.steer ? 'steer' : 'followUp',
   })
   return { action, agentRef, message, events: values.events === true }

@@ -10,8 +10,6 @@ import type { LocalDb } from '../../agent/local-db/local.ts'
 export interface WorkingMemoryDeps {
   /** Serialize remember enqueue with permanent contact admission. */
   trusted?: <T>(operation: () => Promise<T>) => Promise<T>
-  /** Mark history contact before exposing archived text. */
-  contact?: () => Promise<void>
   env: Pick<AgentEnv, 'MEMORY_DB' | 'AGENTS' | 'ARCHIVE'>
   agentId: () => string
   local: () => Promise<LocalDb>

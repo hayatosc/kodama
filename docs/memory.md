@@ -931,7 +931,7 @@ turns it into a `conflict` instead of being undone.
 
 ## External-contact extraction boundary
 
-A root's first web, peer or history contact persists the last extraction-eligible entry ID in
+A root's first web or peer contact persists the last extraction-eligible entry ID in
 object SQLite. `remember` is refused both before execution and in the serialized quota/enqueue
 section. There is no post-contact human-only escape hatch or automatic reset.
 
@@ -941,5 +941,6 @@ tools, assistants and compaction summaries) is excluded. Page `through` still ad
 excluded entries so checkpoints do not stall. The source object serializes final extraction
 writes with contact admission and rechecks evidence against its current boundary, protecting
 already queued/running jobs and reads that raced contact. A checkpoint is scan progress, not
-permission to write unread evidence. Reading archived history marks contact before exposing its
-result to the model. Memory layers remain independent of runtime orchestration.
+permission to write unread evidence. Reading the agent's own archived history does not mark
+contact: before contact the archive holds only trusted entries, and after it the root is
+already in contact. Memory layers remain independent of runtime orchestration.

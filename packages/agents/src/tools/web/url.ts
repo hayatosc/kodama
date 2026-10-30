@@ -72,3 +72,36 @@ export function normalizeUrl(input: string): string {
 export function limitText(value: string, maximum: number): string {
   return Array.from(value).slice(0, maximum).join('')
 }
+
+/** Links kept from one fetched page or one message. */
+export const LINK_LIMIT = 50
+
+/** Longer links are dropped, so a page's link list stays within the envelope bound. */
+const LINK_LENGTH_LIMIT = 500
+
+/**
+ * Normalize candidate links, resolving relative ones against `base`. Invalid, non-public,
+ * overlong and repeated links are dropped, and at most {@link LINK_LIMIT} are kept.
+ */
+export function publicLinks(candidates: Iterable<string>, base?: string): string[] {
+  const links = new Set<string>()
+  for (const candidate of candidates) {
+    if (links.size === LINK_LIMIT) break
+    try {
+      const url = normalizeUrl(base === undefined ? candidate : new URL(candidate, base).href)
+      if (url.length <= LINK_LENGTH_LIMIT) links.add(url)
+    } catch {
+      // Not a public HTTP(S) URL; the page or message keeps it as text only.
+    }
+  }
+  return [...links]
+}
+
+const URL_PATTERN = /https?:\/\/[^\s<>"'`)\]}）」』]+/giu
+
+/** The public HTTP(S) URLs written in `text`, without trailing punctuation. */
+export function urlsInText(text: string): string[] {
+  return publicLinks(
+    Array.from(text.matchAll(URL_PATTERN), (match) => match[0].replace(/[.,;:!?。、]+$/u, '')),
+  )
+}

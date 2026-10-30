@@ -33,13 +33,13 @@ export function requireTrusted(local: LocalDb, root: string): void {
 }
 
 /**
- * Record normalized URLs from adopted owner input or validated search sources. Granting a known
- * URL again refreshes it, so the newest {@link KNOWN_URL_LIMIT} stay.
+ * Record normalized URLs from owner messages, validated search sources or fetched pages' links.
+ * Granting a known URL again refreshes it, so the newest {@link KNOWN_URL_LIMIT} stay.
  */
 export function grantUrls(
   local: LocalDb,
   root: string,
-  source: 'owner' | 'search',
+  source: 'owner' | 'search' | 'page',
   urls: readonly string[],
   now = Date.now(),
 ): void {
@@ -65,7 +65,7 @@ export function grantUrls(
   })
 }
 
-/** Whether `url` came from the owner or a search result of this root. */
+/** Whether `url` came from the owner, a search result or a fetched page of this root. */
 export function isKnownUrl(local: LocalDb, root: string, url: string): boolean {
   return (
     local

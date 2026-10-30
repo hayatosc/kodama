@@ -1,6 +1,7 @@
 /** Model-driven contact uses real DO delivery, admission, provenance and reply correlation. @module */
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
-import { evictDurableObject } from 'cloudflare:test'
+import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
@@ -10,6 +11,8 @@ import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../testi
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { withHarness } from '../testing/harness.ts'
 import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactBoundary } from './local-db/external-data.ts'
+import { openLocalDb } from './local-db/local.ts'
 import { contactAgent, CONTACT_WAIT_MS } from '../tools/contact.ts'
 
 useMockModel()
@@ -325,11 +328,11 @@ it('preserves the hop cap across eviction independently of peer message text', a
     await rejectionInObject(stub, (agent) =>
       agent.sendTo(receiver, { requestId: 'excess', content: 'Must not arrive.' }),
     ),
-  ).toContain('untrusted_context')
+  ).toContain('delegation hop limit 3 reached')
   expect((await exports.default.snapshot(receiver)).snapshot.messages).toEqual([])
 })
 
-it('refuses peer forwarding and never resets contact after owner input or eviction', async () => {
+it('lets a contacted agent forward within the hop cap and keeps contact after owner input or eviction', async () => {
   expect(MAX_CONTACT_HOPS).toBe(3)
   const sender = await enabled()
   const receiver = await enabled()
@@ -344,25 +347,23 @@ it('refuses peer forwarding and never resets contact after owner input or evicti
     .mockImplementationOnce(async () =>
       toolCallResponse({
         name: 'contact_agent',
-        arguments: { target: last, message: 'Must not arrive.' },
+        arguments: { target: last, message: 'Forwarded question.' },
       }),
     )
-    .mockImplementationOnce(async (_input, init) => {
-      expect(requestBody(init)).toContain('untrusted_context')
-      return textResponse('Cannot forward a peer request.')
-    })
     .mockImplementation(async () => textResponse('Finished.'))
   await exports.default.sendMessage(sender, { requestId: 'chain', content: 'Ask the peer.' })
   await waitForAnswer(sender, 'chain')
-  expect((await exports.default.snapshot(last)).snapshot.messages).toEqual([])
+  await vi.waitFor(async () =>
+    expect(JSON.stringify((await exports.default.snapshot(last)).snapshot.messages)).toContain(
+      'delegation hop 2/3',
+    ),
+  )
   await exports.default.sendMessage(receiver, { requestId: 'owner', content: 'New owner turn.' })
   await waitForAnswer(receiver, 'owner')
   const stub = env.AGENTS.getByName(receiver)
   await evictDurableObject(stub)
-  expect(
-    await rejectionInObject(stub, (agent) =>
-      agent.sendTo(last, { requestId: 'retry', content: 'Still forbidden.' }),
-    ),
-  ).toContain('untrusted_context')
-  expect((await exports.default.snapshot(last)).snapshot.messages).toEqual([])
+  await runInDurableObject(stub, async (_, state) => {
+    const local = await openLocalDb(state.storage)
+    expect(contactBoundary(local, String(ROOT_CONVERSATION_ID))).toBeTypeOf('number')
+  })
 })

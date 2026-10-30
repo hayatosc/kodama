@@ -6,7 +6,13 @@
  * @module
  */
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
-import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
+import {
+  contactBoundary,
+  grantUrls,
+  markContact,
+  requireTrusted,
+} from './local-db/external-data.ts'
+import { urlsInText } from '../tools/web/url.ts'
 import { latestEntryId } from '../memory/transcript.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { Operation } from '../memory/store/records.ts'
@@ -365,7 +371,6 @@ export class Agent extends DurableObject<AgentEnv> {
           requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
           return operation()
         }),
-      contact: () => this.#serial(async () => this.#contact('history')),
       agentId: () => this.#agentId(),
       local: () => this.#local,
       sharedSpaces: () => this.#sharedSpaces(),
@@ -486,7 +491,6 @@ export class Agent extends DurableObject<AgentEnv> {
   async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       parseAgentId(origin.senderAgentId)
       if (!Number.isInteger(origin.hop) || origin.hop < 1 || origin.hop > MAX_CONTACT_HOPS)
         throw new TypeError('Invalid delegation hop')
@@ -497,6 +501,14 @@ export class Agent extends DurableObject<AgentEnv> {
     if (await isIdle(await this.#harness)) {
       await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
     }
+    // URLs the owner writes stay reachable after contact; a peer's never become known.
+    if (!origin)
+      grantUrls(
+        await this.#local,
+        String(ROOT_CONVERSATION_ID),
+        'owner',
+        urlsInText(message.content),
+      )
     const submission = await this.admit(
       {
         type: 'input',
@@ -513,14 +525,7 @@ export class Agent extends DurableObject<AgentEnv> {
               },
             }
           : {
-              entry: {
-                kind: 'kodama.owner-message',
-                data: {
-                  webPermissions: message.webPermissions?.urls
-                    ? { urls: message.webPermissions.urls }
-                    : {},
-                },
-              },
+              entry: { kind: 'kodama.owner-message' },
             }),
       },
       origin ? 'agent' : 'user',
@@ -608,9 +613,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     if (agentId === this.#agentId()) throw new TypeError('Cannot contact this agent itself')
     const origin = await this.#serial(async () => {
-      requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
       assertAllowed(this.#refusal)
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       const origin = await contactOrigin(await this.#harness, this.#agentId())
       await this.#contact('peer')
       return origin

@@ -587,12 +587,13 @@ unavailable. Timeout or sender cancellation does not cancel the receiver. Pendin
 to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
 delivery. Its delivery request ID is scoped to the sender and tool task.
 
-`MAX_CONTACT_HOPS = 3` remains a defensive provenance cap, but the permanent external-contact
-boundary is stricter: receiving any peer message or sending a peer request prevents subsequent
-`contact_agent` and `remember` calls for that root. A new owner message, steering, compaction,
-cancellation or eviction never clears contact. Both the early tool guard and the serialized
-side-effect boundary enforce the refusal. Delivery commits sender contact before crossing the
-object boundary and never holds its serial queue while waiting on another object.
+Receiving a peer message or sending a peer request establishes permanent external contact for
+that root; a new owner message, steering, compaction, cancellation or eviction never clears it.
+Contact stops `remember` but not peer delivery: a contacted agent may still use `contact_agent`,
+and the receiver treats the message as peer data and establishes its own contact.
+`MAX_CONTACT_HOPS = 3` bounds how far a chain started by one input can forward. Delivery commits
+sender contact before crossing the object boundary and never holds its serial queue while
+waiting on another object.
 
 ## Public web tools
 
@@ -635,35 +636,35 @@ admissions, 30 fetch admissions and 10 actual anonymous sends. Native responses 
 to 2 MiB. Envelopes are valid JSON ≤128 KiB marked `untrusted_external_data`, not instructions.
 
 Immediately before the first outbound web send, SQLite atomically commits first contact with
-the admission. Failed traffic never clears contact, and contact does not stop research. The
-rules after it guard the two ways a call can carry data out, not the act of reading:
+the admission. Failed traffic never clears contact, and contact does not stop research or ask
+anyone for approval. The rules after it guard the two ways a call can carry data out, not the
+act of reading:
 
 - `web_search` stays available, but its query may not contain a URL (`query_contains_url`): a
   scheme with `://`, or a host followed by a path, query or fragment. A provider's own search
   may open such a URL. A bare domain, as in a `site:` filter, is allowed.
-- `web_fetch` reaches only a known URL (`unverified_url`): one the owner named or a successful
-  search returned. A URL the model composed, edited or found in a page cannot be fetched, so it
-  cannot carry context data to an attacker's server.
+- `web_fetch` reaches only a known URL (`unverified_url`): one written in an owner message,
+  returned by a successful search, or linked from a fetched page. A URL the model composed or
+  edited cannot be fetched, so it cannot carry context data to an attacker's server.
 
-Known URLs live in `kodama_known_urls`, per root and not consumed, so a source stays readable on
-later turns and after eviction. Validated search sources (at most 20 per search) are recorded
-after the search succeeds. Owner URLs are recorded when a web call is admitted from a run that
-adopted the owner input naming them:
+Both refusals return a `hint` (search with words, then fetch a result), so a long-running agent
+finds another route instead of stopping.
 
-```sh
-nr agent send assistant "Research the release" --web-url "https://example.org/release"
-```
-
-`webPermissions.urls` holds at most 20 entries and shares the tool's normalization (IDNA,
-default port and fragment removal, path and query preserved). Prose, peer inputs and model
-output cannot name known URLs, and redirects add none. The newest 1,000 known URLs per root are
-kept; granting one again refreshes it.
+Known URLs live in `kodama_known_urls`, per root and not consumed, so a page stays readable on
+later turns and after eviction. Owner URLs are taken from the message text when `sendMessage`
+admits it, so a UI only sends what the user typed; peer messages add none. Search sources (at
+most 20 per search) are recorded after the search succeeds. A fetched page returns `links`: at
+most 50 public links, normalized and resolved against the final URL, from anchors outside
+removed navigation and hidden subtrees, or from URLs written in a plain-text page; they are
+recorded after the fetch. Links longer than 500 characters are dropped, model output adds no
+known URL, and redirects add none. The newest 1,000 known URLs per root are kept; granting one
+again refreshes it.
 
 A non-removable system section marks web, peer and history content as evidence, not approval.
-Read tools, the web tools under these rules and final answers remain available after contact;
-remember and peer delivery do not. Wrong answers, persuasion, which known URL the model chooses
-to fetch, and what a search query discloses to the search provider remain residual risks.
-Known URLs are authorization, not sanitization.
+Read tools, the web tools under these rules, peer delivery and final answers remain available
+after contact; `remember` does not. Wrong answers, persuasion, which known URL or link the model
+chooses to fetch (an attacker's page can offer many links), and what a search query discloses
+to the search provider remain residual risks. Known URLs are authorization, not sanitization.
 
 All five native routes have mocked transport/schema fixtures, not universal model compatibility
 claims. The owner personally must verify real native dialect/auth/grounding, anonymous endpoints

@@ -172,16 +172,7 @@ export interface SeedResult {
 }
 
 /** Reuse requestId when retrying the same message; a new turn needs a new ID. */
-/**
- * URLs the owner names, which `web_fetch` may reach even after external contact. Only owner-origin
- * input may carry them.
- */
-export interface WebPermissions {
-  urls?: string[]
-}
-
 export interface SendMessageRequest {
-  webPermissions?: WebPermissions
   requestId: string
   content: string
   /** Defaults to followUp; steer joins the current run at the next tool-round boundary. */

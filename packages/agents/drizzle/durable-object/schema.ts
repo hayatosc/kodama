@@ -121,15 +121,16 @@ export const externalData = sqliteTable('kodama_external_data', {
 })
 
 /**
- * URLs whose provenance lies outside the model: the owner named them or a validated search result
- * returned them. After external contact `web_fetch` reaches only these; they are not consumed.
+ * URLs whose provenance lies outside the model: the owner wrote them in a message, a search
+ * returned them, or a fetched page linked to them. After external contact `web_fetch` reaches only
+ * these; they are not consumed.
  */
 export const knownUrls = sqliteTable(
   'kodama_known_urls',
   {
     root: text('root').notNull(),
     url: text('url').notNull(),
-    source: text('source', { enum: ['owner', 'search'] }).notNull(),
+    source: text('source', { enum: ['owner', 'search', 'page'] }).notNull(),
     grantedAt: integer('granted_at').notNull(),
   },
   (t) => [
