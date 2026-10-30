@@ -85,4 +85,4 @@ blocks, are persisted directly by Pi Durable in its conversation `entries` table
 R2 when pruned. Web concurrency limits, 60-second rolling rate windows, keyless 429 provider
 cooldowns, and Parallel session reuse live in memory on each `Agent` Durable Object, while
 Durable Object SQLite persists only permanent external contact (`kodama_external_data`) and
-one-shot exact owner permissions (`kodama_web_permissions`).
+the known URLs `web_fetch` may reach after it (`kodama_known_urls`).

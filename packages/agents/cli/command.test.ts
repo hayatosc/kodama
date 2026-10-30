@@ -167,15 +167,13 @@ describe('commandRequest', () => {
   })
 })
 
-it('carries repeatable exact owner permissions through send without changing replacement tools', () => {
+it('carries repeatable owner URLs through send without changing replacement tools', () => {
   const parsed = command(['send', 'assistant', 'Question'], {
-    'web-query': ['  exact question  ', 'second'],
-    'web-url': ['HTTPS://Example.org:443/page#fragment'],
+    'web-url': ['HTTPS://Example.org:443/page#fragment', 'https://example.org/second'],
   })
   if (parsed.action !== 'send') throw new Error('Expected send')
   expect(parsed.message.webPermissions).toEqual({
-    queries: ['exact question', 'second'],
-    urls: ['https://example.org/page'],
+    urls: ['https://example.org/page', 'https://example.org/second'],
   })
   const body = commandRequest(parsed, 'local-token').init.body
   if (typeof body !== 'string') throw new Error('Missing body')
@@ -187,7 +185,7 @@ it('carries repeatable exact owner permissions through send without changing rep
   ).toThrow()
   expect(() =>
     command(['send', 'assistant', 'Question'], {
-      'web-query': Array.from({ length: 21 }, () => 'query'),
+      'web-url': Array.from({ length: 21 }, (_, index) => `https://example.org/${index}`),
     }),
   ).toThrow()
 })

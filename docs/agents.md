@@ -634,27 +634,36 @@ admissions, 30 fetch admissions and 10 actual anonymous sends. Native responses 
 512 KiB; anonymous attempts to 256 KiB/5 seconds with a 512 KiB total; fetch transfer/decoded text
 to 2 MiB. Envelopes are valid JSON ≤128 KiB marked `untrusted_external_data`, not instructions.
 
-Immediately before the first outbound web send, SQLite atomically commits first contact,
-admission and any permission consumption. Failed traffic never clears contact. Later web
-traffic requires an exact owner permission from an input actually adopted into this run:
+Immediately before the first outbound web send, SQLite atomically commits first contact with
+the admission. Failed traffic never clears contact, and contact does not stop research. The
+rules after it guard the two ways a call can carry data out, not the act of reading:
+
+- `web_search` stays available, but its query may not contain a URL (`query_contains_url`): a
+  scheme with `://`, or a host followed by a path, query or fragment. A provider's own search
+  may open such a URL. A bare domain, as in a `site:` filter, is allowed.
+- `web_fetch` reaches only a known URL (`unverified_url`): one the owner named or a successful
+  search returned. A URL the model composed, edited or found in a page cannot be fetched, so it
+  cannot carry context data to an attacker's server.
+
+Known URLs live in `kodama_known_urls`, per root and not consumed, so a source stays readable on
+later turns and after eviction. Validated search sources (at most 20 per search) are recorded
+after the search succeeds. Owner URLs are recorded when a web call is admitted from a run that
+adopted the owner input naming them:
 
 ```sh
-nr agent send assistant "Research the release" --web-query "exact release query" \
-  --web-url "https://example.org/release"
+nr agent send assistant "Research the release" --web-url "https://example.org/release"
 ```
 
-Each repeatable permission array has at most 20 entries. Queries are trim-only; URLs share the
-tool's normalization including IDNA/default port/fragment removal while preserving path/query.
-Prose, peer inputs and model output cannot mint permissions. Permissions bind root, the logical
-run's first adopted submission, input, tool and exact argument and consume once. Pi's generation
-task ID changes after tool rounds, so it is recorded separately rather than used as run identity.
-Successful search sources grant one fetch per validated URL in that same run; edited URLs,
-page links, another run and repeated consumption do not. Redirects grant nothing reusable.
+`webPermissions.urls` holds at most 20 entries and shares the tool's normalization (IDNA,
+default port and fragment removal, path and query preserved). Prose, peer inputs and model
+output cannot name known URLs, and redirects add none. The newest 1,000 known URLs per root are
+kept; granting one again refreshes it.
 
 A non-removable system section marks web, peer and history content as evidence, not approval.
-Read tools and final answers remain available after contact; remember and peer delivery do not.
-Wrong answers, persuasion and disclosure of pre-contact generated queries remain residual risks.
-Exact permissions are authorization, not sanitization.
+Read tools, the web tools under these rules and final answers remain available after contact;
+remember and peer delivery do not. Wrong answers, persuasion, which known URL the model chooses
+to fetch, and what a search query discloses to the search provider remain residual risks.
+Known URLs are authorization, not sanitization.
 
 All five native routes have mocked transport/schema fixtures, not universal model compatibility
 claims. The owner personally must verify real native dialect/auth/grounding, anonymous endpoints
@@ -749,7 +758,7 @@ Each object's SQLite holds two sets of tables:
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
   (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), permanent external contact
-  (`kodama_external_data`), and one-shot web permissions (`kodama_web_permissions`). Their
+  (`kodama_external_data`), and the known URLs fetch may reach after it (`kodama_known_urls`). Their
   migrations are generated into `drizzle/durable-object/migrations` and applied by
   `src/agent/local-db/local.ts` before the harness opens.
 
@@ -760,7 +769,9 @@ shared spaces, the applied configuration (`kodama:config-version`, `kodama:appli
 ## Development
 
 Issue #26's local SQLite migration (`0003`) adds only `kodama_external_data` and
-`kodama_web_permissions` for permanent external contact and atomic one-shot permissions; web
+`kodama_web_permissions` for permanent external contact and atomic one-shot permissions;
+migration `0004` replaces the permissions with `kodama_known_urls`
+(see [Public web tools](#public-web-tools)); web
 rate limits/cooldowns are held in memory and tool execution logs rely on Pi Durable's own
 `entries` table rather than extending `kodama_usage` or management D1. Existing development state is disposable; start
 with fresh local state when resetting local databases. Current-runtime persistence, permanent external contact,

@@ -172,9 +172,11 @@ export interface SeedResult {
 }
 
 /** Reuse requestId when retrying the same message; a new turn needs a new ID. */
-/** Exact, one-shot permissions issued only by owner-origin input. */
+/**
+ * URLs the owner names, which `web_fetch` may reach even after external contact. Only owner-origin
+ * input may carry them.
+ */
 export interface WebPermissions {
-  queries?: string[]
   urls?: string[]
 }
 

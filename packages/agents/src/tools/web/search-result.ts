@@ -7,7 +7,7 @@
  */
 import { limitText, normalizeUrl } from './url.ts'
 
-/** A validated source is a candidate for a one-shot same-run fetch permission. */
+/** A validated source becomes a known URL that `web_fetch` may reach after contact. */
 export interface SearchSource {
   url: string
   title: string

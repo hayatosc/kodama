@@ -516,12 +516,9 @@ export class Agent extends DurableObject<AgentEnv> {
               entry: {
                 kind: 'kodama.owner-message',
                 data: {
-                  webPermissions: {
-                    ...(message.webPermissions?.queries
-                      ? { queries: message.webPermissions.queries }
-                      : {}),
-                    ...(message.webPermissions?.urls ? { urls: message.webPermissions.urls } : {}),
-                  },
+                  webPermissions: message.webPermissions?.urls
+                    ? { urls: message.webPermissions.urls }
+                    : {},
                 },
               },
             }),

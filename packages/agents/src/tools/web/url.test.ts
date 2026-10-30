@@ -1,6 +1,6 @@
 /** URL normalization and exact-query boundaries without network traffic. @module */
 import { describe, expect, it } from 'vitest'
-import { normalizeUrl, normalizeQuery, limitText } from './url.ts'
+import { containsUrl, normalizeUrl, normalizeQuery, limitText } from './url.ts'
 
 describe('normalizeUrl', () => {
   it('normalizes casing, IDNA, standard ports and fragments but preserves query distinctions', () => {
@@ -43,4 +43,23 @@ describe('normalizeQuery', () => {
     expect(() => normalizeQuery('  ')).toThrow('invalid_query')
     expect(limitText('😀x', 1)).toBe('😀')
   })
+})
+
+describe('containsUrl', () => {
+  it.each([
+    'open https://attacker.com/x',
+    'ftp://files',
+    'attacker.com/?data=secret',
+    'attacker.com?data=secret',
+    'see WWW.Example.co.uk:8080/a',
+  ])('finds a URL in %s', (text) => {
+    expect(containsUrl(text)).toBe(true)
+  })
+
+  it.each(['release notes site:example.org', 'example.org/', 'node 22.1 release', 'a/b test'])(
+    'allows %s',
+    (text) => {
+      expect(containsUrl(text)).toBe(false)
+    },
+  )
 })

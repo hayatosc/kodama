@@ -5,7 +5,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { normalizeQuery, normalizeUrl } from './tools/web/url.ts'
+import { normalizeUrl } from './tools/web/url.ts'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
@@ -195,6 +195,19 @@ export const HistoryPageSchema = v.strictObject({
 const MESSAGE_CONTENT_MAX_LENGTH = 16_000
 const contentMessage = `content must contain 1–${MESSAGE_CONTENT_MAX_LENGTH} characters and cannot be blank`
 
+/** At most 20 owner-named URLs, normalized as `web_fetch` normalizes its argument. */
+const OwnerUrlsSchema = v.optional(
+  v.pipe(v.array(v.pipe(v.string(), v.transform(normalizeUrl))), v.maxLength(20)),
+)
+
+/**
+ * The data of a stored `kodama.owner-message` entry. Unknown fields are ignored, so entries written
+ * before a permission kind was removed still parse.
+ */
+export const OwnerMessageDataSchema = v.object({
+  webPermissions: v.optional(v.object({ urls: OwnerUrlsSchema })),
+})
+
 /** A message: a request ID, nonblank content of at most 16,000 characters, and `whenBusy`. */
 export const SendMessageRequestSchema = v.object(
   {
@@ -204,16 +217,7 @@ export const SendMessageRequestSchema = v.object(
       v.check((content) => content.trim().length > 0, contentMessage),
       v.maxLength(MESSAGE_CONTENT_MAX_LENGTH, contentMessage),
     ),
-    webPermissions: v.optional(
-      v.strictObject({
-        queries: v.optional(
-          v.pipe(v.array(v.pipe(v.string(), v.transform(normalizeQuery))), v.maxLength(20)),
-        ),
-        urls: v.optional(
-          v.pipe(v.array(v.pipe(v.string(), v.transform(normalizeUrl))), v.maxLength(20)),
-        ),
-      }),
-    ),
+    webPermissions: v.optional(v.strictObject({ urls: OwnerUrlsSchema })),
     whenBusy: v.optional(v.picklist(['followUp', 'steer'], 'whenBusy must be followUp or steer')),
   },
   'Expected a message with requestId and content',

@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /** One outer Pi model invocation; IDs are never reused after retention deletes. */
 export const usage = sqliteTable('kodama_usage', {
@@ -120,13 +120,20 @@ export const externalData = sqliteTable('kodama_external_data', {
   eligibleThrough: integer('eligible_through').notNull(),
 })
 
-/** Exact permissions are consumed once and never transferred between runs. */
-export const webPermissions = sqliteTable('kodama_web_permissions', {
-  key: text('key').primaryKey(),
-  root: text('root').notNull(),
-  run: text('run'),
-  input: integer('input'),
-  tool: text('tool', { enum: ['web_search', 'web_fetch'] }).notNull(),
-  argument: text('argument').notNull(),
-  consumedAt: integer('consumed_at'),
-})
+/**
+ * URLs whose provenance lies outside the model: the owner named them or a validated search result
+ * returned them. After external contact `web_fetch` reaches only these; they are not consumed.
+ */
+export const knownUrls = sqliteTable(
+  'kodama_known_urls',
+  {
+    root: text('root').notNull(),
+    url: text('url').notNull(),
+    source: text('source', { enum: ['owner', 'search'] }).notNull(),
+    grantedAt: integer('granted_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.root, t.url] }),
+    index('kodama_known_urls_by_age').on(t.root, t.grantedAt),
+  ],
+)

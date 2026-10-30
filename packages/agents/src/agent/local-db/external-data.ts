@@ -1,7 +1,17 @@
-/** Permanent root contact and atomic one-shot web permission consumption. @module */
-import { and, eq, inArray, isNull, or } from 'drizzle-orm'
-import { externalData, webPermissions } from '../../../drizzle/durable-object/schema.ts'
+/**
+ * Permanent root contact, and the URLs with provenance outside the model that `web_fetch` may
+ * reach after it.
+ *
+ * @see docs/agents.md — Public web tools
+ *
+ * @module
+ */
+import { and, desc, eq, inArray } from 'drizzle-orm'
+import { externalData, knownUrls } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
+
+/** Known URLs kept per root; granting more drops the least recently granted. */
+export const KNOWN_URL_LIMIT = 1000
 
 /** The first contact wins, including across eviction and failed requests. */
 export function markContact(local: LocalDb, root: string, reason: string, eligibleThrough: number) {
@@ -22,95 +32,72 @@ export function requireTrusted(local: LocalDb, root: string): void {
   if (contactBoundary(local, root) !== undefined) throw new Error('untrusted_context')
 }
 
-/** Persist permissions from a verified adopted owner entry, without resetting consumption. */
-export function adoptPermissions(
+/**
+ * Record normalized URLs from adopted owner input or validated search sources. Granting a known
+ * URL again refreshes it, so the newest {@link KNOWN_URL_LIMIT} stay.
+ */
+export function grantUrls(
   local: LocalDb,
   root: string,
-  run: string,
-  input: number,
-  permissions: { queries?: string[]; urls?: string[] },
-) {
-  for (const [tool, args] of [
-    ['web_search', permissions.queries],
-    ['web_fetch', permissions.urls],
-  ] as const) {
-    for (const argument of new Set(args)) {
-      local
-        .insert(webPermissions)
-        .values({
-          key: JSON.stringify([root, input, tool, argument]),
-          root,
-          run,
-          input,
-          tool,
-          argument,
-        })
-        .onConflictDoNothing()
+  source: 'owner' | 'search',
+  urls: readonly string[],
+  now = Date.now(),
+): void {
+  if (urls.length === 0) return
+  local.transaction((tx) => {
+    for (const url of new Set(urls)) {
+      tx.insert(knownUrls)
+        .values({ root, url, source, grantedAt: now })
+        .onConflictDoUpdate({ target: [knownUrls.root, knownUrls.url], set: { grantedAt: now } })
         .run()
     }
-  }
-}
-
-/** Validated search sources grant one fetch each in the same run, never page-link permissions. */
-export function grantSources(
-  local: LocalDb,
-  root: string,
-  run: string,
-  urls: readonly string[],
-): void {
-  for (const argument of urls.slice(0, 20)) {
-    local
-      .insert(webPermissions)
-      .values({
-        key: JSON.stringify([root, run, 'source', argument]),
-        root,
-        run,
-        tool: 'web_fetch',
-        argument,
-      })
-      .onConflictDoNothing()
+    const stale = tx
+      .select({ url: knownUrls.url })
+      .from(knownUrls)
+      .where(eq(knownUrls.root, root))
+      .orderBy(desc(knownUrls.grantedAt))
+      // SQLite needs a LIMIT before OFFSET; this one never binds.
+      .limit(Number.MAX_SAFE_INTEGER)
+      .offset(KNOWN_URL_LIMIT)
+    tx.delete(knownUrls)
+      .where(and(eq(knownUrls.root, root), inArray(knownUrls.url, stale)))
       .run()
-  }
+  })
 }
 
-/** Consume permission and establish contact in one SQLite transaction. */
+/** Whether `url` came from the owner or a search result of this root. */
+export function isKnownUrl(local: LocalDb, root: string, url: string): boolean {
+  return (
+    local
+      .select({ url: knownUrls.url })
+      .from(knownUrls)
+      .where(and(eq(knownUrls.root, root), eq(knownUrls.url, url)))
+      .get() !== undefined
+  )
+}
+
+/**
+ * Admit one web call and establish contact in one SQLite transaction. After contact a fetch must
+ * target a known URL; a search is the caller's to check, since its rule depends on the query text.
+ *
+ * @throws {@link Error} `unverified_url` When contact exists and the fetch URL is unknown.
+ */
 export function admitWeb(
   local: LocalDb,
   request: {
     root: string
-    run: string
-    inputs: number[]
     tool: 'web_search' | 'web_fetch'
     argument: string
     eligibleThrough: number
   },
-  now = Date.now(),
-): string | null {
-  return local.transaction((tx) => {
-    const permission = tx
-      .select()
-      .from(webPermissions)
-      .where(
-        and(
-          eq(webPermissions.root, request.root),
-          eq(webPermissions.tool, request.tool),
-          eq(webPermissions.argument, request.argument),
-          isNull(webPermissions.consumedAt),
-          and(
-            eq(webPermissions.run, request.run),
-            or(isNull(webPermissions.input), inArray(webPermissions.input, request.inputs)),
-          ),
-        ),
-      )
-      .get()
-    if (contactBoundary(tx, request.root) !== undefined && !permission)
-      throw new Error('untrusted_context')
-    if (permission)
-      tx.update(webPermissions)
-        .set({ run: request.run, consumedAt: now })
-        .where(eq(webPermissions.key, permission.key))
-        .run()
+): void {
+  local.transaction((tx) => {
+    if (
+      request.tool === 'web_fetch' &&
+      contactBoundary(tx, request.root) !== undefined &&
+      !isKnownUrl(tx, request.root, request.argument)
+    )
+      throw new Error('unverified_url')
     markContact(tx, request.root, request.tool, request.eligibleThrough)
-    return permission?.key ?? null
   })
 }

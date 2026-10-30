@@ -1,11 +1,22 @@
-/** Public web URL and query normalization shared by tools and exact permissions. @module */
+/** Public web URL and query normalization shared by tools and owner URL permissions. @module */
 
-/** Trim only: punctuation, case, and interior whitespace remain authorization-significant. */
+/** Trim only; the query is otherwise sent as the model wrote it. */
 export function normalizeQuery(query: string): string {
   const normalized = query.trim()
   const length = Array.from(normalized).length
   if (length < 1 || length > 1_000) throw new TypeError('invalid_query')
   return normalized
+}
+
+const URL_IN_TEXT =
+  /[a-z][a-z\d+.-]*:\/\/|(?:^|[^\w@.-])(?:[a-z\d-]+\.)+[a-z]{2,}(?::\d+)?[/?#][^\s]/iu
+
+/**
+ * Whether `text` names a URL: a scheme with `://`, or a host followed by a path, query, or
+ * fragment. A bare domain such as a `site:` filter does not count.
+ */
+export function containsUrl(text: string): boolean {
+  return URL_IN_TEXT.test(text)
 }
 
 /** Normalize a public HTTP(S) URL without resolving DNS or following links. */
