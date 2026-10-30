@@ -80,6 +80,20 @@ describe('pruning', () => {
     const page = await stub.readEntries({ after: 0, limit: 5 })
     expect(page.entries[0]?.text).toContain(codename)
     expect(page.end).toBe(false)
+    const throughEntry = page.entries[0]?.id
+    if (throughEntry === undefined) throw new Error('Missing archived evidence')
+    expect(page.entries.some((entry) => entry.id > throughEntry)).toBe(true)
+    const bounded = await stub.readEntries({ after: 0, limit: 5, throughEntry })
+    expect(bounded).toEqual({
+      entries: page.entries.filter((entry) => entry.id <= throughEntry),
+      through: throughEntry,
+      end: true,
+    })
+    expect(await stub.readEntries({ after: throughEntry, limit: 5, throughEntry })).toEqual({
+      entries: [],
+      through: throughEntry,
+      end: true,
+    })
 
     await say(agentId, 'after', 'Still there?')
     expect(bodies.at(-1)).toContain('Summary: the user set a codename')
@@ -98,7 +112,7 @@ describe('pruning', () => {
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
       'extract',
     ])
-    // Contact while an archive page is in flight excludes its text, not its scan progress.
+    // Historical contact metadata cannot hide evidence during an archive read.
     const excluded = await runInDurableObject(stub, async (agent, state) => {
       const reached = Promise.withResolvers<void>()
       const release = Promise.withResolvers<void>()
@@ -115,7 +129,7 @@ describe('pruning', () => {
       release.resolve()
       return reading.finally(() => spy.mockRestore())
     })
-    expect(excluded.entries).toEqual([])
+    expect(excluded.entries).toEqual(page.entries)
     expect(excluded.through).toBe(page.through)
     expect(excluded.end).toBe(false)
   })

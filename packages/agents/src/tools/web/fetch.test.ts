@@ -37,6 +37,27 @@ describe('fetchPage', () => {
       expect(request).toHaveBeenCalledTimes(1)
     },
   )
+  it('returns normalized public links, without navigation or hidden ones', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        '<body><nav><a href="/menu">Menu</a></nav><p hidden><a href="/hidden">x</a></p><a href="/next#top">Next</a><a href="https://other.org/a">A</a><a href="https://127.0.0.1/">IP</a><a href="mailto:a@b.org">Mail</a><a href="/next">Again</a></body>',
+        { headers: { 'content-type': 'text/html' } },
+      ),
+    )
+    expect((await fetchPage('https://example.org/dir/')).links).toEqual([
+      'https://example.org/next',
+      'https://other.org/a',
+    ])
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('See https://example.org/doc. Also (https://other.org/x)', {
+        headers: { 'content-type': 'text/plain' },
+      }),
+    )
+    expect((await fetchPage('https://example.org/')).links).toEqual([
+      'https://example.org/doc',
+      'https://other.org/x',
+    ])
+  })
   it('rejects loops, unsupported types and transfer overflow', async () => {
     const request = vi
       .spyOn(globalThis, 'fetch')

@@ -16,10 +16,8 @@ import {
   refreshAlwaysLoaded,
   refreshAlwaysLoadedIfChanged,
 } from '../memory/working/always-loaded.ts'
-import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
+import { extractionJobs, MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
-import { contactBoundary } from './local-db/external-data.ts'
-import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { latestEntryId } from '../memory/transcript.ts'
 
 /** How long an agent stays idle before its new entries are extracted. */
@@ -90,11 +88,7 @@ async function extractNewEntries(memory: WorkingMemoryDeps, harness: Harness): P
   const agentId = memory.agentId()
   const latest = await latestEntryId(harness)
   const checkpoint = await extractionCheckpoint(memoryDb(memory.env.MEMORY_DB), agentId)
-  if (latest === undefined || latest <= checkpoint) return
-  await memory.env.AGENTS.getByName(MEMORY_AGENT_NAME).enqueue({
-    kind: 'extract',
-    sourceAgentId: agentId,
-    afterEntry: checkpoint,
-    eligibleThrough: contactBoundary(await memory.local(), String(ROOT_CONVERSATION_ID)),
-  })
+  if (latest === undefined) return
+  const queue = memory.env.AGENTS.getByName(MEMORY_AGENT_NAME)
+  for (const job of extractionJobs(agentId, checkpoint, latest)) await queue.enqueue(job)
 }

@@ -121,9 +121,9 @@ export async function readArchivedText(
   const first = chunks[0]
   const last = chunks.at(-1)
   if (first === undefined || last === undefined) return { entries: [], through: undefined }
-  const entries = (await readSegment(bucket, prefix, { start: first.start, end: last.end }))
+  const page = (await readSegment(bucket, prefix, { start: first.start, end: last.end }))
     .filter((entry) => entry.id > after)
-    .flatMap(({ entry }) => (entry === undefined ? [] : (entryText(entry) ?? [])))
     .slice(0, limit)
-  return { entries, through: entries.at(-1)?.id ?? last.last }
+  const entries = page.flatMap(({ entry }) => (entry === undefined ? [] : (entryText(entry) ?? [])))
+  return { entries, through: page.at(-1)?.id ?? last.last }
 }

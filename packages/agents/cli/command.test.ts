@@ -166,28 +166,3 @@ describe('commandRequest', () => {
     expect(seed).toMatchObject({ url: `${LOCAL_WORKER_URL}/cli/seed`, init: { body: undefined } })
   })
 })
-
-it('carries repeatable exact owner permissions through send without changing replacement tools', () => {
-  const parsed = command(['send', 'assistant', 'Question'], {
-    'web-query': ['  exact question  ', 'second'],
-    'web-url': ['HTTPS://Example.org:443/page#fragment'],
-  })
-  if (parsed.action !== 'send') throw new Error('Expected send')
-  expect(parsed.message.webPermissions).toEqual({
-    queries: ['exact question', 'second'],
-    urls: ['https://example.org/page'],
-  })
-  const body = commandRequest(parsed, 'local-token').init.body
-  if (typeof body !== 'string') throw new Error('Missing body')
-  expect(JSON.parse(body)).toMatchObject({
-    webPermissions: parsed.message.webPermissions,
-  })
-  expect(() =>
-    command(['send', 'assistant', 'Question'], { 'web-url': ['http://127.0.0.1/'] }),
-  ).toThrow()
-  expect(() =>
-    command(['send', 'assistant', 'Question'], {
-      'web-query': Array.from({ length: 21 }, () => 'query'),
-    }),
-  ).toThrow()
-})

@@ -1,3 +1,6 @@
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { isKnownUrl } from './local-db/external-data.ts'
+import { openLocalDb } from './local-db/local.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
@@ -54,6 +57,32 @@ describe('agent RPC', () => {
     expect((await exports.default.snapshot(otherId)).snapshot.messages).toEqual([])
     expect(await exports.default.submission(otherId, 'same')).toBeUndefined()
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('grants only newly admitted owner URLs, not replacement content on a duplicate request', async () => {
+    const agentId = await newAgentId()
+    const first = await exports.default.sendMessage(agentId, {
+      requestId: 'owner-url',
+      content: 'Read https://example.org/original',
+    })
+    await waitForAnswer(agentId, 'owner-url')
+    const duplicate = await exports.default.sendMessage(agentId, {
+      requestId: 'owner-url',
+      content: 'Read https://example.org/replacement',
+    })
+    expect(duplicate.submissionId).toBe(first.submissionId)
+    await env.AGENTS.getByName(uuidv7()).sendTo(agentId, {
+      requestId: 'peer-url',
+      content: 'Read https://example.org/peer',
+    })
+    await waitForAnswer(agentId, 'peer-url')
+    const known = await runInDurableObject(env.AGENTS.getByName(agentId), async (_agent, state) => {
+      const local = await openLocalDb(state.storage)
+      return ['original', 'replacement', 'peer'].map((path) =>
+        isKnownUrl(local, String(ROOT_CONVERSATION_ID), `https://example.org/${path}`),
+      )
+    })
+    expect(known).toEqual([true, false, false])
   })
 
   it('rejects invalid input through service and direct object RPC', async () => {

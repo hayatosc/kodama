@@ -24,8 +24,10 @@ export async function requestRemember(
   userEntry: number | undefined,
   content: string,
 ): Promise<JobStatus> {
-  if (deps.trusted)
-    return deps.trusted(() => requestRemember({ ...deps, trusted: undefined }, userEntry, content))
+  if (deps.serialize)
+    return deps.serialize(() =>
+      requestRemember({ ...deps, serialize: undefined }, userEntry, content),
+    )
   if (userEntry === undefined) throw new Error('Not saved: no user message to attribute it to')
   const local = await deps.local()
   if (!claimRememberTurn(local, userEntry, REMEMBER_LIMIT_PER_TURN)) {

@@ -1,18 +1,21 @@
-/** Working-agent web admission, scoped authentication and in-memory rate/cooldown control. @module */
-import { AgentDoc, LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+/**
+ * Working-agent web admission, scoped authentication and in-memory rate/cooldown control.
+ *
+ * @see docs/agents.md — Public web tools
+ *
+ * @module
+ */
+import { AgentDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Context } from '@earendil-works/chord/context'
 import { deadline } from '../../lib/deadline.ts'
-import { currentRunInputs } from '../../agent/runtime/inputs.ts'
 import type { AgentSettings } from '../../protocol.ts'
 import type { ObserveCredential } from '../../credentials/store.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
-import { latestEntryId } from '../../memory/transcript.ts'
-import { parseMessage } from '../../validation.ts'
 import type { LocalDb } from '../../agent/local-db/local.ts'
-import { adoptPermissions, admitWeb, grantSources } from '../../agent/local-db/external-data.ts'
-import { normalizeQuery, normalizeUrl } from './url.ts'
+import { admitWeb, grantUrls } from '../../agent/local-db/external-data.ts'
+import { containsUrl, normalizeQuery, normalizeUrl } from './url.ts'
 import { nativeSearch, requireSearchCredential, searchRoute } from './search.ts'
 import { keylessSearch } from './providers/keyless.ts'
 import type { KeylessAttempt, KeylessProvider, ProviderState } from './providers/keyless.ts'
@@ -111,7 +114,7 @@ export function finishSearchAttempt(
   if (next) state.providers.set(attempt.provider, next)
 }
 
-/** Current restrictions override exact permissions, including before each redirect/rotation. */
+/** Current restrictions override known URLs, including before each redirect/rotation. */
 export function requireWebEnabled(
   settings: AgentSettings | undefined,
   tool: string,
@@ -124,6 +127,8 @@ export function requireWebEnabled(
 
 const errors = new Set([
   'untrusted_context',
+  'unverified_url',
+  'query_contains_url',
   'busy',
   'rate_limited',
   'tool_disabled',
@@ -150,6 +155,14 @@ const errors = new Set([
   'invalid_url',
   'result_too_large',
 ])
+
+/** How the model continues after a refusal that guards data leaving through a URL. */
+const hints: Partial<Record<string, string>> = {
+  unverified_url:
+    'This URL did not come from the owner, a search result or a fetched page. Find the page with web_search, then fetch a URL from its results.',
+  query_contains_url:
+    'A search query may not contain a URL. Search with words instead, or fetch a URL from earlier results.',
+}
 
 /** Stable error codes only, never exception bodies from authentication or external transports. */
 export function webFailure(error: unknown, signal: AbortSignal): string {
@@ -178,7 +191,6 @@ export async function executeWeb(
   using limit = deadline(15_000, context.abortSignal)
   const signal = limit.signal
   let admitted = false
-  let admittedRun: string | undefined
   let credentialRefusal: string | undefined
   let releaseSlot: (() => void) | undefined
   try {
@@ -216,55 +228,21 @@ export async function executeWeb(
         signal.throwIfAborted()
         requireWebEnabled(await settings(), tool, refusal())
         attemptSignal?.throwIfAborted()
-        // Keep the attempt check and reservation in the permission-consumption section.
-        // A local send-limit refusal must not spend unused owner authorization.
+        // Check the attempt limit in the admission section, so a local refusal marks no contact.
         if (attemptSignal) checkSearchAttemptRate(webState, Date.now())
         if (!admitted) {
-          const live = await harness.snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
-          const inputs = await currentRunInputs(harness, context)
-          if (!live?.run || !inputs) throw new Error('untrusted_context')
-          // Pi hands generation task ownership over after each tool round; the first
-          // adopted submission is stable until this logical run settles.
-          const first = live.run.inputs[0]
-          if (first === undefined) throw new Error('untrusted_context')
-          const run = String(first)
-          for (const input of inputs) {
-            if (
-              input.kind !== 'kodama.owner-message' ||
-              !input.data ||
-              typeof input.data !== 'object' ||
-              Array.isArray(input.data)
-            )
-              continue
-            const permissions = parseMessage({
-              requestId: 'permission',
-              content: 'permission',
-              webPermissions: input.data['webPermissions'],
-            }).webPermissions
-            if (permissions)
-              adoptPermissions(local, String(ROOT_CONVERSATION_ID), run, input.id, permissions)
-          }
-          const eligibleThrough = (await latestEntryId(harness)) ?? 0
+          const root = String(ROOT_CONVERSATION_ID)
           const currentSettings = await settings()
           signal.throwIfAborted()
           attemptSignal?.throwIfAborted()
           requireWebEnabled(currentSettings, tool, refusal())
+          // A provider's own search may open a URL in the query and carry data out in it.
+          if (tool === 'web_search' && containsUrl(normalized))
+            throw new Error('query_contains_url')
           const now = Date.now()
           checkAdmissionRate(webState, tool, now)
-          admitWeb(
-            local,
-            {
-              root: String(ROOT_CONVERSATION_ID),
-              run,
-              inputs: inputs.map((input) => input.id),
-              tool,
-              argument: normalized,
-              eligibleThrough,
-            },
-            now,
-          )
+          admitWeb(local, { root, tool, argument: normalized })
           recordAdmission(webState, tool, now)
-          admittedRun = run
           admitted = true
         }
         signal.throwIfAborted()
@@ -277,7 +255,9 @@ export async function executeWeb(
       const result = await fetchPage(normalized, maximum, signal, async () => {
         await admit()
       })
-      return externalEnvelope(tool, normalized, result)
+      const output = externalEnvelope(tool, normalized, result)
+      grantUrls(local, String(ROOT_CONVERSATION_ID), 'page', result.links)
+      return output
     }
     const auth = route ? await models.getAuth(model, { signal }) : undefined
     signal.throwIfAborted()
@@ -310,22 +290,17 @@ export async function executeWeb(
       api: result.api,
       fetchedAt: result.fetchedAt,
     })
-    await serial(async () => {
-      signal.throwIfAborted()
-      const live = await harness.snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
-      if (!live?.run || admittedRun === undefined || String(live.run.inputs[0]) !== admittedRun)
-        throw new Error('untrusted_context')
-      grantSources(
-        local,
-        String(ROOT_CONVERSATION_ID),
-        admittedRun,
-        result.result.sources.map((source) => source.url),
-      )
-    })
+    grantUrls(
+      local,
+      String(ROOT_CONVERSATION_ID),
+      'search',
+      result.result.sources.map((source) => source.url),
+    )
     return output
   } catch (error) {
     const reason = credentialRefusal ?? webFailure(error, signal)
-    return JSON.stringify({ error: reason })
+    const hint = hints[reason]
+    return JSON.stringify(hint ? { error: reason, hint } : { error: reason })
   } finally {
     releaseSlot?.()
   }

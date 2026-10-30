@@ -5,7 +5,7 @@ import type { Cursor, EntryRecord, Harness } from '@earendil-works/pi-durable'
 import { currentRunInputs } from './runtime/inputs.ts'
 import type { AgentOrigin } from '../protocol.ts'
 
-/** Legacy provenance cap; permanent contact restrictions additionally forbid forwarding peers. */
+/** Bound peer forwarding chains independently of memory or prior external reads. */
 export const MAX_CONTACT_HOPS = 3
 
 function inputHop(entry: EntryRecord): number {

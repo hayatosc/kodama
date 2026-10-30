@@ -6,8 +6,9 @@
  * @module
  */
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
-import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
-import { latestEntryId } from '../memory/transcript.ts'
+import { grantUrls } from './local-db/external-data.ts'
+import { urlsInText } from '../tools/web/url.ts'
+import type { MemoryJob } from '../memory/jobs.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { Operation } from '../memory/store/records.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
@@ -279,11 +280,7 @@ export class Agent extends DurableObject<AgentEnv> {
       this.env,
       [
         createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
-        toolGuardExtension(
-          this.#refusal,
-          () => appliedSettings(this.ctx.storage),
-          async () => requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID)),
-        ),
+        toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
       ],
       this.#refusal,
       this.credentialStore(),
@@ -360,12 +357,7 @@ export class Agent extends DurableObject<AgentEnv> {
   #workingMemory(): WorkingMemoryDeps {
     return {
       env: this.env,
-      trusted: (operation) =>
-        this.#serial(async () => {
-          requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
-          return operation()
-        }),
-      contact: () => this.#serial(async () => this.#contact('history')),
+      serialize: (operation) => this.#serial(operation),
       agentId: () => this.#agentId(),
       local: () => this.#local,
       sharedSpaces: () => this.#sharedSpaces(),
@@ -458,7 +450,6 @@ export class Agent extends DurableObject<AgentEnv> {
         )
         if (existing) return conversation.submit(draft, context)
       }
-      if (actorKind === 'agent') await this.#contact('peer')
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
       if (actorKind) {
@@ -469,7 +460,16 @@ export class Agent extends DurableObject<AgentEnv> {
           actorKind: !idle && previous?.actorKind === 'user' ? 'user' : actorKind,
         } satisfies UsageAttribution)
       }
-      return conversation.submit(draft, context)
+      const admitted = await conversation.submit(draft, context)
+      // Only newly admitted owner text grants URLs; web admission shares this queue.
+      if (actorKind === 'user' && draft.type === 'input' && typeof draft.content === 'string')
+        grantUrls(
+          await this.#local,
+          String(ROOT_CONVERSATION_ID),
+          'owner',
+          urlsInText(draft.content),
+        )
+      return admitted
     })
     await this.#refreshRecovery(harness)
     return submission
@@ -486,7 +486,6 @@ export class Agent extends DurableObject<AgentEnv> {
   async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       parseAgentId(origin.senderAgentId)
       if (!Number.isInteger(origin.hop) || origin.hop < 1 || origin.hop > MAX_CONTACT_HOPS)
         throw new TypeError('Invalid delegation hop')
@@ -513,17 +512,7 @@ export class Agent extends DurableObject<AgentEnv> {
               },
             }
           : {
-              entry: {
-                kind: 'kodama.owner-message',
-                data: {
-                  webPermissions: {
-                    ...(message.webPermissions?.queries
-                      ? { queries: message.webPermissions.queries }
-                      : {}),
-                    ...(message.webPermissions?.urls ? { urls: message.webPermissions.urls } : {}),
-                  },
-                },
-              },
+              entry: { kind: 'kodama.owner-message' },
             }),
       },
       origin ? 'agent' : 'user',
@@ -611,44 +600,19 @@ export class Agent extends DurableObject<AgentEnv> {
     const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     if (agentId === this.#agentId()) throw new TypeError('Cannot contact this agent itself')
     const origin = await this.#serial(async () => {
-      requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
       assertAllowed(this.#refusal)
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       const origin = await contactOrigin(await this.#harness, this.#agentId())
-      await this.#contact('peer')
       return origin
     })
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
   }
 
-  /** Capture the last eligible entry before admitting or exposing external data. */
-  async #contact(reason: string): Promise<void> {
-    markContact(
-      await this.#local,
-      String(ROOT_CONVERSATION_ID),
-      reason,
-      (await latestEntryId(await this.#harness)) ?? 0,
-    )
-  }
-
-  /** Source-owned write authorization serializes D1 commit with contact admission. */
-  async applyExtractionOperation(context: OperationContext, operation: Operation) {
+  /** Serialize memory commits and check the job's source identity; memory cannot change settings. */
+  async applyExtractionOperation(context: OperationContext, operation: Operation, job?: MemoryJob) {
     return this.#serial(async () => {
-      const boundary = contactBoundary(await this.#local, String(ROOT_CONVERSATION_ID))
-      const end =
-        operation.type === 'write' || operation.type === 'supersede'
-          ? operation.record.sourceEntries?.to
-          : operation.type === 'invalidate'
-            ? operation.evidence.sourceEntries?.to
-            : undefined
-      if (
-        boundary !== undefined &&
-        operation.type !== 'checkpoint' &&
-        operation.type !== 'decline' &&
-        (end === undefined || end > boundary)
-      )
-        throw new Error('untrusted_context')
+      if (job && 'sourceAgentId' in job && job.sourceAgentId !== this.#agentId())
+        throw new Error('Invalid extraction source')
       return applyOperation(memoryDb(this.env.MEMORY_DB), context, operation)
     })
   }
@@ -684,7 +648,11 @@ export class Agent extends DurableObject<AgentEnv> {
    * @remarks
    * Entries already pruned are read from their archived segment in R2.
    */
-  readEntries(request: { after: number; limit: number }): Promise<EntryPage> {
+  readEntries(request: {
+    after: number
+    limit: number
+    throughEntry?: number
+  }): Promise<EntryPage> {
     return readEntries(
       {
         agentId: this.#agentId(),

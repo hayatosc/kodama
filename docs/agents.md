@@ -587,12 +587,10 @@ unavailable. Timeout or sender cancellation does not cancel the receiver. Pendin
 to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
 delivery. Its delivery request ID is scoped to the sender and tool task.
 
-`MAX_CONTACT_HOPS = 3` remains a defensive provenance cap, but the permanent external-contact
-boundary is stricter: receiving any peer message or sending a peer request prevents subsequent
-`contact_agent` and `remember` calls for that root. A new owner message, steering, compaction,
-cancellation or eviction never clears contact. Both the early tool guard and the serialized
-side-effect boundary enforce the refusal. Delivery commits sender contact before crossing the
-object boundary and never holds its serial queue while waiting on another object.
+Peer messages retain sender provenance and are data, not owner authorization. Sending or
+receiving them does not change learning permissions. `MAX_CONTACT_HOPS = 3` bounds how far a
+chain started by one input can forward. Delivery never holds its serial queue while waiting
+on another object.
 
 ## Public web tools
 
@@ -634,27 +632,43 @@ admissions, 30 fetch admissions and 10 actual anonymous sends. Native responses 
 512 KiB; anonymous attempts to 256 KiB/5 seconds with a 512 KiB total; fetch transfer/decoded text
 to 2 MiB. Envelopes are valid JSON ≤128 KiB marked `untrusted_external_data`, not instructions.
 
-Immediately before the first outbound web send, SQLite atomically commits first contact,
-admission and any permission consumption. Failed traffic never clears contact. Later web
-traffic requires an exact owner permission from an input actually adopted into this run:
+Admission applies the same operation-level rules from the first call onward. There is no
+agent-wide taint state, and reading does not reduce learning permissions. The rules constrain
+outbound arguments rather than treating external reading as a permanent loss of trust:
 
-```sh
-nr agent send assistant "Research the release" --web-query "exact release query" \
-  --web-url "https://example.org/release"
-```
+- `web_search` stays available, but its query may not contain a URL (`query_contains_url`): a
+  scheme with `://`, or a host followed by a path, query or fragment. A provider's own search
+  may open such a URL. A bare domain, as in a `site:` filter, is allowed.
+- `web_fetch` reaches only a known URL (`unverified_url`): one written in an owner message,
+  returned by a successful search, or linked from a fetched page. A URL the model composed or
+  edited cannot be fetched, so it cannot carry context data to an attacker's server.
 
-Each repeatable permission array has at most 20 entries. Queries are trim-only; URLs share the
-tool's normalization including IDNA/default port/fragment removal while preserving path/query.
-Prose, peer inputs and model output cannot mint permissions. Permissions bind root, the logical
-run's first adopted submission, input, tool and exact argument and consume once. Pi's generation
-task ID changes after tool rounds, so it is recorded separately rather than used as run identity.
-Successful search sources grant one fetch per validated URL in that same run; edited URLs,
-page links, another run and repeated consumption do not. Redirects grant nothing reusable.
+Both refusals return a `hint` (search with words, then fetch a result), so a long-running agent
+finds another route instead of stopping.
+
+Known URLs live in `kodama_known_urls`, per root and not consumed, so a page stays readable on
+later turns and after eviction. Owner URLs are taken from the message text when `sendMessage`
+admits it, so a UI only sends what the user typed; peer messages add none. Search sources (at
+most 20 per search) are recorded after the search succeeds. A fetched page returns `links`: at
+most 50 public links, normalized and resolved against the final URL, from anchors outside
+removed navigation and hidden subtrees, or from URLs written in a plain-text page; they are
+recorded after the fetch. Links longer than 500 characters are dropped, model output adds no
+known URL, and redirects add none. The newest 1,000 known URLs per root are kept; granting one
+again refreshes it.
 
 A non-removable system section marks web, peer and history content as evidence, not approval.
-Read tools and final answers remain available after contact; remember and peer delivery do not.
-Wrong answers, persuasion and disclosure of pre-contact generated queries remain residual risks.
-Exact permissions are authorization, not sanitization.
+Read tools, the web tools under these rules, peer delivery and final answers remain available
+throughout the agent's lifetime; `remember` learns reusable knowledge and procedures under its
+normal quota and policy. Memory can influence behavior but cannot change owner-managed system
+settings, tool permissions, or these admission checks. Wrong answers, malicious persistent
+learning, persuasion, which known URL or link the model
+chooses to fetch (an attacker's page can offer many links), and what a search query discloses
+to the search provider remain residual risks. Known URLs are authorization, not sanitization.
+For the Responses dialect only (OpenAI and xAI), native search is agentic: a query can steer
+`open_page` in prose, spell an attacker URL in words, or disclose data in a bare subdomain that
+passes URL detection. Response validation rejects unexpected actions only after execution, so
+it cannot prevent this egress. This risk is accepted rather than switching search routes based on reading history. Whether OpenAI applies its [URL safety check](https://openai.com/index/ai-agent-link-safety/)
+to API `web_search` is unverified.
 
 All five native routes have mocked transport/schema fixtures, not universal model compatibility
 claims. The owner personally must verify real native dialect/auth/grounding, anonymous endpoints
@@ -748,8 +762,8 @@ Each object's SQLite holds two sets of tables:
   [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): model
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
-  (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), permanent external contact
-  (`kodama_external_data`), and one-shot web permissions (`kodama_web_permissions`). Their
+  (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
+  (`kodama_external_data`), and the known URLs checked on every fetch (`kodama_known_urls`). Their
   migrations are generated into `drizzle/durable-object/migrations` and applied by
   `src/agent/local-db/local.ts` before the harness opens.
 
@@ -760,11 +774,13 @@ shared spaces, the applied configuration (`kodama:config-version`, `kodama:appli
 ## Development
 
 Issue #26's local SQLite migration (`0003`) adds only `kodama_external_data` and
-`kodama_web_permissions` for permanent external contact and atomic one-shot permissions; web
+`kodama_web_permissions` for permanent external contact and atomic one-shot permissions;
+migration `0004` replaces the permissions with `kodama_known_urls`
+(see [Public web tools](#public-web-tools)); web
 rate limits/cooldowns are held in memory and tool execution logs rely on Pi Durable's own
 `entries` table rather than extending `kodama_usage` or management D1. Existing development state is disposable; start
-with fresh local state when resetting local databases. Current-runtime persistence, permanent external contact,
-atomic permissions, and interruption recovery remain required.
+with fresh local state when resetting local databases. Current-runtime persistence, durable URL
+provenance checked on every fetch, and interruption recovery remain required.
 
 Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 

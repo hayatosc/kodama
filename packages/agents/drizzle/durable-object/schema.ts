@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /** One outer Pi model invocation; IDs are never reused after retention deletes. */
 export const usage = sqliteTable('kodama_usage', {
@@ -112,7 +112,7 @@ export const pruneRuns = sqliteTable(
   (t) => [index('kodama_prune_runs_by_state').on(t.state)],
 )
 
-/** Permanent first external contact for a root conversation. */
+/** Legacy first-contact metadata; it no longer controls permissions or learning. */
 export const externalData = sqliteTable('kodama_external_data', {
   root: text('root').primaryKey(),
   reason: text('reason').notNull(),
@@ -120,13 +120,21 @@ export const externalData = sqliteTable('kodama_external_data', {
   eligibleThrough: integer('eligible_through').notNull(),
 })
 
-/** Exact permissions are consumed once and never transferred between runs. */
-export const webPermissions = sqliteTable('kodama_web_permissions', {
-  key: text('key').primaryKey(),
-  root: text('root').notNull(),
-  run: text('run'),
-  input: integer('input'),
-  tool: text('tool', { enum: ['web_search', 'web_fetch'] }).notNull(),
-  argument: text('argument').notNull(),
-  consumedAt: integer('consumed_at'),
-})
+/**
+ * URLs whose provenance lies outside the model: the owner wrote them in a message, a search
+ * returned them, or a fetched page linked to them. Every `web_fetch` call requires a known URL;
+ * these URLs are not consumed.
+ */
+export const knownUrls = sqliteTable(
+  'kodama_known_urls',
+  {
+    root: text('root').notNull(),
+    url: text('url').notNull(),
+    source: text('source', { enum: ['owner', 'search', 'page'] }).notNull(),
+    grantedAt: integer('granted_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.root, t.url] }),
+    index('kodama_known_urls_by_age').on(t.root, t.grantedAt),
+  ],
+)

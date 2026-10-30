@@ -10,7 +10,6 @@ import type { EntryRecord, EntryId, Harness } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { readArchivedText } from './archive/reader.ts'
-import { contactBoundary } from '../agent/local-db/external-data.ts'
 import { prunedThrough } from '../agent/local-db/pruning.ts'
 import type { MemoryDb } from './store/db.ts'
 import { nextArchivedSegment } from './store/archive.ts'
@@ -118,7 +117,7 @@ function isEntryId(value: number): value is EntryId {
  */
 export async function readEntries(
   sources: EntrySources,
-  request: { after: number; limit: number },
+  request: { after: number; limit: number; throughEntry?: number },
 ): Promise<EntryPage> {
   const limit = Math.min(Math.max(1, request.limit), PAGE_LIMIT)
   const first = request.after + 1
@@ -126,10 +125,13 @@ export async function readEntries(
   const pruned = prunedThrough(await sources.local())
   if (first <= pruned) {
     const page = await readArchived(sources, request.after, limit, pruned)
-    const boundary = contactBoundary(await sources.local(), String(ROOT_CONVERSATION_ID))
     return {
       ...page,
-      entries: page.entries.filter((entry) => boundary === undefined || entry.id <= boundary),
+      entries: page.entries.filter(
+        (entry) => request.throughEntry === undefined || entry.id <= request.throughEntry,
+      ),
+      through: Math.min(page.through, request.throughEntry ?? Infinity),
+      end: page.end || (request.throughEntry !== undefined && page.through >= request.throughEntry),
     }
   }
   const harness = await sources.harness()
@@ -141,13 +143,15 @@ export async function readEntries(
       ),
     context,
   )
-  const boundary = contactBoundary(await sources.local(), String(ROOT_CONVERSATION_ID))
   return {
     entries: page.items
-      .filter((entry) => boundary === undefined || entry.id <= boundary)
+      .filter((entry) => request.throughEntry === undefined || entry.id <= request.throughEntry)
       .flatMap((entry) => entryText(entry) ?? []),
-    through: page.items.at(-1)?.id ?? request.after,
-    end: page.next === undefined,
+    through: Math.min(page.items.at(-1)?.id ?? request.after, request.throughEntry ?? Infinity),
+    end:
+      page.next === undefined ||
+      (request.throughEntry !== undefined &&
+        (page.items.at(-1)?.id ?? request.after) >= request.throughEntry),
   }
 }
 

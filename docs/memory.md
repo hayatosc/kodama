@@ -382,21 +382,24 @@ It also lists what not to keep: task progress, guesses, secrets, and one-off req
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
 `kodama_remember_turns`. Attribution uses the active execution's full durable input set, not the
-newest transcript entry: the last adopted owner input anchors quota and evidence. Peer inputs
-permanently establish external contact, so they cannot authorize remember requests. A remember request has no origin of its own; the memory agent treats every one the
-same way, whether the user asked for it or the agent judged it worth keeping.
+newest transcript entry: the last adopted owner input anchors quota and evidence. A remember
+request still needs an adopted owner input for quota attribution. Reading web pages, peer
+messages, or memories does not change learning permissions.
 
 ## Write paths
 
 ### Remember
 
 1. Validate the input and cap its size at 2,000 characters.
-2. Enqueue a `remember` job with the content and the source entry IDs. Return `accepted`.
+2. In the serialized quota/enqueue section, enqueue the content and source entry IDs,
+   and return `accepted`.
 3. The memory agent classifies the content, reconciles it with existing records, and writes it,
    superseding an earlier record it replaces. It may decline a duplicate or something of no
    lasting value, which is logged in the ledger. The record starts with the default importance
    (0.5) unless the memory agent sets one.
-4. The job settles, and the working agent receives `memoryChanged`.
+4. The job settles, and the working agent receives `memoryChanged`. Knowledge and procedures
+   remain eligible for automatic loading, revision, and consolidation regardless of prior web
+   or peer interaction. Memory writes cannot change owner-managed configuration or tool permissions.
 
 ### Extract
 
@@ -697,8 +700,8 @@ daily consolidation in code, logged in `memory_ledger`.
   beside the configuration Pi keeps
   ([`control-plane/config.ts`](../packages/agents/src/control-plane/config.ts)).
 - An agent record overrides a shared record through `memory_write`'s `overrides`.
-- Content from untrusted sources is stored as an `event` with its source. One agent's
-  conversation alone never reaches a shared space.
+- Learned records retain their source agent, evidence entries, observation time, and scope.
+  One agent's conversation alone never reaches a shared space.
 
 ### Writing shared records
 
@@ -929,17 +932,22 @@ turns it into a `conflict` instead of being undone.
 - Which model should the memory agent use?
 - How coarse may live streaming to the UI become in exchange for fewer writes?
 
-## External-contact extraction boundary
+## Learning and operation boundaries
 
-A root's first web, peer or history contact persists the last extraction-eligible entry ID in
-object SQLite. `remember` is refused both before execution and in the serialized quota/enqueue
-section. There is no post-contact human-only escape hatch or automatic reset.
+Web, peer, and history reads do not mark an agent permanently untrusted. Historical contact
+rows do not restrict learning. Extraction freezes a finite window at enqueue and reads all
+roles, retaining their provenance. A checkpoint records scan progress, not permission to cite
+unread evidence: writes must still cite entries within the job's actual read range.
 
-Extraction enqueue freezes any known upper bound; source entry reads reapply the current bound
-for both live SQLite and archived R2 pages. All post-boundary text (including owner messages,
-tools, assistants and compaction summaries) is excluded. Page `through` still advances over
-excluded entries so checkpoints do not stall. The source object serializes final extraction
-writes with contact admission and rechecks evidence against its current boundary, protecting
-already queued/running jobs and reads that raced contact. A checkpoint is scan progress, not
-permission to write unread evidence. Reading archived history marks contact before exposing its
-result to the model. Memory layers remain independent of runtime orchestration.
+Learned facts and procedures can affect future behavior through always-loaded memory, search,
+revision, and consolidation. Source agent, entry IDs, observation time, and scope support
+inspection and correction; they do not certify truth. Learned instructions are revisable memory,
+not owner-managed system settings. Memory tools cannot change configuration, enabled tools,
+credentials, or operation admission rules, and required shared-record override checks remain.
+
+External content can still persuade the model or become incorrect persistent learning. This
+policy does not claim to detect malicious learning. Safety instead relies on operation-level
+checks that apply to every call: URL provenance, query restrictions, configured tool policy,
+and provider-only credential handling. Known-link choices, provider-visible search terms, and
+peer relays remain residual disclosure risks. Memory layers remain independent of runtime
+orchestration.

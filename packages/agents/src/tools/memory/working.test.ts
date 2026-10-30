@@ -4,6 +4,8 @@
  *
  * @module
  */
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { contactBoundary } from '../../agent/local-db/external-data.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
@@ -23,7 +25,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())
 
-it('refuses a peer remember request before enqueue despite an earlier human input', async () => {
+it('accepts a peer-influenced remember request with an earlier human input', async () => {
   const peer = await newAgentId()
   const receiver = await newAgentId()
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => modelResponse())
@@ -56,11 +58,30 @@ it('refuses a peer remember request before enqueue despite an earlier human inpu
     .map((row) => parseMemoryJob(JSON.parse(row.payloadJson)))
     .find((parsed) => parsed.kind === 'remember' && parsed.content === content)
   expect(peerInput).toBeDefined()
-  expect(job).toBeUndefined()
-  expect(JSON.stringify(fetch.mock.calls.at(-1))).toContain('untrusted_context')
+  expect(job).toMatchObject({ kind: 'remember' })
+  expect(JSON.stringify(fetch.mock.calls.at(-1))).toContain('accepted')
 })
 
 describe('working memory search', () => {
+  it('returns learned observations without changing agent permissions', async () => {
+    const agentId = await newAgentId()
+    await write({
+      scope: `agent:${agentId}`,
+      sourceAgentId: agentId,
+      kind: 'event',
+      content: 'External staging observation',
+    })
+    const boundary = () =>
+      runInDurableObject(env.AGENTS.getByName(agentId), async (_agent, state) =>
+        contactBoundary(await openLocalDb(state.storage), String(ROOT_CONVERSATION_ID)),
+      )
+    expect(await boundary()).toBeUndefined()
+    const bodies = scriptedTurn([{ name: 'memory_search', arguments: { query: 'staging' } }])
+    await say(agentId, 'external-search', 'Look up staging')
+    expect(bodies.at(-1)).toContain('[event] External staging observation')
+    expect(await boundary()).toBeUndefined()
+  })
+
   it('hides prohibited overrides even when the required policy does not match the query', async () => {
     const agentId = await newAgentId()
     const space = `space-${uuidv7().slice(-12)}`

@@ -37,7 +37,13 @@ export function decodeDocument(bytes: Uint8Array, contentType: string, html: boo
   }
 }
 
-/** Strip executable, navigation and explicitly hidden subtrees before collecting text. */
+/** Raw link targets collected from one page before normalization. */
+const HREF_LIMIT = 500
+
+/**
+ * Strip executable, navigation and explicitly hidden subtrees before collecting text and the
+ * `href` of the links that remain.
+ */
 export async function extractHtml(html: string, maximum: number, signal: AbortSignal) {
   signal.throwIfAborted()
   const clean = await new HTMLRewriter()
@@ -63,7 +69,13 @@ export async function extractHtml(html: string, maximum: number, signal: AbortSi
     .text()
   signal.throwIfAborted()
   const collected = { title: '', article: '', main: '', body: '' }
-  const rewriter = new HTMLRewriter()
+  const hrefs: string[] = []
+  const rewriter = new HTMLRewriter().on('a[href]', {
+    element(element) {
+      const href = element.getAttribute('href')
+      if (href && hrefs.length < HREF_LIMIT) hrefs.push(href)
+    },
+  })
   for (const key of ['title', 'article', 'main', 'body'] as const) {
     rewriter.on(key, {
       text(chunk) {
@@ -93,5 +105,6 @@ export async function extractHtml(html: string, maximum: number, signal: AbortSi
     title: limitText(collected.title.trim(), 300),
     text: limitText(body, maximum),
     truncated: Array.from(body).length > maximum,
+    hrefs,
   }
 }

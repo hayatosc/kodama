@@ -19,7 +19,7 @@ import { entryText, readEntries, TOOL_RESULT_TEXT_LIMIT } from './transcript.ts'
 
 useMockModel()
 
-it('rechecks contact after an in-flight live page while retaining its scan progress', async () => {
+it('ignores historical contact changes during a live page read', async () => {
   await withHarness({}, async (harness, state) => {
     const root = await harness.root(BACKGROUND_CONTEXT)
     const submission = await root.submit(
@@ -51,7 +51,7 @@ it('rechecks contact after an in-flight live page while retaining its scan progr
     markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
     release.resolve()
     try {
-      expect(await reading).toEqual({ ...before, entries: [] })
+      expect(await reading).toEqual(before)
     } finally {
       release.resolve()
       spy.mockRestore()
@@ -154,6 +154,45 @@ describe('entryText', () => {
 })
 
 describe('readEntries', () => {
+  it('caps live evidence and progress at the frozen extraction window', async () => {
+    await withHarness({}, async (harness, state) => {
+      const root = await harness.root(BACKGROUND_CONTEXT)
+      const sources = {
+        agentId: 'bounded-page-agent',
+        harness: async () => harness,
+        local: () => openLocalDb(state.storage),
+        db: memoryDb(env.MEMORY_DB),
+        archive: env.ARCHIVE,
+      }
+      const first = await root.submit(
+        { type: 'input', requestId: 'within', content: 'Inside the window' },
+        BACKGROUND_CONTEXT,
+      )
+      await first.wait(BACKGROUND_CONTEXT)
+      const before = await readEntries(sources, { after: 0, limit: 50 })
+      const later = await root.submit(
+        { type: 'input', requestId: 'beyond', content: 'Beyond the window' },
+        BACKGROUND_CONTEXT,
+      )
+      await later.wait(BACKGROUND_CONTEXT)
+      const all = await readEntries(sources, { after: 0, limit: 50 })
+      expect(all.entries.some((entry) => entry.id > before.through)).toBe(true)
+      const bounded = await readEntries(sources, {
+        after: 0,
+        limit: 50,
+        throughEntry: before.through,
+      })
+      expect(bounded).toEqual({ entries: before.entries, through: before.through, end: true })
+      expect(
+        await readEntries(sources, {
+          after: before.through,
+          limit: 50,
+          throughEntry: before.through,
+        }),
+      ).toEqual({ entries: [], through: before.through, end: true })
+    })
+  })
+
   it('refuses a page that does not start after an entry ID', async () => {
     const agentId = await newAgentId()
     const rejection = await rejectionInObject(env.AGENTS.getByName(agentId), (agent) =>
