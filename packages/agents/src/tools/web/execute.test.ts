@@ -29,73 +29,89 @@ import {
 
 useMockModel()
 
-it('rechecks lifecycle after a held provenance read without consuming permission or sending', async () => {
-  const credentials = await testCredentialStore(await newAgentId())
-  const modelStarted = Promise.withResolvers<void>()
-  const releaseModel = Promise.withResolvers<void>()
-  vi.mocked(fetch).mockImplementation(async () => {
-    modelStarted.resolve()
-    await releaseModel.promise
-    return textResponse('Done')
-  })
-  await withHarness({}, async (harness, state) => {
-    const local = await openLocalDb(state.storage)
-    const webState = createWebState()
-    markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
-    const root = await harness.root(BACKGROUND_CONTEXT)
-    const submission = await root.submit(
-      {
-        type: 'input',
-        requestId: 'held-web',
-        content: 'fetch',
-        whenBusy: 'followUp',
-        entry: {
-          kind: 'kodama.owner-message',
-          data: { webPermissions: { urls: ['https://example.org/'] } },
-        },
-      },
-      BACKGROUND_CONTEXT,
-    )
-    await modelStarted.promise
-    const reached = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
-    const snapshot = harness.snapshot.bind(harness)
-    const spy = vi.spyOn(harness, 'snapshot').mockImplementation(async (...args) => {
-      const value = await snapshot(...args)
-      if (Object.is(args[0], LiveDoc)) {
-        reached.resolve()
-        await release.promise
-      }
-      return value
+it.each([
+  ['web_fetch', 'paused'],
+  ['web_search', 'paused'],
+  ['web_fetch', 'aborted'],
+  ['web_search', 'aborted'],
+] as const)(
+  'rechecks %s after a held provenance read without consuming permission or sending: %s',
+  async (tool, interruption) => {
+    const credentials = await testCredentialStore(await newAgentId())
+    const modelStarted = Promise.withResolvers<void>()
+    const releaseModel = Promise.withResolvers<void>()
+    vi.mocked(fetch).mockImplementation(async () => {
+      modelStarted.resolve()
+      await releaseModel.promise
+      return textResponse('Done')
     })
-    let refusal: string | undefined
-    const operation = executeWeb(
-      local,
-      webState,
-      harness,
-      async () => defaultAgentSettings(env),
-      () => credentials,
-      serialQueue(),
-      () => refusal,
-      'web_fetch',
-      'https://example.org/',
-      BACKGROUND_CONTEXT,
-    )
-    await reached.promise
-    refusal = 'paused'
-    release.resolve()
-    try {
-      expect(await operation).toContain('agent_restricted')
-      expect(fetch).toHaveBeenCalledOnce() // only the harness model request
-      expect(local.select().from(webPermissions).all()).toMatchObject([{ consumedAt: null }])
-      expect(webState.inFlight).toBe(0)
-    } finally {
-      spy.mockRestore()
-      releaseModel.resolve()
-      await submission.wait(BACKGROUND_CONTEXT)
-    }
-  })
-})
+    await withHarness({}, async (harness, state) => {
+      const local = await openLocalDb(state.storage)
+      const webState = createWebState()
+      markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
+      const root = await harness.root(BACKGROUND_CONTEXT)
+      const submission = await root.submit(
+        {
+          type: 'input',
+          requestId: 'held-web',
+          content: 'fetch',
+          whenBusy: 'followUp',
+          entry: {
+            kind: 'kodama.owner-message',
+            data: { webPermissions: { urls: ['https://example.org/'], queries: ['question'] } },
+          },
+        },
+        BACKGROUND_CONTEXT,
+      )
+      await modelStarted.promise
+      const reached = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const snapshot = harness.snapshot.bind(harness)
+      const spy = vi.spyOn(harness, 'snapshot').mockImplementation(async (...args) => {
+        const value = await snapshot(...args)
+        if (Object.is(args[0], LiveDoc)) {
+          reached.resolve()
+          await release.promise
+        }
+        return value
+      })
+      let refusal: string | undefined
+      const controller = new AbortController()
+      const operation = executeWeb(
+        local,
+        webState,
+        harness,
+        async () => ({ ...defaultAgentSettings(env), webSearchRoute: 'keyless' }),
+        () => credentials,
+        serialQueue(),
+        () => refusal,
+        tool,
+        tool === 'web_fetch' ? 'https://example.org/' : 'question',
+        withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
+      )
+      await reached.promise
+      if (interruption === 'paused') refusal = 'paused'
+      else controller.abort()
+      release.resolve()
+      try {
+        expect(await operation).toContain(
+          interruption === 'paused' ? 'agent_restricted' : 'aborted',
+        )
+        expect(fetch).toHaveBeenCalledOnce() // only the harness model request
+        expect(local.select().from(webPermissions).all()).toMatchObject(
+          interruption === 'paused' ? [{ consumedAt: null }, { consumedAt: null }] : [],
+        )
+        expect(webState.keylessAttempts).toHaveLength(0)
+        expect(webState.searchAdmissions).toHaveLength(0)
+        expect(webState.inFlight).toBe(0)
+      } finally {
+        spy.mockRestore()
+        releaseModel.resolve()
+        await submission.wait(BACKGROUND_CONTEXT)
+      }
+    })
+  },
+)
 
 it('searches with scoped native auth, permits source fetch once and blocks remember and later traffic', async () => {
   const id = await newAgentId()
@@ -405,6 +421,107 @@ it.each([
     expect(sends).toBe(count)
   },
 )
+
+it('preserves exact permission and admission capacity when keyless attempts are rate limited', async () => {
+  const credentials = await testCredentialStore(await newAgentId())
+  const modelStarted = Promise.withResolvers<void>()
+  const releaseModel = Promise.withResolvers<void>()
+  const queries = Array.from({ length: 10 }, (_, index) => `question ${index}`)
+  let sends = 0
+  vi.mocked(fetch).mockImplementation(async (input) => {
+    const url = input instanceof Request ? input.url : input.toString()
+    if (url.startsWith('https://api.openai.com/')) {
+      modelStarted.resolve()
+      await releaseModel.promise
+      return textResponse('Done')
+    }
+    sends++
+    if (url === 'https://mcp.exa.ai/mcp') return new Response('', { status: 429 })
+    expect(url).toBe('https://mcp.firecrawl.dev/v2/mcp')
+    return Response.json({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, data: { web: [] } }) }],
+      },
+    })
+  })
+  await withHarness({}, async (harness, state) => {
+    const local = await openLocalDb(state.storage)
+    const webState = createWebState()
+    const serial = serialQueue()
+    markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
+    const root = await harness.root(BACKGROUND_CONTEXT)
+    const submission = await root.submit(
+      {
+        type: 'input',
+        requestId: 'keyless-rate',
+        content: 'Search the exact queries',
+        whenBusy: 'followUp',
+        entry: { kind: 'kodama.owner-message', data: { webPermissions: { queries } } },
+      },
+      BACKGROUND_CONTEXT,
+    )
+    await modelStarted.promise
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+    const search = (query: string) =>
+      executeWeb(
+        local,
+        webState,
+        harness,
+        async () => ({ ...defaultAgentSettings(env), webSearchRoute: 'keyless' }),
+        () => credentials,
+        serial,
+        () => undefined,
+        'web_search',
+        query,
+        BACKGROUND_CONTEXT,
+      )
+    try {
+      expect(JSON.parse(await search('not permitted'))).toEqual({ error: 'untrusted_context' })
+      expect(webState.keylessAttempts).toHaveLength(0)
+      expect(webState.searchAdmissions).toHaveLength(0)
+      expect(sends).toBe(0)
+      for (const query of queries.slice(0, 9)) {
+        expect(JSON.parse(await search(query))).toMatchObject({ type: 'untrusted_external_data' })
+      }
+      expect(webState.searchAdmissions).toHaveLength(9)
+      expect(webState.keylessAttempts).toHaveLength(10)
+      expect(sends).toBe(10)
+      expect(JSON.parse(await search('question 9'))).toEqual({ error: 'rate_limited' })
+      expect(sends).toBe(10)
+      expect(webState.searchAdmissions).toHaveLength(9)
+      expect(webState.keylessAttempts).toHaveLength(10)
+      expect(
+        local
+          .select()
+          .from(webPermissions)
+          .all()
+          .find((row) => row.argument === 'question 9'),
+      ).toMatchObject({ consumedAt: null })
+      clock.mockReturnValue(Date.now() + 60_001)
+      expect(JSON.parse(await search('question 9'))).toMatchObject({
+        type: 'untrusted_external_data',
+      })
+      expect(sends).toBe(11)
+      expect(webState.searchAdmissions).toHaveLength(1)
+      expect(webState.keylessAttempts).toHaveLength(1)
+      expect(
+        local
+          .select()
+          .from(webPermissions)
+          .all()
+          .find((row) => row.argument === 'question 9'),
+      ).toMatchObject({ consumedAt: Date.now() })
+      expect(webState.inFlight).toBe(0)
+      expect(webState.keylessInFlight).toBe(0)
+    } finally {
+      clock.mockRestore()
+      releaseModel.resolve()
+      await submission.wait(BACKGROUND_CONTEXT)
+    }
+  })
+})
 
 it('enforces in-memory concurrency, rolling rate limits and keyless provider cooldowns', () => {
   const state = createWebState()
