@@ -96,18 +96,12 @@ export function toolGuardExtension(
   refusal: Refusal,
   settings: AppliedSettings,
   trusted: () => Promise<void> = async () => {},
-  webIntent?: (
-    tool: 'web_search' | 'web_fetch',
-    task: string,
-    reason?: string,
-    argument?: unknown,
-  ) => Promise<void>,
 ): Extension {
   return defineExtension({
     name: 'kodama-restrictions',
     hooks: [
       hook(ToolTask, {
-        beforeTool: async (call, api) => {
+        beforeTool: async (call) => {
           let reason = refusal()
           const applied = await settings()
           if (!reason && (call.name === 'remember' || call.name === 'contact_agent')) {
@@ -126,23 +120,7 @@ export function toolGuardExtension(
             reason ??= `tool ${call.name} is denied by the agent's tool policy`
           if (call.name === 'remember' && applied?.memoryPolicy.remember === false)
             reason ??= "remember is disabled by the agent's memory policy"
-          if (call.name === 'web_search' || call.name === 'web_fetch')
-            await webIntent?.(
-              call.name,
-              String(api.taskId),
-              reason,
-              call.arguments[call.name === 'web_search' ? 'query' : 'url'],
-            )
           return reason ? { block: reason } : undefined
-        },
-        afterTool: async (call, result, api) => {
-          if ((call.name === 'web_search' || call.name === 'web_fetch') && result.isError)
-            await webIntent?.(
-              call.name,
-              String(api.taskId),
-              'tool_failed',
-              call.arguments[call.name === 'web_search' ? 'query' : 'url'],
-            )
         },
       }),
     ],

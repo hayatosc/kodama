@@ -1,4 +1,4 @@
-/** Working-agent web admission, scoped authentication and existing-ledger accounting. @module */
+/** Working-agent web admission, scoped authentication and in-memory rate/cooldown control. @module */
 import { AgentDoc, LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
 import type { CredentialStore } from '@earendil-works/pi-ai'
@@ -11,33 +11,101 @@ import { createAgentModels } from '../../control-plane/models.ts'
 import { latestEntryId } from '../../memory/transcript.ts'
 import { parseMessage } from '../../validation.ts'
 import type { LocalDb } from '../../agent/local-db/local.ts'
-import {
-  adoptPermissions,
-  admitWeb,
-  grantSources,
-  reserveWeb,
-} from '../../agent/local-db/external-data.ts'
-import {
-  startToolUsage,
-  finishToolUsage,
-  observeToolUsage,
-  selectUsageCredential,
-  toolUsageActive,
-} from '../../agent/local-db/usage.ts'
-import type { UsageAttribution } from '../../agent/local-db/usage.ts'
-import {
-  searchProviderState,
-  startSearchAttempt,
-  finishSearchAttempt,
-  saveSearchSession,
-  searchSession,
-  searchAttempts,
-} from '../../agent/local-db/web-search.ts'
+import { adoptPermissions, admitWeb, grantSources } from '../../agent/local-db/external-data.ts'
 import { normalizeQuery, normalizeUrl } from './url.ts'
 import { nativeSearch, requireSearchCredential, searchRoute } from './search.ts'
 import { keylessSearch } from './providers/keyless.ts'
+import type { KeylessAttempt, KeylessProvider, ProviderState } from './providers/keyless.ts'
 import { fetchPage } from './fetch.ts'
 import { externalEnvelope } from './search-result.ts'
+
+/** In-memory per-object concurrency, rolling rate windows, 429 cooldowns and Parallel session. */
+export interface WebState {
+  inFlight: number
+  keylessInFlight: number
+  searchAdmissions: number[]
+  fetchAdmissions: number[]
+  keylessAttempts: number[]
+  providers: Map<KeylessProvider, ProviderState>
+  sessionId?: string
+}
+
+/** Create fresh in-memory web runtime state for one agent object. */
+export function createWebState(): WebState {
+  return {
+    inFlight: 0,
+    keylessInFlight: 0,
+    searchAdmissions: [],
+    fetchAdmissions: [],
+    keylessAttempts: [],
+    providers: new Map(),
+  }
+}
+
+function pruneWindow(timestamps: number[], cutoff: number): void {
+  let expired = 0
+  while (expired < timestamps.length && (timestamps[expired] ?? 0) < cutoff) expired++
+  if (expired > 0) timestamps.splice(0, expired)
+}
+
+/** Reserve in-memory concurrency capacity during scoped auth and transport. */
+export function reserveWeb(state: WebState, keyless: boolean): () => void {
+  if (state.inFlight >= 2 || (keyless && state.keylessInFlight >= 1)) throw new Error('busy')
+  state.inFlight++
+  if (keyless) state.keylessInFlight++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    state.inFlight--
+    if (keyless) state.keylessInFlight--
+  }
+}
+
+/** Check the 60-second rolling admission window before consuming permissions or marking contact. */
+export function checkAdmissionRate(
+  state: WebState,
+  tool: 'web_search' | 'web_fetch',
+  now = Date.now(),
+): void {
+  const window = tool === 'web_search' ? state.searchAdmissions : state.fetchAdmissions
+  pruneWindow(window, now - 60_000)
+  if (window.length >= (tool === 'web_search' ? 10 : 30)) throw new Error('rate_limited')
+}
+
+/** Record an admitted web call in the 60-second rolling window. */
+export function recordAdmission(
+  state: WebState,
+  tool: 'web_search' | 'web_fetch',
+  now = Date.now(),
+): void {
+  const window = tool === 'web_search' ? state.searchAdmissions : state.fetchAdmissions
+  window.push(now)
+}
+
+/** Read in-memory cooldown state for a keyless provider. */
+export function searchProviderState(
+  state: WebState,
+  provider: KeylessProvider,
+): ProviderState | undefined {
+  return state.providers.get(provider)
+}
+
+/** Enforce the 60-second rolling keyless attempt limit before sending. */
+export function startSearchAttempt(state: WebState, now = Date.now()): void {
+  pruneWindow(state.keylessAttempts, now - 60_000)
+  if (state.keylessAttempts.length >= 10) throw new Error('rate_limited')
+  state.keylessAttempts.push(now)
+}
+
+/** Update in-memory provider cooldown and consecutive-429 streak before rotating. */
+export function finishSearchAttempt(
+  state: WebState,
+  attempt: KeylessAttempt,
+  next: ProviderState | undefined,
+): void {
+  if (next) state.providers.set(attempt.provider, next)
+}
 
 /** Current restrictions override exact permissions, including before each redirect/rotation. */
 export function requireWebEnabled(
@@ -92,28 +160,23 @@ export function webFailure(error: unknown, signal: AbortSignal): string {
 /** Execute one unsafe task; no native failure can select a different route or repeat traffic. */
 export async function executeWeb(
   local: LocalDb,
+  webState: WebState,
   harness: Harness,
   settings: () => Promise<AgentSettings | undefined>,
   scoped: (observe: ObserveCredential) => CredentialStore,
   serial: <T>(operation: () => Promise<T>) => Promise<T>,
   refusal: () => string | undefined,
-  attribution: UsageAttribution,
   tool: 'web_search' | 'web_fetch',
   argument: string,
-  task: string,
   context: Context,
   maximum?: number,
 ): Promise<string> {
   using limit = deadline(15_000, context.abortSignal)
   const signal = limit.signal
-  const seq = startToolUsage(local, attribution, task, tool)
-  if (!toolUsageActive(local, seq)) return JSON.stringify({ error: 'interrupted' })
   let admitted = false
   let admittedRun: string | undefined
-  let httpCount = 0
-  let permission: string | null = null
-  let skipped: string[] = []
   let credentialRefusal: string | undefined
+  let releaseSlot: (() => void) | undefined
   try {
     signal.throwIfAborted()
     const normalized = tool === 'web_search' ? normalizeQuery(argument) : normalizeUrl(argument)
@@ -124,7 +187,6 @@ export async function executeWeb(
     const state = await harness.snapshot(AgentDoc, ROOT_CONVERSATION_ID, context)
     const models = createAgentModels(
       scoped((selection) => {
-        selectUsageCredential(local, seq, selection)
         if (route) {
           try {
             requireSearchCredential(route, selection.kind)
@@ -140,21 +202,10 @@ export async function executeWeb(
       : undefined
     if (!model) throw new Error('web_failed')
     const route = tool === 'web_search' ? searchRoute(model, applied?.webSearchRoute) : undefined
-    observeToolUsage(local, seq, {
-      argument: normalized,
-      provider: route?.provider ?? null,
-      model: route ? model.id : null,
-      api: null,
-    })
     await serial(async () => {
       signal.throwIfAborted()
       requireWebEnabled(await settings(), tool, refusal())
-      reserveWeb(
-        local,
-        seq,
-        tool === 'web_search' && !route,
-        route?.dialect ?? (tool === 'web_fetch' ? 'http-get' : 'keyless-mcp'),
-      )
+      releaseSlot = reserveWeb(webState, tool === 'web_search' && !route)
     })
     const admit = async () =>
       serial(async () => {
@@ -169,7 +220,6 @@ export async function executeWeb(
           const first = live.run.inputs[0]
           if (first === undefined) throw new Error('untrusted_context')
           const run = String(first)
-          observeToolUsage(local, seq, { root: String(ROOT_CONVERSATION_ID), run })
           for (const input of inputs) {
             if (
               input.kind !== 'kodama.owner-message' ||
@@ -190,16 +240,21 @@ export async function executeWeb(
           const currentSettings = await settings()
           signal.throwIfAborted()
           requireWebEnabled(currentSettings, tool, refusal())
-          permission = admitWeb(local, {
-            seq,
-            root: String(ROOT_CONVERSATION_ID),
-            run,
-            inputs: inputs.map((input) => input.id),
-            tool,
-            argument: normalized,
-            keyless: tool === 'web_search' && !route,
-            eligibleThrough,
-          })
+          const now = Date.now()
+          checkAdmissionRate(webState, tool, now)
+          admitWeb(
+            local,
+            {
+              root: String(ROOT_CONVERSATION_ID),
+              run,
+              inputs: inputs.map((input) => input.id),
+              tool,
+              argument: normalized,
+              eligibleThrough,
+            },
+            now,
+          )
+          recordAdmission(webState, tool, now)
           admittedRun = run
           admitted = true
         }
@@ -208,12 +263,8 @@ export async function executeWeb(
     if (tool === 'web_fetch') {
       const result = await fetchPage(normalized, maximum, signal, async () => {
         await admit()
-        observeToolUsage(local, seq, { httpCount: ++httpCount })
       })
-      observeToolUsage(local, seq, { receivedBytes: result.receivedBytes, resultCount: 1 })
-      const output = externalEnvelope(tool, normalized, result)
-      finishToolUsage(local, seq, 'succeeded', { permission })
-      return output
+      return externalEnvelope(tool, normalized, result)
     }
     const auth = route ? await models.getAuth(model, { signal }) : undefined
     signal.throwIfAborted()
@@ -222,62 +273,31 @@ export async function executeWeb(
       route && auth?.auth.apiKey
         ? await nativeSearch(route, model, normalized, auth.auth.apiKey, signal, async () => {
             await admit()
-            observeToolUsage(local, seq, { httpCount: ++httpCount })
           })
         : await keylessSearch(
             normalized,
             signal,
-            (provider) => searchProviderState(local, provider),
-            async (provider, attemptSignal) => {
+            (provider) => searchProviderState(webState, provider),
+            async (_provider, attemptSignal) => {
               await admit()
               await serial(async () => {
                 const currentSettings = await settings()
                 attemptSignal.throwIfAborted()
                 requireWebEnabled(currentSettings, tool, refusal())
-                startSearchAttempt(local, seq, provider)
-                observeToolUsage(local, seq, {
-                  httpCount: ++httpCount,
-                  provider,
-                  api: provider === 'tavily' ? 'keyless-rest' : 'keyless-mcp',
-                })
+                startSearchAttempt(webState)
               })
             },
-            (attempt, next) => finishSearchAttempt(local, seq, attempt, next),
-            searchSession(local),
-            (provider) => skipped.push(provider),
+            (attempt, next) => finishSearchAttempt(webState, attempt, next),
+            webState.sessionId,
           )
-    if ('skippedProviders' in result) skipped = result.skippedProviders
     if (result.result === undefined) {
-      finishToolUsage(local, seq, 'failed', {
-        reason: result.error,
-        retryAt: result.retryAt ?? null,
-        skippedProviders: skipped,
-        attempts: searchAttempts(local, seq).map((attempt) => JSON.stringify(attempt)),
-        permission,
-      })
       return JSON.stringify({
         error: result.error,
         retryAt: result.retryAt,
         triedProviders: result.attempts.map((attempt) => attempt.provider),
       })
     }
-    if ('sessionId' in result && result.sessionId) saveSearchSession(local, seq, result.sessionId)
-    const attempts = searchAttempts(local, seq)
-    const bytes =
-      'receivedBytes' in result
-        ? result.receivedBytes
-        : attempts.reduce((sum, attempt) => sum + (attempt.bytes ?? 0), 0)
-    observeToolUsage(local, seq, {
-      provider: result.provider,
-      model: result.model,
-      api: result.api,
-      searchCount: result.result.searchCount,
-      countKind: result.result.countKind,
-      resultCount: result.result.sources.length,
-      input: result.result.inputTokens,
-      output: result.result.outputTokens,
-      receivedBytes: bytes,
-    })
+    if ('sessionId' in result && result.sessionId) webState.sessionId = result.sessionId
     const output = externalEnvelope(tool, normalized, {
       ...result.result,
       provider: result.provider,
@@ -296,21 +316,12 @@ export async function executeWeb(
         admittedRun,
         result.result.sources.map((source) => source.url),
       )
-      finishToolUsage(local, seq, 'succeeded', {
-        permission,
-        skippedProviders: skipped,
-        attempts: attempts.map((attempt) => JSON.stringify(attempt)),
-      })
     })
     return output
   } catch (error) {
     const reason = credentialRefusal ?? webFailure(error, signal)
-    finishToolUsage(local, seq, signal.aborted ? 'aborted' : admitted ? 'failed' : 'blocked', {
-      reason,
-      permission,
-      skippedProviders: skipped,
-      attempts: searchAttempts(local, seq).map((attempt) => JSON.stringify(attempt)),
-    })
     return JSON.stringify({ error: reason })
+  } finally {
+    releaseSlot?.()
   }
 }

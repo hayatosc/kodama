@@ -269,8 +269,9 @@ through `AgentService`. A new version takes effect from the agent's next turn, w
 or a deploy, even if the agent is busy when it is written; `getAgent` shows the desired and
 applied versions separately until they converge. Two updates from the same version conflict:
 exactly one succeeds. `rollbackConfig` writes an old version's content as a new version. The
-default tool list is empty. Add tool implementations in `src/tools/` and register them in
-`src/tools/index.ts`; agents enable registered tools by name.
+default tool list for new agents enables `web_search` and `web_fetch`; explicitly apply
+`tools: []` to disable optional tools. Add tool implementations in `src/tools/` and register them
+in `src/tools/index.ts`; agents enable registered tools by name.
 
 `src/control-plane/models.ts` registers Pi's built-in providers and model catalogs. Provider credentials
 are encrypted in the management D1 credential store; agents select credential IDs in configuration.

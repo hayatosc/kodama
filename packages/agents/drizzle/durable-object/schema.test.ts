@@ -1,4 +1,4 @@
-/** Fresh schema parity, usage defaults and task uniqueness. @module */
+/** Fresh schema parity for Durable Object local tables. @module */
 import { uuidv7 } from '../../src/lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
@@ -6,51 +6,6 @@ import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { expect, it } from 'vitest'
 import { openLocalDb } from '../../src/agent/local-db/local.ts'
 import * as schema from './schema.ts'
-
-it('stores fresh model defaults and nullable tool providers with unique tasks', async () => {
-  await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
-    const local = await openLocalDb(state.storage)
-    local
-      .insert(schema.usage)
-      .values(
-        [1, 2].map((input) => ({
-          startedAt: 1,
-          chargedAgentId: 'agent',
-          actorKind: 'user' as const,
-          provider: 'openai',
-          model: 'model',
-          input,
-        })),
-      )
-      .run()
-    const rows = local.select().from(schema.usage).all()
-    expect(rows).toHaveLength(2)
-    expect(rows.map((row) => row.input)).toEqual([1, 2])
-    for (const row of rows)
-      expect(row).toMatchObject({
-        kind: 'model',
-        task: null,
-        tool: null,
-        keyless: false,
-        searchCount: null,
-        admittedAt: null,
-        searchAttempts: [],
-        searchSessionId: null,
-        provider: 'openai',
-        model: 'model',
-      })
-    const tool = {
-      kind: 'tool' as const,
-      task: 'unique-task',
-      startedAt: 2,
-      chargedAgentId: 'agent',
-      actorKind: 'user' as const,
-    }
-    const inserted = local.insert(schema.usage).values(tool).returning().get()
-    expect(inserted).toMatchObject({ kind: 'tool', provider: null, model: null })
-    expect(() => local.insert(schema.usage).values(tool).run()).toThrow()
-  })
-})
 
 const tables = Object.values(schema).filter((value) => value instanceof SQLiteTable)
 

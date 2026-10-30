@@ -74,32 +74,15 @@ Subscription usage is an API-equivalent reference amount, separate from pay-as-y
 cost; neither implies subscription fees. No budgets, caps, reservations or cost-driven model
 changes exist. Subscription limits never authorize falling back to an API key.
 
-## Web-tool observations and audit
+## Tool execution logs
 
-The same durable ledger now discriminates `kind: 'model' | 'tool'`; default reads remain
-model-only. Request `kind: 'tool'` and optionally `tool: 'web_search' | 'web_fetch'` through the
-existing usage RPC for tool groups. Aggregate identity includes kind/tool, native dialect and
-count unit. `toolObservations` reports nullable search/result/HTTP/byte/input/output observations;
-missing observations are not free or complete measurements. Tool dollar amounts are unknown,
-not fabricated from the model catalog; subscription/keyless do not imply zero billing.
+`kodama_usage`, `usage_daily`, and the management `audit_log` record only outer Pi model invocations
+and control-plane management changes; they do not duplicate tool executions.
 
-Each logical tool task has one idempotent row, including early guard rejection, blocked, failed,
-aborted and interrupted outcomes. Native HTTP creates no second model row. Selected credential
-identity is observed before auth release and existing ingestion advances its last-use timestamp.
-Keyless/fetch have no credential. Search counts distinguish completed calls, provider requests
-and Google query count (not necessarily billable searches). Fetch records only HTTP counts,
-not fictitious DNS preflight traffic.
-
-The local terminal result stores content-free audit metadata atomically. Cursor-guarded D1
-batches ingest `tool.web_search` / `tool.web_fetch` audit rows together with aggregation and
-credential last-use. Retries and lost acknowledgments have one effect. Owner-visible arguments,
-permission provenance, ordered attempts/cooldowns and skipped providers may be audited; keys,
-Authorization, session IDs, raw provider errors, answer/page text and suggestion HTML never are.
-Interrupted measurements remain unknown; no-traffic rejection has zero HTTP/provider attempts.
-The usage row owns its ordered pending/completed keyless attempts and private Parallel session;
-there is no separate attempt or provider-state table. Cooldowns are derived from these attempts.
-A 429 attempt retains its deadline and streak count; success resets the streak. Recovery closes
-pending attempts before creating the terminal audit and preserves known counts/bytes.
-Acknowledgment/30-day detail retention applies, except rows needed for still-effective cooldowns,
-the latest per-provider streak checkpoint, or the latest private session remain until superseded.
-Aggregates/audit remain indefinite.
+Tool invocations (`web_search`, `web_fetch`, `contact_agent`, `remember`, and memory read tools),
+including their arguments, returned JSON envelopes, refusal/error codes, and `beforeTool` policy
+blocks, are persisted directly by Pi Durable in its conversation `entries` table and archived to
+R2 when pruned. Web concurrency limits, 60-second rolling rate windows, keyless 429 provider
+cooldowns, and Parallel session reuse live in memory on each `Agent` Durable Object, while
+Durable Object SQLite persists only permanent external contact (`kodama_external_data`) and
+one-shot exact owner permissions (`kodama_web_permissions`).

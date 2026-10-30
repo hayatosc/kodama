@@ -5,9 +5,7 @@
  *
  * @module
  */
-import { executeWeb } from '../tools/web/execute.ts'
-import { startToolUsage, finishToolUsage, observeToolUsage } from './local-db/usage.ts'
-import { normalizeQuery, normalizeUrl } from '../tools/web/url.ts'
+import { createWebState, executeWeb } from '../tools/web/execute.ts'
 import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
 import { latestEntryId } from '../memory/transcript.ts'
 import { applyOperation } from '../memory/store/records.ts'
@@ -16,7 +14,7 @@ import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
   Harness,
@@ -138,6 +136,7 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Why the next external call must not happen, checked before each one. */
   readonly #refusal: Refusal
   readonly #credentials: ReturnType<typeof agentCredentialStore>
+  readonly #web = createWebState()
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
@@ -284,28 +283,6 @@ export class Agent extends DurableObject<AgentEnv> {
           this.#refusal,
           () => appliedSettings(this.ctx.storage),
           async () => requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID)),
-          async (tool, task, reason, argument) => {
-            const local = await this.#local
-            const seq = startToolUsage(local, this.#toolAttribution(), task, tool)
-            const live = await (
-              await this.#harness
-            ).snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
-            let normalized: string | null = null
-            if (typeof argument === 'string') {
-              try {
-                normalized =
-                  tool === 'web_search' ? normalizeQuery(argument) : normalizeUrl(argument)
-              } catch {
-                // Invalid arguments never become unbounded audit text or authorize traffic.
-              }
-            }
-            observeToolUsage(local, seq, {
-              root: String(ROOT_CONVERSATION_ID),
-              run: live?.run?.inputs[0] === undefined ? null : String(live.run.inputs[0]),
-              argument: normalized,
-            })
-            if (reason) finishToolUsage(local, seq, 'blocked', { reason })
-          },
         ),
       ],
       this.#refusal,
@@ -319,30 +296,20 @@ export class Agent extends DurableObject<AgentEnv> {
           `${this.#agentId()}-${requestId}`,
           context,
         ),
-      async (tool, argument, task, context, maximum) =>
+      async (tool, argument, context, maximum) =>
         executeWeb(
           await this.#local,
+          this.#web,
           await this.#harness,
           () => appliedSettings(this.ctx.storage),
           this.#credentials.scoped,
           this.#serial,
           this.#refusal,
-          this.#toolAttribution(),
           tool,
           argument,
-          task,
           context,
           maximum,
         ),
-    )
-  }
-
-  #toolAttribution(): UsageAttribution {
-    return (
-      this.ctx.storage.kv.get<UsageAttribution>(USAGE_CONTEXT_KEY) ?? {
-        chargedAgentId: this.#agentId(),
-        actorKind: 'system',
-      }
     )
   }
 

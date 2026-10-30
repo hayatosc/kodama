@@ -151,20 +151,8 @@ export const usageDaily = sqliteTable(
     chargedAgentId: text('charged_agent_id').notNull(),
     credentialId: text('credential_id'),
     credentialKind: text('credential_kind', { enum: ['api_key', 'oauth_subscription'] }),
-    kind: text('kind', { enum: ['model', 'tool'] })
-      .notNull()
-      .default('model'),
-    tool: text('tool'),
-    api: text('api'),
-    countKind: text('count_kind'),
-    searchCount: integer('search_count'),
-    resultCount: integer('result_count'),
-    httpCount: integer('http_count'),
-    receivedBytes: integer('received_bytes'),
-    toolInput: integer('tool_input'),
-    toolOutput: integer('tool_output'),
-    provider: text('provider'),
-    model: text('model'),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
     actorKind: text('actor_kind', { enum: ['user', 'agent', 'system'] }).notNull(),
     usageState: text('usage_state', {
       enum: ['reported', 'partial', 'unknown', 'not_applicable'],

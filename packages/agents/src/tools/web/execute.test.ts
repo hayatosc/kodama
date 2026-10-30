@@ -1,4 +1,4 @@
-/** Real tool execution with mocked web/model traffic, durable contact and exact owner permissions. @module */
+/** Real tool execution with mocked web/model traffic, in-memory rate/cooldown state, durable contact and exact owner permissions. @module */
 import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { expect, it, vi } from 'vitest'
@@ -6,14 +6,9 @@ import { newAgentId, updateSettings } from '../../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../../testing/model.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
-import { usageSince } from '../../agent/local-db/usage.ts'
-import { and, eq } from 'drizzle-orm'
-import { usageDaily } from '../../../drizzle/management/schema.ts'
-import { managementDb } from '../../control-plane/db.ts'
 import type { Operation } from '../../memory/store/records.ts'
 import { activeContents } from '../../testing/memory.ts'
-import { ingestUsage } from '../../control-plane/usage.ts'
-import { usage, webPermissions } from '../../../drizzle/durable-object/schema.ts'
+import { webPermissions } from '../../../drizzle/durable-object/schema.ts'
 import { contactBoundary, markContact } from '../../agent/local-db/external-data.ts'
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
@@ -21,7 +16,16 @@ import { withHarness } from '../../testing/harness.ts'
 import { testCredentialStore } from '../../testing/credentials.ts'
 import { defaultAgentSettings } from '../../control-plane/config.ts'
 import { serialQueue } from '../../lib/serial.ts'
-import { executeWeb } from './execute.ts'
+import {
+  checkAdmissionRate,
+  createWebState,
+  executeWeb,
+  finishSearchAttempt,
+  recordAdmission,
+  reserveWeb,
+  searchProviderState,
+  startSearchAttempt,
+} from './execute.ts'
 
 useMockModel()
 
@@ -36,6 +40,7 @@ it('rechecks lifecycle after a held provenance read without consuming permission
   })
   await withHarness({}, async (harness, state) => {
     const local = await openLocalDb(state.storage)
+    const webState = createWebState()
     markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
     const root = await harness.root(BACKGROUND_CONTEXT)
     const submission = await root.submit(
@@ -66,15 +71,14 @@ it('rechecks lifecycle after a held provenance read without consuming permission
     let refusal: string | undefined
     const operation = executeWeb(
       local,
+      webState,
       harness,
       async () => defaultAgentSettings(env),
       () => credentials,
       serialQueue(),
       () => refusal,
-      { chargedAgentId: 'held-agent', actorKind: 'user' },
       'web_fetch',
       'https://example.org/',
-      'held-task',
       BACKGROUND_CONTEXT,
     )
     await reached.promise
@@ -84,7 +88,7 @@ it('rechecks lifecycle after a held provenance read without consuming permission
       expect(await operation).toContain('agent_restricted')
       expect(fetch).toHaveBeenCalledOnce() // only the harness model request
       expect(local.select().from(webPermissions).all()).toMatchObject([{ consumedAt: null }])
-      expect(usageSince(local, 0, 10).rows).toMatchObject([{ status: 'blocked', httpCount: 0 }])
+      expect(webState.inFlight).toBe(0)
     } finally {
       spy.mockRestore()
       releaseModel.resolve()
@@ -164,21 +168,10 @@ it('searches with scoped native auth, permits source fetch once and blocks remem
   expect(searches).toBe(1)
   expect(pages).toBe(1)
   const stub = env.AGENTS.getByName(id)
-  const rows = await runInDurableObject(stub, async (_, state) => {
+  await runInDurableObject(stub, async (_, state) => {
     const local = await openLocalDb(state.storage)
     expect(contactBoundary(local, String(ROOT_CONVERSATION_ID))).toBeTypeOf('number')
-    return usageSince(local, 0, 20).rows.filter((row) => row.kind === 'tool')
   })
-  expect(rows.map((row) => row.status)).toEqual(['succeeded', 'succeeded', 'blocked'])
-  expect(rows[0]).toMatchObject({
-    provider: 'openai',
-    credentialKind: 'api_key',
-    searchCount: 1,
-    input: 4,
-    output: 2,
-    totalCost: null,
-  })
-  expect(rows[0]?.credentialId).toBeTypeOf('string')
   await evictDurableObject(stub)
   let next = 0
   vi.mocked(fetch).mockImplementation(async (_input, init) => {
@@ -230,14 +223,17 @@ it('adopts exact owner URL permission in the current run and consumes it only on
   expect(generation).toBe(3)
 })
 
-it('records policy denial once without web traffic, retaining explicit OFF after reopening', async () => {
+it('blocks policy denial without web traffic and retains explicit OFF after reopening', async () => {
   const id = await newAgentId()
   await updateSettings(id, { toolPolicy: { web_fetch: 'deny' } })
   vi.mocked(fetch)
     .mockImplementationOnce(async () =>
       toolCallResponse({ name: 'web_fetch', arguments: { url: 'https://example.org/' } }),
     )
-    .mockImplementation(async () => textResponse('Denied'))
+    .mockImplementation(async (_input, init) => {
+      expect(requestBody(init)).toContain('denied')
+      return textResponse('Denied')
+    })
   const accepted = await exports.default.sendMessage(id, {
     requestId: 'deny',
     content: 'Read page',
@@ -245,13 +241,6 @@ it('records policy denial once without web traffic, retaining explicit OFF after
   accepted[Symbol.dispose]()
   await waitForAnswer(id, 'deny')
   expect(fetch).toHaveBeenCalledTimes(2)
-  await runInDurableObject(env.AGENTS.getByName(id), async (_, state) => {
-    const rows = usageSince(await openLocalDb(state.storage), 0, 20).rows.filter(
-      (row) => row.kind === 'tool',
-    )
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ status: 'blocked', httpCount: 0, credentialId: null })
-  })
   await updateSettings(id, { tools: [] })
   await evictDurableObject(env.AGENTS.getByName(id))
   const config = await env.AGENTS.getByName(id).getConfig()
@@ -381,57 +370,29 @@ it.each(['write-first', 'contact-first'] as const)(
 )
 
 it.each([
-  ['exhausted', 4, 8],
-  ['http500', 1, 2],
-  ['malformed', 1, 2],
-  ['cooling', 0, 0],
-  ['network', 1, null],
-  ['oversized', 1, 262_145],
+  ['exhausted', 4, 'search_rate_limited'],
+  ['http500', 1, 'provider_failed'],
+  ['malformed', 1, 'provider_response_invalid'],
+  ['network', 1, 'web_failed'],
+  ['oversized', 1, 'response_too_large'],
 ] as const)(
-  'persists and ingests known keyless measurements on %s failure',
-  async (mode, count, bytes) => {
+  'records keyless failure in Pi transcript and rotates only on 429: %s',
+  async (mode, count, expectedError) => {
     const id = await newAgentId()
     await updateSettings(id, { webSearchRoute: 'keyless' })
-    const stub = env.AGENTS.getByName(id)
-    if (mode === 'cooling')
-      await runInDurableObject(stub, async (_instance, state) => {
-        const local = await openLocalDb(state.storage)
-        local
-          .insert(usage)
-          .values({
-            kind: 'tool',
-            task: 'cooldown-seed',
-            tool: 'web_search',
-            keyless: true,
-            chargedAgentId: `${id}-seed`,
-            actorKind: 'user',
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-            status: 'failed',
-            searchAttempts: ['exa', 'firecrawl', 'parallel', 'tavily'].map((provider) => ({
-              provider,
-              startedAt: Date.now(),
-              finishedAt: Date.now(),
-              status: 429,
-              cooldown: Date.now() + 60_000,
-              consecutive429: 1,
-              reason: 'rate_limited',
-              bytes: 0,
-            })),
-          })
-          .run()
-      })
     let generation = 0
     let sends = 0
-    vi.mocked(fetch).mockImplementation(async (input) => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
       if (
         (input instanceof Request ? input.url : input.toString()).startsWith(
           'https://api.openai.com/',
         )
       ) {
-        return generation++ === 0
-          ? toolCallResponse({ name: 'web_search', arguments: { query: 'question' } })
-          : textResponse('Failed safely')
+        if (generation++ === 0) {
+          return toolCallResponse({ name: 'web_search', arguments: { query: 'question' } })
+        }
+        expect(requestBody(init)).toContain(expectedError)
+        return textResponse('Failed safely')
       }
       sends++
       if (mode === 'network') throw new Error('network failure')
@@ -442,51 +403,69 @@ it.each([
     await exports.default.sendMessage(id, { requestId: 'keyless-failure', content: 'Search' })
     await waitForAnswer(id, 'keyless-failure')
     expect(sends).toBe(count)
-    const page = await stub.usageSince(0, 20)
-    const row = page.rows.find((row) => row.kind === 'tool' && row.chargedAgentId === id)
-    expect(row).toMatchObject({
-      status: 'failed',
-      searchCount: count,
-      countKind: 'provider_requests',
-      httpCount: count,
-      receivedBytes: bytes,
-    })
-    const db = managementDb(env.MANAGEMENT_DB)
-    await ingestUsage(db, id, 0, page, Date.now())
-    await ingestUsage(db, id, 0, page, Date.now())
-    const aggregate = await db
-      .select()
-      .from(usageDaily)
-      .where(and(eq(usageDaily.chargedAgentId, id), eq(usageDaily.kind, 'tool')))
-    expect(aggregate).toMatchObject([
-      {
-        attempts: 1,
-        searchCount: count,
-        countKind: 'provider_requests',
-        httpCount: count,
-        receivedBytes: bytes,
-      },
-    ])
   },
 )
 
-it('includes scoped auth in cancellation, persists identity before key access and makes no request', async () => {
+it('enforces in-memory concurrency, rolling rate limits and keyless provider cooldowns', () => {
+  const state = createWebState()
+  const now = 100_000
+  const releaseKeyless = reserveWeb(state, true)
+  expect(() => reserveWeb(state, true)).toThrow('busy')
+  const releaseNative = reserveWeb(state, false)
+  expect(() => reserveWeb(state, false)).toThrow('busy')
+  releaseNative()
+  releaseKeyless()
+  expect(state.inFlight).toBe(0)
+  expect(state.keylessInFlight).toBe(0)
+
+  for (let i = 0; i < 10; i++) {
+    checkAdmissionRate(state, 'web_search', now)
+    recordAdmission(state, 'web_search', now)
+  }
+  expect(() => checkAdmissionRate(state, 'web_search', now)).toThrow('rate_limited')
+  expect(() => checkAdmissionRate(state, 'web_search', now + 60_001)).not.toThrow()
+
+  for (let i = 0; i < 10; i++) startSearchAttempt(state, now)
+  expect(() => startSearchAttempt(state, now)).toThrow('rate_limited')
+  expect(() => startSearchAttempt(state, now + 60_001)).not.toThrow()
+
+  finishSearchAttempt(
+    state,
+    {
+      provider: 'exa',
+      startedAt: now,
+      finishedAt: now,
+      status: 429,
+      reason: 'rate_limited',
+      cooldown: now + 86_400_000,
+      bytes: 3,
+    },
+    { blockedUntil: now + 86_400_000, consecutive429: 1 },
+  )
+  expect(searchProviderState(state, 'exa')).toEqual({
+    blockedUntil: now + 86_400_000,
+    consecutive429: 1,
+  })
+})
+
+it('includes scoped auth in cancellation and makes no request after deadline', async () => {
   const id = await newAgentId()
   const store = await testCredentialStore(id)
   const controller = new AbortController()
   const settings = defaultAgentSettings(env)
   await withHarness({}, async (harness, state) => {
     const local = await openLocalDb(state.storage)
+    const webState = createWebState()
     await harness.root(BACKGROUND_CONTEXT)
     const result = await executeWeb(
       local,
+      webState,
       harness,
       async () => settings,
       (observe) => ({
         ...store,
         async read(_provider, options) {
           observe({ credentialId: 'fixture-selected-before-secret', kind: 'api_key' })
-          expect(usageSince(local, 0, 20).rows).toEqual([])
           expect(options?.signal).toBeInstanceOf(AbortSignal)
           controller.abort(new DOMException('fixture deadline', 'TimeoutError'))
           options?.signal?.throwIfAborted()
@@ -495,22 +474,12 @@ it('includes scoped auth in cancellation, persists identity before key access an
       }),
       serialQueue(),
       () => undefined,
-      { chargedAgentId: id, actorKind: 'user' },
       'web_search',
       'question',
-      'auth-timeout',
       withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
     )
     expect(JSON.parse(result)).toEqual({ error: 'timeout' })
-    const rows = usageSince(local, 0, 20).rows
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
-      credentialId: 'fixture-selected-before-secret',
-      credentialKind: 'api_key',
-      httpCount: 0,
-      status: 'aborted',
-      admittedAt: null,
-    })
+    expect(webState.inFlight).toBe(0)
     expect(contactBoundary(local, String(ROOT_CONVERSATION_ID))).toBeUndefined()
     expect(fetch).not.toHaveBeenCalled()
   })

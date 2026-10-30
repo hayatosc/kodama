@@ -7,19 +7,7 @@
  */
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
-/** Ordered actual sends owned by one logical tool invocation, including interrupted observations. */
-export interface StoredSearchAttempt {
-  provider: string
-  startedAt: number
-  finishedAt: number | null
-  status: number | null
-  reason: string | null
-  cooldown: number | null
-  consecutive429: number | null
-  bytes: number | null
-}
-
-/** One model or logical tool invocation; IDs are never reused after retention deletes. */
+/** One outer Pi model invocation; IDs are never reused after retention deletes. */
 export const usage = sqliteTable('kodama_usage', {
   seq: integer('seq').primaryKey({ autoIncrement: true }),
   startedAt: integer('started_at').notNull(),
@@ -29,34 +17,11 @@ export const usage = sqliteTable('kodama_usage', {
   jobId: text('job_id'),
   credentialId: text('credential_id'),
   credentialKind: text('credential_kind', { enum: ['api_key', 'oauth_subscription'] }),
-  kind: text('kind', { enum: ['model', 'tool'] })
-    .notNull()
-    .default('model'),
-  tool: text('tool', { enum: ['web_search', 'web_fetch'] }),
-  root: text('root'),
-  run: text('run'),
-  task: text('task').unique(),
-  api: text('api'),
-  argument: text('argument'),
-  admittedAt: integer('admitted_at'),
-  keyless: integer('keyless', { mode: 'boolean' }).notNull().default(false),
-  searchCount: integer('search_count'),
-  countKind: text('count_kind'),
-  resultCount: integer('result_count'),
-  httpCount: integer('http_count'),
-  receivedBytes: integer('received_bytes'),
-  auditJson: text('audit_json'),
-  searchAttempts: text('search_attempts', { mode: 'json' })
-    .$type<StoredSearchAttempt[]>()
-    .notNull()
-    .default([]),
-  /** Private Parallel coordination metadata, excluded from terminal audit. */
-  searchSessionId: text('search_session_id'),
-  provider: text('provider'),
-  model: text('model'),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
   responseModel: text('response_model'),
   status: text('status', {
-    enum: ['in_flight', 'succeeded', 'failed', 'aborted', 'interrupted', 'blocked'],
+    enum: ['in_flight', 'succeeded', 'failed', 'aborted', 'interrupted'],
   })
     .notNull()
     .default('in_flight'),

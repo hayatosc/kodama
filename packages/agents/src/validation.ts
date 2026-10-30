@@ -63,8 +63,6 @@ const UsageDaySchema = v.pipe(
 /** Day-aligned bounded usage reads; cursors are opaque group keys. */
 export const UsageQuerySchema = v.pipe(
   v.object({
-    kind: v.optional(v.picklist(['model', 'tool'])),
-    tool: v.optional(v.picklist(['web_search', 'web_fetch'])),
     agentId: v.optional(AgentIdSchema),
     from: UsageDaySchema,
     to: UsageDaySchema,

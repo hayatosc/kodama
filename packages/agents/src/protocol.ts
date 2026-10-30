@@ -59,8 +59,6 @@ export interface AgentSettings extends AgentConfig {
 
 /** A bounded day-aligned usage read, charged to the optional agent UUID. */
 export interface UsageQuery {
-  kind?: 'model' | 'tool'
-  tool?: 'web_search' | 'web_fetch'
   agentId?: string
   from: string
   to: string

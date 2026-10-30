@@ -177,8 +177,7 @@ Some consequences:
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
   store functions, never construct Drizzle queries or import agent classes. Agents supply shared
   state and operations; prompt refresh, extraction scheduling, and peer delivery remain outside tools.
-  Pure argument normalization in `src/tools/web/url.ts` is also used by RPC validation; storage may
-  import web protocol types with type-only imports, but never tool execution.
+  Pure argument normalization in `src/tools/web/url.ts` is also used by RPC validation.
   `src/tools/index.ts` registers optional general tools; memory tools are wired by the working agent's
   extension or the system agent's configuration, not by settings.
 - `src/memory/` owns job permissions, extraction, shared-write validation, prompt assembly, and
@@ -364,7 +363,7 @@ interface AgentSettings {
 
 A new agent's version 1 holds the defaults of its creation: the model `DEFAULT_MODEL_PROVIDER` and
 `DEFAULT_MODEL_ID` from `cloudflare.config.ts`, the prompt `DEFAULT_SYSTEM_PROMPT` in
-`src/control-plane/config.tsindex.ts`, thinking off, `web_search` and `web_fetch` enabled, `sharedSpaces` `["global"]`, and both memory
+`src/control-plane/config.ts`, thinking off, `web_search` and `web_fetch` enabled, `sharedSpaces` `["global"]`, and both memory
 policies on. Changing the defaults later changes no existing agent.
 
 ### Configuration versions
@@ -440,7 +439,7 @@ revocation, narrower permissions, and pause and delete add their checks to the s
 
 ### Models and credentials
 
-[`src/control-plane/models.tsindex.ts`](../packages/agents/src/control-plane/models.tsindex.ts) registers Pi's built-in providers
+[`src/control-plane/models.ts`](../packages/agents/src/control-plane/models.ts) registers Pi's built-in providers
 and model catalogs. Provider and model IDs come from the installed Pi catalog, so updating Pi
 updates the catalog.
 
@@ -610,20 +609,24 @@ provider/API/base combinations and explicit `webSearchRoute: 'keyless'` select a
 before sending. Native errors never retry, fall back, or change a later call's route. Native API
 keys may incur inference and search charges; there is no budget or billing approval mechanism.
 
-Keyless order is Exa → Firecrawl → Parallel → Tavily, skipping durable cooldowns. Only verified
-HTTP 429 responses rotate. Ordered attempts live on the logical `kodama_usage` tool row, whose
-provider identifies the final answering provider on success. Cooldowns are derived from that
-history, not a separate provider-state ledger; attempts and limits survive eviction. Parallel's
-session is reused privately from its successful usage row. Shared egress means even the first request can be limited. `retryAt` is a best-effort
+Keyless order is Exa → Firecrawl → Parallel → Tavily, skipping in-memory cooldowns. Only verified
+HTTP 429 responses rotate. Concurrency caps, 60-second rolling rate windows, keyless 429 provider
+cooldowns, and Parallel's session reuse are kept in memory per `Agent` Durable Object (`WebState`).
+Tool calls, returned envelopes, and error results are recorded directly by Pi Durable in its own
+`entries` transcript (and archived to R2 on prune), so `kodama_usage`, `usage_daily`, and
+`audit_log` remain model-invocation and management ledgers without duplicate tool rows. Shared
+egress means even the first request can be limited. `retryAt` is a best-effort
 indication, not quota availability or permission to retry. Fixed anonymous protocols remain
 owner-live verification gates, not claims of confirmed service availability.
 
 Fetch accepts `{url, max_chars?}` and returns inert HTML/plain/Markdown text, not a browser.
-Only public HTTP(S), standard ports and no userinfo/IP/internal names are accepted. Up to three
-redirects are checked individually; loops and HTTPS downgrade fail. There is no DNS preflight,
+Lexical URL checks allow only HTTP(S), standard ports and no userinfo/IP/internal names. Up to
+three redirects are checked individually; loops and HTTPS downgrade fail. There is no DNS preflight,
 JS, subresource loading, login, cookies, page-link permission harvesting or arbitrary headers.
-`global_fetch_strictly_public` is required for connection-time public egress. Local URL fixtures
-do not prove resolved-destination/rebinding protection; that remains an owner-only release gate.
+`global_fetch_strictly_public` controls same-zone routing to the public front door rather than
+the zone origin; it does not enforce connection-time public egress. The code-level URL guards
+are lexical only. Resolved-destination and DNS-rebinding safety remain an owner-only live
+verification release gate, not protections proven by the flag or local URL fixtures.
 
 Each call has a cancellable 15-second deadline beginning before scoped vault auth. Per object,
 at most two calls (one keyless) run concurrently; rolling 60-second limits are 10 search
@@ -742,10 +745,13 @@ Each object's SQLite holds two sets of tables:
   [`src/agent/local-db/pi-tables.ts`](../packages/agents/src/agent/local-db/pi-tables.ts), which must be checked
   on every Pi upgrade.
 - **Kodama's tables**, prefixed `kodama_`, defined in
-  [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): the
-  memory agent's job queue, the `remember` count per turn, the always-loaded memory copy, and
-  pruning runs. Their migrations are generated into `drizzle/durable-object/migrations` and
-  applied by `src/agent/local-db/local.ts` before the harness opens.
+  [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): model
+  invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
+  `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
+  (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), permanent external contact
+  (`kodama_external_data`), and one-shot web permissions (`kodama_web_permissions`). Their
+  migrations are generated into `drizzle/durable-object/migrations` and applied by
+  `src/agent/local-db/local.ts` before the harness opens.
 
 Small values use the object's key-value storage under `kodama:` keys: alarm times, prune limits,
 shared spaces, the applied configuration (`kodama:config-version`, `kodama:applied-settings`,
@@ -753,14 +759,12 @@ shared spaces, the applied configuration (`kodama:config-version`, `kodama:appli
 
 ## Development
 
-Issue #26's web-tool migrations are undeployed. Their feature migrations are regenerated from
-base migrations 0000–0002 for fresh databases; existing development state is disposable. Start
-with fresh local state for both Durable Objects and management D1 together, rather than carrying
-an old usage sequence or ingestion cursor into the regenerated schema. Data transfer, populated
-or pruned legacy upgrades, and old-version compatibility are out of scope by the owner's decision,
-not validated preservation paths. Do not use this replacement strategy on deployed databases.
-Current-runtime persistence, permanent external contact, cooldown retention, atomic permissions,
-and interruption recovery remain required.
+Issue #26's local SQLite migration (`0003`) adds only `kodama_external_data` and
+`kodama_web_permissions` for permanent external contact and atomic one-shot permissions; web
+rate limits/cooldowns are held in memory and tool execution logs rely on Pi Durable's own
+`entries` table rather than extending `kodama_usage` or management D1. Existing development state is disposable; start
+with fresh local state when resetting local databases. Current-runtime persistence, permanent external contact,
+atomic permissions, and interruption recovery remain required.
 
 Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 
@@ -914,8 +918,8 @@ this allowance to new errors or timeouts; keep rejection assertions and the obje
 | `src/agent/agent.test.ts`                    | the Agent RPC and input validation                            |
 | `src/agent/runtime/events.test.ts`           | `send` and `subscribe` streams                                |
 | `src/agent/runtime/alarms.test.ts`           | alarm purposes; failures, cancellation, and recovery          |
-| `src/control-plane/config.tsindex.test.ts`   | the settings schema, and versions applied across eviction     |
-| `src/control-plane/models.tsindex.test.ts`   | provider credentials                                          |
+| `src/control-plane/config.test.ts`           | the settings schema, and versions applied across eviction     |
+| `src/control-plane/models.test.ts`           | provider credentials                                          |
 | `cli/*.test.ts`                              | the CLI's commands, token, stream output, and adapter Worker  |
 | `drizzle/*/schema.test.ts`                   | each schema matches its generated migrations                  |
 

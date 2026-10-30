@@ -12,7 +12,7 @@ import journal from '../../../drizzle/durable-object/migrations/meta/_journal.js
 import m0000 from '../../../drizzle/durable-object/migrations/0000_curly_mandroid.sql?raw'
 import m0001 from '../../../drizzle/durable-object/migrations/0001_omniscient_agent_brand.sql?raw'
 import m0002 from '../../../drizzle/durable-object/migrations/0002_lovely_carnage.sql?raw'
-import m0003 from '../../../drizzle/durable-object/migrations/0003_complex_titanium_man.sql?raw'
+import m0003 from '../../../drizzle/durable-object/migrations/0003_bizarre_black_bird.sql?raw'
 import * as schema from '../../../drizzle/durable-object/schema.ts'
 
 /** Drizzle handle of one object's local tables. */

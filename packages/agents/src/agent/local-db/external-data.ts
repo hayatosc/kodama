@@ -1,6 +1,6 @@
-/** Permanent root contact and atomic one-shot web admission. @module */
-import { and, eq, gte, inArray, isNull, isNotNull, ne, or } from 'drizzle-orm'
-import { externalData, usage, webPermissions } from '../../../drizzle/durable-object/schema.ts'
+/** Permanent root contact and atomic one-shot web permission consumption. @module */
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
+import { externalData, webPermissions } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
 
 /** The first contact wins, including across eviction and failed requests. */
@@ -73,42 +73,20 @@ export function grantSources(
   }
 }
 
-/** Consume permission, count admission, and establish contact in one SQLite transaction. */
+/** Consume permission and establish contact in one SQLite transaction. */
 export function admitWeb(
   local: LocalDb,
   request: {
-    seq: number
     root: string
     run: string
     inputs: number[]
     tool: 'web_search' | 'web_fetch'
     argument: string
-    keyless: boolean
     eligibleThrough: number
   },
   now = Date.now(),
 ): string | null {
   return local.transaction((tx) => {
-    const active = tx
-      .select()
-      .from(usage)
-      .where(
-        and(
-          eq(usage.kind, 'tool'),
-          eq(usage.status, 'in_flight'),
-          or(isNotNull(usage.api), isNotNull(usage.admittedAt)),
-          ne(usage.seq, request.seq),
-        ),
-      )
-      .all()
-    if (active.length >= 2 || (request.keyless && active.some((row) => row.keyless)))
-      throw new Error('busy')
-    const recent = tx
-      .select()
-      .from(usage)
-      .where(and(eq(usage.tool, request.tool), gte(usage.admittedAt, now - 60_000)))
-      .all()
-    if (recent.length >= (request.tool === 'web_search' ? 10 : 30)) throw new Error('rate_limited')
     const permission = tx
       .select()
       .from(webPermissions)
@@ -133,37 +111,6 @@ export function admitWeb(
         .where(eq(webPermissions.key, permission.key))
         .run()
     markContact(tx, request.root, request.tool, request.eligibleThrough)
-    tx.update(usage)
-      .set({
-        admittedAt: now,
-        keyless: request.keyless,
-        root: request.root,
-        run: request.run,
-        argument: request.argument,
-      })
-      .where(eq(usage.seq, request.seq))
-      .run()
     return permission?.key ?? null
-  })
-}
-
-/** Reserve capacity during scoped auth as well as transport; no contact or permission is consumed. */
-export function reserveWeb(local: LocalDb, seq: number, keyless: boolean, api: string): void {
-  local.transaction((tx) => {
-    const active = tx
-      .select()
-      .from(usage)
-      .where(
-        and(
-          eq(usage.kind, 'tool'),
-          eq(usage.status, 'in_flight'),
-          or(isNotNull(usage.api), isNotNull(usage.admittedAt)),
-          ne(usage.seq, seq),
-        ),
-      )
-      .all()
-    if (active.length >= 2 || (keyless && active.some((row) => row.keyless)))
-      throw new Error('busy')
-    tx.update(usage).set({ keyless, api }).where(eq(usage.seq, seq)).run()
   })
 }

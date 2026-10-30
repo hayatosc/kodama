@@ -181,7 +181,7 @@ assignment for `openai`, `xai`, `anthropic`, `deepseek`, or `google`. API keys r
 OpenAI subscription retains `oauth_subscription`. Other native subscription kinds are rejected,
 not switched to another billing route. There is no search credential kind or ambient fallback.
 
-An invocation-scoped D1 observer records credential UUID/kind in the existing usage row before
+An invocation-scoped D1 observer validates the selected credential kind before
 releasing plaintext. `Models.getAuth(model, {signal})` receives the tool's 15-second deadline,
 including lease wait and refresh; restriction/cancellation checks run again before sending.
 Native requests use fixed official endpoints, never Codex, proxies or identity impersonation.

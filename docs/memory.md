@@ -695,7 +695,7 @@ daily consolidation in code, logged in `memory_ledger`.
 - Agents read the shared spaces listed in their `sharedSpaces` configuration: at most eight unique
   names of lowercase letters, digits, and hyphens. They are stored under `kodama:shared-spaces`
   beside the configuration Pi keeps
-  ([`control-plane/config.ts`](../packages/agents/src/control-plane/config.tsindex.ts)).
+  ([`control-plane/config.ts`](../packages/agents/src/control-plane/config.ts)).
 - An agent record overrides a shared record through `memory_write`'s `overrides`.
 - Content from untrusted sources is stored as an `event` with its source. One agent's
   conversation alone never reaches a shared space.

@@ -24,13 +24,13 @@ export function createWebFetchTool(call?: WebCall) {
       max_chars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 20000 })),
     }),
     replay: 'unsafe',
-    execute: async ({ url, max_chars }, api, context) => {
+    execute: async ({ url, max_chars }, _api, context) => {
       if (!call) throw new Error('web_unavailable')
       return {
         output: [
           {
             type: 'text',
-            text: await call('web_fetch', url, String(api.taskId), context, max_chars),
+            text: await call('web_fetch', url, context, max_chars),
           },
         ],
       }
@@ -38,7 +38,11 @@ export function createWebFetchTool(call?: WebCall) {
   })
 }
 
-/** Fetch inert text with caller-owned cancellation; connection-time public egress is mandatory. */
+/**
+ * Fetch inert text with caller-owned cancellation and lexical URL guards only.
+ * `global_fetch_strictly_public` controls same-zone routing, not connection-time public egress.
+ * Resolved-destination and DNS-rebinding safety remain an owner-only live verification release gate.
+ */
 export async function fetchPage(
   input: string,
   maximum = 12_000,

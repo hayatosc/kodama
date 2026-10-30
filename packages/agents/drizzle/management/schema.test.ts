@@ -5,62 +5,6 @@ import { expect, it } from 'vitest'
 import { managementDb } from '../../src/control-plane/db.ts'
 import * as schema from './schema.ts'
 
-it('stores fresh model defaults and nullable tool aggregate providers', async () => {
-  const db = managementDb(env.MANAGEMENT_DB)
-  const aggregate = {
-    bucket: 'existing',
-    day: '2026-10-26',
-    chargedAgentId: 'agent',
-    provider: 'openai',
-    model: 'model',
-    actorKind: 'user' as const,
-    usageState: 'reported' as const,
-    attempts: 2,
-    failed: 0,
-    rateLimited: 0,
-    input: 8,
-    output: 4,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 12,
-    reasoning: 0,
-    cacheWrite1h: 0,
-    reasoningReported: 0,
-    cacheWrite1hReported: 0,
-    costUsd: 0.5,
-  }
-  await db.insert(schema.usageDaily).values(aggregate)
-  expect(await db.select().from(schema.usageDaily)).toMatchObject([
-    {
-      bucket: 'existing',
-      kind: 'model',
-      tool: null,
-      provider: 'openai',
-      model: 'model',
-      attempts: 2,
-      input: 8,
-      output: 4,
-      totalTokens: 12,
-      costUsd: 0.5,
-      api: null,
-      countKind: null,
-      searchCount: null,
-      receivedBytes: null,
-    },
-  ])
-  const tool = await db
-    .insert(schema.usageDaily)
-    .values({
-      ...aggregate,
-      bucket: 'tool',
-      kind: 'tool',
-      provider: null,
-      model: null,
-    })
-    .returning()
-  expect(tool).toMatchObject([{ kind: 'tool', provider: null, model: null }])
-})
-
 const tables = Object.values(schema).filter((value) => value instanceof SQLiteTable)
 
 it('rejects credential references labeled as a different provider', async () => {
