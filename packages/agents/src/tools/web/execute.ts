@@ -91,10 +91,14 @@ export function searchProviderState(
   return state.providers.get(provider)
 }
 
-/** Enforce the 60-second rolling keyless attempt limit before sending. */
-export function startSearchAttempt(state: WebState, now = Date.now()): void {
+function checkSearchAttemptRate(state: WebState, now: number): void {
   pruneWindow(state.keylessAttempts, now - 60_000)
   if (state.keylessAttempts.length >= 10) throw new Error('rate_limited')
+}
+
+/** Enforce the 60-second rolling keyless attempt limit before sending. */
+export function startSearchAttempt(state: WebState, now = Date.now()): void {
+  checkSearchAttemptRate(state, now)
   state.keylessAttempts.push(now)
 }
 
@@ -207,10 +211,14 @@ export async function executeWeb(
       requireWebEnabled(await settings(), tool, refusal())
       releaseSlot = reserveWeb(webState, tool === 'web_search' && !route)
     })
-    const admit = async () =>
+    const admit = async (attemptSignal?: AbortSignal) =>
       serial(async () => {
         signal.throwIfAborted()
         requireWebEnabled(await settings(), tool, refusal())
+        attemptSignal?.throwIfAborted()
+        // Keep the attempt check and reservation in the permission-consumption section.
+        // A local send-limit refusal must not spend unused owner authorization.
+        if (attemptSignal) checkSearchAttemptRate(webState, Date.now())
         if (!admitted) {
           const live = await harness.snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
           const inputs = await currentRunInputs(harness, context)
@@ -239,6 +247,7 @@ export async function executeWeb(
           const eligibleThrough = (await latestEntryId(harness)) ?? 0
           const currentSettings = await settings()
           signal.throwIfAborted()
+          attemptSignal?.throwIfAborted()
           requireWebEnabled(currentSettings, tool, refusal())
           const now = Date.now()
           checkAdmissionRate(webState, tool, now)
@@ -259,6 +268,10 @@ export async function executeWeb(
           admitted = true
         }
         signal.throwIfAborted()
+        if (attemptSignal) {
+          attemptSignal.throwIfAborted()
+          startSearchAttempt(webState)
+        }
       })
     if (tool === 'web_fetch') {
       const result = await fetchPage(normalized, maximum, signal, async () => {
@@ -278,15 +291,7 @@ export async function executeWeb(
             normalized,
             signal,
             (provider) => searchProviderState(webState, provider),
-            async (_provider, attemptSignal) => {
-              await admit()
-              await serial(async () => {
-                const currentSettings = await settings()
-                attemptSignal.throwIfAborted()
-                requireWebEnabled(currentSettings, tool, refusal())
-                startSearchAttempt(webState)
-              })
-            },
+            async (_provider, attemptSignal) => admit(attemptSignal),
             (attempt, next) => finishSearchAttempt(webState, attempt, next),
             webState.sessionId,
           )
