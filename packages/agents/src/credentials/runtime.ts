@@ -1,8 +1,8 @@
 /** Agent-local credential resolution through the live management database. @module */
 import type { AgentEnv } from '../env.ts'
 import type { AgentSettings } from '../protocol.ts'
-import { managementDb } from '../management/db.ts'
-import { agentRowByObjectName } from '../management/registry.ts'
+import { managementDb } from '../control-plane/db.ts'
+import { agentRowByObjectName } from '../control-plane/registry.ts'
 import { createCredentialStore } from './store.ts'
 
 /** Working and dedicated agents resolve the registry ID through the same store. */

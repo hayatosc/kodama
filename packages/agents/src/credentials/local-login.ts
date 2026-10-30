@@ -1,7 +1,7 @@
 /** Node-only credential intake; never imported by the Worker or persisted to auth.json. @module */
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai'
 import type { AuthInteraction } from '@earendil-works/pi-ai'
-import { createAgentModels } from '../models/index.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 
 /** Prepare write-only API-key registration without embedding key values in failures. */
 export function apiKeyRegistration(provider: string, requestId: string, input: string): string {

@@ -7,14 +7,14 @@ import { env } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { searchHistory } from './history.ts'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
-import { mockModel, say } from '../../helper/conversation.ts'
-import type { ToolCall } from '../../helper/model.ts'
+import { mockModel, say } from '../../testing/conversation.ts'
+import type { ToolCall } from '../../testing/model.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
-import { toolCallResponse } from '../../helper/model.ts'
-import { db } from '../../helper/memory.ts'
+import { toolCallResponse } from '../../testing/model.ts'
+import { db } from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../helper/management.ts'
+import { newAgentId } from '../../testing/management.ts'
 
 afterEach(() => vi.restoreAllMocks())
 

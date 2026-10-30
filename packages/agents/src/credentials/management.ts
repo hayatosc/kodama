@@ -13,9 +13,9 @@ import {
   agentCredentialRefs,
 } from '../../drizzle/management/schema.ts'
 import type { AgentEnv } from '../env.ts'
-import type { ManagementCall } from '../management/service/agents.ts'
-import { auditByOpId, auditStatement } from '../management/audit.ts'
-import { installationId } from '../management/installation.ts'
+import type { ManagementCall } from '../control-plane/workflows/agents.ts'
+import { auditByOpId, auditStatement } from '../control-plane/audit.ts'
+import { installationId } from '../control-plane/installation.ts'
 import { uuidv7, UUID_PATTERN } from '../lib/uuid.ts'
 import { isConstraintError } from '../lib/errors.ts'
 import { credentialFingerprint } from './encryption.ts'

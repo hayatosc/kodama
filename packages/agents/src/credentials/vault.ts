@@ -7,7 +7,7 @@
 import type { Credential } from '@earendil-works/pi-ai'
 import * as v from 'valibot'
 import { credentials } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../management/db.ts'
+import type { ManagementDb } from '../control-plane/db.ts'
 import { credentialFingerprint, encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
 

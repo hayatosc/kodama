@@ -25,6 +25,7 @@ export interface AgentConfig {
   model: { provider: string; modelId: string }
   systemPrompt: string
   thinkingLevel: ModelThinkingLevel
+  webSearchRoute?: 'auto' | 'keyless'
   tools: string[]
   /** Shared memory spaces the agent reads, earliest first; defaults to `["global"]`. */
   sharedSpaces: string[]
@@ -171,7 +172,14 @@ export interface SeedResult {
 }
 
 /** Reuse requestId when retrying the same message; a new turn needs a new ID. */
+/** Exact, one-shot permissions issued only by owner-origin input. */
+export interface WebPermissions {
+  queries?: string[]
+  urls?: string[]
+}
+
 export interface SendMessageRequest {
+  webPermissions?: WebPermissions
   requestId: string
   content: string
   /** Defaults to followUp; steer joins the current run at the next tool-round boundary. */

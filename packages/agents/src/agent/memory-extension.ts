@@ -7,7 +7,6 @@
  */
 import { defineExtension, section } from '@earendil-works/pi-durable'
 import type { Extension, Harness } from '@earendil-works/pi-durable'
-import { currentRunInputs } from '../runtime/inputs.ts'
 import type { VisibleSkill } from '../memory/skills.ts'
 import { storedMemoryText, storedSkills } from '../memory/working/always-loaded.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
@@ -16,7 +15,7 @@ import {
   memorySearchTool,
   rememberTool,
   skillReadTool,
-} from '../tools/working-agent/memory.ts'
+} from '../tools/memory/working.ts'
 
 function skillsText(skills: readonly VisibleSkill[]): string | undefined {
   if (skills.length === 0) return undefined
@@ -35,11 +34,7 @@ export function createWorkingMemoryExtension(
     name: 'kodama-memory',
     tools: [
       memorySearchTool(deps),
-      rememberTool(deps, async (context) => {
-        const inputs = await currentRunInputs(await harness(), context)
-        if (!inputs) throw new Error('Remember requires an active execution')
-        return inputs
-      }),
+      rememberTool(deps, harness),
       historySearchTool(deps),
       skillReadTool(deps),
     ],

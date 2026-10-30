@@ -7,10 +7,10 @@ import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import type { Scope } from '../../drizzle/memory/schema.ts'
 import { invalidateOverridesOfRequired } from './store/maintenance.ts'
 import { writeShared } from './shared.ts'
-import { context, db, record, renderedAlwaysLoaded, write } from '../helper/memory.ts'
+import { context, db, record, renderedAlwaysLoaded, write } from '../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId, updateSettings } from '../helper/management.ts'
+import { newAgentId, updateSettings } from '../testing/management.ts'
 
 afterEach(() => vi.restoreAllMocks())
 

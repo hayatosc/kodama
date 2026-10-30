@@ -29,6 +29,8 @@ export const MemoryJobSchema = v.variant('kind', [
     sourceAgentId: AgentIdSchema,
     /** Extract entries after this one. */
     afterEntry: EntryIdSchema,
+    /** Frozen upper bound at enqueue; current source contact can only tighten it. */
+    eligibleThrough: v.optional(EntryIdSchema),
   }),
   v.object({
     kind: v.literal('consolidate'),

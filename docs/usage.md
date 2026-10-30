@@ -73,3 +73,16 @@ are retained indefinitely. There is no audit expiry, operation-receipt table or 
 Subscription usage is an API-equivalent reference amount, separate from pay-as-you-go catalog
 cost; neither implies subscription fees. No budgets, caps, reservations or cost-driven model
 changes exist. Subscription limits never authorize falling back to an API key.
+
+## Tool execution logs
+
+`kodama_usage`, `usage_daily`, and the management `audit_log` record only outer Pi model invocations
+and control-plane management changes; they do not duplicate tool executions.
+
+Tool invocations (`web_search`, `web_fetch`, `contact_agent`, `remember`, and memory read tools),
+including their arguments, returned JSON envelopes, refusal/error codes, and `beforeTool` policy
+blocks, are persisted directly by Pi Durable in its conversation `entries` table and archived to
+R2 when pruned. Web concurrency limits, 60-second rolling rate windows, keyless 429 provider
+cooldowns, and Parallel session reuse live in memory on each `Agent` Durable Object, while
+Durable Object SQLite persists only permanent external contact (`kodama_external_data`) and
+one-shot exact owner permissions (`kodama_web_permissions`).

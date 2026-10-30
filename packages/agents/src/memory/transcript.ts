@@ -10,10 +10,11 @@ import type { EntryRecord, EntryId, Harness } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { readArchivedText } from './archive/reader.ts'
-import { prunedThrough } from '../storage/pruning.ts'
+import { contactBoundary } from '../agent/local-db/external-data.ts'
+import { prunedThrough } from '../agent/local-db/pruning.ts'
 import type { MemoryDb } from './store/db.ts'
 import { nextArchivedSegment } from './store/archive.ts'
-import type { LocalDb } from '../storage/local.ts'
+import type { LocalDb } from '../agent/local-db/local.ts'
 
 /** Characters of tool output kept in text; the archive keeps the full entry. */
 export const TOOL_RESULT_TEXT_LIMIT = 2_000
@@ -50,6 +51,7 @@ function contentText(content: unknown, limit: number | undefined): string {
 
 function roleOf(kind: string): EntryRole {
   switch (kind) {
+    case 'kodama.owner-message':
     case 'pi.user':
       return 'user'
     case 'kodama.agent-message':
@@ -122,7 +124,14 @@ export async function readEntries(
   const first = request.after + 1
   if (!isEntryId(first)) throw new TypeError('after must be an entry ID')
   const pruned = prunedThrough(await sources.local())
-  if (first <= pruned) return readArchived(sources, request.after, limit, pruned)
+  if (first <= pruned) {
+    const page = await readArchived(sources, request.after, limit, pruned)
+    const boundary = contactBoundary(await sources.local(), String(ROOT_CONVERSATION_ID))
+    return {
+      ...page,
+      entries: page.entries.filter((entry) => boundary === undefined || entry.id <= boundary),
+    }
+  }
   const harness = await sources.harness()
   const page = await harness.commit(
     (tx) =>
@@ -132,8 +141,11 @@ export async function readEntries(
       ),
     context,
   )
+  const boundary = contactBoundary(await sources.local(), String(ROOT_CONVERSATION_ID))
   return {
-    entries: page.items.flatMap((entry) => entryText(entry) ?? []),
+    entries: page.items
+      .filter((entry) => boundary === undefined || entry.id <= boundary)
+      .flatMap((entry) => entryText(entry) ?? []),
     through: page.items.at(-1)?.id ?? request.after,
     end: page.next === undefined,
   }

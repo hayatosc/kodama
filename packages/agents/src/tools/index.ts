@@ -5,16 +5,24 @@
  * @module
  */
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { createContactAgentTool } from './contact-agent.ts'
-import type { ContactAgent } from './contact-agent.ts'
+import { createContactAgentTool } from './contact.ts'
+import type { ContactAgent } from './contact.ts'
+import { createWebSearchTool } from './web/search.ts'
+import type { WebCall } from './web/search.ts'
+import { createWebFetchTool } from './web/fetch.ts'
 import { currentTimeTool } from './current-time.ts'
 
 /** Every registered tool. Add a tool here; each agent enables an explicit subset by name. */
 export const agentTools: readonly ToolRegistration[] = createAgentTools()
 
 /** Bind runtime-only delivery while retaining the same opt-in names and schemas. */
-export function createAgentTools(contact?: ContactAgent): ToolRegistration[] {
-  return [currentTimeTool, createContactAgentTool(contact)]
+export function createAgentTools(contact?: ContactAgent, web?: WebCall): ToolRegistration[] {
+  return [
+    currentTimeTool,
+    createContactAgentTool(contact),
+    createWebSearchTool(web),
+    createWebFetchTool(web),
+  ]
 }
 
 const toolsByName = new Map(agentTools.map((tool) => [tool.name, tool]))

@@ -64,34 +64,40 @@ export async function refreshChatGPT(
 ): Promise<OAuthCredential> {
   if (typeof credential.clientId !== 'string' || !credential.clientId.trim())
     throw new Error(REFRESH_REJECTED)
-  const timeout = AbortSignal.timeout(10_000)
+  // A settled refresh must not keep the object alive until an uncancellable timeout fires.
+  const timeout = new AbortController()
+  const timer = setTimeout(() => timeout.abort(), 10_000)
   let response: Response
   let body: unknown
   try {
-    response = await fetch('https://auth.openai.com/api/accounts/oauth/token', {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: credential.clientId,
-        refresh_token: credential.refresh,
-        resource: 'https://api.openai.com/v1',
-      }),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      redirect: 'manual',
-    })
-  } catch {
-    throw new Error('credential_unavailable: OAuth refresh request failed')
-  }
-  try {
-    body = response.ok ? await response.json() : await response.json().catch(() => undefined)
-  } catch (error) {
-    if (error instanceof SyntaxError)
-      throw new Error('credential_unavailable: invalid OAuth refresh response')
-    throw new Error('credential_unavailable: OAuth refresh request failed')
+    try {
+      response = await fetch('https://auth.openai.com/api/accounts/oauth/token', {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: credential.clientId,
+          refresh_token: credential.refresh,
+          resource: 'https://api.openai.com/v1',
+        }),
+        signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
+        redirect: 'manual',
+      })
+    } catch {
+      throw new Error('credential_unavailable: OAuth refresh request failed')
+    }
+    try {
+      body = response.ok ? await response.json() : await response.json().catch(() => undefined)
+    } catch (error) {
+      if (error instanceof SyntaxError)
+        throw new Error('credential_unavailable: invalid OAuth refresh response')
+      throw new Error('credential_unavailable: OAuth refresh request failed')
+    }
+  } finally {
+    clearTimeout(timer)
   }
   if (!response.ok) {
     const parsed = v.safeParse(rejectionSchema, body)

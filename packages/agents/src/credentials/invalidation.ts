@@ -1,7 +1,7 @@
 /** Best-effort DO invalidation after a committed credential restriction. @module */
 import { eq } from 'drizzle-orm'
 import { agentCredentialRefs, agents } from '../../drizzle/management/schema.ts'
-import type { ManagementCall } from '../management/service/agents.ts'
+import type { ManagementCall } from '../control-plane/workflows/agents.ts'
 
 /** Await each notification before acknowledging revocation; live store checks also protect failed pushes. */
 export async function invalidateCredential(call: ManagementCall, credentialId: string) {

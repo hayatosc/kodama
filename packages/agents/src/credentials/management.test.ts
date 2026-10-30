@@ -3,11 +3,11 @@ import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
-import { managementDb } from '../management/db.ts'
-import { principalOf } from '../management/principals.ts'
-import { newAgentId } from '../helper/management.ts'
+import { managementDb } from '../control-plane/db.ts'
+import { principalOf } from '../control-plane/principals.ts'
+import { newAgentId } from '../testing/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { createAgentModels } from '../models/index.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 import {
   credentialCoverage,
   credentialRow,

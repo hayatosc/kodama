@@ -5,6 +5,12 @@
  *
  * @module
  */
+import { createWebState, executeWeb } from '../tools/web/execute.ts'
+import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
+import { latestEntryId } from '../memory/transcript.ts'
+import { applyOperation } from '../memory/store/records.ts'
+import type { Operation } from '../memory/store/records.ts'
+import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -18,8 +24,8 @@ import type {
   TaskId,
 } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import { takeDueAlarms, armRecovery, refreshRecovery } from '../runtime/alarms.ts'
-import type { AlarmPurpose } from '../runtime/alarms.ts'
+import { takeDueAlarms, armRecovery, refreshRecovery } from './runtime/alarms.ts'
+import type { AlarmPurpose } from './runtime/alarms.ts'
 import {
   agentChange,
   defaultAgentConfig,
@@ -27,22 +33,17 @@ import {
   parseSettings,
   readSharedSpaces,
   readConfig,
-} from '../configuration/index.ts'
-import { managementDb } from '../management/db.ts'
+} from '../control-plane/config.ts'
+import { managementDb } from '../control-plane/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
-import { admitAgent, agentRowByObjectName } from '../management/registry.ts'
-import { interruptUsage, usageSince, acknowledgeUsage } from '../storage/usage.ts'
-import type { UsagePage } from '../storage/usage.ts'
-import type { UsageAttribution } from '../storage/usage.ts'
-import { usageModels, USAGE_CONTEXT_KEY } from '../runtime/usage.ts'
-import { reportApplied } from '../management/versions.ts'
-import {
-  applyOrHold,
-  applyPending,
-  appliedSettings,
-  pullIfBehind,
-} from '../runtime/config-apply.ts'
-import type { ApplyDeps, PushedConfig } from '../runtime/config-apply.ts'
+import { admitAgent, agentRowByObjectName } from '../control-plane/registry.ts'
+import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.ts'
+import type { UsagePage } from './local-db/usage.ts'
+import type { UsageAttribution } from './local-db/usage.ts'
+import { usageModels, USAGE_CONTEXT_KEY } from './runtime/usage.ts'
+import { reportApplied } from '../control-plane/versions.ts'
+import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './runtime/config-apply.ts'
+import type { ApplyDeps, PushedConfig } from './runtime/config-apply.ts'
 import {
   anyRefusal,
   assertAllowed,
@@ -50,15 +51,16 @@ import {
   STATUS_KEY,
   statusRefusal,
   toolGuardExtension,
-} from '../runtime/restrictions.ts'
-import type { Refusal } from '../runtime/restrictions.ts'
+} from './runtime/restrictions.ts'
+import type { Refusal } from './runtime/restrictions.ts'
 import { refreshAlwaysLoaded } from '../memory/working/always-loaded.ts'
 import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
-import { sendEvents, subscribeEvents } from '../runtime/events.ts'
-import { exclusiveSection, isIdle, openHarness } from '../runtime/harness.ts'
+import { sendEvents, subscribeEvents } from './runtime/events.ts'
+import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
 import { createAgentOptions } from './config.ts'
-import { contactAgent, contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
+import { contactAgent } from '../tools/contact.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
@@ -66,7 +68,7 @@ import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { JobStatus } from '../memory/jobs.ts'
 import { createWorkingMemoryExtension } from './memory-extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
-import { createAgentModels } from '../models/index.ts'
+import { createAgentModels } from '../control-plane/models.ts'
 import { agentCredentialStore } from '../credentials/runtime.ts'
 import type {
   AgentConfig,
@@ -78,8 +80,8 @@ import type {
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
-import { openLocalDb } from '../storage/local.ts'
-import type { LocalDb } from '../storage/local.ts'
+import { openLocalDb } from './local-db/local.ts'
+import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
   parseInput,
@@ -89,8 +91,8 @@ import {
 } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
-import type { ConfigStore } from '../configuration/index.ts'
-import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from '../runtime/pruning.ts'
+import type { ConfigStore } from '../control-plane/config.ts'
+import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
 import {
   extracts,
   markActivity,
@@ -98,7 +100,7 @@ import {
   runExtraction,
   scheduleExtraction,
 } from './memory.ts'
-import { snapshotOf, submissionOf } from '../runtime/views.ts'
+import { snapshotOf, submissionOf } from './runtime/views.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -134,6 +136,7 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Why the next external call must not happen, checked before each one. */
   readonly #refusal: Refusal
   readonly #credentials: ReturnType<typeof agentCredentialStore>
+  readonly #web = createWebState()
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
@@ -185,7 +188,11 @@ export class Agent extends DurableObject<AgentEnv> {
     )
     return openHarness(this.ctx, { ...options, models }, async (harness) => {
       await harness.root(context)
-      await initializeAgentConfig(harness, this.defaultConfig())
+      await initializeAgentConfig(
+        harness,
+        this.defaultConfig(),
+        await appliedSettings(this.ctx.storage),
+      )
       await this.#catchUp(harness)
       await this.prepare(harness)
       await this.#refreshRecovery(harness)
@@ -272,7 +279,11 @@ export class Agent extends DurableObject<AgentEnv> {
       this.env,
       [
         createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
-        toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
+        toolGuardExtension(
+          this.#refusal,
+          () => appliedSettings(this.ctx.storage),
+          async () => requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID)),
+        ),
       ],
       this.#refusal,
       this.credentialStore(),
@@ -284,6 +295,20 @@ export class Agent extends DurableObject<AgentEnv> {
           message,
           `${this.#agentId()}-${requestId}`,
           context,
+        ),
+      async (tool, argument, context, maximum) =>
+        executeWeb(
+          await this.#local,
+          this.#web,
+          await this.#harness,
+          () => appliedSettings(this.ctx.storage),
+          this.#credentials.scoped,
+          this.#serial,
+          this.#refusal,
+          tool,
+          argument,
+          context,
+          maximum,
         ),
     )
   }
@@ -335,6 +360,12 @@ export class Agent extends DurableObject<AgentEnv> {
   #workingMemory(): WorkingMemoryDeps {
     return {
       env: this.env,
+      trusted: (operation) =>
+        this.#serial(async () => {
+          requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
+          return operation()
+        }),
+      contact: () => this.#serial(async () => this.#contact('history')),
       agentId: () => this.#agentId(),
       local: () => this.#local,
       sharedSpaces: () => this.#sharedSpaces(),
@@ -427,6 +458,7 @@ export class Agent extends DurableObject<AgentEnv> {
         )
         if (existing) return conversation.submit(draft, context)
       }
+      if (actorKind === 'agent') await this.#contact('peer')
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
       if (actorKind) {
@@ -454,6 +486,7 @@ export class Agent extends DurableObject<AgentEnv> {
   async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
+      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       parseAgentId(origin.senderAgentId)
       if (!Number.isInteger(origin.hop) || origin.hop < 1 || origin.hop > MAX_CONTACT_HOPS)
         throw new TypeError('Invalid delegation hop')
@@ -479,7 +512,19 @@ export class Agent extends DurableObject<AgentEnv> {
                 data: { senderAgentId: origin.senderAgentId, hop: origin.hop },
               },
             }
-          : {}),
+          : {
+              entry: {
+                kind: 'kodama.owner-message',
+                data: {
+                  webPermissions: {
+                    ...(message.webPermissions?.queries
+                      ? { queries: message.webPermissions.queries }
+                      : {}),
+                    ...(message.webPermissions?.urls ? { urls: message.webPermissions.urls } : {}),
+                  },
+                },
+              },
+            }),
       },
       origin ? 'agent' : 'user',
     )
@@ -498,7 +543,12 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** The stored configuration. */
   async getConfig(): Promise<AgentConfig> {
-    return readConfig(await this.#config())
+    const config = await readConfig(await this.#config())
+    const applied = await appliedSettings(this.ctx.storage)
+    return {
+      ...config,
+      ...(applied?.webSearchRoute ? { webSearchRoute: applied.webSearchRoute } : {}),
+    }
   }
 
   /** An SSE stream of this agent's events, starting with a snapshot. */
@@ -560,9 +610,47 @@ export class Agent extends DurableObject<AgentEnv> {
     assertAllowed(this.#refusal)
     const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     if (agentId === this.#agentId()) throw new TypeError('Cannot contact this agent itself')
-    const origin = await contactOrigin(await this.#harness, this.#agentId())
+    const origin = await this.#serial(async () => {
+      requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
+      assertAllowed(this.#refusal)
+      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
+      const origin = await contactOrigin(await this.#harness, this.#agentId())
+      await this.#contact('peer')
+      return origin
+    })
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** Capture the last eligible entry before admitting or exposing external data. */
+  async #contact(reason: string): Promise<void> {
+    markContact(
+      await this.#local,
+      String(ROOT_CONVERSATION_ID),
+      reason,
+      (await latestEntryId(await this.#harness)) ?? 0,
+    )
+  }
+
+  /** Source-owned write authorization serializes D1 commit with contact admission. */
+  async applyExtractionOperation(context: OperationContext, operation: Operation) {
+    return this.#serial(async () => {
+      const boundary = contactBoundary(await this.#local, String(ROOT_CONVERSATION_ID))
+      const end =
+        operation.type === 'write' || operation.type === 'supersede'
+          ? operation.record.sourceEntries?.to
+          : operation.type === 'invalidate'
+            ? operation.evidence.sourceEntries?.to
+            : undefined
+      if (
+        boundary !== undefined &&
+        operation.type !== 'checkpoint' &&
+        operation.type !== 'decline' &&
+        (end === undefined || end > boundary)
+      )
+        throw new Error('untrusted_context')
+      return applyOperation(memoryDb(this.env.MEMORY_DB), context, operation)
+    })
   }
 
   /** Internal accounting export, including inactive and dedicated agents. */

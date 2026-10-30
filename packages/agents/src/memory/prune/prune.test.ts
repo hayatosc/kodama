@@ -3,19 +3,21 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'c
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STORAGE_MAINTENANCE_ERROR } from '../../runtime/pruning.ts'
+import { STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
 import { searchHistory } from '../archive/history.ts'
 import { applyOperation } from '../store/records.ts'
 import type { NewRecord } from '../store/records.ts'
-import type { ToolCall } from '../../helper/model.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../../helper/model.ts'
+import type { ToolCall } from '../../testing/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
 import { PRUNE_LIMITS_KEY } from './runs.ts'
-import { prunedThrough } from '../../storage/pruning.ts'
+import { prunedThrough } from '../../agent/local-db/pruning.ts'
 import { memoryDb } from '../store/db.ts'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
-import { openLocalDb } from '../../storage/local.ts'
+import { openLocalDb } from '../../agent/local-db/local.ts'
+import { markContact } from '../../agent/local-db/external-data.ts'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import {
   BACKGROUND_USAGE,
   COMPACT_AFTER_TURN_7,
@@ -25,10 +27,10 @@ import {
   mockModel,
   say,
   storedEntryIds,
-} from '../../helper/conversation.ts'
+} from '../../testing/conversation.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId, updateSettings } from '../../helper/management.ts'
+import { newAgentId, updateSettings } from '../../testing/management.ts'
 
 const db = memoryDb(env.MEMORY_DB)
 afterEach(() => vi.restoreAllMocks())
@@ -96,6 +98,26 @@ describe('pruning', () => {
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
       'extract',
     ])
+    // Contact while an archive page is in flight excludes its text, not its scan progress.
+    const excluded = await runInDurableObject(stub, async (agent, state) => {
+      const reached = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const get = env.ARCHIVE.get.bind(env.ARCHIVE)
+      const spy = vi.spyOn(env.ARCHIVE, 'get').mockImplementationOnce(async (...args) => {
+        const object = await get(...args)
+        reached.resolve()
+        await release.promise
+        return object
+      })
+      const reading = agent.readEntries({ after: 0, limit: 5 })
+      await reached.promise
+      markContact(await openLocalDb(state.storage), String(ROOT_CONVERSATION_ID), 'peer', 0)
+      release.resolve()
+      return reading.finally(() => spy.mockRestore())
+    })
+    expect(excluded.entries).toEqual([])
+    expect(excluded.through).toBe(page.through)
+    expect(excluded.end).toBe(false)
   })
 
   it('hands pruned entries to extraction only while the memory policy extracts', async () => {

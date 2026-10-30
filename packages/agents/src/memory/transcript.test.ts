@@ -7,10 +7,57 @@ import { env } from 'cloudflare:workers'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { EntryId, EntryRecord } from '@earendil-works/pi-durable'
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai'
-import { describe, expect, it } from 'vitest'
-import { newAgentId } from '../helper/management.ts'
-import { rejectionInObject } from '../helper/rpc.ts'
-import { entryText, TOOL_RESULT_TEXT_LIMIT } from './transcript.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { newAgentId } from '../testing/management.ts'
+import { withHarness } from '../testing/harness.ts'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { openLocalDb } from '../agent/local-db/local.ts'
+import { markContact } from '../agent/local-db/external-data.ts'
+import { memoryDb } from './store/db.ts'
+import { rejectionInObject, useMockModel } from '../testing/rpc.ts'
+import { entryText, readEntries, TOOL_RESULT_TEXT_LIMIT } from './transcript.ts'
+
+useMockModel()
+
+it('rechecks contact after an in-flight live page while retaining its scan progress', async () => {
+  await withHarness({}, async (harness, state) => {
+    const root = await harness.root(BACKGROUND_CONTEXT)
+    const submission = await root.submit(
+      { type: 'input', requestId: 'page', content: 'Trusted before contact', whenBusy: 'followUp' },
+      BACKGROUND_CONTEXT,
+    )
+    await submission.wait(BACKGROUND_CONTEXT)
+    const local = await openLocalDb(state.storage)
+    const sources = {
+      agentId: 'page-agent',
+      harness: async () => harness,
+      local: async () => local,
+      db: memoryDb(env.MEMORY_DB),
+      archive: env.ARCHIVE,
+    }
+    const before = await readEntries(sources, { after: 0, limit: 50 })
+    expect(before.entries.length).toBeGreaterThan(0)
+    const reached = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const commit = harness.commit.bind(harness)
+    const spy = vi.spyOn(harness, 'commit').mockImplementationOnce(async (...args) => {
+      const page = await commit(...args)
+      reached.resolve()
+      await release.promise
+      return page
+    })
+    const reading = readEntries(sources, { after: 0, limit: 50 })
+    await reached.promise
+    markContact(local, String(ROOT_CONVERSATION_ID), 'peer', 0)
+    release.resolve()
+    try {
+      expect(await reading).toEqual({ ...before, entries: [] })
+    } finally {
+      release.resolve()
+      spy.mockRestore()
+    }
+  })
+})
 
 function isEntryId(value: number): value is EntryId {
   return Number.isSafeInteger(value) && value >= 0

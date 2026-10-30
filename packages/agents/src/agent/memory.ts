@@ -8,9 +8,9 @@
  */
 import { safeFailure } from '../lib/errors.ts'
 import type { Harness } from '@earendil-works/pi-durable'
-import { setAlarm, setAlarmNoLaterThan } from '../runtime/alarms.ts'
-import { appliedSettings } from '../runtime/config-apply.ts'
-import { isIdle } from '../runtime/harness.ts'
+import { setAlarm, setAlarmNoLaterThan } from './runtime/alarms.ts'
+import { appliedSettings } from './runtime/config-apply.ts'
+import { isIdle } from './runtime/harness.ts'
 import { extractionCheckpoint, memoryDb } from '../memory/store/db.ts'
 import {
   refreshAlwaysLoaded,
@@ -18,6 +18,8 @@ import {
 } from '../memory/working/always-loaded.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
+import { contactBoundary } from './local-db/external-data.ts'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { latestEntryId } from '../memory/transcript.ts'
 
 /** How long an agent stays idle before its new entries are extracted. */
@@ -93,5 +95,6 @@ async function extractNewEntries(memory: WorkingMemoryDeps, harness: Harness): P
     kind: 'extract',
     sourceAgentId: agentId,
     afterEntry: checkpoint,
+    eligibleThrough: contactBoundary(await memory.local(), String(ROOT_CONVERSATION_ID)),
   })
 }

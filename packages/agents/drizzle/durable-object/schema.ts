@@ -111,3 +111,22 @@ export const pruneRuns = sqliteTable(
   },
   (t) => [index('kodama_prune_runs_by_state').on(t.state)],
 )
+
+/** Permanent first external contact for a root conversation. */
+export const externalData = sqliteTable('kodama_external_data', {
+  root: text('root').primaryKey(),
+  reason: text('reason').notNull(),
+  contactedAt: integer('contacted_at').notNull(),
+  eligibleThrough: integer('eligible_through').notNull(),
+})
+
+/** Exact permissions are consumed once and never transferred between runs. */
+export const webPermissions = sqliteTable('kodama_web_permissions', {
+  key: text('key').primaryKey(),
+  root: text('root').notNull(),
+  run: text('run'),
+  input: integer('input'),
+  tool: text('tool', { enum: ['web_search', 'web_fetch'] }).notNull(),
+  argument: text('argument').notNull(),
+  consumedAt: integer('consumed_at'),
+})

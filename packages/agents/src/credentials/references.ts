@@ -1,7 +1,7 @@
 /** Current-version reverse indexes for credential invalidation. @module */
 import { eq } from 'drizzle-orm'
 import { agentCredentialRefs, credentialGrants } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../management/db.ts'
+import type { ManagementDb } from '../control-plane/db.ts'
 import type { AgentSettings } from '../protocol.ts'
 
 /** Initial grants for an authorized creation; include them in the registry creation batch. */

@@ -1,0 +1,105 @@
+/**
+ * Extraction may only checkpoint and cite entries its job actually read.
+ *
+ * @module
+ */
+import { uuidv7 } from '../../../lib/uuid.ts'
+import { exports } from 'cloudflare:workers'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { newAgentId } from '../../../testing/management.ts'
+import { db, memoryAgent, activeContents, runScriptedJob } from '../../../testing/memory.ts'
+import { waitForAnswer } from '../../../testing/rpc.ts'
+import {
+  isMemoryAgentRequest,
+  requestBody,
+  textResponse,
+  toolCallResponse,
+  toolResults,
+} from '../../../testing/model.ts'
+import { extractionCheckpoint } from '../../../memory/store/db.ts'
+import '@earendil-works/pi-ai/api/openai-responses'
+
+afterEach(() => vi.restoreAllMocks())
+
+describe('extraction read bounds', () => {
+  it.each(['checkpoint', 'citation', 'skip', 'valid'] as const)(
+    'checks %s against the read page',
+    async (mode) => {
+      const agentId = await newAgentId()
+      const responses: string[] = []
+      let through = 0
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+        const body = requestBody(init)
+        if (!isMemoryAgentRequest(body)) return textResponse('Noted.')
+        const step = toolResults(body)
+        if (step === 0)
+          return toolCallResponse({
+            name: 'read_entries',
+            arguments: mode === 'skip' ? { after: 999999 } : {},
+          })
+        responses.push(body)
+        through = Number(/through #(\d+)/.exec(body)?.[1] ?? 0)
+        if (step === 1 && mode !== 'skip')
+          return toolCallResponse(
+            mode === 'citation'
+              ? {
+                  name: 'memory_write',
+                  arguments: {
+                    kind: 'fact',
+                    content: 'Invented evidence',
+                    sourceEntryFrom: through + 100,
+                  },
+                }
+              : {
+                  name: 'finish_extraction',
+                  arguments: { lastEntryId: through + (mode === 'valid' ? 0 : 100) },
+                },
+          )
+        return textResponse('Finished.')
+      })
+      await exports.default.sendMessage(agentId, {
+        requestId: 'source',
+        content: 'Actual evidence',
+      })
+      await waitForAnswer(agentId, 'source')
+      const queued = await memoryAgent().enqueue({
+        kind: 'extract',
+        sourceAgentId: agentId,
+        afterEntry: 0,
+      })
+      await expect
+        .poll(async () => (await memoryAgent().jobStatus(queued.jobId))?.status, {
+          timeout: 10_000,
+        })
+        .toBe('settled')
+      if (mode === 'valid') {
+        expect(through).toBeGreaterThan(0)
+        expect(await extractionCheckpoint(db, agentId)).toBe(through)
+      } else {
+        expect(await extractionCheckpoint(db, agentId)).toBe(0)
+        expect(await activeContents(agentId)).toEqual([])
+        expect(responses.join('\n')).toContain('read range')
+      }
+    },
+  )
+})
+
+describe('job kinds', () => {
+  it('refuses the extraction tools in a job of another kind', async () => {
+    const { outputs } = await runScriptedJob(
+      {
+        kind: 'remember',
+        sourceAgentId: uuidv7(),
+        content: 'Read my history',
+        sourceEntries: { from: 1, to: 1 },
+      },
+      [
+        { name: 'read_entries', arguments: {} },
+        { name: 'finish_extraction', arguments: { lastEntryId: 1 } },
+      ],
+    )
+
+    expect(outputs[0]).toContain('read_entries needs an extract job')
+    expect(outputs[1]).toContain('finish_extraction needs an extract job')
+  })
+})
