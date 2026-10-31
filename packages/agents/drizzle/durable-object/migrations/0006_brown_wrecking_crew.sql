@@ -1,0 +1,1 @@
+ALTER TABLE `kodama_scheduled_occurrences` ADD `admission_started` integer DEFAULT false NOT NULL;

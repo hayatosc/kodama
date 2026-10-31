@@ -17,19 +17,16 @@ export const STORAGE_MAINTENANCE_ERROR =
   'storage_maintenance: the agent is archiving old history; retry later'
 
 /**
- * Archive and delete old entries until the database is under the threshold, or run once with
- * `force`.
+ * Process one bounded pruning slice; schedule remaining work instead of monopolizing an alarm.
+ * With `force`, process exactly one run.
  *
  * @returns The last run's outcome. On `deferred`, the `prune` alarm retries later.
  */
-export async function pruneUntilUnder(deps: PruneDeps, force: boolean): Promise<PruneOutcome> {
-  let outcome = await pruneOnce(deps, { force })
-  while (outcome === 'pruned' && !force) {
-    const next = await pruneOnce(deps)
-    if (next === 'nothing') break
-    outcome = next
-  }
-  const retryAt = outcome === 'deferred' ? Date.now() + PRUNE_RETRY_MS : undefined
+export async function pruneSlice(deps: PruneDeps, force: boolean): Promise<PruneOutcome> {
+  const outcome = await pruneOnce(deps, { force })
+  const remaining =
+    !force && outcome === 'pruned' && (await needsPrune(deps.storage, await deps.local()))
+  const retryAt = outcome === 'deferred' || remaining ? Date.now() + PRUNE_RETRY_MS : undefined
   await setAlarm(deps.storage, 'prune', retryAt)
   return outcome
 }

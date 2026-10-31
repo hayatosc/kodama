@@ -190,9 +190,15 @@ importers:
       '@earendil-works/pi-durable':
         specifier: 1.2.0
         version: 1.2.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(supports-color@10.2.2)(undici@7.29.1)(ws@8.22.0)(zod@4.6.5)
+      cron-parser:
+        specifier: ^5.10.2
+        version: 5.10.2
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3
+      luxon:
+        specifier: ^3.7.2
+        version: 3.7.2
       uuid:
         specifier: ^14.0.3
         version: 14.0.3
@@ -206,6 +212,9 @@ importers:
       '@cloudflare/vitest-plugin':
         specifier: 1.4.1
         version: 1.4.1(@types/node@26.6.5)(vitest@5.0.4)
+      '@types/luxon':
+        specifier: ^3.7.6
+        version: 3.7.6
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -1662,6 +1671,9 @@ packages:
   '@types/jsesc@2.5.1':
     resolution: {integrity: sha512-9VN+6yxLOPLOav+7PwjZbxiID2bVaeq0ED4qSQmdQTdjnXJSaCVKTR58t15oqH1H5t8Ng2ZX1SabJVoN9Q34bw==}
 
+  '@types/luxon@3.7.6':
+    resolution: {integrity: sha512-6KSjliQAXK8ZLgFQO4B7iE4Rpf/B3rItzCFuXezBY/XIAGxOdLd7vRNK9/StRPwiS/yJsVbB7HKpW46B8tcEuQ==}
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
@@ -1883,6 +1895,10 @@ packages:
 
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
+    engines: {node: '>=18'}
+
+  cron-parser@5.10.2:
+    resolution: {integrity: sha512-JfAYMY0LZaWQTuict8PhtF/ksSnq8xefSDmQUnnoqvkPYkU/y3UP0DTWzJKFBz0P1IXsDG8q0vY3zHkoFZOhvw==}
     engines: {node: '>=18'}
 
   data-uri-to-buffer@4.0.1:
@@ -2223,6 +2239,10 @@ packages:
 
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   magic-string@1.4.3:
     resolution: {integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ==}
@@ -3760,6 +3780,8 @@ snapshots:
 
   '@types/jsesc@2.5.1': {}
 
+  '@types/luxon@3.7.6': {}
+
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
@@ -3919,6 +3941,10 @@ snapshots:
   convert-source-map@2.0.0: {}
 
   cookie@1.1.1: {}
+
+  cron-parser@5.10.2:
+    dependencies:
+      luxon: 3.7.2
 
   data-uri-to-buffer@4.0.1: {}
 
@@ -4206,6 +4232,8 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.33.0
 
   long@5.3.2: {}
+
+  luxon@3.7.2: {}
 
   magic-string@1.4.3:
     dependencies:

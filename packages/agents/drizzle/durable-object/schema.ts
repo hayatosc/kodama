@@ -5,7 +5,58 @@
  *
  * @module
  */
-import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
+import type { ScheduleSpec } from '../../src/agent/schedule-spec.ts'
+
+/** Immutable reservation and replay identity; the cursor survives occurrence retention. */
+export const scheduledTasks = sqliteTable(
+  'kodama_scheduled_tasks',
+  {
+    id: text('id').primaryKey(),
+    sourceTask: text('source_task').notNull().unique(),
+    sourceEntry: integer('source_entry').notNull(),
+    arguments: text('arguments').notNull(),
+    instruction: text('instruction').notNull(),
+    rule: text('rule', { mode: 'json' }).$type<ScheduleSpec>().notNull(),
+    state: text('state', { enum: ['active', 'completed', 'cancelled', 'failed'] }).notNull(),
+    nextDue: integer('next_due'),
+    cursor: integer('cursor'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('kodama_scheduled_tasks_due').on(t.state, t.nextDue)],
+)
+
+/** One claimed nominal time; receipt is persisted before Pi history can be pruned. */
+export const scheduledTaskOccurrences = sqliteTable(
+  'kodama_scheduled_occurrences',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => scheduledTasks.id),
+    nominalAt: integer('nominal_at').notNull(),
+    coalescedFrom: integer('coalesced_from').notNull(),
+    state: text('state', { enum: ['dispatching', 'submitted', 'settled', 'failed'] }).notNull(),
+    submissionId: integer('submission_id'),
+    admissionStarted: integer('admission_started', { mode: 'boolean' }).notNull().default(false),
+    retryAt: integer('retry_at').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    outcome: text('outcome'),
+    settledAt: integer('settled_at'),
+  },
+  (t) => [
+    uniqueIndex('kodama_scheduled_occurrences_nominal').on(t.taskId, t.nominalAt),
+    index('kodama_scheduled_occurrences_pending').on(t.state, t.retryAt),
+  ],
+)
 
 /** One outer Pi model invocation; IDs are never reused after retention deletes. */
 export const usage = sqliteTable('kodama_usage', {

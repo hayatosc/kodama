@@ -192,6 +192,11 @@ accepted/pending. Enable it locally with `nr agent tools assistant current_time 
 Messages identify their sender; a persisted three-hop cap allows multi-stage delegation while
 bounding cycles. The memory agent cannot use it. See [Agent to agent](docs/agents.md#agent-to-agent).
 
+Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task`
+for durable one-shot, fixed-interval, and timezone-aware cron reservations. Due work enters the normal
+conversation queue; missed ticks coalesce and each reservation runs without overlapping itself.
+See [Scheduled tasks](docs/agents.md#scheduled-tasks) for tool arguments, limits, and permission rules.
+
 Active work has a recovery alarm. On wake, the object reopens Pi's SQLite storage,
 reconstructs pending tasks, and resumes the scheduler. Once tasks settle, the
 alarm is removed. Model calls can be repeated after interruption; request ID

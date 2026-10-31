@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { newAgentId, updateSettings } from '../../testing/management.ts'
 import { mockModel, say } from '../../testing/conversation.ts'
 import { record, write } from '../../testing/memory.ts'
-import { toolCallResponse } from '../../testing/model.ts'
+import { isMemoryAgentRequest, requestBody, toolCallResponse } from '../../testing/model.ts'
 import type { ToolCall } from '../../testing/model.ts'
 import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.ts'
 // Load the provider outside short-lived DO requests.
@@ -59,7 +59,10 @@ it('accepts a peer-influenced remember request with an earlier human input', asy
     .find((parsed) => parsed.kind === 'remember' && parsed.content === content)
   expect(peerInput).toBeDefined()
   expect(job).toMatchObject({ kind: 'remember' })
-  expect(JSON.stringify(fetch.mock.calls.at(-1))).toContain('accepted')
+  const workingCalls = fetch.mock.calls.filter(
+    ([, init]) => !isMemoryAgentRequest(requestBody(init)),
+  )
+  expect(JSON.stringify(workingCalls.at(-1))).toContain('accepted')
 })
 
 describe('working memory search', () => {
