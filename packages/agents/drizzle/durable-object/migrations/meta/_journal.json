@@ -40,15 +40,8 @@
     {
       "idx": 5,
       "version": "6",
-      "when": 1793411609815,
-      "tag": "0005_windy_jetstream",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1793412700109,
-      "tag": "0006_brown_wrecking_crew",
+      "when": 1793432717856,
+      "tag": "0005_typical_photon",
       "breakpoints": true
     }
   ]

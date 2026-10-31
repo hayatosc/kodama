@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6b36ab08-1c2b-4486-b3de-d476a5caa6bb",
+  "id": "e2dc98e2-2cb8-431f-9318-2b914b796ec8",
   "prevId": "558ff348-63c6-4258-bb74-8e624b52fc09",
   "tables": {
     "kodama_always_loaded": {
@@ -400,6 +400,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "admission_started": {
+          "name": "admission_started",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "retry_at": {
           "name": "retry_at",

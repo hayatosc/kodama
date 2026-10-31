@@ -5,6 +5,7 @@ CREATE TABLE `kodama_scheduled_occurrences` (
 	`coalesced_from` integer NOT NULL,
 	`state` text NOT NULL,
 	`submission_id` integer,
+	`admission_started` integer DEFAULT false NOT NULL,
 	`retry_at` integer NOT NULL,
 	`attempts` integer DEFAULT 0 NOT NULL,
 	`outcome` text,
