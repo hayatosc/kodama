@@ -4,7 +4,7 @@ import { env, exports } from 'cloudflare:workers'
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { withHarness } from '../testing/harness.ts'
-import { mutateSchedule } from './scheduling.ts'
+import { dispatchSchedules, mutateSchedule } from './scheduling.ts'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -12,7 +12,8 @@ import {
   scheduledTaskOccurrences,
   usage,
 } from '../../drizzle/durable-object/schema.ts'
-import { newAgentId, updateSettings } from '../testing/management.ts'
+import { management, newAgentId, updateSettings } from '../testing/management.ts'
+import { agents, credentialGrants } from '../../drizzle/management/schema.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { openLocalDb } from './local-db/local.ts'
@@ -202,6 +203,67 @@ it.each(['kodama.agent-message', 'kodama.scheduled-message'])(
 )
 
 describe('scheduled dispatch and receipts', () => {
+  it.each(['credentials', 'registry'] as const)(
+    'immediately refuses a never-admitted occurrence after %s access is removed',
+    async (reason) => {
+      const id = await enabled()
+      await due(id)
+      if (reason === 'credentials')
+        await management.delete(credentialGrants).where(eq(credentialGrants.agentId, id))
+      else await management.update(agents).set({ status: 'archived' }).where(eq(agents.agentId, id))
+      await wake(id)
+      expect((await rows(id)).tasks[0]).toMatchObject({
+        state: 'failed',
+        latest: {
+          state: 'failed',
+          admissionStarted: false,
+          attempts: 0,
+          outcome: 'admission_refused',
+        },
+      })
+      expect(vi.mocked(fetch).mock.calls).toHaveLength(0)
+    },
+  )
+
+  it.each([
+    'credential_unavailable: credential is busy',
+    'credential_unavailable: OAuth refresh temporarily unavailable',
+    'credential_unavailable: OAuth refresh request failed',
+  ])('keeps transient preparation failure retryable: %s', async (message) => {
+    await withHarness({}, async (harness, state) => {
+      const local = await openLocalDb(state.storage)
+      const start = Date.now() - 1000
+      insertReservation(
+        local,
+        {
+          sourceTask: 'transient-prepare',
+          sourceEntry: 1,
+          arguments: '{}',
+          instruction: 'Retry later',
+          rule: { kind: 'once', start },
+          nextDue: start,
+        },
+        start - 1,
+      )
+      const admit = vi.fn(async () => {})
+      await dispatchSchedules(
+        local,
+        harness,
+        state.storage,
+        (operation) => operation(),
+        async () => {
+          throw new Error(message)
+        },
+        admit,
+      )
+      expect(listReservations(local).tasks[0]).toMatchObject({
+        state: 'active',
+        latest: { state: 'dispatching', admissionStarted: false, attempts: 1, outcome: null },
+      })
+      expect(admit).not.toHaveBeenCalled()
+    })
+  })
+
   it('keeps uncertain admission recoverable after a later permanent refusal', async () => {
     const id = await enabled()
     const task = await due(id)

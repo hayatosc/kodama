@@ -59,7 +59,15 @@ describe('cron grammar', () => {
   it('accepts named IANA zones but not fixed offsets or unknown zones', () => {
     for (const zone of ['UTC', 'Asia/Tokyo', 'America/New_York', 'Etc/GMT+9'])
       expect(() => validateCronZone(zone)).not.toThrow()
-    for (const zone of ['', 'Z', '+09:00', '-0500', 'Not/A_Zone'])
+    for (const zone of [
+      '',
+      'Z',
+      '+09:00',
+      '-0500',
+      'Not/A_Zone',
+      '2026-01-01T00:00+09:00',
+      '2026-01-01T00:00:00Z[UTC]',
+    ])
       expect(() => validateCronZone(zone)).toThrow('schedule_timezone')
   })
 })
