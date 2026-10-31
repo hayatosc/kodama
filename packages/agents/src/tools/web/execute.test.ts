@@ -395,12 +395,15 @@ it.each(['write-first', 'contact-first'] as const)(
           spy.mockRestore()
         }
       } else {
-        const setAlarm = state.storage.setAlarm.bind(state.storage)
-        const spy = vi.spyOn(state.storage, 'setAlarm').mockImplementationOnce(async (...args) => {
-          reached.resolve()
-          await release.promise
-          return setAlarm(...args)
-        })
+        // Alarm changes now commit atomically through the storage transaction API.
+        const transaction = state.storage.transaction.bind(state.storage)
+        const spy = vi
+          .spyOn(state.storage, 'transaction')
+          .mockImplementationOnce(async (callback) => {
+            reached.resolve()
+            await release.promise
+            return transaction(callback)
+          })
         const contacting = contact()
         await reached.promise
         expect(contactBoundary(local, String(ROOT_CONVERSATION_ID))).toBeUndefined()

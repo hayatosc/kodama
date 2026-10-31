@@ -2,7 +2,7 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject, evictDurableObject, runDurableObjectAlarm } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { setAlarm, takeDueAlarms } from './alarms.ts'
+import { setAlarm, claimDueAlarms, acknowledgeAlarm, dispatchAlarms } from './alarms.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
@@ -26,15 +26,66 @@ describe('alarm schedule', () => {
       const both = await state.storage.getAlarm()
       await setAlarm(state.storage, 'recovery', undefined)
       const extractOnly = await state.storage.getAlarm()
-      const taken = await takeDueAlarms(state.storage, now + 100_000)
-      return { both, extractOnly, taken, after: await state.storage.getAlarm() }
+      const claims = await claimDueAlarms(state.storage, now + 100_000)
+      const retry = await state.storage.getAlarm()
+      for (const claim of claims) await acknowledgeAlarm(state.storage, claim)
+      return {
+        both,
+        extractOnly,
+        taken: claims.map((claim) => claim.purpose),
+        retry,
+        after: await state.storage.getAlarm(),
+      }
     })
 
     expect(alarms).toEqual({
       both: now + 50_000,
       extractOnly: now + 100_000,
       taken: ['extract'],
+      retry: now + 160_000,
       after: null,
+    })
+  })
+})
+
+describe('durable alarm claims', () => {
+  it('preserves concurrent deadlines, rejects stale acknowledgements, and retries after eviction', async () => {
+    const stub = env.AGENTS.getByName(uuidv7())
+    const now = Date.now() + 100_000
+    const old = await runInDurableObject(stub, async (_instance, state) => {
+      await setAlarm(state.storage, 'extract', now)
+      const [claim] = await claimDueAlarms(state.storage, now)
+      if (!claim) throw new Error('Missing claim')
+      await setAlarm(state.storage, 'extract', now + 200_000)
+      return claim
+    })
+    await evictDurableObject(stub)
+    await runInDurableObject(stub, async (_instance, state) => {
+      const [retry] = await claimDueAlarms(state.storage, now + 60_000)
+      if (!retry) throw new Error('Missing retry')
+      await acknowledgeAlarm(state.storage, old)
+      expect(await state.storage.getAlarm()).toBe(now + 120_000)
+      await acknowledgeAlarm(state.storage, retry)
+      expect(await state.storage.getAlarm()).toBe(now + 200_000)
+    })
+  })
+
+  it('keeps a failed early purpose retryable without losing later purposes', async () => {
+    const stub = env.AGENTS.getByName(uuidv7())
+    const now = Date.now() + 100_000
+    await runInDurableObject(stub, async (_instance, state) => {
+      await setAlarm(state.storage, 'recovery', now)
+      await setAlarm(state.storage, 'extract', now)
+      const handled: string[] = []
+      await dispatchAlarms(state.storage, now, async (purpose) => {
+        handled.push(purpose)
+        if (purpose === 'recovery') throw new Error('Injected opening failure')
+      })
+      expect(handled).toEqual(['recovery', 'extract'])
+      expect(await state.storage.getAlarm()).toBe(now + 60_000)
+      expect((await claimDueAlarms(state.storage, now + 60_000)).map((c) => c.purpose)).toEqual([
+        'recovery',
+      ])
     })
   })
 })

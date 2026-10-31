@@ -25,7 +25,12 @@ import type {
   TaskId,
 } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import { takeDueAlarms, armRecovery, refreshRecovery } from './runtime/alarms.ts'
+import {
+  dispatchAlarms,
+  setAlarmNoLaterThan,
+  armRecovery,
+  refreshRecovery,
+} from './runtime/alarms.ts'
 import type { AlarmPurpose } from './runtime/alarms.ts'
 import {
   agentChange,
@@ -93,7 +98,7 @@ import {
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../control-plane/config.ts'
-import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
+import { pruneSlice, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
 import {
   extracts,
   markActivity,
@@ -102,6 +107,16 @@ import {
   scheduleExtraction,
 } from './memory.ts'
 import { snapshotOf, submissionOf } from './runtime/views.ts'
+import { currentRunInputs } from './runtime/inputs.ts'
+import {
+  armScheduling,
+  dispatchSchedules,
+  mutateSchedule,
+  readSchedules,
+  rearmScheduling,
+  reconcileSchedules,
+} from './scheduling.ts'
+import { pendingOccurrences } from './local-db/scheduled-tasks.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -132,6 +147,8 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #watching = new Set<TaskId>()
   /** The pruning pass in progress; concurrent calls share it. */
   #pruning: Promise<PruneOutcome> | undefined
+  /** Concurrent alarm/recovery callbacks share one bounded scheduling pass. */
+  #scheduling: Promise<void> | undefined
   /** A memory change arrived while the agent was busy; refresh at the next idle moment. */
   #memoryChanged = false
   /** Why the next external call must not happen, checked before each one. */
@@ -171,6 +188,28 @@ export class Agent extends DurableObject<AgentEnv> {
         local,
         async () => {
           const active = this.ctx.storage.kv.get<UsageAttribution>(USAGE_CONTEXT_KEY)
+          // Dedicated jobs charge their requester, not the object's Pi input provenance.
+          if (active?.jobId) return active
+          const inputs = await currentRunInputs(await this.#harness, context)
+          if (
+            inputs?.some((entry) =>
+              [
+                'pi.user',
+                'kodama.owner-message',
+                'kodama.agent-message',
+                'kodama.scheduled-message',
+              ].includes(entry.kind),
+            )
+          ) {
+            const owner = inputs.some(
+              (entry) => entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message',
+            )
+            const peer = inputs.some((entry) => entry.kind === 'kodama.agent-message')
+            return {
+              chargedAgentId: this.#agentId(),
+              actorKind: owner ? 'user' : peer ? 'agent' : 'system',
+            }
+          }
           if (active) return active
           const agent = await agentRowByObjectName(
             managementDb(this.env.MANAGEMENT_DB),
@@ -307,6 +346,32 @@ export class Agent extends DurableObject<AgentEnv> {
           context,
           maximum,
         ),
+      (call, api, invocation) =>
+        this.#serial(async () => {
+          assertAllowed(this.#refusal)
+          const settings = await appliedSettings(this.ctx.storage)
+          const tool =
+            call.operation === 'create'
+              ? 'schedule_task'
+              : call.operation === 'cancel'
+                ? 'cancel_scheduled_task'
+                : 'list_scheduled_tasks'
+          if (!settings?.tools.includes(tool) || settings.toolPolicy?.[tool] === 'deny')
+            throw new Error('schedule_disabled')
+          const local = await this.#local
+          if (call.operation === 'list') return JSON.stringify(readSchedules(local, call))
+          await armScheduling(this.ctx.storage)
+          const result = await mutateSchedule(
+            local,
+            await this.#harness,
+            call,
+            api,
+            invocation,
+            () => assertAllowed(this.#refusal),
+          )
+          await rearmScheduling(local, this.ctx.storage)
+          return JSON.stringify(result)
+        }),
     )
   }
 
@@ -318,6 +383,7 @@ export class Agent extends DurableObject<AgentEnv> {
   /** The last step of opening, before recovery: a working agent refreshes its memory copy. */
   protected async prepare(_harness: Harness): Promise<void> {
     await refreshMemory(this.#workingMemory())
+    await rearmScheduling(await this.#local, this.ctx.storage)
   }
 
   /**
@@ -339,6 +405,34 @@ export class Agent extends DurableObject<AgentEnv> {
       await this.#serial(() => runExtraction(this.#workingMemory(), harness, this.ctx.storage))
     }
     if (purpose === 'prune') await this.prune()
+    if (purpose === 'schedule') {
+      this.#scheduling ??= (async () =>
+        dispatchSchedules(
+          await this.#local,
+          await this.#harness,
+          this.ctx.storage,
+          (operation) => this.#serial(operation),
+          () => this.#prepareScheduled(),
+          (draft) => this.admit(draft, 'system'),
+        ))().finally(() => {
+        this.#scheduling = undefined
+      })
+      await this.#scheduling
+    }
+  }
+
+  /** Current admission checks, not permissions frozen at reservation creation. */
+  async #prepareScheduled(): Promise<void> {
+    assertAllowed(this.#refusal)
+    await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+    const settings = await appliedSettings(this.ctx.storage)
+    if (!settings?.tools.includes('schedule_task') || settings.toolPolicy?.schedule_task === 'deny')
+      throw new Error('schedule_disabled')
+    await refuseWhenFull(this.ctx.storage)
+    const config = await readConfig(await this.#config())
+    await this.credentialStore().read(config.model.provider)
+    if (await isIdle(await this.#harness))
+      await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
   }
 
   /** Whether pruning archives entries to R2 before deleting them. */
@@ -395,15 +489,36 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Close the harness for `mutate` if `check` passes, then reopen it; see `exclusiveSection`. */
   async #exclusive(check: (harness: Harness) => Promise<boolean>, mutate: () => void) {
-    const section = exclusiveSection(this.ctx, this.#harness, check, mutate, () => this.#open())
+    const section = exclusiveSection(
+      this.ctx,
+      this.#harness,
+      async (harness) => {
+        const local = await this.#local
+        await reconcileSchedules(local, harness)
+        // Never-admitted claims need pruning to recover from storage pressure. Preserve evidence
+        // only after admission may have started or an accepted submission remains unresolved.
+        if (
+          pendingOccurrences(local).some(
+            ({ occurrence }) => occurrence.admissionStarted || occurrence.state === 'submitted',
+          )
+        )
+          return false
+        return check(harness)
+      },
+      mutate,
+      () => this.#open(),
+    )
     this.#harness = section.then((result) => result.harness)
     return (await section).mutated
   }
 
   /** Keep the recovery alarm in step with Pi's tasks; runs in the serial queue. */
   #refreshRecovery(harness: Harness): Promise<void> {
-    return this.#serial(() =>
-      refreshRecovery({
+    return this.#serial(async () => {
+      const local = await this.#local
+      await reconcileSchedules(local, harness)
+      await rearmScheduling(local, this.ctx.storage)
+      await refreshRecovery({
         harness,
         storage: this.ctx.storage,
         watching: this.#watching,
@@ -413,21 +528,20 @@ export class Agent extends DurableObject<AgentEnv> {
           await this.onIdle()
         },
         refreshAgain: () => this.#refreshRecovery(harness),
-      }),
-    )
+      })
+    })
   }
 
   /**
-   * The platform alarm: take the due purposes, refresh recovery, and handle each purpose.
-   *
-   * @remarks
-   * Due purposes are taken first. Successful extraction clears its pending activity and deadline,
-   * including any deadline restored by the recovery refresh.
+   * Dispatch independently claimed purposes. Recovery also covers old platform-only wakes;
+   * its retry is durable before opening or refreshing Pi can fail.
    */
   override async alarm(): Promise<void> {
-    const due = await takeDueAlarms(this.ctx.storage, Date.now())
-    await this.#refreshRecovery(await this.#harness)
-    for (const purpose of due) await this.onAlarm(purpose)
+    await setAlarmNoLaterThan(this.ctx.storage, 'recovery', Date.now())
+    await dispatchAlarms(this.ctx.storage, Date.now(), async (purpose) => {
+      if (purpose === 'recovery') await this.#refreshRecovery(await this.#harness)
+      await this.onAlarm(purpose)
+    })
   }
 
   /**
@@ -437,7 +551,10 @@ export class Agent extends DurableObject<AgentEnv> {
    * The recovery alarm is persisted first, in the serial queue, which also covers the window between
    * admission and Pi's scheduler.
    */
-  protected async admit(draft: SubmissionDraft, actorKind?: 'user' | 'agent'): Promise<Submission> {
+  protected async admit(
+    draft: SubmissionDraft,
+    actorKind?: 'user' | 'agent' | 'system',
+  ): Promise<Submission> {
     const harness = await this.#harness
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
@@ -449,6 +566,15 @@ export class Agent extends DurableObject<AgentEnv> {
           context,
         )
         if (existing) return conversation.submit(draft, context)
+      }
+      if (actorKind === 'system') {
+        assertAllowed(this.#refusal)
+        const settings = await appliedSettings(this.ctx.storage)
+        if (
+          !settings?.tools.includes('schedule_task') ||
+          settings.toolPolicy?.schedule_task === 'deny'
+        )
+          throw new Error('schedule_disabled')
       }
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
@@ -674,11 +800,11 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /**
-   * Archive and delete old entries until the database is under the threshold, or run once with
-   * `force`. Concurrent calls share the running pass.
+   * Archive and delete one bounded slice, scheduling another wake if still over the threshold.
+   * With `force`, run once. Concurrent calls share the running pass.
    */
   prune(request: { force?: boolean } = {}): Promise<PruneOutcome> {
-    this.#pruning ??= pruneUntilUnder(this.#pruneDeps(), request.force === true).finally(() => {
+    this.#pruning ??= pruneSlice(this.#pruneDeps(), request.force === true).finally(() => {
       this.#pruning = undefined
     })
     return this.#pruning

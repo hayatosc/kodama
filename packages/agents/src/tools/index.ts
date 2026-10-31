@@ -11,17 +11,24 @@ import { createWebSearchTool } from './web/search.ts'
 import type { WebCall } from './web/search.ts'
 import { createWebFetchTool } from './web/fetch.ts'
 import { currentTimeTool } from './current-time.ts'
+import { createScheduleTools } from './scheduled-tasks.ts'
+import type { ScheduleTools } from './scheduled-tasks.ts'
 
 /** Every registered tool. Add a tool here; each agent enables an explicit subset by name. */
 export const agentTools: readonly ToolRegistration[] = createAgentTools()
 
 /** Bind runtime-only delivery while retaining the same opt-in names and schemas. */
-export function createAgentTools(contact?: ContactAgent, web?: WebCall): ToolRegistration[] {
+export function createAgentTools(
+  contact?: ContactAgent,
+  web?: WebCall,
+  schedule?: ScheduleTools,
+): ToolRegistration[] {
   return [
     currentTimeTool,
     createContactAgentTool(contact),
     createWebSearchTool(web),
     createWebFetchTool(web),
+    ...createScheduleTools(schedule),
   ]
 }
 

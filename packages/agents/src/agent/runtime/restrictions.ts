@@ -101,7 +101,13 @@ export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings):
           let reason = refusal()
           const applied = await settings()
           if (
-            (call.name === 'web_search' || call.name === 'web_fetch') &&
+            [
+              'web_search',
+              'web_fetch',
+              'schedule_task',
+              'list_scheduled_tasks',
+              'cancel_scheduled_task',
+            ].includes(call.name) &&
             !applied?.tools.includes(call.name)
           )
             reason ??= 'tool_disabled'

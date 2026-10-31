@@ -12,6 +12,14 @@ function inputHop(entry: EntryRecord): number {
   if (entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message') return 0
   const data = entry.data
   if (
+    entry.kind === 'kodama.scheduled-message' &&
+    typeof data === 'object' &&
+    data !== null &&
+    'hop' in data &&
+    data.hop === 0
+  )
+    return 0
+  if (
     entry.kind !== 'kodama.agent-message' ||
     typeof data !== 'object' ||
     data === null ||
@@ -43,7 +51,8 @@ export async function contactOrigin(harness: Harness, senderAgentId: string): Pr
               if (
                 entry.kind === 'pi.user' ||
                 entry.kind === 'kodama.owner-message' ||
-                entry.kind === 'kodama.agent-message'
+                entry.kind === 'kodama.agent-message' ||
+                entry.kind === 'kodama.scheduled-message'
               )
                 return inputHop(entry)
             }

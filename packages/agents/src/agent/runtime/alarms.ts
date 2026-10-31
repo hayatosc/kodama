@@ -1,9 +1,9 @@
 /**
  * The object's one platform alarm, shared by several purposes, and the recovery alarm.
  *
- * Each purpose keeps its due time in the object's storage, and the platform alarm points at the
- * earliest. Times are read and written with the synchronous storage API, so two updates never
- * interleave, and each one sets the alarm from the state it just wrote.
+ * Each purpose has a pending deadline and, while executing, a durable retry claim. An atomic
+ * storage transaction updates these and the platform alarm together; completion acknowledges
+ * only its claim, never a newly scheduled deadline.
  *
  * @see docs/agents.md — Alarms and recovery
  *
@@ -14,24 +14,31 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, TaskId } from '@earendil-works/pi-durable'
 
 /** Why an object wants to be woken. */
-export type AlarmPurpose = 'recovery' | 'extract' | 'prune' | 'jobs'
+export type AlarmPurpose = 'recovery' | 'schedule' | 'extract' | 'prune' | 'jobs'
 
 const KEY_PREFIX = 'kodama:alarm:'
-const PURPOSES: readonly AlarmPurpose[] = ['recovery', 'extract', 'prune', 'jobs']
+const PURPOSES: readonly AlarmPurpose[] = ['recovery', 'schedule', 'extract', 'jobs', 'prune']
+const CLAIM_PREFIX = 'kodama:alarm-claim:'
+const RETRY_MS = 60_000
 
-function dueTimes(storage: DurableObjectStorage): Map<AlarmPurpose, number> {
-  const due = new Map<AlarmPurpose, number>()
-  for (const purpose of PURPOSES) {
-    const at = storage.kv.get<number>(KEY_PREFIX + purpose)
-    if (at !== undefined) due.set(purpose, at)
-  }
-  return due
+/** A durable wake lease, separate from a purpose's next pending deadline. */
+export interface AlarmClaim {
+  purpose: AlarmPurpose
+  id: string
+  retryAt: number
 }
 
-/** Point the platform alarm at the earliest due time, or clear it. */
-function syncAlarm(storage: DurableObjectStorage): Promise<void> {
-  const times = [...dueTimes(storage).values()]
-  return times.length === 0 ? storage.deleteAlarm() : storage.setAlarm(Math.min(...times))
+async function syncAlarm(tx: DurableObjectTransaction): Promise<void> {
+  const times: number[] = []
+  for (const purpose of PURPOSES) {
+    const claim = await tx.get<AlarmClaim>(CLAIM_PREFIX + purpose)
+    const pending = await tx.get<number>(KEY_PREFIX + purpose)
+    // A live claim owns this purpose until its retry deadline, even if another wake arrives.
+    const at = claim?.retryAt ?? pending
+    if (at !== undefined) times.push(at)
+  }
+  if (times.length === 0) await tx.deleteAlarm()
+  else await tx.setAlarm(Math.min(...times))
 }
 
 /**
@@ -44,9 +51,11 @@ export function setAlarm(
   purpose: AlarmPurpose,
   at: number | undefined,
 ): Promise<void> {
-  if (at === undefined) storage.kv.delete(KEY_PREFIX + purpose)
-  else storage.kv.put(KEY_PREFIX + purpose, at)
-  return syncAlarm(storage)
+  return storage.transaction(async (tx) => {
+    if (at === undefined) await tx.delete(KEY_PREFIX + purpose)
+    else await tx.put(KEY_PREFIX + purpose, at)
+    await syncAlarm(tx)
+  })
 }
 
 /** When `purpose` is due, or undefined when it is not scheduled. */
@@ -60,28 +69,67 @@ export async function setAlarmNoLaterThan(
   purpose: AlarmPurpose,
   at: number,
 ): Promise<void> {
-  const current = alarmAt(storage, purpose)
-  if (current !== undefined && current <= at) return
-  await setAlarm(storage, purpose, at)
+  await storage.transaction(async (tx) => {
+    const current = await tx.get<number>(KEY_PREFIX + purpose)
+    if (current === undefined || current > at) await tx.put(KEY_PREFIX + purpose, at)
+    await syncAlarm(tx)
+  })
 }
 
-/**
- * Remove the purposes due at `now` and point the alarm at the next one.
- *
- * @returns The purposes that were due.
- */
-export async function takeDueAlarms(
+/** Claim due purposes and persist retry wakes before any handler can have effects. */
+export async function claimDueAlarms(
   storage: DurableObjectStorage,
   now: number,
-): Promise<AlarmPurpose[]> {
-  const taken: AlarmPurpose[] = []
-  for (const [purpose, at] of dueTimes(storage)) {
-    if (at > now) continue
-    taken.push(purpose)
-    storage.kv.delete(KEY_PREFIX + purpose)
+): Promise<AlarmClaim[]> {
+  return storage.transaction(async (tx) => {
+    const due: { purpose: AlarmPurpose; at: number; retry: boolean }[] = []
+    for (const purpose of PURPOSES) {
+      const claim = await tx.get<AlarmClaim>(CLAIM_PREFIX + purpose)
+      const pending = await tx.get<number>(KEY_PREFIX + purpose)
+      const at = claim?.retryAt ?? pending
+      if (at !== undefined && at <= now) due.push({ purpose, at, retry: claim !== undefined })
+    }
+    due.sort((a, b) => a.at - b.at)
+    const claims: AlarmClaim[] = []
+    for (const { purpose, retry } of due) {
+      const claim = { purpose, id: crypto.randomUUID(), retryAt: now + RETRY_MS }
+      // A retry must not consume a pending deadline registered during the previous attempt.
+      if (!retry) await tx.delete(KEY_PREFIX + purpose)
+      await tx.put(CLAIM_PREFIX + purpose, claim)
+      claims.push(claim)
+    }
+    await syncAlarm(tx)
+    return claims
+  })
+}
+
+/** Acknowledge this attempt only; stale completions cannot delete a newer claim or deadline. */
+export async function acknowledgeAlarm(
+  storage: DurableObjectStorage,
+  claim: AlarmClaim,
+): Promise<void> {
+  await storage.transaction(async (tx) => {
+    const current = await tx.get<AlarmClaim>(CLAIM_PREFIX + claim.purpose)
+    if (current?.id === claim.id) await tx.delete(CLAIM_PREFIX + claim.purpose)
+    await syncAlarm(tx)
+  })
+}
+
+/** Isolate domain failures; storage failures in claim/ack still reach the platform. */
+export async function dispatchAlarms(
+  storage: DurableObjectStorage,
+  now: number,
+  handle: (purpose: AlarmPurpose) => Promise<void>,
+): Promise<void> {
+  for (const claim of await claimDueAlarms(storage, now)) {
+    try {
+      await handle(claim.purpose)
+    } catch (error) {
+      console.error('Alarm purpose failed', claim.purpose, safeFailure(error))
+      continue
+    }
+    await acknowledgeAlarm(storage, claim)
   }
-  await syncAlarm(storage)
-  return taken
 }
 
 /** How long after admission the recovery alarm wakes the object if work is still pending. */

@@ -193,6 +193,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3
+      temporal-polyfill-lite:
+        specifier: ^1.0.0
+        version: 1.0.0
       uuid:
         specifier: ^14.0.3
         version: 14.0.3
@@ -2422,6 +2425,9 @@ packages:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
 
+  temporal-polyfill-lite@1.0.0:
+    resolution: {integrity: sha512-dC6ITb3X/JgPN+kbhi4MFsVHMgWPBIE5BS9GlwF8cTlGyXaW229HKQxjOfdBI2tE8f2VcbyUAFwS6TzVmR1Wqw==}
+
   tinybench@6.2.2:
     resolution: {integrity: sha512-nIZ2N2dFpjBsg2hgitKu7mA+FvsIJuGJOwysRngmVRRmWgR/UyPjwJj8c/fT/dhm8EkHnF5EOogRf+0Z2qrimA==}
     engines: {node: '>=20.0.0'}
@@ -4469,6 +4475,8 @@ snapshots:
   std-env@4.3.0: {}
 
   supports-color@10.2.2: {}
+
+  temporal-polyfill-lite@1.0.0: {}
 
   tinybench@6.2.2: {}
 

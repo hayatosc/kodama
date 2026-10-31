@@ -721,12 +721,24 @@ Delivery works like this:
 ## Alarms and recovery
 
 A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/runtime/alarms.ts) stores one due
-time per purpose and sets the platform alarm to the earliest. It reads and writes the times with the
-synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
+time per purpose and sets the platform alarm to the earliest actionable deadline. Each purpose also
+has a durable in-flight claim with a unique identity and a 60-second retry deadline. Asynchronous
+storage transactions commit pending times, claims, and the platform alarm together. Legacy scalar
+pending times remain readable. Before handlers run, claiming consumes their old pending times and
+persists retry wakes. Acknowledgement removes only the matching claim, preserving a new pending
+time written during execution. Clearing a pending time does not cancel a running claim.
+
+Due purposes run sequentially in deadline order, with recovery and scheduled input ahead of
+maintenance on ties. A handler failure leaves its retry wake and does not prevent another due
+purpose from running; claim/acknowledgement storage failures propagate. This includes recovery
+before domain dispatch. Pruning performs one bounded slice per wake, and the memory jobs purpose
+starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
+not the sole guarantee of another wake:
 
 | Purpose    | Meaning                                                           |
 | ---------- | ----------------------------------------------------------------- |
 | `recovery` | resume Pi's scheduler after eviction while work is pending        |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs    |
 | `extract`  | hand new entries to the memory agent after 10 minutes idle        |
 | `prune`    | archive and delete old entries when storage is over its threshold |
 | `jobs`     | the memory agent's job runner                                     |
@@ -750,6 +762,91 @@ deadline. Without new input, later recovery or eviction does not schedule anothe
 Model calls can be repeated after an interruption. Request IDs prevent duplicate durable inputs,
 not duplicate provider billing.
 
+## Scheduled tasks
+
+Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task` in
+`settings.tools`. They manage only that agent's reservations. There is no new public scheduling RPC,
+notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
+its nominal time; it does not guarantee exact-time execution or wait for the model in the alarm.
+
+`schedule_task` takes `{ schedule, instruction }`. Supported rules are:
+
+- `{ kind: 'once', run_at: '2027-01-10T09:00:00+09:00' }` for one execution.
+- `{ kind: 'interval', every_seconds: 3600, start_at?, end_at? }` for a fixed elapsed-time cadence.
+  The default anchor is creation time plus the period; later times are anchor plus integer multiples,
+  never completion time plus the period.
+- `{ kind: 'cron', expression: '0 9 * * 0', timezone: 'Asia/Tokyo', start_at?, end_at? }` for Sunday at
+  09:00 local time. Cron has exactly five numeric fields supporting `*`, lists, ranges, and steps.
+  Day-of-month or day-of-week must be the literal `*`; macros, names, seconds, years, `L`, `W`, and `#`
+  are not accepted. The zone must be explicit IANA, not an offset or guessed from the conversation.
+
+Dates require RFC3339 with an explicit offset. Creation requires a future start within 365 days.
+Intervals range from 60 to 31,536,000 seconds. Start is inclusive; end is exclusive and optional.
+Cron without an explicit start begins strictly after creation. Invalid calendar dates are rejected;
+day 31 skips shorter months. Missing DST wall-clock minutes are skipped, and a repeated minute runs
+only at its earlier instant. The numeric cron parser and bounded eight-year calendar search are
+implemented in `agent/cron.ts`. Search walks calendar dates and allowed hours/minutes on matching
+dates, not elapsed minutes or missed occurrences. Both directions validate the earlier instant by
+round-tripping to the requested wall time, which skips DST gaps without silently shifting work.
+
+Datetime parsing and calendar/timezone operations import Temporal only through `lib/temporal.ts`.
+This boundary currently exports the Gregorian/ISO bundle of `temporal-polyfill-lite` without patching
+globals. It uses platform IANA data and works even when the Workers runtime does not expose native
+Temporal. Once native support is available, switch the implementation at this boundary rather than
+changing each caller.
+No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
+
+The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
+`agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. There are two
+local tables: immutable definitions with next-time/cursor progress, and uniquely addressed occurrence
+receipts. No future occurrence queue is pre-generated. At most 100 active or stopped-but-unsettled
+reservations are allowed; instructions are limited to 16,000 characters, listings to 50 per stable-ID
+page, and dispatch to 10 attempts per pass. Listings accept a definition-state filter and cursor.
+
+After downtime, only the latest due nominal occurrence is materialized, recording the coalesced
+range. A definition has at most one unfinished occurrence, including Pi's pending/running input.
+Long executions therefore do not overlap themselves. Completion callbacks, recovery, and a
+60-second receipt fallback unblock the next occurrence without spinning on a past deadline.
+
+The durable request ID is `scheduled-<task UUID>-<nominal epoch milliseconds>`. Claiming atomically
+inserts that occurrence and advances its definition cursor; a persistent alarm claim already covers
+the handoff. Retries reconcile Pi acceptance before rechecking current admission policy. An
+`admissionStarted` marker is persisted before crossing that boundary, so a later refusal or retry
+limit cannot turn uncertain acceptance into terminal failure. Confirmed pre-admission transient
+failures retry with exponential backoff (60 seconds to one hour), stopping after five attempts;
+permanent refusal stops immediately. Uncertain admission retries without that terminal cutoff.
+Current lifecycle, tool policy, credentials, and storage checks still apply. Accepted model failure
+settles that occurrence, not the recurring definition. `submitted` means accepted, not successful.
+
+Creation replays use the durable tool-task identity and canonical arguments before revalidating dates
+or generating a default anchor. Cancellation stops future materialization, reports any already
+claimed execution as too late to cancel, and never calls global conversation cancellation. Global
+conversation cancellation likewise does not remove future reservations. Terminal receipts are saved
+before pruning; pruning defers while admission may have started or an accepted submission remains
+unresolved. Never-admitted claims do not block pruning, so storage-pressure retries can recover.
+Settled receipt details may be removed after 30 days, while definitions and cursors are retained as
+replay tombstones. This is
+conservative retention, not a complete history-retention policy. Request IDs prevent duplicate input
+admission, not repeated model calls or provider billing after interruption.
+
+Creation and cancellation require a nonempty adopted **owner-only current run**, checked again at
+the mutation boundary against the running tool and exact input set. Earlier peer history and web
+reads do not revoke this permission. Peer-only, scheduled-only, mixed owner/nonowner, idle, or
+unresolved provenance fails closed. After a mixed run settles, a new owner-only run can mutate again.
+Listing is read-only and available to other runs when enabled. Opt-in grants bounded model discretion,
+not proof of the owner's approval of every argument; prompt injection and recurring-cost risks remain.
+
+Scheduled inputs use `kodama.scheduled-message`, never owner provenance. They do not grant URLs from
+the instruction; existing known URLs and normal search remain usable, with no restored contact-taint
+ban or one-shot web permission. They start their own contact hop at zero and retain the three-hop
+peer limit. Scheduled-only model usage is attributed to the system; an adopted mixed run charges the
+working agent once, with owner attribution taking precedence over peer and then system attribution.
+Dedicated memory jobs retain their requester/job accounting. A scheduled model cannot recursively
+create or cancel definitions, but server-side expansion of an existing immutable recurrence is allowed.
+
+Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, notifications, and UI
+management are outside this version.
+
 ## Storage in the Durable Object
 
 Each object's SQLite holds two sets of tables:
@@ -763,7 +860,8 @@ Each object's SQLite holds two sets of tables:
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
   (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
-  (`kodama_external_data`), and the known URLs checked on every fetch (`kodama_known_urls`). Their
+  (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), and scheduled
+  definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`). Their
   migrations are generated into `drizzle/durable-object/migrations` and applied by
   `src/agent/local-db/local.ts` before the harness opens.
 
