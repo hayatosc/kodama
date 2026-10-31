@@ -32,7 +32,16 @@ describe('schedule specifications', () => {
     const rule = normalizeSchedule({ kind: 'once', run_at: '2026-01-02T09:00:00+09:00' }, now)
     expect(nextAfter(rule, now)).toBe(Date.parse('2026-01-02T00:00:00Z'))
     expect(nextAfter(rule, rule.start)).toBeUndefined()
-    for (const value of ['2026-02-30T09:00:00Z', '2026-01-01T09:00:00'])
+    expect(scheduleDate('2026-01-02T09:00:00.123+09:00')).toBe(
+      Date.parse('2026-01-02T00:00:00.123Z'),
+    )
+    for (const value of [
+      '2026-02-30T09:00:00Z',
+      '2026-01-01T09:00:00',
+      '2026-01-01T24:00:00Z',
+      '2026-01-01T00:00:60Z',
+      '2026-01-01T00:00:00+24:00',
+    ])
       expect(() => scheduleDate(value)).toThrow()
   })
 
@@ -79,6 +88,16 @@ describe('schedule specifications', () => {
     )
     expect(latestAtOrBefore(fall, Date.parse('2026-11-01T07:00:00Z'))).toBe(
       Date.parse('2026-11-01T05:30:00Z'),
+    )
+  })
+
+  it('selects the latest cron tick after decades without replaying missed occurrences', () => {
+    const rule = normalizeSchedule({ kind: 'cron', expression: '* * * * *', timezone: 'UTC' }, now)
+    expect(latestAtOrBefore(rule, Date.parse('2126-06-01T23:59:59Z'))).toBe(
+      Date.parse('2126-06-01T23:59:00Z'),
+    )
+    expect(nextAfter(rule, Date.parse('2126-06-01T23:59:59Z'))).toBe(
+      Date.parse('2126-06-02T00:00:00Z'),
     )
   })
 

@@ -33,7 +33,6 @@ function migratedColumns(folder: string): Record<string, string[]> {
 export default defineConfig({
   test: {
     name: 'workerd',
-    deps: { optimizer: { ssr: { enabled: true, include: ['cron-parser', 'luxon'] } } },
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
     exclude: [
       'cli/index.test.ts',

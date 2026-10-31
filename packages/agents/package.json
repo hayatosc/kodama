@@ -26,16 +26,14 @@
     "@earendil-works/chord": "1.2.0",
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",
-    "cron-parser": "^5.10.2",
     "drizzle-orm": "0.45.3",
-    "luxon": "^3.7.2",
+    "temporal-polyfill-lite": "^1.0.0",
     "uuid": "^14.0.3",
     "valibot": "1.5.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.64.0",
     "@cloudflare/vitest-plugin": "1.4.1",
-    "@types/luxon": "^3.7.6",
     "@types/node": "^26.6.5",
     "@vitest/coverage-istanbul": "5.0.4",
     "cf": "1.0.0-beta.18",

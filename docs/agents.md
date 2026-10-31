@@ -784,8 +784,15 @@ Dates require RFC3339 with an explicit offset. Creation requires a future start 
 Intervals range from 60 to 31,536,000 seconds. Start is inclusive; end is exclusive and optional.
 Cron without an explicit start begins strictly after creation. Invalid calendar dates are rejected;
 day 31 skips shorter months. Missing DST wall-clock minutes are skipped, and a repeated minute runs
-only at its earlier instant. `cron-parser` and Luxon use platform IANA data; a bounded eight-year
-calendar search and validation of DST candidates avoid scanning missed minutes.
+only at its earlier instant. The numeric cron parser and bounded eight-year calendar search are
+implemented in `agent/cron.ts`. Search walks calendar dates and allowed hours/minutes on matching
+dates, not elapsed minutes or missed occurrences. Both directions validate the earlier instant by
+round-tripping to the requested wall time, which skips DST gaps without silently shifting work.
+
+Datetime parsing and calendar/timezone operations use the Gregorian/ISO bundle of
+`temporal-polyfill-lite`, imported as a module-local Temporal implementation without patching globals.
+It uses platform IANA data and works even when the Workers runtime does not expose native Temporal.
+No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
 
 The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
 `agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. There are two

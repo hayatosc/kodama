@@ -2,8 +2,8 @@
  * @see docs/agents.md — Scheduled tasks
  * @module
  */
-import { CronExpressionParser } from 'cron-parser'
-import { DateTime, IANAZone } from 'luxon'
+import { Temporal } from 'temporal-polyfill-lite'
+import { cronTime, parseCron, validateCronZone } from './cron.ts'
 import * as v from 'valibot'
 
 const date = v.string()
@@ -41,9 +41,11 @@ export function scheduleDate(value: string): number {
     )
   )
     throw new TypeError('schedule_date: expected RFC3339 with an explicit offset')
-  const parsed = DateTime.fromISO(value, { setZone: true })
-  if (!parsed.isValid) throw new TypeError('schedule_date: invalid calendar date')
-  return parsed.toMillis()
+  try {
+    return Temporal.Instant.from(value).epochMilliseconds
+  } catch {
+    throw new TypeError('schedule_date: invalid calendar date')
+  }
 }
 
 /** Freeze the default anchor once, validate limits, and require at least one occurrence. */
@@ -67,23 +69,8 @@ export function normalizeSchedule(input: Schedule, now: number): ScheduleSpec {
       }
     else {
       const expression = input.expression.trim().replace(/\s+/g, ' ')
-      const fields = expression.split(' ')
-      if (
-        fields.length !== 5 ||
-        fields.some((field) => !/^[\d*,/-]+$/.test(field)) ||
-        (fields[2] !== '*' && fields[4] !== '*')
-      )
-        throw new TypeError(
-          'schedule_cron: five numeric fields; day-of-month or day-of-week must be *',
-        )
-      if (/^[+-]/.test(input.timezone) || !IANAZone.isValidZone(input.timezone))
-        throw new TypeError('schedule_timezone: expected an IANA zone')
-      // The library's strict grammar includes seconds; the public grammar does not.
-      CronExpressionParser.parse(`0 ${expression}`, {
-        strict: true,
-        tz: input.timezone,
-        currentDate: now,
-      })
+      parseCron(expression)
+      validateCronZone(input.timezone)
       spec = {
         kind: 'cron',
         start,
@@ -105,30 +92,13 @@ function cronAt(
   at: number,
   forward: boolean,
 ): number | undefined {
-  const horizon = 8 * 366 * 86_400_000
-  const start = Math.max(spec.start, at - horizon)
-  const end = Math.min(spec.end === undefined ? at + horizon : spec.end - 1, at + horizon)
-  if (start > end) return undefined
-  const iterator = CronExpressionParser.parse(`0 ${spec.expression}`, {
-    strict: true,
-    tz: spec.timezone,
-    currentDate: at,
-    startDate: start - 1,
-    endDate: end,
-  })
-  // Only DST-adjusted candidates are skipped; never enumerate elapsed minutes or missed runs.
-  for (let attempts = 0; attempts < 32; attempts++) {
-    if (forward ? !iterator.hasNext() : !iterator.hasPrev()) return undefined
-    const candidate = forward ? iterator.next() : iterator.prev()
-    const timestamp = candidate.toDate().getTime()
-    if (!iterator.includesDate(candidate)) continue // Spring-forward normalization is not a match.
-    const offsets = DateTime.fromMillis(timestamp, { zone: spec.timezone }).getPossibleOffsets()
-    const earlier = Math.min(...offsets.map((value) => value.toMillis()))
-    if (timestamp !== earlier) continue // Repeated local minute runs only at its earlier instant.
-    if (timestamp >= spec.start && (spec.end === undefined || timestamp < spec.end))
-      return timestamp
-  }
-  throw new TypeError('schedule_search: candidate validation bound exceeded')
+  return cronTime(
+    spec.expression,
+    spec.timezone,
+    forward ? Math.max(spec.start, at + 1) : spec.start,
+    Math.min(spec.end === undefined ? Infinity : spec.end - 1, forward ? Infinity : at - 1),
+    forward,
+  )
 }
 
 /** First nominal occurrence strictly after `after`, within immutable start/end bounds. */
