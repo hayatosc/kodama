@@ -2,7 +2,7 @@
  * @see docs/agents.md — Scheduled tasks
  * @module
  */
-import { Temporal } from 'temporal-polyfill-lite'
+import { Temporal } from '../lib/temporal.ts'
 import { cronTime, parseCron, validateCronZone } from './cron.ts'
 import * as v from 'valibot'
 

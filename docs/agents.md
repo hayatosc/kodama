@@ -789,9 +789,11 @@ implemented in `agent/cron.ts`. Search walks calendar dates and allowed hours/mi
 dates, not elapsed minutes or missed occurrences. Both directions validate the earlier instant by
 round-tripping to the requested wall time, which skips DST gaps without silently shifting work.
 
-Datetime parsing and calendar/timezone operations use the Gregorian/ISO bundle of
-`temporal-polyfill-lite`, imported as a module-local Temporal implementation without patching globals.
-It uses platform IANA data and works even when the Workers runtime does not expose native Temporal.
+Datetime parsing and calendar/timezone operations import Temporal only through `lib/temporal.ts`.
+This boundary currently exports the Gregorian/ISO bundle of `temporal-polyfill-lite` without patching
+globals. It uses platform IANA data and works even when the Workers runtime does not expose native
+Temporal. Once native support is available, switch the implementation at this boundary rather than
+changing each caller.
 No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
 
 The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
@@ -820,8 +822,10 @@ Creation replays use the durable tool-task identity and canonical arguments befo
 or generating a default anchor. Cancellation stops future materialization, reports any already
 claimed execution as too late to cancel, and never calls global conversation cancellation. Global
 conversation cancellation likewise does not remove future reservations. Terminal receipts are saved
-before pruning; pruning defers while any occurrence is unresolved. Settled receipt details may be
-removed after 30 days, while definitions and cursors are retained as replay tombstones. This is
+before pruning; pruning defers while admission may have started or an accepted submission remains
+unresolved. Never-admitted claims do not block pruning, so storage-pressure retries can recover.
+Settled receipt details may be removed after 30 days, while definitions and cursors are retained as
+replay tombstones. This is
 conservative retention, not a complete history-retention policy. Request IDs prevent duplicate input
 admission, not repeated model calls or provider billing after interruption.
 

@@ -495,8 +495,14 @@ export class Agent extends DurableObject<AgentEnv> {
       async (harness) => {
         const local = await this.#local
         await reconcileSchedules(local, harness)
-        // Keep all acceptance evidence while any delivery is uncertain or still executing.
-        if (pendingOccurrences(local).length) return false
+        // Never-admitted claims need pruning to recover from storage pressure. Preserve evidence
+        // only after admission may have started or an accepted submission remains unresolved.
+        if (
+          pendingOccurrences(local).some(
+            ({ occurrence }) => occurrence.admissionStarted || occurrence.state === 'submitted',
+          )
+        )
+          return false
         return check(harness)
       },
       mutate,

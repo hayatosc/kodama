@@ -26,7 +26,8 @@ export async function pruneSlice(deps: PruneDeps, force: boolean): Promise<Prune
   const outcome = await pruneOnce(deps, { force })
   const remaining =
     !force && outcome === 'pruned' && (await needsPrune(deps.storage, await deps.local()))
-  const retryAt = outcome === 'deferred' || remaining ? Date.now() + PRUNE_RETRY_MS : undefined
+  const retryAt =
+    outcome === 'deferred' ? Date.now() + PRUNE_RETRY_MS : remaining ? Date.now() : undefined
   await setAlarm(deps.storage, 'prune', retryAt)
   return outcome
 }

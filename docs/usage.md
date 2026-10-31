@@ -30,9 +30,12 @@ is marked not applicable. This is catalog accounting, not a provider invoice rec
 
 Memory jobs persist their accounting context before submission and restore it before resumed
 requests. Each stream snapshots that context. A job cannot relinquish it or start the next
-job until every Pi task, including background compaction, settles. When working admissions
-mix user and peer input while busy, user attribution takes precedence. Actual parent/sub-agent
-and working-agent scheduled execution do not exist yet and are not simulated here.
+job until every Pi task, including background compaction, settles. Working invocations use the
+currently adopted run inputs, with owner (`user`) attribution taking precedence over peer (`agent`),
+then scheduled (`system`) input. Scheduled-only runs charge the working registry UUID with actor
+`system`; queued inputs that have not been adopted do not change that run's attribution. Dedicated
+memory-job accounting remains separate and retains its persisted requester context. Actual
+parent/sub-agent execution does not exist yet and is not simulated here.
 
 ## Daily usage reads
 

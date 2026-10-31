@@ -2,7 +2,7 @@
  * @see docs/agents.md — Scheduled tasks
  * @module
  */
-import { Temporal } from 'temporal-polyfill-lite'
+import { Temporal } from '../lib/temporal.ts'
 
 /** Sorted allowed values; Sunday is normalized to zero after expanding ranges and steps. */
 export interface CronFields {
@@ -71,7 +71,7 @@ export function parseCron(expression: string): CronFields {
 
 /** Require a named zone backed by platform IANA data, not a fixed numeric offset. */
 export function validateCronZone(timezone: string): void {
-  if (!timezone || /^[+-]/.test(timezone))
+  if (!/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/.test(timezone))
     throw new TypeError('schedule_timezone: expected an IANA zone')
   try {
     Temporal.Instant.fromEpochMilliseconds(0).toZonedDateTimeISO(timezone)

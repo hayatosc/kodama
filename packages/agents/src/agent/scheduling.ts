@@ -150,7 +150,7 @@ export function scheduledDraft(
 function permanentRefusal(error: unknown): boolean {
   return (
     error instanceof Error &&
-    /^(schedule_disabled|agent_restricted|Agent is not|credential_unavailable:.*(?:needs_reauth|missing|not granted|revoked|disabled))/.test(
+    /^(schedule_disabled|agent_restricted|agent_unavailable:|Unknown agent:|credential_unavailable:.*(?:needs_reauth|no usable assigned credential|missing|not granted|revoked|disabled))/.test(
       error.message,
     )
   )
