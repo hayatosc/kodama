@@ -64,7 +64,11 @@ active agent; list/download/delete remain available while paused or archived. Me
 URL. List returns an array ordered by ascending artifact ID, defaults to 50 items, and accepts a
 limit of 1–100; use the last returned ID as the next cursor. Downloads return metadata plus a
 `Uint8Array`. A missing, expired, uploading, deleting, or another owner's ID cannot be downloaded.
-Deleting a missing or another owner's ID is an indistinguishable no-op, not a cross-owner operation.
+Deleting an ID absent from the caller's local metadata, including another owner's ID, is an
+indistinguishable no-op, not a cross-owner operation. If a local metadata row exists but its storage
+key points outside the owner's prefix, download and deletion reject with `artifact_unavailable`
+before accessing R2. This is an integrity failure, not an ordinary missing ID; the ownership check
+is never bypassed.
 
 With the local development Worker and an existing `assistant` agent:
 

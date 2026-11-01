@@ -586,29 +586,42 @@ Omit tool names to disable all optional tools.
 at the boundary, admits them from the registry (see [Registry and admission](#registry-and-admission)),
 and forwards to the agent's Durable Object:
 
-| Method                                         | Result                                       |
-| ---------------------------------------------- | -------------------------------------------- |
-| `send(agentId, { requestId, content })`        | SSE response through terminal submission     |
-| `subscribe(agentId)`                           | Continuous agent-wide SSE observation        |
-| `sendMessage(agentId, { requestId, content })` | Durable acceptance with `submissionId`       |
-| `submission(agentId, requestId)`               | Submission status, or `undefined`            |
-| `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
-| `cancel(agentId)`                              | Stop current work; resolves once idle        |
+| Method                                                    | Result                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| `send(agentId, { requestId, content })`                   | SSE response through terminal submission                     |
+| `subscribe(agentId)`                                      | Continuous agent-wide SSE observation                        |
+| `sendMessage(agentId, { requestId, content })`            | Durable acceptance with `submissionId`                       |
+| `submission(agentId, requestId)`                          | Submission status, or `undefined`                            |
+| `snapshot(agentId)`                                       | Committed user/assistant messages and `busy`                 |
+| `cancel(agentId)`                                         | Stop current work; resolves once idle                        |
+| `uploadArtifact(agentId, { filename, mediaType, bytes })` | `ArtifactMetadata`; `chat` admission (active only)           |
+| `listArtifacts(agentId, { cursor?, limit? })`             | `ArtifactMetadata[]`; `read` admission                       |
+| `downloadArtifact(agentId, artifactId)`                   | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
+| `deleteArtifact(agentId, artifactId)`                     | `void`; `read` admission                                     |
+
+Artifact `read` admission also permits paused and archived working agents. Metadata contains
+`artifactId`, `filename`, `mediaType`, `size`, `createdAt`, and `expiresAt`, never a storage key.
+See [Artifact operations](extensions.md#artifact-operations) for pagination, retention, and the
+distinction between an absent local ID (delete is a no-op) and a corrupt owner key (rejected).
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
 few more methods, for other Durable Objects and for `AgentService`:
 
-| Method                          | Caller       | Effect                                                         |
-| ------------------------------- | ------------ | -------------------------------------------------------------- |
-| `sendTo(agentId, message)`      | an agent     | deliver to another agent; returns once the target admits input |
-| `applyConfig(pushed)`           | AgentService | apply a configuration version now, or hold it until idle       |
-| `setStatus(status)`             | AgentService | set the object's copy of its registry state                    |
-| `getConfig()`                   | tests, tools | the applied configuration as Pi holds it                       |
-| `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
-| `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
-| `prune({ force })`              | maintenance  | archive and delete old entries                                 |
-| `enqueue(job)`, `jobStatus(id)` | agents       | queue a memory job and read its status (memory agent only)     |
-| `consolidate(now)`              | cron         | the daily consolidation (memory agent only)                    |
+| Method                          | Caller                              | Effect                                                              |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| `sendTo(agentId, message)`      | an agent                            | deliver to another agent; returns once the target admits input      |
+| `applyConfig(pushed)`           | AgentService                        | apply a configuration version now, or hold it until idle            |
+| `setStatus(status)`             | AgentService                        | set the object's copy of its registry state                         |
+| `getConfig()`                   | tests, tools                        | the applied configuration as Pi holds it                            |
+| `readEntries({ after, limit })` | memory agent                        | conversation text after an entry, from Pi or from the archive       |
+| `memoryChanged()`               | memory agent                        | refresh the always-loaded memory now, or when next idle             |
+| `prune({ force })`              | maintenance                         | archive and delete old entries                                      |
+| `enqueue(job)`, `jobStatus(id)` | agents                              | queue a memory job and read its status (memory agent only)          |
+| `consolidate(now)`              | cron                                | the daily consolidation (memory agent only)                         |
+| `uploadArtifact(input)`         | AgentService, owner-bound execution | return `ArtifactMetadata`; active only (`chat` at service boundary) |
+| `listArtifacts(page)`           | AgentService                        | return `ArtifactMetadata[]`; `read` at service boundary             |
+| `downloadArtifact(id)`          | AgentService, owner-bound execution | return metadata and `Uint8Array` bytes; `read` at service boundary  |
+| `deleteArtifact(id)`            | AgentService, owner-bound execution | retryable deletion returning `void`; `read` at service boundary     |
 
 ### IDs, limits, and retries
 

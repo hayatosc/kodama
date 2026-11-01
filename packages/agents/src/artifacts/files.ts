@@ -89,7 +89,7 @@ export async function downloadArtifact(db: LocalDb, bucket: R2Bucket, owner: str
   return { ...artifactMetadata(row), bytes }
 }
 
-/** A missing ID is indistinguishable from another owner's ID; retries of deletion are safe. */
+/** Retryable deletion: absent local IDs are no-ops; local rows with foreign storage keys reject. */
 export async function deleteArtifact(
   db: LocalDb,
   bucket: R2Bucket,

@@ -372,7 +372,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return { artifactId, filename, mediaType, size, createdAt, expiresAt, bytes }
   }
 
-  /** Retryable deletion; another owner's or a missing ID has no effect. */
+  /** Retryable deletion; absent local IDs are no-ops, but corrupt owner keys reject. */
   async deleteArtifact(agentId: string, artifactId: string): Promise<void> {
     return (await this.#agent(agentId, 'read')).deleteArtifact(artifactId)
   }

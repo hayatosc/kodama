@@ -92,12 +92,19 @@ async function main(): Promise<void> {
   }
   let artifact: { filename: string; bytes: Uint8Array } | undefined
   if (command.action === 'artifact-upload') {
-    const stat = statSync(command.path)
-    if (!stat.isFile() || stat.size > MAX_ARTIFACT_BYTES)
-      throw new Error('Upload must be a file of at most 10 MiB')
-    const bytes = readFileSync(command.path)
-    if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('Upload exceeds 10 MiB')
-    artifact = { filename: basename(command.path), bytes }
+    try {
+      const stat = statSync(command.path)
+      if (!stat.isFile() || stat.size > MAX_ARTIFACT_BYTES)
+        throw new Error('Upload must be a file of at most 10 MiB')
+      const bytes = readFileSync(command.path)
+      if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('Upload exceeds 10 MiB')
+      artifact = { filename: basename(command.path), bytes }
+    } catch (error) {
+      throw new Error(
+        'Cannot upload file. Choose a readable regular file of at most 10 MiB. See nr agent --help.',
+        { cause: error },
+      )
+    }
   }
   let response: Response
   try {
