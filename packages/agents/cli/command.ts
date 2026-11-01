@@ -160,7 +160,9 @@ export function toCommand(
       return {
         action: 'artifact-list',
         agentRef,
-        ...(values.cursor ? { cursor: parseInput(ExtensionIdSchema, values.cursor) } : {}),
+        ...(values.cursor === undefined
+          ? {}
+          : { cursor: parseInput(ExtensionIdSchema, values.cursor) }),
         ...(limit === undefined ? {} : { limit }),
       }
     }

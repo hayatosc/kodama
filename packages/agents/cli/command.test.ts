@@ -56,6 +56,14 @@ describe('toCommand', () => {
     expect(() => command(['artifacts', 'download', 'assistant', '../key', 'x'])).toThrow()
     expect(() => command(['artifacts', 'download', 'assistant', 'id'])).toThrow()
   })
+  it('omits an absent artifact cursor but rejects an explicitly empty one', () => {
+    expect(command(['artifacts', 'list', 'assistant'])).toEqual({
+      action: 'artifact-list',
+      agentRef: 'assistant',
+    })
+    expect(() => command(['artifacts', 'list', 'assistant'], { cursor: '' })).toThrow(TypeError)
+  })
+
   it('sets the full optional tool selection, including an empty selection', () => {
     expect(command(['tools', 'assistant', 'contact_agent'])).toEqual({
       action: 'tools',
