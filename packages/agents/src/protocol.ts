@@ -18,6 +18,10 @@ export type {
   CompletionOutcome,
   CompletionReference,
   ContactResult,
+  NotificationItem,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
 } from './extensions.ts'
 
 /**

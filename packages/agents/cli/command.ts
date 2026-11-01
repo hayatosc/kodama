@@ -7,8 +7,21 @@
  * @module
  */
 import { uuidv7 } from '../src/lib/uuid.ts'
-import type { CreateAgentRequest, SendMessageRequest } from '../src/protocol.ts'
-import { parseAgentId, parseAgentRef, parseMessage, parseRequestId } from '../src/validation.ts'
+import type {
+  CreateAgentRequest,
+  NotificationQuery,
+  NotificationRead,
+  SendMessageRequest,
+} from '../src/protocol.ts'
+import {
+  parseAgentId,
+  parseAgentRef,
+  parseInput,
+  parseMessage,
+  parseRequestId,
+  NotificationQuerySchema,
+  NotificationReadSchema,
+} from '../src/validation.ts'
 
 /** Where the local Worker listens. */
 export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
@@ -28,6 +41,8 @@ export const USAGE = `Usage:
   nr agent credentials revoke <credential-id>
   nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
   nr agent snapshot <agent>
+  nr agent notifications <agent> [--before SEQ] [--limit N] [--unread]
+  nr agent notification-read <agent> <seq>
   nr agent cancel <agent>
 
 Start nr dev:agents in another terminal first (localhost:5173).
@@ -60,6 +75,8 @@ export type Command =
   | { action: 'credentials/revoke'; credentialId: string }
   | { action: 'dev/seed-credentials' }
   | { action: 'snapshot' | 'cancel'; agentRef: string }
+  | { action: 'notifications'; agentRef: string; query: NotificationQuery }
+  | { action: 'notification-read'; agentRef: string; request: NotificationRead }
   | { action: 'send'; agentRef: string; message: SendMessageRequest; events: boolean }
 
 /** The CLI's options, for `parseArgs` from `node:util`. */
@@ -68,6 +85,9 @@ export const CLI_OPTIONS = {
   'request-id': { type: 'string' },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
+  before: { type: 'string' },
+  limit: { type: 'string' },
+  unread: { type: 'boolean' },
   name: { type: 'string' },
   credential: { type: 'string', multiple: true },
   provider: { type: 'string' },
@@ -81,6 +101,9 @@ export interface ParsedArgs {
     'request-id'?: string
     steer?: boolean
     events?: boolean
+    before?: string
+    limit?: string
+    unread?: boolean
     name?: string
     credential?: string[]
     provider?: string
@@ -150,8 +173,24 @@ export function toCommand(
       }
     throw new Error('Invalid credential command; see nr agent --help')
   }
+  if (action === 'notifications' && positionals.length === 2)
+    return {
+      action,
+      agentRef: parseAgentRef(rawAgentRef),
+      query: parseInput(NotificationQuerySchema, {
+        ...(values.before === undefined ? {} : { before: Number(values.before) }),
+        ...(values.limit === undefined ? {} : { limit: Number(values.limit) }),
+        unreadOnly: values.unread === true,
+      }),
+    }
+  if (action === 'notification-read' && positionals.length === 3)
+    return {
+      action,
+      agentRef: parseAgentRef(rawAgentRef),
+      request: parseInput(NotificationReadSchema, { seq: Number(content) }),
+    }
   if (action !== 'seed' && action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
-    throw new Error('Expected seed, send, snapshot, or cancel; see nr agent --help')
+    throw new Error('Invalid command or arguments; see nr agent --help')
   }
   const expected = action === 'send' ? 3 : action === 'seed' ? 1 : 2
   if (positionals.length !== expected) {
@@ -194,13 +233,17 @@ export function commandRequest(
       body:
         command.action === 'send'
           ? JSON.stringify(command.message)
-          : command.action === 'create'
-            ? JSON.stringify(command.request)
-            : command.action === 'seed' && command.credentialIds
-              ? JSON.stringify({ credentialIds: command.credentialIds })
-              : command.action === 'tools'
-                ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
-                : credentialJson,
+          : command.action === 'notifications'
+            ? JSON.stringify(command.query)
+            : command.action === 'notification-read'
+              ? JSON.stringify(command.request)
+              : command.action === 'create'
+                ? JSON.stringify(command.request)
+                : command.action === 'seed' && command.credentialIds
+                  ? JSON.stringify({ credentialIds: command.credentialIds })
+                  : command.action === 'tools'
+                    ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
+                    : credentialJson,
       redirect: 'error',
     },
   }

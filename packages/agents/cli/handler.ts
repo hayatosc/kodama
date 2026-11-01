@@ -4,14 +4,21 @@
  * @module
  */
 import * as v from 'valibot'
-import { RequestIdSchema } from '../src/validation.ts'
+import {
+  RequestIdSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
+} from '../src/validation.ts'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
 import { selectedCredentialRefs } from '../src/credentials/validation.ts'
 import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 
-type Service = Pick<AgentService, 'send' | 'snapshot' | 'cancel'>
+type Service = Pick<
+  AgentService,
+  'send' | 'snapshot' | 'cancel' | 'notifications' | 'readNotification'
+>
 type Management = Pick<
   AgentService,
   | 'seed'
@@ -98,6 +105,20 @@ export async function handleCli(
         }),
       )
     }
+    if (action === 'notifications')
+      return Response.json(
+        await service.notifications(
+          agentId,
+          parseInput(NotificationQuerySchema, await request.json()),
+        ),
+      )
+    if (action === 'notification-read')
+      return Response.json({
+        found: await service.readNotification(
+          agentId,
+          parseInput(NotificationReadSchema, await request.json()),
+        ),
+      })
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)

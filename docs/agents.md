@@ -583,6 +583,8 @@ and forwards to the agent's Durable Object:
 | `submission(agentId, requestId)`               | Submission status, or `undefined`            |
 | `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
 | `cancel(agentId)`                              | Stop current work; resolves once idle        |
+| `notifications(agentId, query?)`               | Newest-first bounded agent-wide inbox        |
+| `readNotification(agentId, { seq })`           | Exact agent-wide read acknowledgement        |
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
 few more methods, for other Durable Objects and for `AgentService`:
@@ -851,7 +853,7 @@ not duplicate provider billing.
 
 Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task` in
 `settings.tools`. They manage only that agent's reservations. There is no new public scheduling RPC,
-notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
+external notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
 its nominal time; it does not guarantee exact-time execution or wait for the model in the alarm.
 
 `schedule_task` takes `{ schedule, instruction }`. Supported rules are:
@@ -929,8 +931,13 @@ working agent once, with owner attribution taking precedence over peer and then 
 Dedicated memory jobs retain their requester/job accounting. A scheduled model cannot recursively
 create or cancel definitions, but server-side expansion of an existing immutable recurrence is allowed.
 
-Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, notifications, and UI
-management are outside this version.
+Scheduled terminal completions also produce a durable agent-wide inbox notification atomically with
+the occurrence receipt. The notification references the occurrence ID, not its definition, and never
+wakes a model or inserts owner input. Inbox reads use descending sequence pagination and exact
+acknowledgements; see [extensions.md — Inbox API and retention](extensions.md#inbox-api-and-retention).
+
+Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, external notification
+delivery, and UI management are outside this version.
 
 ## Storage in the Durable Object
 
@@ -1023,6 +1030,9 @@ nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
 nr agent credentials revoke <old-credential-id>
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
+nr agent notifications assistant --unread --limit 20
+nr agent notifications assistant --before 42
+nr agent notification-read assistant 41
 nr agent cancel assistant
 nr agent send assistant "Hello!" --request-id my-test-1
 nr agent send assistant "Change direction." --steer
@@ -1063,6 +1073,10 @@ The CLI works like this:
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
+- `notifications` returns newest-first JSON pages, with an exclusive `nextBefore` cursor for
+  `--before`. `--unread` filters agent-wide unread metadata; `--limit` is 1–100 (default 50).
+  `notification-read <agent> <seq>` acknowledges exactly one sequence, idempotently, without
+  deleting the result. It returns `{ found: false }` for missing or expired metadata.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
 
 The CLI ([`cli/`](../packages/agents/cli/)) connects to a token-authenticated adapter at

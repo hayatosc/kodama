@@ -14,6 +14,9 @@ import { assignCredential } from './credentials/assignments.ts'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
@@ -52,6 +55,8 @@ import {
   ListFilterSchema,
   HistoryPageSchema,
   RenameAgentSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
   parseManagementActor,
   parseAgentId,
   parseAgentRef,
@@ -373,6 +378,22 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   async sendMessage(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
     const submissionId = await (await this.#agent(agentId, 'chat')).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** List the admitted working agent's inbox; paused and archived agents remain readable. */
+  async notifications(agentId: string, query: NotificationQuery = {}): Promise<NotificationPage> {
+    const input = parseInput(NotificationQuerySchema, query)
+    using page = await (await this.#agent(agentId, 'read')).notifications(input)
+    return {
+      notifications: page.notifications,
+      ...(page.nextBefore === undefined ? {} : { nextBefore: page.nextBefore }),
+    }
+  }
+
+  /** Acknowledge one exact sequence agent-wide without deleting the referenced result. */
+  async readNotification(agentId: string, request: NotificationRead): Promise<boolean> {
+    const input = parseInput(NotificationReadSchema, request)
+    return (await this.#agent(agentId, 'read')).readNotification(input)
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */
