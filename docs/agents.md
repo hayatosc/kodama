@@ -228,6 +228,8 @@ The tool accepts:
 - `code`: JavaScript or TypeScript exporting a default function. It receives `input` and returns a
   JSON-serializable value; asynchronous functions are supported.
 - `input`: an optional JSON value, defaulting to `null`.
+- `files`: optional owner-local artifact IDs (at most 100). Omit it for the unchanged JSON API;
+  use `[]` for output-only file execution. See [Artifact operations](extensions.md#artifact-operations).
 - `dependencies`: optional npm package-name/version pairs.
 - `virtualModules`: optional import-name/source pairs passed directly to `createWorker()` for
   compatibility aliases. Nothing executes in the host as a virtual module.
@@ -249,10 +251,12 @@ and adding a `truncated` warning. A truncated result is not necessarily valid JS
 Pi defaults, not an additional `execute_code` quota; regression tests cover results larger than the
 SQLite row limit, including multibyte and JSON-escaped text. The executor still reads the full response
 into host memory before Pi bounds it. Compilation and runtime failures become normal tool errors.
-Results are untrusted data, not instructions or authorization. This tool does not add a file
-upload/download API, persistent artifact storage, Office-specific operations, a shell, or a persistent
-session. Binary
-files require an explicit encoding in JSON until a separate file transport is introduced.
+Results are untrusted data, not instructions or authorization. File mode passes only explicitly
+selected bytes to `run(input, files)` and persists validated binary outputs as artifacts, without
+putting those bytes in the model transcript. Input and output aggregate byte limits are each 10 MiB,
+with four outputs maximum. It does not add format-specific parsing, previews, Office operations,
+a shell, or a persistent session. The file response transport is bounded to 10 MiB plus 64 KiB for
+multipart metadata and the JSON result before decoding, unlike the legacy JSON-only response.
 
 Kodama uses the official
 [`createWorker()` flow](https://developers.cloudflare.com/dynamic-workers/getting-started/#using-typescript-and-npm-dependencies),
@@ -273,15 +277,22 @@ The Worker Loader cache ID is a SHA-256 fingerprint of the agent ID, the actual 
 (including binary bytes), and all supplied runtime settings. This avoids sharing globals between
 agents or reusing an ID for different npm resolutions after a rebuild. The loader can reuse compiled
 code and warm isolates, even after a local compilation cache miss. Cache retention is not guaranteed:
-module globals and temporary files may survive calls, but must never be relied on for persistence.
+module globals may survive JSON-only calls, but must never be relied on for persistence.
 This is code reuse, not a persistent execution session or a cache of execution results. No live
-Worker stubs are retained across requests.
+Worker stubs are retained across requests. File-mode calls add a fresh random suffix to the loader
+identity, so a subsequent call cannot recover previously selected bytes from module globals. JSON-only
+calls retain their existing cache behavior.
 
-Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty `env`, and
-`globalOutbound: null`. Generated code receives no secrets, credentials, D1, R2, Durable
+Generated Workers use compatibility date `2026-10-01`, an empty `env`, and `globalOutbound: null`.
+JSON-only calls retain their existing `nodejs_compat` runtime and npm/Node support. File calls instead
+use `no_nodejs_compat` and `no_nodejs_compat_v2` so no native Node module can access the virtual
+filesystem: disabling only `node:fs` does not prevent `node:fs/promises` access. File-mode dependencies
+must work with Web APIs; Node built-in-dependent packages are unsupported in file mode. This runtime
+restriction does not change the existing JSON-only API or its Node compatibility.
+Generated code receives no secrets, credentials, D1, R2, Durable
 Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
 isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
-default resource limits apply: no application-specific CPU, wall-time, size, concurrency, or daily
+default resource limits apply: no application-specific CPU, wall-time, source-size, concurrency, or daily
 quotas and no price accounting are added. Compilation runs in the host before the generated isolate
 starts, so large source or dependency inputs can exhaust the host's platform CPU or memory budget;
 the generated Worker's isolation does not protect that compilation phase.
@@ -1064,6 +1075,10 @@ The CLI works like this:
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
+- `artifacts upload/list/download/delete` operates on an admitted working agent's arbitrary binary
+  files. Downloads require a new local path, use private file permissions, and never print file bytes
+  to the terminal or overwrite an existing file. See [Artifact operations](extensions.md#artifact-operations)
+  for upload, tool configuration, code execution, and download examples.
 
 The CLI ([`cli/`](../packages/agents/cli/)) connects to a token-authenticated adapter at
 `127.0.0.1:5173`, which calls the Durable Object RPC methods. Only the `development` mode selects

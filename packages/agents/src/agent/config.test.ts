@@ -68,6 +68,52 @@ it('does not run a registered tool that the applied version does not enable', as
   expect(toolResults(requestBody(vi.mocked(globalThis.fetch).mock.calls[1]?.[1]))).toBe(1)
 })
 
+it('executes selected binary files through the real tool loop and persists downloadable outputs', async () => {
+  const id = await newAgentId()
+  await updateSettings(id, {
+    tools: ['execute_code', 'list_artifacts', 'delete_artifact'],
+    memoryPolicy: { remember: true, extract: false },
+  })
+  const bytes = new Uint8Array([80, 75, 5, 6, ...Array.from({ length: 18 }, () => 0)])
+  const file = await exports.default.uploadArtifact(id, {
+    filename: 'source.zip',
+    mediaType: 'application/zip',
+    bytes,
+  })
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    toolCallResponse({
+      name: 'execute_code',
+      arguments: {
+        files: [file.artifactId],
+        code: 'export default (_, files) => ({result:{copied:true},files:files.map(file=>({...file,filename:"copy.zip"}))})',
+      },
+    }),
+  )
+  await exports.default.sendMessage(id, {
+    requestId: 'code-files',
+    content: 'Copy the selected ZIP bytes',
+  })
+  await waitForAnswer(id, 'code-files')
+  const output = (await exports.default.listArtifacts(id)).find(
+    (item) => item.filename === 'copy.zip',
+  )
+  if (!output) throw new Error('Missing code output artifact')
+  expect((await exports.default.downloadArtifact(id, output.artifactId)).bytes).toEqual(bytes)
+  expect(requestBody(vi.mocked(fetch).mock.calls[1]?.[1])).toContain('copied')
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    toolCallResponse({ name: 'list_artifacts', arguments: {} }),
+  )
+  await exports.default.sendMessage(id, { requestId: 'list-files', content: 'List artifacts' })
+  await waitForAnswer(id, 'list-files')
+  expect(requestBody(vi.mocked(fetch).mock.calls.at(-1)?.[1])).toContain('copy.zip')
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    toolCallResponse({ name: 'delete_artifact', arguments: { artifactId: output.artifactId } }),
+  )
+  await exports.default.sendMessage(id, { requestId: 'delete-file', content: 'Delete the copy' })
+  await waitForAnswer(id, 'delete-file')
+  expect(await exports.default.listArtifacts(id)).toEqual([file])
+})
+
 it('executes opted-in code through the real agent tool loop', async () => {
   const id = await newAgentId()
   await updateSettings(id, {

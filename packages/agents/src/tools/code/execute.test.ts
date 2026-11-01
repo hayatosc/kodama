@@ -3,6 +3,32 @@ import { env } from 'cloudflare:workers'
 import * as bundler from '@cloudflare/worker-bundler'
 import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
 import { createCodeExecutor, createCodeTool } from './execute.ts'
+import type { ArtifactUpload } from '../../extensions.ts'
+import { MAX_ARTIFACT_BYTES } from '../../extensions.ts'
+
+function fileStore(inputs: ArtifactUpload[] = []) {
+  const outputs: ArtifactUpload[] = []
+  return {
+    outputs,
+    read: vi.fn(async (id: string) => {
+      const file = inputs[Number(id.replace('input', ''))]
+      if (!file) throw new Error('artifact_unavailable')
+      return file
+    }),
+    write: vi.fn(async (file: ArtifactUpload) => {
+      outputs.push(file)
+      return {
+        artifactId: `output${outputs.length}`,
+        filename: file.filename,
+        mediaType: file.mediaType,
+        size: file.bytes.byteLength,
+        createdAt: 1,
+        expiresAt: 2,
+      }
+    }),
+    remove: vi.fn(async (_id: string) => undefined),
+  }
+}
 
 declare module 'vitest' {
   interface ProvidedContext {
@@ -24,6 +50,278 @@ function trackedLoader() {
     load: vi.fn<WorkerLoader['load']>((code) => env.CODE_LOADER.load(code)),
   }
 }
+
+describe('binary file execution', () => {
+  it('round trips image and ZIP bytes, selecting only explicitly named inputs', async () => {
+    const image = Uint8Array.from(
+      atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+      ),
+      (c) => c.charCodeAt(0),
+    )
+    const zip = new Uint8Array([80, 75, 5, 6, ...Array.from({ length: 18 }, () => 0)])
+    const inputs = [
+      { filename: 'pixel.png', mediaType: 'image/png', bytes: image },
+      { filename: 'empty.zip', mediaType: 'application/zip', bytes: zip },
+      { filename: 'not-selected', mediaType: 'text/plain', bytes: new Uint8Array([99]) },
+    ]
+    const store = fileStore(inputs)
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    const result: unknown = JSON.parse(
+      await execute(
+        {
+          code: 'export default (input, files) => ({ result: input, files })',
+          input: { copied: true },
+          files: ['input0', 'input1'],
+        },
+        allow,
+      ),
+    )
+    expect(result).toMatchObject({
+      result: { copied: true },
+      files: [{ filename: 'pixel.png' }, { filename: 'empty.zip' }],
+    })
+    expect(store.outputs).toEqual(inputs.slice(0, 2))
+    expect(store.read.mock.calls).toEqual([['input0'], ['input1']])
+  })
+
+  it('uses a fresh isolate for file calls so unselected bytes cannot survive in globals', async () => {
+    const store = fileStore([
+      {
+        filename: 'secret.bin',
+        mediaType: 'application/octet-stream',
+        bytes: new Uint8Array([42]),
+      },
+    ])
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    const code =
+      'let previous; export default (_, files) => { const result = previous ?? null; previous = files[0]?.bytes[0]; return { result, files: [] } }'
+    await execute({ code, files: ['input0'] }, allow)
+    expect(JSON.parse(await execute({ code, files: [] }, allow))).toEqual({
+      result: null,
+      files: [],
+    })
+    expect(await execute({ code: 'export default () => typeof previous' }, allow)).toBe(
+      '"undefined"',
+    )
+  })
+
+  it('blocks outbound network and exposes no host bindings in file mode', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    const result: unknown = JSON.parse(
+      await execute(
+        {
+          files: [],
+          code: `import { env } from 'cloudflare:workers'
+      export default async () => {
+        let network = false
+        try { await fetch('https://example.com') } catch { network = true }
+        return { result: { bindings: Object.keys(env), network }, files: [] }
+      }`,
+        },
+        allow,
+      ),
+    )
+    expect(result).toEqual({ result: { bindings: [], network: true }, files: [] })
+  })
+
+  it('disables the filesystem module, including temporary files', async () => {
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
+    await expect(
+      execute(
+        {
+          files: [],
+          code: `import * as fs from 'node:fs'; export default () => ({result:Object.keys(fs),files:[]})`,
+        },
+        allow,
+      ),
+    ).rejects.toThrow(/No such module/)
+  })
+
+  it('preserves JSON-mode Node compatibility even when the same source also runs in file mode', async () => {
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
+    const code = `import { Buffer } from 'node:buffer'; export default () => Buffer.from([1,2,255]).toString('hex')`
+    expect(await execute({ code }, allow)).toBe('"0102ff"')
+    await expect(execute({ code, files: [] }, allow)).rejects.toThrow(/No such module/)
+    expect(await execute({ code }, allow)).toBe('"0102ff"')
+  })
+
+  it('refuses fs/promises access rather than relying on the incomplete fs-only opt-out', async () => {
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
+    await expect(
+      execute(
+        {
+          files: [],
+          code: `
+      import { writeFile, readFile } from 'node:fs/promises'
+      export default async () => {
+        await writeFile('/tmp/unselected', new Uint8Array([1]))
+        return {result: await readFile('/bundle/bundle.js'), files: []}
+      }`,
+        },
+        allow,
+      ),
+    ).rejects.toThrow(/No such module/)
+  })
+
+  it('refuses missing and duplicate IDs without executing or saving outputs', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    for (const files of [['input0'], ['input0', 'input0']])
+      await expect(
+        execute(
+          { code: 'export default () => { throw new Error("should_not_run") }', files },
+          allow,
+        ),
+      ).rejects.toThrow(/artifact_unavailable|code_duplicate_input_file/)
+    expect(store.write).not.toHaveBeenCalled()
+  })
+
+  it('caps aggregate inputs, not only individual files', async () => {
+    const store = fileStore(
+      Array.from({ length: 2 }, () => ({
+        filename: 'large.bin',
+        mediaType: 'application/octet-stream',
+        bytes: new Uint8Array(MAX_ARTIFACT_BYTES / 2 + 1),
+      })),
+    )
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    await expect(
+      execute({ code: 'export default () => ({ files: [] })', files: ['input0', 'input1'] }, allow),
+    ).rejects.toThrow('code_input_byte_limit')
+    expect(store.write).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      'count',
+      'Array.from({length:5}, () => ({filename:"x",mediaType:"application/octet-stream",bytes:new Uint8Array()}))',
+    ],
+    [
+      'aggregate',
+      `Array.from({length:2}, () => ({filename:"x",mediaType:"application/octet-stream",bytes:new Uint8Array(${MAX_ARTIFACT_BYTES / 2 + 1})}))`,
+    ],
+    ['filename', '[{filename:"../x",mediaType:"text/plain",bytes:new Uint8Array([1])}]'],
+    ['bytes', '[{filename:"x",mediaType:"text/plain",bytes:[1]}]'],
+  ])('rejects invalid output %s before persisting any file', async (_, expression) => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    await expect(
+      execute(
+        { code: `export default () => ({result:null,files:${expression}})`, files: [] },
+        allow,
+      ),
+    ).rejects.toThrow()
+    expect(store.write).not.toHaveBeenCalled()
+  })
+
+  it('accepts four outputs and exactly 10 MiB of aggregate output bytes', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    await execute(
+      {
+        code: `export default () => ({ result: 4, files: Array.from({length:4},(_,i)=>({filename:i+'.bin',mediaType:'application/octet-stream',bytes:new Uint8Array(${MAX_ARTIFACT_BYTES / 4})})) })`,
+        files: [],
+      },
+      allow,
+    )
+    expect(store.outputs).toHaveLength(4)
+    expect(store.outputs.reduce((sum, f) => sum + f.bytes.byteLength, 0)).toBe(MAX_ARTIFACT_BYTES)
+  })
+
+  it('rechecks permission after reading inputs and before saving outputs', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    let checks = 0
+    await expect(
+      execute(
+        {
+          code: 'export default () => ({files:[{filename:"x",mediaType:"text/plain",bytes:new Uint8Array()}]})',
+          files: [],
+        },
+        async () => {
+          if (++checks === 4) throw new Error('code_disabled')
+        },
+      ),
+    ).rejects.toThrow('code_disabled')
+    expect(store.write).not.toHaveBeenCalled()
+  })
+
+  it('checks cancellation after output admission before saving bytes', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    const controller = new AbortController()
+    let checks = 0
+    await expect(
+      execute(
+        {
+          code: 'export default () => ({files:[{filename:"x",mediaType:"text/plain",bytes:new Uint8Array()}]})',
+          files: [],
+        },
+        async () => {
+          if (++checks === 4) controller.abort()
+        },
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(store.write).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['count', 'Array.from({length:5},()=>({filename:"x",mediaType:"text/plain"}))', '0'],
+    [
+      'aggregate',
+      '[{filename:"x",mediaType:"text/plain"},{filename:"y",mediaType:"text/plain"}]',
+      String(MAX_ARTIFACT_BYTES / 2 + 1),
+    ],
+    ['filename', '[{filename:"../x",mediaType:"text/plain"}]', '0'],
+  ])(
+    'host validates forged multipart output %s even when code replaces wrapper globals',
+    async (_, manifest, size) => {
+      const store = fileStore()
+      const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+      const code = `const OriginalResponse = Response
+      globalThis.Response = function () {
+        const form = new FormData()
+        const meta = ${manifest}
+        form.set('manifest', JSON.stringify(meta))
+        form.set('result', 'null')
+        meta.forEach((_,i)=>form.set('file'+i,new Blob([new Uint8Array(${size})])))
+        return new OriginalResponse(form)
+      }
+      export default () => ({files:[]})`
+      await expect(execute({ code, files: [] }, allow)).rejects.toThrow()
+      expect(store.write).not.toHaveBeenCalled()
+    },
+  )
+
+  it('rolls back already saved outputs when a later output fails', async () => {
+    const store = fileStore()
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    // The first save succeeds; the second fails after the first acquired a durable ID.
+    store.write
+      .mockResolvedValueOnce({
+        artifactId: 'saved',
+        filename: 'x',
+        mediaType: 'text/plain',
+        size: 0,
+        createdAt: 1,
+        expiresAt: 2,
+      })
+      .mockRejectedValueOnce(new Error('r2_failure'))
+    await expect(
+      execute(
+        {
+          code: 'export default () => ({files:Array.from({length:2},()=>({filename:"x",mediaType:"text/plain",bytes:new Uint8Array()}))})',
+          files: [],
+        },
+        allow,
+      ),
+    ).rejects.toThrow('r2_failure')
+    expect(store.remove).toHaveBeenCalledWith('saved')
+  })
+})
 
 describe('code execution', () => {
   it('runs TypeScript with JSON input and async output', async () => {

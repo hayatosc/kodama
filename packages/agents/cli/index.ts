@@ -5,7 +5,9 @@
  *
  * @module
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename } from 'node:path'
+import { MAX_ARTIFACT_BYTES } from '../src/extensions.ts'
 import { parseArgs } from 'node:util'
 import { createInterface } from 'node:readline/promises'
 import { Writable } from 'node:stream'
@@ -88,12 +90,22 @@ async function main(): Promise<void> {
       process.off('SIGINT', cancel)
     }
   }
+  let artifact: { filename: string; bytes: Uint8Array } | undefined
+  if (command.action === 'artifact-upload') {
+    const stat = statSync(command.path)
+    if (!stat.isFile() || stat.size > MAX_ARTIFACT_BYTES)
+      throw new Error('Upload must be a file of at most 10 MiB')
+    const bytes = readFileSync(command.path)
+    if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('Upload exceeds 10 MiB')
+    artifact = { filename: basename(command.path), bytes }
+  }
   let response: Response
   try {
     const { url, init } = commandRequest(
       command,
       token,
       command.action === 'dev/seed-credentials' ? readFileSync(0, 'utf8') : credentialJson,
+      artifact,
     )
     response = await fetch(url, init)
   } catch (error) {
@@ -105,6 +117,13 @@ async function main(): Promise<void> {
         `Credential operation failed (${response.status}); check the local Worker, KEK and input.`,
       )
     throw new Error(`RPC failed (${response.status}): ${await response.text()}`)
+  }
+  if (command.action === 'artifact-download') {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('Download exceeds 10 MiB')
+    writeFileSync(command.path, bytes, { flag: 'wx', mode: 0o600 })
+    console.log(`Saved ${bytes.byteLength} bytes to ${command.path}`)
+    return
   }
   if (command.action !== 'send') {
     console.log(JSON.stringify(await response.json(), null, 2))

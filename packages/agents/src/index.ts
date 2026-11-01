@@ -7,6 +7,7 @@
  * @module
  */
 import { safeFailure } from './lib/errors.ts'
+import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
@@ -343,6 +344,37 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return credentialFlows.credentialRpc(async () =>
       credentialFlows.revokeCredential(await this.#call(actor), credentialId),
     )
+  }
+
+  /** Store arbitrary bytes under the admitted working agent; no public URL is created. */
+  async uploadArtifact(agentId: string, input: ArtifactUpload): Promise<ArtifactMetadata> {
+    using result = await (await this.#agent(agentId, 'chat')).uploadArtifact(input)
+    const { artifactId, filename, mediaType, size, createdAt, expiresAt } = result
+    return { artifactId, filename, mediaType, size, createdAt, expiresAt }
+  }
+
+  /** Page only this agent's ready, unexpired metadata. */
+  async listArtifacts(
+    agentId: string,
+    page: { cursor?: string; limit?: number } = {},
+  ): Promise<ArtifactMetadata[]> {
+    using result = await (await this.#agent(agentId, 'read')).listArtifacts(page)
+    return Array.from(result)
+  }
+
+  /** Download binary data; the calling Worker must not render active content inline. */
+  async downloadArtifact(
+    agentId: string,
+    artifactId: string,
+  ): Promise<ArtifactMetadata & { bytes: Uint8Array }> {
+    using result = await (await this.#agent(agentId, 'read')).downloadArtifact(artifactId)
+    const { filename, mediaType, size, createdAt, expiresAt, bytes } = result
+    return { artifactId, filename, mediaType, size, createdAt, expiresAt, bytes }
+  }
+
+  /** Retryable deletion; another owner's or a missing ID has no effect. */
+  async deleteArtifact(agentId: string, artifactId: string): Promise<void> {
+    return (await this.#agent(agentId, 'read')).deleteArtifact(artifactId)
   }
 
   /** An SSE stream of the agent's events, starting with a snapshot. */

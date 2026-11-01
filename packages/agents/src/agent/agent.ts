@@ -6,6 +6,15 @@
  * @module
  */
 import { createCodeExecutor } from '../tools/code/execute.ts'
+import {
+  cleanupArtifacts,
+  deleteArtifact,
+  downloadArtifact,
+  readArtifacts,
+  rearmArtifacts,
+  uploadArtifact,
+} from '../artifacts/files.ts'
+import type { ArtifactUpload } from '../extensions.ts'
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
 import { grantUrls } from './local-db/external-data.ts'
 import { urlsInText } from '../tools/web/url.ts'
@@ -28,6 +37,7 @@ import type {
 import * as v from 'valibot'
 import {
   dispatchAlarms,
+  setAlarm,
   setAlarmNoLaterThan,
   armRecovery,
   refreshRecovery,
@@ -162,7 +172,11 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
-    this.#executeCode = createCodeExecutor(env.CODE_LOADER, this.#agentId())
+    this.#executeCode = createCodeExecutor(env.CODE_LOADER, this.#agentId(), {
+      read: (id) => this.downloadArtifact(id),
+      write: (file) => this.uploadArtifact(file),
+      remove: (id) => this.deleteArtifact(id),
+    })
     this.#refusal = anyRefusal(statusRefusal(ctx.storage))
     this.#credentials = agentCredentialStore(
       env,
@@ -391,6 +405,25 @@ export class Agent extends DurableObject<AgentEnv> {
             }),
           context.abortSignal,
         ),
+      async (call) => {
+        await this.#harness
+        return this.#serial(async () => {
+          assertAllowed(this.#refusal)
+          const name = call.operation === 'list' ? 'list_artifacts' : 'delete_artifact'
+          const settings = await appliedSettings(this.ctx.storage)
+          if (!settings?.tools.includes(name) || settings.toolPolicy?.[name] === 'deny')
+            throw new Error('artifacts_disabled')
+          const local = await this.#local
+          if (call.operation === 'list') {
+            const { operation: _operation, ...page } = call
+            return JSON.stringify(readArtifacts(local, page))
+          }
+          await deleteArtifact(local, this.env.ARCHIVE, this.#agentId(), call.artifactId, (at) =>
+            this.#artifactWake(at),
+          )
+          return JSON.stringify({ deleted: true })
+        })
+      },
     )
   }
 
@@ -403,6 +436,7 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async prepare(_harness: Harness): Promise<void> {
     await refreshMemory(this.#workingMemory())
     await rearmScheduling(await this.#local, this.ctx.storage)
+    await rearmArtifacts(await this.#local, (at) => this.#artifactWake(at))
   }
 
   /**
@@ -419,6 +453,12 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Handle one due alarm purpose: extraction once idle, and pruning. */
   protected async onAlarm(purpose: AlarmPurpose): Promise<void> {
+    if (purpose === 'artifacts')
+      await this.#serial(async () =>
+        cleanupArtifacts(await this.#local, this.env.ARCHIVE, this.#agentId(), (at) =>
+          this.#artifactWake(at),
+        ),
+      )
     if (purpose === 'extract') {
       const harness = await this.#harness
       await this.#serial(() => runExtraction(this.#workingMemory(), harness, this.ctx.storage))
@@ -673,6 +713,46 @@ export class Agent extends DurableObject<AgentEnv> {
   async send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     const message = parseMessage(request)
     return sendEvents(await this.#harness, message.requestId, () => this.sendMessage(message))
+  }
+
+  /** Persist cleanup in the object's shared purpose-based alarm scheduler. */
+  #artifactWake(at: number | undefined): Promise<void> {
+    return setAlarm(this.ctx.storage, 'artifacts', at)
+  }
+
+  /** Upload arbitrary bytes without interpreting their extension or declared media type. */
+  async uploadArtifact(input: ArtifactUpload) {
+    await this.#harness
+    return this.#serial(async () => {
+      assertAllowed(this.#refusal)
+      return uploadArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), input, (at) =>
+        this.#artifactWake(at),
+      )
+    })
+  }
+
+  /** Read only this object's unexpired metadata. */
+  async listArtifacts(page: { cursor?: string; limit?: number } = {}) {
+    await this.#harness
+    return this.#serial(async () => readArtifacts(await this.#local, page))
+  }
+
+  /** Return bytes through private RPC, never an executable public response or R2 URL. */
+  async downloadArtifact(id: string) {
+    await this.#harness
+    return this.#serial(async () =>
+      downloadArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), id),
+    )
+  }
+
+  /** Hide immediately and retry interrupted storage deletion using the shared alarm. */
+  async deleteArtifact(id: string): Promise<void> {
+    await this.#harness
+    return this.#serial(async () =>
+      deleteArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), id, (at) =>
+        this.#artifactWake(at),
+      ),
+    )
   }
 
   /** The stored configuration. */

@@ -14,6 +14,7 @@ import { createAgentModels } from '../control-plane/models.ts'
 import { createAgentTools } from '../tools/index.ts'
 import type { WebCall } from '../tools/web/search.ts'
 import type { CodeCall } from '../tools/code/execute.ts'
+import type { ArtifactCall } from '../tools/artifacts.ts'
 import type { ContactAgent } from '../tools/contact.ts'
 import type { ScheduleTools } from '../tools/scheduled-tasks.ts'
 import { harnessSettings } from './runtime/harness.ts'
@@ -35,10 +36,11 @@ export function createAgentOptions(
   web?: WebCall,
   schedule?: ScheduleTools,
   code?: CodeCall,
+  artifacts?: ArtifactCall,
 ): HarnessOptions {
   const extension = defineExtension({
     name: 'kodama',
-    tools: createAgentTools(contact, web, schedule, code),
+    tools: createAgentTools(contact, web, schedule, code, artifacts),
     sections: [
       section(
         'external-data',

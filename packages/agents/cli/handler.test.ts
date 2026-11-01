@@ -44,6 +44,65 @@ it('creates and addresses an agent by slug before seed', async () => {
   expect((await post('cancel/before-seed')).status).toBe(200)
 })
 
+it('uploads arbitrary binary data and downloads it only as a non-executable attachment', async () => {
+  const owner = await newAgentId()
+  const call = (action: string, body: BodyInit, headers: Record<string, string> = {}) =>
+    handleCli(
+      new Request(`http://localhost/cli/artifact-${action}/${owner}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token', ...headers },
+        body,
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
+  const bytes = new Uint8Array([80, 75, 5, 6, 0, 255, 128])
+  const form = new FormData()
+  form.set('filename', 'data.zip')
+  form.set('mediaType', 'application/zip')
+  form.set('file', new Blob([bytes]))
+  const uploaded = await call('upload', form)
+  expect(uploaded.status).toBe(200)
+  const file: { artifactId: string } = await uploaded.json()
+  expect(await (await call('list', '{}')).json()).toMatchObject([
+    { artifactId: file.artifactId, filename: 'data.zip', size: bytes.length },
+  ])
+  const download = await call('download', JSON.stringify({ artifactId: file.artifactId }))
+  expect(new Uint8Array(await download.arrayBuffer())).toEqual(bytes)
+  expect(download.headers.get('content-type')).toBe('application/octet-stream')
+  expect(download.headers.get('content-disposition')).toContain('attachment')
+  expect(download.headers.get('x-content-type-options')).toBe('nosniff')
+  expect(download.headers.get('content-security-policy')).toContain('sandbox')
+  const html = new FormData()
+  html.set('filename', 'active.html')
+  html.set('mediaType', 'text/html')
+  html.set('file', new Blob(['<script>throw new Error("never rendered")</script>']))
+  const active: { artifactId: string } = await (await call('upload', html)).json()
+  const safe = await call('download', JSON.stringify({ artifactId: active.artifactId }))
+  expect(safe.headers.get('content-type')).toBe('application/octet-stream')
+  expect(safe.headers.get('content-disposition')).toContain('attachment')
+  expect(
+    await (await call('delete', JSON.stringify({ artifactId: file.artifactId }))).json(),
+  ).toEqual({ deleted: true })
+})
+
+it('rejects oversized upload streams before multipart decoding', async () => {
+  const owner = await newAgentId()
+  const response = await handleCli(
+    new Request(`http://localhost/cli/artifact-upload/${owner}`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-token' },
+      body: new Uint8Array(10 * 1024 * 1024 + 64 * 1024 + 1),
+    }),
+    'test-token',
+    exports.default,
+    exports.default,
+  )
+  expect(response.status).toBe(400)
+  expect(await exports.default.listArtifacts(owner)).toEqual([])
+})
+
 it('enables and disables optional tools through versioned configuration without losing credentials', async () => {
   const id = await newAgentId()
   const before = await exports.default.getConfig(CLI_ACTOR, id)
