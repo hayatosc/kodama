@@ -394,13 +394,7 @@ export class Agent extends DurableObject<AgentEnv> {
           await this.#rearmContacts()
           return reserved
         })
-        // Preserve the legacy observation window after admission. Transport uncertainty stays pending.
-        try {
-          await awaitWithContext(this.#collectContact(row.id), invocation)
-        } catch {
-          invocation.abortSignal?.throwIfAborted()
-          return JSON.stringify(contactView(contactRequest(local, row.id) ?? row, true))
-        }
+        // Bound observation of every peer RPC; durable collection outlives this observer.
         const deadline = new AbortController()
         const timer = setTimeout(() => deadline.abort(), CONTACT_WAIT_MS)
         const waiting = withAbortSignal(deadline.signal, invocation)
@@ -959,15 +953,18 @@ export class Agent extends DurableObject<AgentEnv> {
       // Known pre-admission refusals are safe, bounded results, not raw provider exceptions.
       if (
         error instanceof Error &&
-        /^(contact_disabled|agent_restricted|agent_unavailable:|credential_unavailable:)/.test(
+        /^(contact_disabled|agent_restricted|agent_unavailable:|credential_unavailable:|storage_maintenance:)/.test(
           error.message,
         )
       ) {
-        const reason = error.message.startsWith('credential_')
-          ? 'credential_unavailable'
-          : error.message.startsWith('agent_unavailable:')
-            ? 'admission_refused:paused_or_unavailable'
-            : 'contact_disabled_or_restricted'
+        // A proven storage refusal must release the fence so pruning can make progress.
+        const reason = error.message.startsWith('storage_maintenance:')
+          ? 'storage_maintenance'
+          : error.message.startsWith('credential_')
+            ? 'credential_unavailable'
+            : error.message.startsWith('agent_unavailable:')
+              ? 'admission_refused:paused_or_unavailable'
+              : 'contact_disabled_or_restricted'
         updateReceipt(local, receipt, 0, boundedContactResult('failed', reason))
         return undefined
       }

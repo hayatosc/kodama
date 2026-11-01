@@ -11,6 +11,7 @@ import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../testi
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { withHarness } from '../testing/harness.ts'
 import { contactOrigin, MAX_CONTACT_HOPS, reserveToolContact } from './contact.ts'
+import { Agent } from './agent.ts'
 import {
   contactReceipts,
   contactRequests,
@@ -34,6 +35,7 @@ import {
 import { contactBoundary } from './local-db/external-data.ts'
 import { openLocalDb } from './local-db/local.ts'
 import { CONTACT_WAIT_MS } from '../tools/contact.ts'
+import { PRUNE_LIMITS_KEY } from '../memory/prune/runs.ts'
 
 useMockModel()
 
@@ -241,9 +243,15 @@ describe('model contacts', () => {
     const sender = await enabled()
     const receiver = await newAgentId()
     const originalTimeout = globalThis.setTimeout.bind(globalThis)
-    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
-      originalTimeout(callback, delay === CONTACT_WAIT_MS ? 5 : delay, ...args),
-    )
+    let receiverStarted = false
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+      if (delay !== CONTACT_WAIT_MS) return originalTimeout(callback, delay, ...args)
+      const tick = () => {
+        if (receiverStarted) callback(...args)
+        else originalTimeout(tick, 5)
+      }
+      return originalTimeout(tick, 5)
+    })
     let release: (() => void) | undefined
     const held = new Promise<void>((resolve) => {
       release = resolve
@@ -256,6 +264,7 @@ describe('model contacts', () => {
         }),
       )
       .mockImplementationOnce(async () => {
+        receiverStarted = true
         await held
         return textResponse('Late peer answer.')
       })
@@ -278,6 +287,58 @@ describe('model contacts', () => {
     await expect
       .poll(async () => (await exports.default.snapshot(receiver)).snapshot.messages.at(-1)?.text)
       .toBe('Late peer answer.')
+  })
+
+  it('bounds the first result RPC without stopping durable collection', async () => {
+    const sender = await enabled()
+    const receiver = await newAgentId()
+    const originalTimeout = globalThis.setTimeout.bind(globalThis)
+    let reads = 0
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+      if (delay !== CONTACT_WAIT_MS) return originalTimeout(callback, delay, ...args)
+      const tick = () => {
+        if (reads > 0) callback(...args)
+        else originalTimeout(tick, 5)
+      }
+      return originalTimeout(tick, 5)
+    })
+    const held = Promise.withResolvers<void>()
+    await runInDurableObject(env.AGENTS.getByName(receiver), (instance) => {
+      const read = instance.trackedContactResult.bind(instance)
+      vi.spyOn(Agent.prototype, 'trackedContactResult').mockImplementation(async (...args) => {
+        reads++
+        await held.promise
+        return read(...args)
+      })
+    })
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'contact_agent',
+          arguments: { target: receiver, message: 'Held result RPC.' },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Peer answer.'))
+      .mockImplementationOnce(async (_, init) => {
+        expect(requestBody(init)).toContain('pending')
+        return textResponse('Result observation timed out.')
+      })
+    try {
+      await exports.default.sendMessage(sender, { requestId: 'held-rpc', content: 'Ask peer.' })
+      await waitForAnswer(sender, 'held-rpc')
+      expect(reads).toBe(1)
+    } finally {
+      held.resolve()
+    }
+    await expect
+      .poll(async () =>
+        runInDurableObject(
+          env.AGENTS.getByName(sender),
+          async (_, state) =>
+            (await openLocalDb(state.storage)).select().from(contactRequests).get()?.result?.text,
+        ),
+      )
+      .toBe('Peer answer.')
   })
 
   it('reports a terminal unanswered receiver separately from pending', async () => {
@@ -663,6 +724,33 @@ describe('durable contact recovery', () => {
       await waitForAnswer(sender, name)
     }
     expect((await outbound(sender, row.id))?.result?.text).toBe('Hello from Kodama')
+  })
+
+  it('releases a refused admission fence so hard-limit storage can be pruned', async () => {
+    const sender = await enabled()
+    const receiver = await newAgentId()
+    mockModel({ usage: COMPACT_AFTER_TURN_7 })
+    await compactedAgent(receiver, 'full-contact-receiver')
+    const peer = env.AGENTS.getByName(receiver)
+    const row = await outbox(sender, receiver)
+    const hardBytes = await runInDurableObject(peer, async (_, state) => {
+      const limit = state.storage.sql.databaseSize - 1
+      await state.storage.put(PRUNE_LIMITS_KEY, { hardBytes: limit })
+      return limit
+    })
+    await peer.acceptTrackedContact(sender, row.id)
+    expect(await peer.submission(row.requestId)).toBeUndefined()
+    expect(await peer.prune({ force: true })).toBe('pruned')
+    await runInDurableObject(peer, (_, state) =>
+      expect(state.storage.sql.databaseSize).toBeLessThanOrEqual(hardBytes),
+    )
+    await wake(sender)
+    expect((await outbound(sender, row.id))?.result).toMatchObject({
+      outcome: 'failed',
+      text: 'storage_maintenance',
+    })
+    expect(await peer.acceptTrackedContact(sender, row.id)).toBeUndefined()
+    expect(await peer.submission(row.requestId)).toBeUndefined()
   })
 
   it('blocks pruning while receiver admission is fenced but not yet reconciled', async () => {

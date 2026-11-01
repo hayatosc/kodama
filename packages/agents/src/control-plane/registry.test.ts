@@ -2,7 +2,8 @@ import { listDurableObjectIds } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { agents } from '../../drizzle/management/schema.ts'
+import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
+import { defaultAgentSettings } from './config.ts'
 import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { uuidv7 } from '../lib/uuid.ts'
@@ -90,6 +91,55 @@ describe('AgentService admission', () => {
 })
 
 describe('discoverAgents', () => {
+  it('continues through an empty filtered scan page to a matching final page', async () => {
+    const start = Date.now() + 60_000
+    await seedOnce()
+    const ids = Array.from({ length: 51 }, (_, index) => uuidv7(start + index))
+    const match = ids.at(-1)
+    for (let offset = 0; offset < ids.length; offset += 10) {
+      const page = ids.slice(offset, offset + 10)
+      await management.batch([
+        management.insert(agents).values(
+          page.map((agentId) => ({
+            agentId,
+            objectName: agentId,
+            kind: 'working' as const,
+            displayName: 'Discovery fixture',
+            status: 'active' as const,
+            currentVersion: 1,
+            createdAt: start,
+            updatedAt: start,
+          })),
+        ),
+        management.insert(agentConfigVersions).values(
+          page.map((agentId) => ({
+            agentId,
+            version: 1,
+            settingsJson: JSON.stringify({
+              ...defaultAgentSettings(env),
+              labels: agentId === match ? ['last-page-match'] : [],
+            }),
+            schemaVersion: 1,
+            authorId: null,
+            createdAt: start,
+          })),
+        ),
+      ])
+    }
+    const first = await discoverAgents(management, {
+      cursor: uuidv7(start - 1),
+      label: 'last-page-match',
+    })
+    expect(first.agents).toEqual([])
+    expect(first.nextCursor).toBe(ids[49])
+    const last = await discoverAgents(management, {
+      cursor: first.nextCursor,
+      label: 'last-page-match',
+    })
+    expect(last.agents.map((agent) => agent.agentId)).toEqual([match])
+    expect(last.nextCursor).toBeUndefined()
+  })
+
   it('searches public descriptions and exact labels, excluding inactive and dedicated agents', async () => {
     const active = await newAgentId()
     const paused = await newAgentId()

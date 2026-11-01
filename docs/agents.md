@@ -671,14 +671,19 @@ receiver verifies the sender's persisted outbox through the registered sender ob
 pruning before admission. It reconciles the exact submission answer into a durable receipt before
 history may be deleted. Acceptance alone is never successful completion.
 
-The tool preserves the immediate answer and 30-second observation window after the first delivery
-attempt. It returns `contactId` with `answered`, terminal `failed`/`cancelled`/`unanswered`, or
+The tool returns an immediate answer when available and bounds observation of delivery, result reads,
+and acknowledgement to 30 seconds after outbox reservation. It returns `contactId` with `answered`,
+terminal `failed`/`cancelled`/`unanswered`, or
 `pending`. Timeout, transport uncertainty, or sender cancellation does not cancel accepted receiver
 work. Pending is not a reason to resend. The `contact` alarm retries dispatch and result collection;
-current sender permissions, target admission, and credentials are checked before a new admission.
+current sender permissions and target admission are rechecked before a new admission. The receiver's
+`sendMessage` also checks assigned credential availability before admission; this is not a guarantee
+of provider-side authentication. A later provider failure can produce a terminal `unanswered` receipt.
 The first sender terminal result and `recordNotification` commit in one SQLite transaction before
 the receiver acknowledges collection. An accepted request remains recoverable even if permissions
-later change.
+later change. A confirmed pre-admission storage refusal settles as `failed` with
+`storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
+failures keep their fence and remain retryable.
 
 Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
 this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
