@@ -151,6 +151,40 @@ describe('code caching', () => {
     expect(compile).toHaveBeenCalledTimes(3)
   })
 
+  it('reuses compilation when distinct Unicode aliases are inserted in a different order', async () => {
+    const compile = vi.spyOn(bundler, 'createWorker')
+    const composed = '\u00e9'
+    const decomposed = 'e\u0301'
+    const code = `import a from '${composed}'; import b from '${decomposed}'; export default () => a + b`
+    const first = { [composed]: 'export default 1', [decomposed]: 'export default 2' }
+    const reversed = { [decomposed]: 'export default 2', [composed]: 'export default 1' }
+    expect(await executeCode({ code, virtualModules: first }, allow)).toBe('3')
+    expect(await executeCode({ code, virtualModules: reversed }, allow)).toBe('3')
+    expect(compile).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Worker identity stable when distinct Unicode modules are inserted in a different order', async () => {
+    const entrypoint = { 'index.js': 'export default { fetch() { return Response.json(1) } }' }
+    const composed = { '\u00e9.txt': { text: 'first' } }
+    const decomposed = { 'e\u0301.txt': { text: 'second' } }
+    vi.spyOn(bundler, 'createWorker')
+      .mockResolvedValueOnce({
+        mainModule: 'index.js',
+        modules: { ...entrypoint, ...composed, ...decomposed },
+      })
+      .mockResolvedValueOnce({
+        mainModule: 'index.js',
+        modules: { ...entrypoint, ...decomposed, ...composed },
+      })
+    const loader = trackedLoader()
+    const agentId = crypto.randomUUID()
+    const source = { code: 'export default () => 1' }
+    expect(await createCodeExecutor(loader, agentId)(source, allow)).toBe('1')
+    expect(await createCodeExecutor(loader, agentId)(source, allow)).toBe('1')
+    expect(loader.get).toHaveBeenCalledTimes(2)
+    expect(loader.get.mock.calls[0]?.[0]).toBe(loader.get.mock.calls[1]?.[0])
+  })
+
   it('checks permissions and cancellation even when compilation is cached', async () => {
     const compile = vi.spyOn(bundler, 'createWorker')
     const loader = trackedLoader()

@@ -94,7 +94,7 @@ export function createCodeExecutor(loader: WorkerLoader, agentId: string) {
 }
 
 function orderedRecord(value: Record<string, string> = {}): Record<string, string> {
-  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 async function compileCode(
@@ -129,7 +129,7 @@ async function compileCode(
     {
       ...workerCode,
       modules: Object.entries(modules)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([name, module]) => [
           name,
           typeof module === 'string'
