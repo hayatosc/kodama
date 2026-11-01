@@ -9,6 +9,17 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** Shared extension payloads; references never grant cross-agent access. */
+export type {
+  AgentNotification,
+  ArtifactMetadata,
+  ArtifactUpload,
+  CompletionNotice,
+  CompletionOutcome,
+  CompletionReference,
+  ContactResult,
+} from './extensions.ts'
+
 /**
  * An event of an `AgentService.send` stream: Pi's events, preceded by `accepted` once the
  * message is admitted.

@@ -8,6 +8,7 @@ import * as v from 'valibot'
 import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
+import { MAX_ARTIFACT_BYTES } from './extensions.ts'
 import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -40,6 +41,46 @@ const agentIdMessage = 'agentId must be a lowercase UUID v7'
 
 /** A public agent ID: a lowercase v7 UUID. Reserved names such as `kodama:memory` fail. */
 export const AgentIdSchema = v.pipe(v.string(agentIdMessage), v.regex(UUID_PATTERN, agentIdMessage))
+
+/** Opaque extension IDs have no authority without the admitted owning agent. */
+export const ExtensionIdSchema = idSchema('extension ID', 128)
+
+/** Binary uploads accept any media type without interpreting the file's contents. */
+export const ArtifactUploadSchema = v.strictObject({
+  filename: v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.maxLength(255),
+    v.check((name) => {
+      for (const char of name)
+        if (char < ' ' || char === '\u007f' || char === '/' || char === '\\') return false
+      return true
+    }, 'Invalid artifact filename'),
+  ),
+  mediaType: v.pipe(v.string(), v.minLength(1), v.maxLength(255), v.regex(/^[\x20-\x7e]+$/)),
+  bytes: v.pipe(
+    v.instance(Uint8Array),
+    v.check((bytes) => bytes.byteLength <= MAX_ARTIFACT_BYTES, 'Artifact exceeds byte limit'),
+  ),
+})
+
+/** Stable ascending ID pagination for artifact and contact lists. */
+export const ExtensionPageSchema = v.strictObject({
+  cursor: v.optional(ExtensionIdSchema),
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+})
+
+/** Stable descending notification sequence pagination; unread state is agent-wide. */
+export const NotificationQuerySchema = v.strictObject({
+  before: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
+  unreadOnly: v.optional(v.boolean(), false),
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+})
+
+/** Acknowledge one exact notification, never a model-supplied timestamp or owner. */
+export const NotificationReadSchema = v.strictObject({
+  seq: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
+})
 
 /** Descending audit pagination, capped independently of total retained history. */
 export const AuditQuerySchema = v.strictObject({
