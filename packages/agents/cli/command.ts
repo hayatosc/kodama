@@ -19,6 +19,7 @@ import {
   parseInput,
   parseMessage,
   parseRequestId,
+  ExtensionIdSchema,
   NotificationQuerySchema,
   NotificationReadSchema,
 } from '../src/validation.ts'
@@ -44,6 +45,10 @@ export const USAGE = `Usage:
   nr agent notifications <agent> [--before SEQ] [--limit N] [--unread]
   nr agent notification-read <agent> <seq>
   nr agent cancel <agent>
+  nr agent artifacts upload <agent> <path> [--media-type TYPE]
+  nr agent artifacts list <agent> [--cursor ID] [--limit N]
+  nr agent artifacts download <agent> <artifact-id> <new-path>
+  nr agent artifacts delete <agent> <artifact-id>
 
 Start nr dev:agents in another terminal first (localhost:5173).
 <agent> is a UUID, a slug, or a unique UUID prefix; the seed creates the
@@ -61,6 +66,10 @@ already initialized installation. Login does not seed or create agents.`
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
+  | { action: 'artifact-upload'; agentRef: string; path: string; mediaType: string }
+  | { action: 'artifact-list'; agentRef: string; cursor?: string; limit?: number }
+  | { action: 'artifact-download'; agentRef: string; artifactId: string; path: string }
+  | { action: 'artifact-delete'; agentRef: string; artifactId: string }
   | { action: 'list' | 'credentials/list' | 'credentials/installation' }
   | { action: 'seed'; credentialIds?: string[] }
   | { action: 'create'; request: CreateAgentRequest & { credentialIds?: string[] } }
@@ -92,6 +101,8 @@ export const CLI_OPTIONS = {
   credential: { type: 'string', multiple: true },
   provider: { type: 'string' },
   'key-from-env': { type: 'string' },
+  'media-type': { type: 'string' },
+  cursor: { type: 'string' },
 } as const
 
 /** What `parseArgs` returns for {@link CLI_OPTIONS}. */
@@ -108,6 +119,8 @@ export interface ParsedArgs {
     credential?: string[]
     provider?: string
     'key-from-env'?: string
+    'media-type'?: string
+    cursor?: string
   }
   positionals: string[]
 }
@@ -145,6 +158,44 @@ export function toCommand(
         ...(values.credential ? { credentialIds: values.credential.map(parseAgentId) } : {}),
       },
     }
+  if (action === 'artifacts') {
+    const agentRef = parseAgentRef(content)
+    const argument = positionals[3]
+    if (rawAgentRef === 'upload' && positionals.length === 4 && argument)
+      return {
+        action: 'artifact-upload',
+        agentRef,
+        path: argument,
+        mediaType: values['media-type'] ?? 'application/octet-stream',
+      }
+    if (rawAgentRef === 'list' && positionals.length === 3) {
+      const limit = values.limit === undefined ? undefined : Number(values.limit)
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100))
+        throw new Error('Artifact limit must be 1–100')
+      return {
+        action: 'artifact-list',
+        agentRef,
+        ...(values.cursor === undefined
+          ? {}
+          : { cursor: parseInput(ExtensionIdSchema, values.cursor) }),
+        ...(limit === undefined ? {} : { limit }),
+      }
+    }
+    if (rawAgentRef === 'download' && positionals.length === 5 && positionals[4])
+      return {
+        action: 'artifact-download',
+        agentRef,
+        artifactId: parseInput(ExtensionIdSchema, argument),
+        path: positionals[4],
+      }
+    if (rawAgentRef === 'delete' && positionals.length === 4)
+      return {
+        action: 'artifact-delete',
+        agentRef,
+        artifactId: parseInput(ExtensionIdSchema, argument),
+      }
+    throw new Error('Invalid artifacts command; see nr agent --help')
+  }
   if (action === 'credentials') {
     if (rawAgentRef === 'list' && positionals.length === 2) return { action: 'credentials/list' }
     if ((rawAgentRef === 'add' || rawAgentRef === 'login') && positionals.length === 2) {
@@ -216,7 +267,24 @@ export function commandRequest(
   command: Exclude<Command, { action: 'help' }>,
   token: string,
   credentialJson?: string,
+  artifact?: { filename: string; bytes: Uint8Array },
 ): { url: string; init: RequestInit } {
+  if (command.action === 'artifact-upload') {
+    if (!artifact) throw new Error('Missing upload bytes')
+    const form = new FormData()
+    form.set('filename', artifact.filename)
+    form.set('mediaType', command.mediaType)
+    form.set('file', new Blob([new Uint8Array(artifact.bytes)]))
+    return {
+      url: `${LOCAL_WORKER_URL}/cli/artifact-upload/${command.agentRef}`,
+      init: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+        redirect: 'error',
+      },
+    }
+  }
   const path =
     'credentialId' in command
       ? `${command.action}/${command.credentialId}${'agentRef' in command ? `/${command.agentRef}` : ''}`
@@ -231,19 +299,26 @@ export function commandRequest(
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body:
-        command.action === 'send'
-          ? JSON.stringify(command.message)
-          : command.action === 'notifications'
-            ? JSON.stringify(command.query)
-            : command.action === 'notification-read'
-              ? JSON.stringify(command.request)
-              : command.action === 'create'
-                ? JSON.stringify(command.request)
-                : command.action === 'seed' && command.credentialIds
-                  ? JSON.stringify({ credentialIds: command.credentialIds })
-                  : command.action === 'tools'
-                    ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
-                    : credentialJson,
+        command.action === 'artifact-download' || command.action === 'artifact-delete'
+          ? JSON.stringify({ artifactId: command.artifactId })
+          : command.action === 'artifact-list'
+            ? JSON.stringify({
+                ...(command.cursor ? { cursor: command.cursor } : {}),
+                ...(command.limit === undefined ? {} : { limit: command.limit }),
+              })
+            : command.action === 'send'
+              ? JSON.stringify(command.message)
+              : command.action === 'notifications'
+                ? JSON.stringify(command.query)
+                : command.action === 'notification-read'
+                  ? JSON.stringify(command.request)
+                  : command.action === 'create'
+                    ? JSON.stringify(command.request)
+                    : command.action === 'seed' && command.credentialIds
+                      ? JSON.stringify({ credentialIds: command.credentialIds })
+                      : command.action === 'tools'
+                        ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
+                        : credentialJson,
       redirect: 'error',
     },
   }

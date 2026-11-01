@@ -14,6 +14,56 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('parses artifact commands and sends bytes as multipart rather than JSON strings', async () => {
+    const upload = command(['artifacts', 'upload', 'assistant', '/tmp/image.png'], {
+      'media-type': 'image/png',
+    })
+    expect(upload).toEqual({
+      action: 'artifact-upload',
+      agentRef: 'assistant',
+      path: '/tmp/image.png',
+      mediaType: 'image/png',
+    })
+    if (upload.action !== 'artifact-upload') throw new Error('Expected upload')
+    const request = commandRequest(upload, 'token', undefined, {
+      filename: 'image.png',
+      bytes: new Uint8Array([0, 255, 128]),
+    })
+    expect(request.url).toBe(`${LOCAL_WORKER_URL}/cli/artifact-upload/assistant`)
+    const form = request.init.body
+    if (!(form instanceof FormData)) throw new Error('Expected multipart body')
+    const file = form.get('file')
+    if (!file || typeof file === 'string') throw new Error('Expected binary form file')
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([0, 255, 128]))
+    expect(command(['artifacts', 'list', 'assistant'], { cursor: 'id', limit: '2' })).toEqual({
+      action: 'artifact-list',
+      agentRef: 'assistant',
+      cursor: 'id',
+      limit: 2,
+    })
+    expect(command(['artifacts', 'download', 'assistant', 'id', 'new.zip'])).toEqual({
+      action: 'artifact-download',
+      agentRef: 'assistant',
+      artifactId: 'id',
+      path: 'new.zip',
+    })
+    expect(command(['artifacts', 'delete', 'assistant', 'id'])).toEqual({
+      action: 'artifact-delete',
+      agentRef: 'assistant',
+      artifactId: 'id',
+    })
+    expect(() => command(['artifacts', 'list', 'assistant'], { limit: '101' })).toThrow()
+    expect(() => command(['artifacts', 'download', 'assistant', '../key', 'x'])).toThrow()
+    expect(() => command(['artifacts', 'download', 'assistant', 'id'])).toThrow()
+  })
+  it('omits an absent artifact cursor but rejects an explicitly empty one', () => {
+    expect(command(['artifacts', 'list', 'assistant'])).toEqual({
+      action: 'artifact-list',
+      agentRef: 'assistant',
+    })
+    expect(() => command(['artifacts', 'list', 'assistant'], { cursor: '' })).toThrow(TypeError)
+  })
+
   it('sets the full optional tool selection, including an empty selection', () => {
     expect(command(['tools', 'assistant', 'contact_agent'])).toEqual({
       action: 'tools',

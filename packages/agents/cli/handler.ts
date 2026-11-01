@@ -6,9 +6,13 @@
 import * as v from 'valibot'
 import {
   RequestIdSchema,
+  ArtifactUploadSchema,
+  ExtensionIdSchema,
+  ExtensionPageSchema,
   NotificationQuerySchema,
   NotificationReadSchema,
 } from '../src/validation.ts'
+import { MAX_ARTIFACT_BYTES } from '../src/extensions.ts'
 import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
@@ -17,8 +21,35 @@ import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 
 type Service = Pick<
   AgentService,
-  'send' | 'snapshot' | 'cancel' | 'notifications' | 'readNotification'
+  | 'send'
+  | 'snapshot'
+  | 'cancel'
+  | 'uploadArtifact'
+  | 'listArtifacts'
+  | 'downloadArtifact'
+  | 'deleteArtifact'
+  | 'notifications'
+  | 'readNotification'
 >
+async function uploadForm(request: Request): Promise<FormData> {
+  if (!request.body) throw new TypeError('Missing upload body')
+  const reader = request.body.getReader()
+  const chunks: Uint8Array<ArrayBuffer>[] = []
+  let size = 0
+  try {
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      size += chunk.value.byteLength
+      if (size > MAX_ARTIFACT_BYTES + 64 * 1024) throw new TypeError('Upload exceeds 10 MiB')
+      chunks.push(new Uint8Array(chunk.value))
+    }
+  } finally {
+    await reader.cancel()
+  }
+  return new Response(new Blob(chunks), { headers: request.headers }).formData()
+}
+
 type Management = Pick<
   AgentService,
   | 'seed'
@@ -104,6 +135,41 @@ export async function handleCli(
           settings: { ...current.settings, tools: input.tools },
         }),
       )
+    }
+    if (action === 'artifact-upload') {
+      const form = await uploadForm(request)
+      const file = form.get('file')
+      if (!file || typeof file === 'string') throw new TypeError('Missing artifact bytes')
+      const input = parseInput(ArtifactUploadSchema, {
+        filename: form.get('filename'),
+        mediaType: form.get('mediaType'),
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })
+      return Response.json(await service.uploadArtifact(agentId, input))
+    }
+    if (action === 'artifact-list')
+      return Response.json(
+        await service.listArtifacts(agentId, parseInput(ExtensionPageSchema, await request.json())),
+      )
+    if (action === 'artifact-download' || action === 'artifact-delete') {
+      const { artifactId } = parseInput(
+        v.strictObject({ artifactId: ExtensionIdSchema }),
+        await request.json(),
+      )
+      if (action === 'artifact-delete') {
+        await service.deleteArtifact(agentId, artifactId)
+        return Response.json({ deleted: true })
+      }
+      const file = await service.downloadArtifact(agentId, artifactId)
+      return new Response(new Uint8Array(file.bytes), {
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-disposition': 'attachment; filename="artifact"',
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'no-store',
+        },
+      })
     }
     if (action === 'notifications')
       return Response.json(

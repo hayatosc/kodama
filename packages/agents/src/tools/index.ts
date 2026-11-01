@@ -7,6 +7,8 @@
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { createCodeTool } from './code/execute.ts'
 import type { CodeCall } from './code/execute.ts'
+import { createArtifactTools } from './artifacts.ts'
+import type { ArtifactCall } from './artifacts.ts'
 import { createContactAgentTool, createContactReadTools } from './contact.ts'
 import type { ContactAgent } from './contact.ts'
 import { createWebSearchTool } from './web/search.ts'
@@ -25,10 +27,12 @@ export function createAgentTools(
   web?: WebCall,
   schedule?: ScheduleTools,
   code?: CodeCall,
+  artifacts?: ArtifactCall,
 ): ToolRegistration[] {
   return [
     currentTimeTool,
     createCodeTool(code),
+    ...createArtifactTools(artifacts),
     createContactAgentTool(contact),
     ...createContactReadTools(contact),
     createWebSearchTool(web),

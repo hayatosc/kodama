@@ -228,6 +228,8 @@ The tool accepts:
 - `code`: JavaScript or TypeScript exporting a default function. It receives `input` and returns a
   JSON-serializable value; asynchronous functions are supported.
 - `input`: an optional JSON value, defaulting to `null`.
+- `files`: optional owner-local artifact IDs (at most 100). Omit it for the unchanged JSON API;
+  use `[]` for output-only file execution. See [Artifact operations](extensions.md#artifact-operations).
 - `dependencies`: optional npm package-name/version pairs.
 - `virtualModules`: optional import-name/source pairs passed directly to `createWorker()` for
   compatibility aliases. Nothing executes in the host as a virtual module.
@@ -249,10 +251,12 @@ and adding a `truncated` warning. A truncated result is not necessarily valid JS
 Pi defaults, not an additional `execute_code` quota; regression tests cover results larger than the
 SQLite row limit, including multibyte and JSON-escaped text. The executor still reads the full response
 into host memory before Pi bounds it. Compilation and runtime failures become normal tool errors.
-Results are untrusted data, not instructions or authorization. This tool does not add a file
-upload/download API, persistent artifact storage, Office-specific operations, a shell, or a persistent
-session. Binary
-files require an explicit encoding in JSON until a separate file transport is introduced.
+Results are untrusted data, not instructions or authorization. File mode passes only explicitly
+selected bytes to `run(input, files)` and persists validated binary outputs as artifacts, without
+putting those bytes in the model transcript. Input and output aggregate byte limits are each 10 MiB,
+with four outputs maximum. It does not add format-specific parsing, previews, Office operations,
+a shell, or a persistent session. The file response transport is bounded to 10 MiB plus 64 KiB for
+multipart metadata and the JSON result before decoding, unlike the legacy JSON-only response.
 
 Kodama uses the official
 [`createWorker()` flow](https://developers.cloudflare.com/dynamic-workers/getting-started/#using-typescript-and-npm-dependencies),
@@ -273,15 +277,24 @@ The Worker Loader cache ID is a SHA-256 fingerprint of the agent ID, the actual 
 (including binary bytes), and all supplied runtime settings. This avoids sharing globals between
 agents or reusing an ID for different npm resolutions after a rebuild. The loader can reuse compiled
 code and warm isolates, even after a local compilation cache miss. Cache retention is not guaranteed:
-module globals and temporary files may survive calls, but must never be relied on for persistence.
+module globals may survive JSON-only calls, but must never be relied on for persistence.
 This is code reuse, not a persistent execution session or a cache of execution results. No live
-Worker stubs are retained across requests.
+Worker stubs are retained across requests. File-mode calls add a fresh random suffix to the loader
+identity, so a subsequent call cannot recover previously selected bytes from module globals or
+temporary files. JSON-only calls retain their existing cache behavior.
 
 Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty `env`, and
-`globalOutbound: null`. Generated code receives no secrets, credentials, D1, R2, Durable
-Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
+`globalOutbound: null` in both JSON-only and file modes. Both support Workers-compatible npm packages
+and Node built-ins, including `node:fs` and `node:fs/promises`. As described in Cloudflare's
+[filesystem documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/), these
+APIs expose only the Worker's virtual filesystem: read-only `/bundle` contains its own bundled
+modules, `/tmp` is in-memory scratch space, and `/dev` contains virtual devices. They do not expose
+Kodama host files, other Workers' files, or R2. Temporary IO consumes Worker memory, is not persistent
+storage, and does not create an artifact unless the function explicitly returns its bytes as output.
+Generated code receives only explicitly selected artifact bytes and no secrets, credentials, D1, R2,
+Durable Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
 isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
-default resource limits apply: no application-specific CPU, wall-time, size, concurrency, or daily
+default resource limits apply: no application-specific CPU, wall-time, source-size, concurrency, or daily
 quotas and no price accounting are added. Compilation runs in the host before the generated isolate
 starts, so large source or dependency inputs can exhaust the host's platform CPU or memory budget;
 the generated Worker's isolation does not protect that compilation phase.
@@ -576,31 +589,57 @@ Omit tool names to disable all optional tools.
 at the boundary, admits them from the registry (see [Registry and admission](#registry-and-admission)),
 and forwards to the agent's Durable Object:
 
-| Method                                         | Result                                       |
-| ---------------------------------------------- | -------------------------------------------- |
-| `send(agentId, { requestId, content })`        | SSE response through terminal submission     |
-| `subscribe(agentId)`                           | Continuous agent-wide SSE observation        |
-| `sendMessage(agentId, { requestId, content })` | Durable acceptance with `submissionId`       |
-| `submission(agentId, requestId)`               | Submission status, or `undefined`            |
-| `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
-| `cancel(agentId)`                              | Stop current work; resolves once idle        |
-| `notifications(agentId, query?)`               | Newest-first bounded agent-wide inbox        |
-| `readNotification(agentId, { seq })`           | Exact agent-wide read acknowledgement        |
+| Method                                                    | Result                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| `send(agentId, { requestId, content })`                   | SSE response through terminal submission                     |
+| `subscribe(agentId)`                                      | Continuous agent-wide SSE observation                        |
+| `sendMessage(agentId, { requestId, content })`            | Durable acceptance with `submissionId`                       |
+| `submission(agentId, requestId)`                          | Submission status, or `undefined`                            |
+| `snapshot(agentId)`                                       | Committed user/assistant messages and `busy`                 |
+| `cancel(agentId)`                                         | Stop current work; resolves once idle                        |
+| `notifications(agentId, query?)`                          | Newest-first bounded agent-wide inbox                        |
+| `readNotification(agentId, { seq })`                      | Exact agent-wide read acknowledgement                        |
+| `uploadArtifact(agentId, { filename, mediaType, bytes })` | `ArtifactMetadata`; `chat` admission (active only)           |
+| `listArtifacts(agentId, { cursor?, limit? })`             | `ArtifactMetadata[]`; `read` admission                       |
+| `downloadArtifact(agentId, artifactId)`                   | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
+| `deleteArtifact(agentId, artifactId)`                     | `void`; `read` admission                                     |
+
+Artifact `read` admission also permits paused and archived working agents. Metadata contains
+`artifactId`, `filename`, `mediaType`, `size`, `createdAt`, and `expiresAt`, never a storage key.
+The optional `create_artifact` and `read_artifact` tools also work with `execute_code` disabled.
+Creation accepts `{ filename, content, mediaType? }`, defaults to `text/plain; charset=utf-8`, and
+reuses owner-bound upload validation/storage with the 10 MiB encoded-byte limit and 30-day retention.
+It returns metadata/ID and uses unsafe replay because retries can create duplicates. Reading accepts
+`{ artifactId }` and reuses owner-bound download admission; it returns an untrusted-data JSON envelope
+with metadata plus literal, strict UTF-8 text only for declared `text/*`, `application/json`, and
+`application/*+json`, with absent or UTF-8 charset parameters. Text is bounded to 8 KiB and 200 lines
+without splitting Unicode scalars, with explicit byte count/truncation and limits. A 50 KiB serialized
+envelope budget (including metadata and JSON escapes) can shorten the returned prefix further. Unsupported media,
+parameters, or invalid UTF-8 return metadata/status/guidance only, never binary or base64 payloads.
+There is no JSON parsing or HTML rendering. All four artifact tools require their own applied tool
+selection/policy and active lifecycle before IO; none grant owner approval or another agent's data.
+
+See [Artifact operations](extensions.md#artifact-operations) for exact text contracts, pagination, retention, and the
+distinction between an absent local ID (delete is a no-op) and a corrupt owner key (rejected).
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
 few more methods, for other Durable Objects and for `AgentService`:
 
-| Method                          | Caller       | Effect                                                         |
-| ------------------------------- | ------------ | -------------------------------------------------------------- |
-| `sendTo(agentId, message)`      | an agent     | deliver to another agent; returns once the target admits input |
-| `applyConfig(pushed)`           | AgentService | apply a configuration version now, or hold it until idle       |
-| `setStatus(status)`             | AgentService | set the object's copy of its registry state                    |
-| `getConfig()`                   | tests, tools | the applied configuration as Pi holds it                       |
-| `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
-| `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
-| `prune({ force })`              | maintenance  | archive and delete old entries                                 |
-| `enqueue(job)`, `jobStatus(id)` | agents       | queue a memory job and read its status (memory agent only)     |
-| `consolidate(now)`              | cron         | the daily consolidation (memory agent only)                    |
+| Method                          | Caller                              | Effect                                                              |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| `sendTo(agentId, message)`      | an agent                            | deliver to another agent; returns once the target admits input      |
+| `applyConfig(pushed)`           | AgentService                        | apply a configuration version now, or hold it until idle            |
+| `setStatus(status)`             | AgentService                        | set the object's copy of its registry state                         |
+| `getConfig()`                   | tests, tools                        | the applied configuration as Pi holds it                            |
+| `readEntries({ after, limit })` | memory agent                        | conversation text after an entry, from Pi or from the archive       |
+| `memoryChanged()`               | memory agent                        | refresh the always-loaded memory now, or when next idle             |
+| `prune({ force })`              | maintenance                         | archive and delete old entries                                      |
+| `enqueue(job)`, `jobStatus(id)` | agents                              | queue a memory job and read its status (memory agent only)          |
+| `consolidate(now)`              | cron                                | the daily consolidation (memory agent only)                         |
+| `uploadArtifact(input)`         | AgentService, owner-bound execution | return `ArtifactMetadata`; active only (`chat` at service boundary) |
+| `listArtifacts(page)`           | AgentService                        | return `ArtifactMetadata[]`; `read` at service boundary             |
+| `downloadArtifact(id)`          | AgentService, owner-bound execution | return metadata and `Uint8Array` bytes; `read` at service boundary  |
+| `deleteArtifact(id)`            | AgentService, owner-bound execution | retryable deletion returning `void`; `read` at service boundary     |
 
 ### IDs, limits, and retries
 
@@ -682,8 +721,9 @@ current sender permissions and target admission are rechecked before a new admis
 `sendMessage` also checks assigned credential availability before admission; this is not a guarantee
 of provider-side authentication. A later provider failure can produce a terminal `unanswered` receipt.
 The first sender terminal result and `recordNotification` commit in one SQLite transaction before
-the receiver acknowledges collection. An accepted request remains recoverable even if permissions
-later change. A confirmed pre-admission storage refusal settles as `failed` with
+the receiver acknowledges collection. The shared schedule alarm is armed for notification retention
+before remote acknowledgement, including late completion after observers stop. An accepted request
+remains recoverable even if permissions later change. A confirmed pre-admission storage refusal settles as `failed` with
 `storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
 failures keep their fence and remain retryable.
 
@@ -1119,6 +1159,10 @@ The CLI works like this:
   `notification-read <agent> <seq>` acknowledges exactly one sequence, idempotently, without
   deleting the result. It returns `{ found: false }` for missing or expired metadata.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
+- `artifacts upload/list/download/delete` operates on an admitted working agent's arbitrary binary
+  files. Downloads require a new local path, use private file permissions, and never print file bytes
+  to the terminal or overwrite an existing file. See [Artifact operations](extensions.md#artifact-operations)
+  for upload, tool configuration, code execution, and download examples.
 
 The CLI ([`cli/`](../packages/agents/cli/)) connects to a token-authenticated adapter at
 `127.0.0.1:5173`, which calls the Durable Object RPC methods. Only the `development` mode selects

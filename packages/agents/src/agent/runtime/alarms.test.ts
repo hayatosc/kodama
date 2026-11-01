@@ -16,6 +16,30 @@ import { newAgentId, updateSettings } from '../../testing/management.ts'
 afterEach(() => vi.restoreAllMocks())
 
 describe('alarm schedule', () => {
+  it('dispatches artifact, contact and schedule purposes without dropping existing maintenance', async () => {
+    const stub = env.AGENTS.getByName(await newAgentId())
+    await stub.getConfig()
+    const purposes = [
+      'recovery',
+      'schedule',
+      'contact',
+      'extract',
+      'jobs',
+      'prune',
+      'artifacts',
+    ] as const
+    await runInDurableObject(stub, async (_, state) => {
+      const now = Date.now() + 100_000
+      for (const purpose of purposes) await setAlarm(state.storage, purpose, now)
+      const handled: string[] = []
+      await dispatchAlarms(state.storage, now, async (purpose) => {
+        handled.push(purpose)
+      })
+      expect(handled).toEqual(purposes)
+      expect(await state.storage.getAlarm()).toBeNull()
+    })
+  })
+
   it('keeps one alarm at the earliest purpose and clears only the purpose it is told to', async () => {
     const stub = env.AGENTS.getByName(uuidv7())
     const now = Date.now()

@@ -205,12 +205,16 @@ export async function reconcileContactReceipts(local: LocalDb, harness: Harness)
   }
 }
 
-/** Retry durable delivery and pull only the validated receipt, never a transient transcript snapshot. */
+/**
+ * Retry durable delivery and pull only the validated receipt, never a transient transcript snapshot.
+ * @param rearmNotifications - Persist inbox retention before a remote acknowledgement can block.
+ */
 export async function collectContact(
   local: LocalDb,
   env: Pick<AgentEnv, 'AGENTS' | 'MANAGEMENT_DB'>,
   senderAgentId: string,
   id: string,
+  rearmNotifications: () => Promise<void>,
 ): Promise<void> {
   let row = contactRequest(local, id)
   if (!row || (row.settledAt !== null && row.retryAt === 0)) return
@@ -228,6 +232,7 @@ export async function collectContact(
     if (row && row.settledAt !== null) {
       // A hung ack must not leave a past-due result spinning the purpose scheduler.
       deferContact(local, id, Date.now())
+      await rearmNotifications()
       await peer.acknowledgeTrackedContact(senderAgentId, id)
       finishContactAcknowledgement(local, id)
     } else deferContact(local, id, Date.now())

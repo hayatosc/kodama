@@ -852,6 +852,11 @@ describe('durable contact recovery', () => {
             true,
           )
           expect(maintenance).toBe(1)
+          if (stage === 'ack') {
+            const notice = (await openLocalDb(state.storage)).select().from(notifications).get()
+            expect(notice?.source).toBe('contact')
+            expect(await state.storage.get('kodama:alarm:schedule')).toBe(notice?.expiresAt)
+          }
           // A second alarm may observe, but must not replace, the unresolved RPC.
           await contactAlarm(sender, false, row.id, dispatch)
           expect(calls).toBe(1)
@@ -876,6 +881,11 @@ describe('durable contact recovery', () => {
           (message) => message.role === 'user',
         ),
       ).toHaveLength(1)
+      await runInDurableObject(env.AGENTS.getByName(sender), async (_, state) => {
+        const notice = (await openLocalDb(state.storage)).select().from(notifications).get()
+        expect(notice?.source).toBe('contact')
+        expect(await state.storage.get('kodama:alarm:schedule')).toBe(notice?.expiresAt)
+      })
     },
   )
 

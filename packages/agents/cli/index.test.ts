@@ -5,8 +5,13 @@
  * @module
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { USAGE } from './command.ts'
 import { readLocalToken } from './token.ts'
+
+vi.mock('node:fs', { spy: true })
 
 const prompt = vi.hoisted(() => vi.fn<() => Promise<string>>())
 vi.mock('node:readline/promises', () => ({
@@ -46,6 +51,78 @@ async function run(...args: string[]) {
 }
 
 describe('CLI entrypoint', () => {
+  it('uploads a binary file without encoding it as text', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kodama-artifacts-'))
+    try {
+      const path = join(dir, 'opaque.zip')
+      const bytes = new Uint8Array([80, 75, 5, 6, 0, 255, 128])
+      writeFileSync(path, bytes)
+      fetchMock.mockResolvedValue(Response.json({ artifactId: 'saved' }))
+      await run('artifacts', 'upload', 'assistant', path, '--media-type', 'application/zip')
+      expect(process.exitCode).toBeUndefined()
+      const call = fetchMock.mock.calls[0]
+      if (!call) throw new Error('Missing upload')
+      const form = await new Request('http://localhost', call[1]).formData()
+      const file = form.get('file')
+      if (!file || typeof file === 'string') throw new Error('Missing file')
+      expect(new Uint8Array(await file.arrayBuffer())).toEqual(bytes)
+      expect(form.get('filename')).toBe('opaque.zip')
+      expect(form.get('mediaType')).toBe('application/zip')
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
+  })
+
+  it.each(['missing', 'directory', 'unreadable'])(
+    'explains %s upload paths without connecting',
+    async (kind) => {
+      const dir = mkdtempSync(join(tmpdir(), 'kodama-artifacts-'))
+      try {
+        const path = kind === 'directory' ? dir : join(dir, 'input.bin')
+        if (kind === 'unreadable') {
+          writeFileSync(path, new Uint8Array([0, 255]))
+          vi.mocked(readFileSync).mockImplementationOnce(() => {
+            throw new Error('EACCES: permission denied, read')
+          })
+        }
+        await run(
+          'artifacts',
+          'upload',
+          'assistant',
+          path,
+          '--media-type',
+          'application/octet-stream',
+        )
+        expect(process.exitCode).toBe(1)
+        expect(console.error).toHaveBeenCalledWith(
+          'Cannot upload file. Choose a readable regular file of at most 10 MiB. See nr agent --help.',
+        )
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(console.log).not.toHaveBeenCalled()
+      } finally {
+        rmSync(dir, { recursive: true })
+      }
+    },
+  )
+
+  it('downloads binary bytes to a private new file, never terminal output or an existing path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kodama-artifacts-'))
+    try {
+      const path = join(dir, 'image.png')
+      const bytes = new Uint8Array([137, 80, 78, 71, 0, 255, 128])
+      fetchMock.mockImplementation(async () => new Response(bytes))
+      await run('artifacts', 'download', 'assistant', 'file-id', path)
+      expect(process.exitCode).toBeUndefined()
+      expect(new Uint8Array(readFileSync(path))).toEqual(bytes)
+      expect(writeMock).not.toHaveBeenCalled()
+      vi.resetModules()
+      await run('artifacts', 'download', 'assistant', 'file-id', path)
+      expect(process.exitCode).toBe(1)
+      expect(new Uint8Array(readFileSync(path))).toEqual(bytes)
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
+  })
   it('preserves safe command errors while refusing unsupported login providers', async () => {
     await run('credentials', 'login', '--provider', 'xai')
     expect(process.exitCode).toBe(1)
