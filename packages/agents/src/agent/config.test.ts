@@ -1,6 +1,9 @@
 /** Provider content and request identities pass through without credential redaction. @module */
+import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
+import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { expect, it, vi } from 'vitest'
+import { piEntries } from './local-db/pi-tables.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, toolCallResponse, toolResults } from '../testing/model.ts'
@@ -91,6 +94,52 @@ it('executes opted-in code through the real agent tool loop', async () => {
     ]),
   })
 })
+
+it.each([
+  { name: 'ASCII', text: 'x', count: 3 * 1024 * 1024 },
+  { name: 'multibyte', text: 'あ', count: 1024 * 1024 },
+  { name: 'JSON-escaped', text: '\u0000', count: 512 * 1024 },
+])(
+  'bounds $name code output before SQLite persistence using Pi defaults',
+  async ({ text, count }) => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      tools: ['execute_code'],
+      memoryPolicy: { remember: true, extract: false },
+    })
+    // Each generated response exceeds the platform's 2 MiB SQLite row limit before Pi bounds it.
+    expect(new TextEncoder().encode(JSON.stringify(text.repeat(count))).byteLength).toBeGreaterThan(
+      2 * 1024 * 1024,
+    )
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'execute_code',
+        arguments: { code: `export default () => ${JSON.stringify(text)}.repeat(${count})` },
+      }),
+    )
+    await exports.default.sendMessage(id, { requestId: 'large-code-output', content: 'Run code' })
+    await waitForAnswer(id, 'large-code-output')
+    expect(JSON.parse(requestBody(vi.mocked(fetch).mock.calls[1]?.[1]))).toMatchObject({
+      input: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function_call_output',
+          output: expect.stringContaining('Output truncated'),
+        }),
+      ]),
+    })
+    const rows = await runInDurableObject(env.AGENTS.getByName(id), (_instance, state) =>
+      drizzle(state.storage).select({ record: piEntries.record }).from(piEntries).all(),
+    )
+    const result = rows.find((row) => row.record.includes('"kind":"pi.tool-result"'))
+    expect(result).toBeDefined()
+    if (!result) throw new Error('Missing persisted tool result')
+    expect(new TextEncoder().encode(result.record).byteLength).toBeLessThan(2 * 1024 * 1024)
+    expect(JSON.parse(result.record)).toMatchObject({
+      model: [expect.objectContaining({ toolName: 'execute_code', isError: false })],
+      data: { diagnostics: [expect.objectContaining({ code: 'truncated', severity: 'warn' })] },
+    })
+  },
+)
 
 it.each(['disabled', 'denied'] as const)(
   'refuses %s code execution through the agent tool loop',

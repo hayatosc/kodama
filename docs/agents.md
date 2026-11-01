@@ -243,9 +243,15 @@ For example:
 ```
 
 The result is the returned value serialized as JSON text (`{"numeric":true}` in this example), not
-captured console output. Compilation and runtime failures become normal tool errors. Results are
-untrusted data, not instructions or authorization. This tool does not add a file upload/download API,
-persistent artifact storage, Office-specific operations, a shell, or a persistent session. Binary
+captured console output. Before saving the tool result or sending it to the model, Pi applies its
+standard text-output limits (50 KiB or 2,000 lines, whichever is reached first), retaining the beginning
+and adding a `truncated` warning. A truncated result is not necessarily valid JSON. These are existing
+Pi defaults, not an additional `execute_code` quota; regression tests cover results larger than the
+SQLite row limit, including multibyte and JSON-escaped text. The executor still reads the full response
+into host memory before Pi bounds it. Compilation and runtime failures become normal tool errors.
+Results are untrusted data, not instructions or authorization. This tool does not add a file
+upload/download API, persistent artifact storage, Office-specific operations, a shell, or a persistent
+session. Binary
 files require an explicit encoding in JSON until a separate file transport is introduced.
 
 Kodama uses the official
@@ -276,7 +282,9 @@ Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty
 Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
 isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
 default resource limits apply: no application-specific CPU, wall-time, size, concurrency, or daily
-quotas and no price accounting are added.
+quotas and no price accounting are added. Compilation runs in the host before the generated isolate
+starts, so large source or dependency inputs can exhaust the host's platform CPU or memory budget;
+the generated Worker's isolation does not protect that compilation phase.
 
 Execution uses `replay: 'unsafe'`, so interrupted calls are not automatically re-executed during Pi
 recovery. Cancellation is checked around compilation and admission, passed to the execution request,
