@@ -14,10 +14,17 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, TaskId } from '@earendil-works/pi-durable'
 
 /** Why an object wants to be woken. */
-export type AlarmPurpose = 'recovery' | 'schedule' | 'extract' | 'prune' | 'jobs'
+export type AlarmPurpose = 'recovery' | 'schedule' | 'contact' | 'extract' | 'prune' | 'jobs'
 
 const KEY_PREFIX = 'kodama:alarm:'
-const PURPOSES: readonly AlarmPurpose[] = ['recovery', 'schedule', 'extract', 'jobs', 'prune']
+const PURPOSES: readonly AlarmPurpose[] = [
+  'recovery',
+  'schedule',
+  'contact',
+  'extract',
+  'jobs',
+  'prune',
+]
 const CLAIM_PREFIX = 'kodama:alarm-claim:'
 const RETRY_MS = 60_000
 

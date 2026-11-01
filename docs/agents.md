@@ -172,7 +172,7 @@ Some consequences:
 - `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
   descriptions, admission orchestration, external transport, and result formatting. Web definitions,
   execution, and provider protocols live together in `src/tools/web/`; `contact.ts` resolves
-  contact targets and observes replies through the supplied `sendTo` operation.
+  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
   store functions, never construct Drizzle queries or import agent classes. Agents supply shared
@@ -561,7 +561,8 @@ To add a tool:
 
 Agents enable registered tools by name in `tools`. New working agents default to `web_search`
 and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
-`current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory
+`current_time`, `contact_agent`, `list_contacts`, `contact_status`, `contact_result`,
+`discover_agents`, `web_search`, and `web_fetch`. The memory tools come from the memory
 extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
@@ -666,13 +667,52 @@ message text. Peer input is always queued as `followUp`, never injected into an 
 turn. Self-contact is refused.
 
 The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
-Its workflow in `src/tools/contact.ts` resolves the registry reference and calls this same `sendTo`
-path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
-the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
-`answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked
-unavailable. Timeout or sender cancellation does not cancel the receiver. Pending is not a reason
-to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
-delivery. Its delivery request ID is scoped to the sender and tool task.
+It reserves an object-local outbox using the actual adopted Pi tool task and full input provenance
+before dispatch. A stable `contactId` and receiver request identity make retries replay-safe. The
+receiver verifies the sender's persisted outbox through the registered sender object, then fences
+pruning before admission. It reconciles the exact submission answer into a durable receipt before
+history may be deleted. Acceptance alone is never successful completion.
+
+The tool returns an immediate answer when available and bounds observation of delivery, result reads,
+and acknowledgement to 30 seconds after outbox reservation. It returns `contactId` with `answered`,
+terminal `failed`/`cancelled`/`unanswered`, or
+`pending`. Timeout, transport uncertainty, or sender cancellation does not cancel accepted receiver
+work. Pending is not a reason to resend. The `contact` alarm retries dispatch and result collection;
+current sender permissions and target admission are rechecked before a new admission. The receiver's
+`sendMessage` also checks assigned credential availability before admission; this is not a guarantee
+of provider-side authentication. A later provider failure can produce a terminal `unanswered` receipt.
+The first sender terminal result and `recordNotification` commit in one SQLite transaction before
+the receiver acknowledges collection. An accepted request remains recoverable even if permissions
+later change. A confirmed pre-admission storage refusal settles as `failed` with
+`storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
+failures keep their fence and remain retryable.
+
+Collection observations have a shared 30-second attempt deadline; each contact alarm has a five-second
+peer-observation budget for its entire batch, not for each of its ten rows. Later due alarm purposes
+therefore do not wait for a blocked peer. Durable retry deadlines alone cannot preempt an alarm:
+Cloudflare runs only one alarm handler per object at a time. Timeout is unknown acceptance, not a
+terminal refusal, and the tool's independent 30-second window remains unchanged.
+
+RPC disposal does not guarantee cancellation of remote effects. A timed-out attempt retains its
+single-flight slot until the actual RPC chain settles, so a tool and an alarm cannot start overlapping
+attempts. Late success still saves the result and notification before ack, and late RPC results are
+disposed normally. At most ten unresolved flights, including blocked acknowledgements, are held per
+object; excess work is durably deferred. Re-observation does not shorten transport backoff or spin a
+past-due alarm. A permanently stalled RPC can pin a slot until it settles or the object restarts; a
+restart retries the same durable identity and receiver receipt, never a new submission. These budgets
+bound peer waiting, not platform storage latency or a claimed ability to cancel remote execution.
+
+Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
+this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
+64 KiB of UTF-8 with explicit `truncated` and `expired` flags; terminal payloads default to 30 days.
+Pending work and unacknowledged receiver receipts do not expire. The legacy low-level `sendTo` RPC
+remains admission-only and does not create a tracked tool contact.
+
+Opt-in `discover_agents({query?, label?, cursor?})` exposes active working agents' IDs, display names,
+slugs, descriptions, and labels, never their credentials or other settings. `query` matches public
+text case-insensitively; `label` is an exact match. Discovery scans at most 50 registry rows per page,
+so a filtered page can be empty with `nextCursor`; continue until no cursor remains. Local contact
+lists use stable ascending contact-ID pagination.
 
 Peer messages retain sender provenance and are data, not owner authorization. Sending or
 receiving them does not change learning permissions. `MAX_CONTACT_HOPS = 3` bounds how far a
@@ -822,13 +862,14 @@ before domain dispatch. Pruning performs one bounded slice per wake, and the mem
 starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
 not the sole guarantee of another wake:
 
-| Purpose    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| `recovery` | resume Pi's scheduler after eviction while work is pending        |
-| `schedule` | reconcile reservations and admit a bounded batch of due inputs    |
-| `extract`  | hand new entries to the memory agent after 10 minutes idle        |
-| `prune`    | archive and delete old entries when storage is over its threshold |
-| `jobs`     | the memory agent's job runner                                     |
+| Purpose    | Meaning                                                               |
+| ---------- | --------------------------------------------------------------------- |
+| `recovery` | resume Pi's scheduler after eviction while work is pending            |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs        |
+| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results |
+| `extract`  | hand new entries to the memory agent after 10 minutes idle            |
+| `prune`    | archive and delete old entries when storage is over its threshold     |
+| `jobs`     | the memory agent's job runner                                         |
 
 The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between

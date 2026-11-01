@@ -5,8 +5,9 @@
  *
  * @module
  */
-import { and, desc, eq, like } from 'drizzle-orm'
-import { agents } from '../../drizzle/management/schema.ts'
+import { and, desc, eq, gt, like } from 'drizzle-orm'
+import * as v from 'valibot'
+import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { isUuid } from '../lib/uuid.ts'
 import type { AgentStatus, AgentSummary } from '../protocol.ts'
 import type { AgentRow, ManagementDb } from './db.ts'
@@ -114,6 +115,59 @@ export async function resolveAgentRef(db: ManagementDb, ref: string): Promise<Ag
   if (first === undefined) throw new TypeError(`Unknown agent: ${ref}`)
   if (others.length > 0) throw ambiguous(ref, matches)
   return first
+}
+
+/** Bounded discovery exposes only an allowlisted projection of public configuration metadata. */
+export async function discoverAgents(
+  db: ManagementDb,
+  filter: { query?: string; label?: string; cursor?: string },
+) {
+  const rows = await db
+    .select({
+      agentId: agents.agentId,
+      displayName: agents.displayName,
+      slug: agents.slug,
+      settingsJson: agentConfigVersions.settingsJson,
+    })
+    .from(agents)
+    .innerJoin(
+      agentConfigVersions,
+      and(
+        eq(agentConfigVersions.agentId, agents.agentId),
+        eq(agentConfigVersions.version, agents.currentVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(agents.kind, 'working'),
+        eq(agents.status, 'active'),
+        filter.cursor ? gt(agents.agentId, filter.cursor) : undefined,
+      ),
+    )
+    .orderBy(agents.agentId)
+    .limit(51)
+  const query = filter.query?.toLowerCase()
+  const found = rows
+    .slice(0, 50)
+    .map((row) => {
+      const metadata = v.parse(
+        v.object({
+          description: v.optional(v.string(), ''),
+          labels: v.optional(v.array(v.string()), []),
+        }),
+        JSON.parse(row.settingsJson),
+      )
+      return { agentId: row.agentId, displayName: row.displayName, slug: row.slug, ...metadata }
+    })
+    .filter(
+      (row) =>
+        (!filter.label || row.labels.includes(filter.label)) &&
+        (!query ||
+          `${row.displayName}\n${row.slug ?? ''}\n${row.description}`
+            .toLowerCase()
+            .includes(query)),
+    )
+  return { agents: found, nextCursor: rows.length > 50 ? rows[49]?.agentId : undefined }
 }
 
 /** Registry rows, newest first, optionally of one kind or state. */

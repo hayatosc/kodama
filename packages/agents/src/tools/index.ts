@@ -7,7 +7,7 @@
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { createCodeTool } from './code/execute.ts'
 import type { CodeCall } from './code/execute.ts'
-import { createContactAgentTool } from './contact.ts'
+import { createContactAgentTool, createContactReadTools } from './contact.ts'
 import type { ContactAgent } from './contact.ts'
 import { createWebSearchTool } from './web/search.ts'
 import type { WebCall } from './web/search.ts'
@@ -30,6 +30,7 @@ export function createAgentTools(
     currentTimeTool,
     createCodeTool(code),
     createContactAgentTool(contact),
+    ...createContactReadTools(contact),
     createWebSearchTool(web),
     createWebFetchTool(web),
     ...createScheduleTools(schedule),
