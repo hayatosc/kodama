@@ -101,6 +101,41 @@ describe('toCommand', () => {
     expect(command(['cancel', agentId])).toEqual({ action: 'cancel', agentRef: agentId })
   })
 
+  it('lists notifications and acknowledges exact sequences with validated bounded arguments', () => {
+    const parsed = command(['notifications', 'assistant'], {
+      before: '42',
+      limit: '2',
+      unread: true,
+    })
+    expect(parsed).toEqual({
+      action: 'notifications',
+      agentRef: 'assistant',
+      query: { before: 42, limit: 2, unreadOnly: true },
+    })
+    if (parsed.action !== 'notifications') throw new Error('Unexpected command')
+    expect(commandRequest(parsed, 'token')).toMatchObject({
+      url: `${LOCAL_WORKER_URL}/cli/notifications/assistant`,
+      init: { body: JSON.stringify(parsed.query) },
+    })
+    const read = command(['notification-read', 'assistant', '41'])
+    expect(read).toEqual({
+      action: 'notification-read',
+      agentRef: 'assistant',
+      request: { seq: 41 },
+    })
+    if (read.action !== 'notification-read') throw new Error('Unexpected command')
+    expect(commandRequest(read, 'token')).toMatchObject({
+      url: `${LOCAL_WORKER_URL}/cli/notification-read/assistant`,
+      init: { body: '{"seq":41}' },
+    })
+    for (const value of ['0', '-1', '1.5', 'abc', '9007199254740992']) {
+      expect(() => command(['notification-read', 'assistant', value])).toThrow()
+      expect(() => command(['notifications', 'assistant'], { before: value })).toThrow()
+    }
+    for (const limit of ['0', '101', '1.5', 'abc'])
+      expect(() => command(['notifications', 'assistant'], { limit })).toThrow()
+  })
+
   it('reads a message with its request ID, steering, and event output', () => {
     expect(
       command(['send', 'assistant', 'Hello'], { 'request-id': 'r1', steer: true, events: true }),

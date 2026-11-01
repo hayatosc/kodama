@@ -82,12 +82,16 @@ import type {
   AgentSettings,
   AgentSnapshot,
   AgentStatus,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
   ApplyResult,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
+import { listNotifications, readNotification } from './local-db/notifications.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
@@ -95,6 +99,8 @@ import {
   parseMessage,
   parseRequestId,
   VersionSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
 } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
@@ -770,6 +776,18 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Acknowledge a D1-committed prefix and perform safe local detail retention. */
   async acknowledgeUsage(through: number): Promise<void> {
     acknowledgeUsage(await this.#local, through)
+  }
+
+  /** Newest-first agent-wide inbox; reading metadata never admits model input. */
+  async notifications(query: NotificationQuery = {}): Promise<NotificationPage> {
+    const input = parseInput(NotificationQuerySchema, query)
+    return listNotifications(await this.#local, input, Date.now())
+  }
+
+  /** Mark exactly one sequence read; returns false for missing or expired notifications. */
+  async readNotification(request: NotificationRead): Promise<boolean> {
+    const input = parseInput(NotificationReadSchema, request)
+    return readNotification(await this.#local, input.seq, Date.now())
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */
