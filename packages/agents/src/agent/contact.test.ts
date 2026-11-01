@@ -100,6 +100,29 @@ async function wake(sender: string) {
   })
 }
 
+/** Queue a manual test wake without racing a second platform alarm dispatch. */
+async function contactAlarm(sender: string, maintenance = false) {
+  await runInDurableObject(env.AGENTS.getByName(sender), async (instance, state) => {
+    const db = await openLocalDb(state.storage)
+    db.update(contactRequests)
+      .set({ retryAt: Date.now() - 1 })
+      .run()
+    await state.storage.put('kodama:alarm:contact', Date.now() - 2)
+    if (maintenance) await state.storage.put('kodama:alarm:prune', Date.now() - 1)
+    await instance.alarm()
+  })
+}
+
+/** Accelerate only the documented contact budgets, leaving test guards and platform I/O real. */
+function contactBudgetTimers() {
+  const realTimeout = globalThis.setTimeout.bind(globalThis)
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) =>
+    realTimeout(callback, delay === 5_000 ? 20 : delay === 30_000 ? 80 : delay, ...args),
+  )
+  return (milliseconds: number) =>
+    new Promise<void>((resolve) => realTimeout(resolve, milliseconds))
+}
+
 describe('model contacts', () => {
   it.each(['uuid', 'slug', 'prefix'])(
     'a model contacts by %s and incorporates the correlated reply',
@@ -751,6 +774,160 @@ describe('durable contact recovery', () => {
     })
     expect(await peer.acceptTrackedContact(sender, row.id)).toBeUndefined()
     expect(await peer.submission(row.requestId)).toBeUndefined()
+  })
+
+  it.each(['admission', 'result', 'ack'] as const)(
+    'bounds a blocked %s RPC and lets the following due purpose run',
+    async (stage) => {
+      const sender = await enabled()
+      const receiver = await newAgentId()
+      const row = await outbox(sender, receiver)
+      if (stage !== 'admission') {
+        await env.AGENTS.getByName(receiver).acceptTrackedContact(sender, row.id)
+        await waitForAnswer(receiver, row.requestId)
+      }
+      const held = Promise.withResolvers<void>()
+      const started = Promise.withResolvers<void>()
+      let calls = 0
+      await runInDurableObject(env.AGENTS.getByName(receiver), (instance) => {
+        const block = async () => {
+          calls++
+          started.resolve()
+          await held.promise
+        }
+        if (stage === 'admission') {
+          const accept = instance.acceptTrackedContact.bind(instance)
+          vi.spyOn(Agent.prototype, 'acceptTrackedContact').mockImplementation(async (...args) => {
+            await block()
+            return accept(...args)
+          })
+        } else if (stage === 'result') {
+          const read = instance.trackedContactResult.bind(instance)
+          vi.spyOn(Agent.prototype, 'trackedContactResult').mockImplementation(async (...args) => {
+            await block()
+            return read(...args)
+          })
+        } else {
+          const ack = instance.acknowledgeTrackedContact.bind(instance)
+          vi.spyOn(Agent.prototype, 'acknowledgeTrackedContact').mockImplementation(
+            async (...args) => {
+              await block()
+              return ack(...args)
+            },
+          )
+        }
+      })
+      let maintenance = 0
+      vi.spyOn(Agent.prototype, 'prune').mockImplementation(async () => {
+        maintenance++
+        return 'nothing'
+      })
+      const pause = contactBudgetTimers()
+      await runInDurableObject(env.AGENTS.getByName(sender), async (instance, state) => {
+        await setAlarm(state.storage, 'contact', Date.now() - 2)
+        await setAlarm(state.storage, 'prune', Date.now() - 1)
+        const alarm = instance.alarm()
+        try {
+          await started.promise
+          expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(
+            true,
+          )
+          expect(maintenance).toBe(1)
+          // A second alarm may observe, but must not replace, the unresolved RPC.
+          await wake(sender)
+          expect(calls).toBe(1)
+          const pending = contactRequest(await openLocalDb(state.storage), row.id)
+          expect(pending?.result?.outcome === 'failed').toBe(false)
+          expect(pending?.retryAt).toBeGreaterThan(Date.now())
+        } finally {
+          held.resolve()
+          await alarm
+        }
+      })
+      await waitForAnswer(receiver, row.requestId)
+      await expect.poll(async () => (await outbound(sender, row.id))?.retryAt).toBe(0)
+      expect((await outbound(sender, row.id))?.result?.text).toBe('Hello from Kodama')
+      expect(
+        (await exports.default.snapshot(receiver)).snapshot.messages.filter(
+          (message) => message.role === 'user',
+        ),
+      ).toHaveLength(1)
+    },
+  )
+
+  it('bounds an alarm observing the same single-flight as a timed-out tool', async () => {
+    const sender = await enabled()
+    const receiver = await newAgentId()
+    const held = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    let calls = 0
+    await runInDurableObject(env.AGENTS.getByName(receiver), (instance) => {
+      const accept = instance.acceptTrackedContact.bind(instance)
+      vi.spyOn(Agent.prototype, 'acceptTrackedContact').mockImplementation(async (...args) => {
+        calls++
+        started.resolve()
+        await held.promise
+        return accept(...args)
+      })
+    })
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'contact_agent',
+        arguments: { target: receiver, message: 'Slow admission' },
+      }),
+    )
+    // Stop native test alarms from claiming the contact before the explicit shared-flight wake.
+    const nativeAlarms = vi.spyOn(Agent.prototype, 'alarm').mockResolvedValue()
+    const pause = contactBudgetTimers()
+    try {
+      await exports.default.sendMessage(sender, { requestId: 'shared-flight', content: 'Ask peer' })
+      await started.promise
+      await waitForAnswer(sender, 'shared-flight')
+      nativeAlarms.mockRestore()
+      const alarm = contactAlarm(sender)
+      expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(true)
+      expect(calls).toBe(1)
+    } finally {
+      held.resolve()
+    }
+    await expect
+      .poll(async () =>
+        runInDurableObject(
+          env.AGENTS.getByName(sender),
+          async (_, state) =>
+            (await openLocalDb(state.storage)).select().from(contactRequests).get()?.retryAt,
+        ),
+      )
+      .toBe(0)
+  })
+
+  it('bounds the entire contact batch rather than spending one full budget per row', async () => {
+    const sender = await enabled()
+    const receiver = await newAgentId()
+    for (let index = 0; index < 10; index++) await outbox(sender, receiver)
+    const held = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    let calls = 0
+    await runInDurableObject(env.AGENTS.getByName(receiver), (instance) => {
+      const accept = instance.acceptTrackedContact.bind(instance)
+      vi.spyOn(Agent.prototype, 'acceptTrackedContact').mockImplementation(async (...args) => {
+        calls++
+        started.resolve()
+        await held.promise
+        return accept(...args)
+      })
+    })
+    const pause = contactBudgetTimers()
+    const alarm = wake(sender)
+    try {
+      await started.promise
+      expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(true)
+      expect(calls).toBe(1)
+    } finally {
+      held.resolve()
+      await alarm
+    }
+    expect(calls).toBeGreaterThanOrEqual(1)
   })
 
   it('blocks pruning while receiver admission is fenced but not yet reconciled', async () => {
