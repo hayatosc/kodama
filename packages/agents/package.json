@@ -23,6 +23,7 @@
     "db:generate:management": "drizzle-kit generate --config drizzle.management.config.ts"
   },
   "dependencies": {
+    "@cloudflare/worker-bundler": "0.2.6",
     "@earendil-works/chord": "1.2.0",
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",

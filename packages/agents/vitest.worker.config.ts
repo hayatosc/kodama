@@ -33,6 +33,8 @@ function migratedColumns(folder: string): Record<string, string[]> {
 export default defineConfig({
   test: {
     name: 'workerd',
+    // Real npm compilation is opt-in so the normal suite remains offline.
+    provide: { codeNpmSmoke: process.env.KODAMA_CODE_NPM_SMOKE === '1' },
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
     exclude: [
       'cli/index.test.ts',

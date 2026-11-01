@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { createCodeExecutor } from '../tools/code/execute.ts'
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
 import { grantUrls } from './local-db/external-data.ts'
 import { urlsInText } from '../tools/web/url.ts'
@@ -155,10 +156,13 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #refusal: Refusal
   readonly #credentials: ReturnType<typeof agentCredentialStore>
   readonly #web = createWebState()
+  /** The most recent code compilation; generated Worker caches are scoped to this agent. */
+  readonly #executeCode: ReturnType<typeof createCodeExecutor>
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
+    this.#executeCode = createCodeExecutor(env.CODE_LOADER, this.#agentId())
     this.#refusal = anyRefusal(statusRefusal(ctx.storage))
     this.#credentials = agentCredentialStore(
       env,
@@ -372,6 +376,21 @@ export class Agent extends DurableObject<AgentEnv> {
           await rearmScheduling(local, this.ctx.storage)
           return JSON.stringify(result)
         }),
+      (input, context) =>
+        this.#executeCode(
+          input,
+          () =>
+            this.#serial(async () => {
+              assertAllowed(this.#refusal)
+              const settings = await appliedSettings(this.ctx.storage)
+              if (
+                !settings?.tools.includes('execute_code') ||
+                settings.toolPolicy?.execute_code === 'deny'
+              )
+                throw new Error('code_disabled')
+            }),
+          context.abortSignal,
+        ),
     )
   }
 
