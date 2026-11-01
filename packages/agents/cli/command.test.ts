@@ -166,7 +166,9 @@ describe('toCommand', () => {
   })
 
   it.each([
-    [['deploy'], /Expected seed, send, snapshot, or cancel/],
+    [['deploy'], /Invalid command or arguments; see nr agent --help/],
+    [['notifications'], /Invalid command or arguments; see nr agent --help/],
+    [['notification-read', 'assistant'], /Invalid command or arguments; see nr agent --help/],
     [['seed', 'assistant'], /Unexpected arguments/],
     [['send', 'assistant'], /Unexpected arguments/],
     [['snapshot', 'Not A Ref!'], TypeError],

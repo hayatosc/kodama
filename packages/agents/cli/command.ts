@@ -190,7 +190,7 @@ export function toCommand(
       request: parseInput(NotificationReadSchema, { seq: Number(content) }),
     }
   if (action !== 'seed' && action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
-    throw new Error('Expected seed, send, snapshot, or cancel; see nr agent --help')
+    throw new Error('Invalid command or arguments; see nr agent --help')
   }
   const expected = action === 'send' ? 3 : action === 'seed' ? 1 : 2
   if (positionals.length !== expected) {

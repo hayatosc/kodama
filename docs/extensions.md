@@ -99,8 +99,8 @@ notifications do not shift an existing page cursor. Unread filtering uses the sa
 It returns `true` for a live notification, including an already-read one, and `false` for a missing
 or expired one. Replays preserve the first server-generated `readAt`; acknowledging one sequence
 never acknowledges earlier sequences. Reads and acknowledgements are available for active,
-pausing, paused and archived working agents, not unknown, dedicated, provisioning or deleting agents.
-The authenticated calling Worker still owns user authorization; a source ID is not a capability.
+pausing, paused and archived working agents, not unknown, dedicated, provisioning, deleting or deleted
+agents. The authenticated calling Worker still owns user authorization; a source ID is not a capability.
 
 Each item includes `referenceState`: `available` means its object-local terminal receipt is retained,
 `expired` means the receipt is missing or past its retention deadline, and `unavailable` means a
