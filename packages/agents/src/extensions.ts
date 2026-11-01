@@ -62,3 +62,26 @@ export interface AgentNotification extends CompletionNotice {
   expiresAt: number
   readAt: number | null
 }
+
+/** Inbox filters use an exclusive descending sequence cursor, not an offset. */
+export interface NotificationQuery {
+  before?: number
+  unreadOnly?: boolean
+  limit?: number
+}
+
+/** Exact acknowledgement; a sequence is scoped to the admitted agent, never a read-through cursor. */
+export interface NotificationRead {
+  seq: number
+}
+
+/** Result availability is metadata only and does not authorize access to referenced artifacts. */
+export interface NotificationItem extends AgentNotification {
+  referenceState: 'available' | 'unavailable' | 'expired'
+}
+
+/** Bounded newest-first inbox page; continue with the exclusive nextBefore cursor when present. */
+export interface NotificationPage {
+  notifications: NotificationItem[]
+  nextBefore?: number
+}

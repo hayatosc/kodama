@@ -4,12 +4,15 @@ import { env, exports } from 'cloudflare:workers'
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { withHarness } from '../testing/harness.ts'
-import { dispatchSchedules, mutateSchedule } from './scheduling.ts'
+import { dispatchSchedules, mutateSchedule, rearmScheduling } from './scheduling.ts'
+import { recordNotification } from './local-db/notifications.ts'
+import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import {
   scheduledTasks,
   scheduledTaskOccurrences,
+  notifications,
   usage,
 } from '../../drizzle/durable-object/schema.ts'
 import { management, newAgentId, updateSettings } from '../testing/management.ts'
@@ -68,6 +71,95 @@ async function wake(id: string) {
   })
 }
 
+it('uses the existing schedule alarm for idle inbox retention without waking the model', async () => {
+  const id = await enabled()
+  await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    const now = Date.now()
+    recordNotification(
+      local,
+      {
+        source: 'contact',
+        sourceId: 'retention',
+        outcome: 'succeeded',
+        summary: 'Completed.',
+        artifactIds: [],
+      },
+      now,
+    )
+    await rearmScheduling(local, state.storage)
+    expect(await state.storage.get('kodama:alarm:schedule')).toBe(now + EXTENSION_RETENTION_MS)
+    local
+      .update(notifications)
+      .set({ expiresAt: now - 1 })
+      .run()
+  })
+  await wake(id)
+  await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+    const local = await openLocalDb(state.storage)
+    expect(local.select().from(notifications).all()).toEqual([])
+    expect(await state.storage.get('kodama:alarm:schedule')).toBeUndefined()
+  })
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('notifies model failure with a fixed summary and leaves a recurring definition active', async () => {
+  const id = await enabled()
+  await due(id, true)
+  vi.mocked(fetch).mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        error: { message: 'private provider detail', type: 'invalid_request_error' },
+      }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    ),
+  )
+  await wake(id)
+  await expect
+    .poll(async () => (await exports.default.notifications(id)).notifications[0]?.outcome)
+    .toBe('failed')
+  expect((await rows(id)).tasks[0]?.state).toBe('active')
+  const inbox = await exports.default.notifications(id)
+  expect(JSON.stringify(inbox)).not.toContain('private provider detail')
+  expect(inbox.notifications).toHaveLength(1)
+  await wake(id)
+  expect((await exports.default.notifications(id)).notifications).toHaveLength(1)
+})
+
+it('global cancellation notifies the execution once but preserves future reservations', async () => {
+  const id = await enabled()
+  await due(id, true)
+  const started = Promise.withResolvers<void>()
+  const finish = Promise.withResolvers<Response>()
+  vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+    started.resolve()
+    if (init?.signal) {
+      const signal = init.signal
+      return Promise.race([
+        finish.promise,
+        new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+      ])
+    }
+    return finish.promise
+  })
+  try {
+    await wake(id)
+    await started.promise
+    expect((await exports.default.notifications(id)).notifications).toEqual([])
+    await exports.default.cancel(id)
+    await expect
+      .poll(async () => (await exports.default.notifications(id)).notifications[0]?.outcome)
+      .toBe('cancelled')
+    expect((await rows(id)).tasks[0]?.state).toBe('active')
+    await wake(id)
+    expect((await exports.default.notifications(id)).notifications).toHaveLength(1)
+  } finally {
+    finish.resolve(textResponse('Late answer'))
+  }
+})
+
 describe('agent-managed reservations', () => {
   it('creates, lists and cancels through actual model tools even with legacy contact metadata', async () => {
     const id = await enabled()
@@ -109,6 +201,7 @@ describe('agent-managed reservations', () => {
     await exports.default.sendMessage(id, { requestId: 'cancel', content: 'Cancel it.' })
     await waitForAnswer(id, 'cancel')
     expect((await rows(id)).tasks[0]?.state).toBe('cancelled')
+    expect((await exports.default.notifications(id)).notifications).toEqual([])
   })
 
   it('rejects peer creation, but a later owner-only run may create', async () => {
@@ -261,6 +354,24 @@ describe('scheduled dispatch and receipts', () => {
         latest: { state: 'dispatching', admissionStarted: false, attempts: 1, outcome: null },
       })
       expect(admit).not.toHaveBeenCalled()
+      expect(local.select().from(notifications).all()).toEqual([])
+      // Exhaust confirmed pre-admission failures; only the final transition produces a notice.
+      local
+        .update(scheduledTaskOccurrences)
+        .set({ attempts: 4, retryAt: Date.now() - 1 })
+        .run()
+      await dispatchSchedules(
+        local,
+        harness,
+        state.storage,
+        (operation) => operation(),
+        async () => {
+          throw new Error(message)
+        },
+        admit,
+      )
+      expect(listReservations(local).tasks[0]?.latest?.outcome).toBe('admission_retry_exhausted')
+      expect(local.select().from(notifications).all()).toMatchObject([{ outcome: 'failed' }])
     })
   })
 
@@ -279,6 +390,7 @@ describe('scheduled dispatch and receipts', () => {
       latest: { state: 'dispatching', admissionStarted: true, attempts: 6 },
     })
     expect(vi.mocked(fetch).mock.calls).toHaveLength(0)
+    expect((await exports.default.notifications(id)).notifications).toEqual([])
   })
   it('survives eviction, runs once as system without granting URLs, and does not replay on another wake', async () => {
     const id = await enabled()
@@ -289,6 +401,21 @@ describe('scheduled dispatch and receipts', () => {
     await waitForAnswer(id, request)
     await expect.poll(async () => (await rows(id)).tasks[0]?.latest?.outcome).toBe('done')
     await wake(id)
+    const inbox = await exports.default.notifications(id)
+    expect(inbox.notifications).toMatchObject([
+      {
+        source: 'schedule',
+        sourceId: `scheduled-${task.id}-${task.rule.start}`,
+        outcome: 'succeeded',
+        readAt: null,
+        referenceState: 'available',
+      },
+    ])
+    expect(await exports.default.readNotification(id, { seq: 1 })).toBe(true)
+    await wake(id)
+    expect((await exports.default.notifications(id, { unreadOnly: true })).notifications).toEqual(
+      [],
+    )
     expect(vi.mocked(fetch).mock.calls).toHaveLength(1)
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
@@ -366,6 +493,9 @@ describe('scheduled dispatch and receipts', () => {
       state: 'failed',
       latest: { outcome: 'admission_refused' },
     })
+    expect((await exports.default.notifications(disabled)).notifications).toMatchObject([
+      { outcome: 'failed', summary: 'Scheduled execution failed.' },
+    ])
     const id = await enabled()
     const task = await due(id)
     vi.mocked(fetch)

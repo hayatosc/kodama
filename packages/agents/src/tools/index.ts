@@ -9,7 +9,7 @@ import { createCodeTool } from './code/execute.ts'
 import type { CodeCall } from './code/execute.ts'
 import { createArtifactTools } from './artifacts.ts'
 import type { ArtifactCall } from './artifacts.ts'
-import { createContactAgentTool } from './contact.ts'
+import { createContactAgentTool, createContactReadTools } from './contact.ts'
 import type { ContactAgent } from './contact.ts'
 import { createWebSearchTool } from './web/search.ts'
 import type { WebCall } from './web/search.ts'
@@ -34,6 +34,7 @@ export function createAgentTools(
     createCodeTool(code),
     ...createArtifactTools(artifacts),
     createContactAgentTool(contact),
+    ...createContactReadTools(contact),
     createWebSearchTool(web),
     createWebFetchTool(web),
     ...createScheduleTools(schedule),

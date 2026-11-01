@@ -221,6 +221,51 @@ acknowledgement internal to validated peer operations; arbitrary caller-supplied
 not authorization. Add stop/retry/pruning/hop tests. Do not add dynamic agents or use whole-agent
 cancellation to cancel one peer request.
 
+#### Implemented contact protocol and limits
+
+`contact_agent` remains opt-in with the same `target`/`message` arguments and immediate 30-second
+answer observation. Its response now includes a stable `contactId`; `list_contacts`, `contact_status`,
+`contact_result`, and `discover_agents` are separately opt-in tools. Result reads are local and do not
+resend the message. Discovery projects only active working agents' public metadata, matches descriptions
+or names by text and labels exactly, and returns a scan cursor even when a filtered page is empty.
+
+The sender reserves `contactRequests` from the actual adopted tool task and full durable input set.
+It persists the bounded hop before dispatch; model-supplied sender or task identities are not accepted.
+The receiver calls the registered sender object to verify the exact outbox and target, reserves a
+`contactReceipts` pruning fence, and admits the stable Pi request. A receipt with `submissionId = 0`
+means admission must be recovered by that request ID. Recovery checks an existing acceptance before
+applying today's admission restrictions. Before any new admission it rechecks sender permissions,
+receiver lifecycle, and credentials. No whole-agent cancellation is used for peer work.
+
+Receiver reconciliation saves the exact terminal answer before Pi pruning; absent answer evidence
+becomes explicit `unanswered`, never a successful empty answer. The sender commits its first terminal
+result and notification together, then acknowledges the receiver. Stops before/after admission,
+receipt persistence, sender completion, and acknowledgement can all replay without new delivery or
+notification. The existing `contact` alarm purpose owns dispatch, collection, acknowledgement retries,
+and result expiry; a slow or cancelled observer is not the recovery mechanism.
+
+There are at most 100 pending outbound contacts per agent. Alarms process at most ten due contacts
+per wake with a five-second total peer-observation budget, allowing later due purposes to run. Each
+single-flight collection has a shared 30-second observation deadline, independent of the tool's
+30-second wait. Accepted pending work is polled every minute and transport failures or attempt
+timeouts back off up to one hour. A timeout means unknown acceptance, never a terminal refusal.
+
+A timed-out collection keeps its exclusive slot until the underlying RPC chain actually settles;
+re-observation cannot create overlapping retries or discard late success. Late answers follow the
+same atomic result/notification, acknowledgement, and RPC-result disposal order. At most ten unresolved
+flights are retained per object, including blocked acknowledgements; other work is deferred without
+shortening backoff. A permanently stalled flight can pin its slot until completion or object restart.
+After restart, the stable request ID and receiver receipt recover without duplicate admission.
+The budgets bound peer observation, not platform storage latency or remote execution cancellation:
+RPC disposal does not guarantee cancellation, and a scheduled retry cannot preempt Cloudflare's one
+active alarm invocation per object. No scheduler purpose ordering or priority policy changes.
+Results are capped at 64 KiB of UTF-8 without splitting code points, and terminal payloads expire after
+30 days with explicit expiry in reads. Pending contacts and unacknowledged receiver answers never
+expire. Replay tombstones and immutable request inputs are retained indefinitely; bounded cleanup of
+that evidence is not implemented. Artifact reference arrays are currently empty; a peer reference
+would not grant cross-agent artifact access. The legacy internal `sendTo` RPC stays admission-only.
+No new public service-binding contact-result API is introduced.
+
 ### C: durable inbox
 
 Own notification list/read/retention operations, the notification RPC/CLI, and scheduled completion
@@ -228,6 +273,55 @@ integration in `src/agent/scheduling.ts` and its store. Reuse `recordNotificatio
 second contact tracker. Exercise the inbox using scheduled completion, independently of B.
 Use exact sequence acknowledgements and bounded pagination. Add stop/retry/deduplication/unread
 and schedule failure tests. Do not wake a model, inject owner messages, or add Slack/email delivery.
+
+#### Inbox API and retention
+
+`AgentService.notifications(agentId, { before?, unreadOnly?, limit? })` lists the admitted working
+agent's inbox. The object-local method has the same name without `agentId`. Sequences sort in
+**descending** order; `before` is exclusive. The default limit is 50, bounded to 1–100. A page returns
+`{ notifications, nextBefore? }`; use `nextBefore` unchanged for the next page. Concurrent new
+notifications do not shift an existing page cursor. Unread filtering uses the same sequence order.
+
+`AgentService.readNotification(agentId, { seq })` marks exactly that sequence read, agent-wide.
+It returns `true` for a live notification, including an already-read one, and `false` for a missing
+or expired one. Replays preserve the first server-generated `readAt`; acknowledging one sequence
+never acknowledges earlier sequences. Reads and acknowledgements are available for active,
+pausing, paused and archived working agents, not unknown, dedicated, provisioning, deleting or deleted
+agents. The authenticated calling Worker still owns user authorization; a source ID is not a capability.
+
+Each item includes `referenceState`: `available` means its object-local terminal receipt is retained,
+`expired` means the receipt is missing or past its retention deadline, and `unavailable` means a
+receipt exists but has no terminal result. This is metadata availability, not authorization to read
+an artifact or another agent's result. Schedule references identify occurrence receipts, not full
+assistant answers; pruning Pi history does not turn them into retained answer text.
+
+Scheduled execution success, model failure, global cancellation and other unanswered completions
+produce one notification with a fixed, bounded summary. Raw provider errors, instructions and answer
+text are not copied into it. Permanent pre-admission refusal or exhausted confirmed pre-admission
+retries also produce a failure notice. Pending work and retries do not. Cancelling a definition only
+stops future materialization: it does not itself produce a completion notice or cancel an admitted
+execution. Accepted recurring execution failure/cancellation does not stop its future reservations.
+
+The first atomic pending-to-terminal transition writes both the occurrence receipt and its notice.
+Later settlement, acceptance repair and stale retries cannot revive terminal receipts. Thirty-day
+notification retention removes inbox metadata, not referenced results. Reads opportunistically clean
+expired metadata; the existing purpose-based `schedule` alarm also includes the earliest retained
+notification expiry whenever scheduling is rearmed, without adding a platform alarm or model input.
+Terminal receipt cleanup retains definitions and cursors. Even if inbox rows expire before receipt
+cleanup, or both expire, a stale settlement cannot recreate the notice.
+
+Local CLI commands return JSON through the existing token-authenticated development adapter:
+
+```sh
+nr agent notifications assistant --unread --limit 20
+nr agent notifications assistant --before 42 --limit 20
+nr agent notification-read assistant 41
+```
+
+Notification insertion alone is storage-only: contact producers use the shared transaction helper
+and their existing wake/recovery path; they do not depend on this public API. There is no external
+push delivery, model wake, owner-message insertion, per-user read state or complete schedule-answer
+archive. Combined contact/artifact integration remains a separate validation step.
 
 ### Shared files and integration
 

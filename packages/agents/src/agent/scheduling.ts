@@ -7,6 +7,7 @@ import type { Harness, SubmissionDraft, ToolExecutionApi } from '@earendil-works
 import type { Context } from '@earendil-works/chord/context'
 import * as v from 'valibot'
 import type { LocalDb } from './local-db/local.ts'
+import { nextNotificationExpiry, retainNotifications } from './local-db/notifications.ts'
 import {
   cancelReservation,
   claimOccurrence,
@@ -126,7 +127,11 @@ export async function rearmScheduling(
   local: LocalDb,
   storage: DurableObjectStorage,
 ): Promise<void> {
-  await setAlarm(storage, 'schedule', nextScheduleWake(local))
+  retainNotifications(local, Date.now())
+  const deadlines = [nextScheduleWake(local), nextNotificationExpiry(local)].filter(
+    (at): at is number => at !== undefined,
+  )
+  await setAlarm(storage, 'schedule', deadlines.length ? Math.min(...deadlines) : undefined)
 }
 
 /** A scheduled input is never owner authorization and never grants URLs from its instruction. */

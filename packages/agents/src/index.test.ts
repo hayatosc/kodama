@@ -81,6 +81,8 @@ describe('AgentService', () => {
       'rollbackConfig',
       'configHistory',
       'sendMessage',
+      'notifications',
+      'readNotification',
       'snapshot',
       'uploadArtifact',
       'listArtifacts',

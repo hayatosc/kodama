@@ -2,12 +2,14 @@
  * @see docs/agents.md — Scheduled tasks
  * @module
  */
-import { and, count, eq, gt, inArray, isNull, lte, ne, notExists, or, desc, lt } from 'drizzle-orm'
+import { and, count, eq, gt, inArray, isNull, lte, ne, notExists, or, desc } from 'drizzle-orm'
 import {
   scheduledTasks as tasks,
   scheduledTaskOccurrences as occurrences,
 } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
+import { recordNotification } from './notifications.ts'
+import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import type { ScheduleSpec } from '../schedule-spec.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 
@@ -192,14 +194,17 @@ export function pendingOccurrences(db: LocalDb, now?: number) {
 
 /** Persist uncertainty before crossing the Pi admission boundary; never infer rejection later. */
 export function markAdmissionStarted(db: LocalDb, id: string): void {
-  db.update(occurrences).set({ admissionStarted: true }).where(eq(occurrences.id, id)).run()
+  db.update(occurrences)
+    .set({ admissionStarted: true })
+    .where(and(eq(occurrences.id, id), unfinished))
+    .run()
 }
 
 /** Save acceptance independently of execution success. */
 export function recordAccepted(db: LocalDb, id: string, submissionId: number, now: number): void {
   db.update(occurrences)
     .set({ state: 'submitted', submissionId, retryAt: now + 60_000 })
-    .where(eq(occurrences.id, id))
+    .where(and(eq(occurrences.id, id), unfinished))
     .run()
 }
 
@@ -212,15 +217,45 @@ export function settleOccurrence(
   failed = false,
 ): void {
   db.transaction((tx) => {
-    tx.update(occurrences)
+    const settled = tx
+      .update(occurrences)
       .set({ state: failed ? 'failed' : 'settled', outcome, settledAt: now })
-      .where(eq(occurrences.id, occurrence.id))
-      .run()
+      .where(and(eq(occurrences.id, occurrence.id), unfinished))
+      .returning({ taskId: occurrences.taskId })
+      .get()
+    // Terminal rows and deleted receipts cannot recreate an expired notification on replay.
+    if (!settled) return
+    const completion =
+      failed || outcome === 'unanswered:model_error' || outcome === 'unanswered:faulted'
+        ? 'failed'
+        : outcome === 'done'
+          ? 'succeeded'
+          : outcome === 'unanswered:aborted'
+            ? 'cancelled'
+            : 'unanswered'
+    recordNotification(
+      tx,
+      {
+        source: 'schedule',
+        sourceId: occurrence.id,
+        outcome: completion,
+        summary:
+          completion === 'succeeded'
+            ? 'Scheduled execution completed.'
+            : completion === 'cancelled'
+              ? 'Scheduled execution was cancelled.'
+              : completion === 'failed'
+                ? 'Scheduled execution failed.'
+                : 'Scheduled execution ended without an answer.',
+        artifactIds: [],
+      },
+      now,
+    )
     tx.update(tasks)
       .set({ state: failed ? 'failed' : 'completed', nextDue: null })
       .where(
         and(
-          eq(tasks.id, occurrence.taskId),
+          eq(tasks.id, settled.taskId),
           eq(tasks.state, 'active'),
           failed ? undefined : isNull(tasks.nextDue),
         ),
@@ -236,7 +271,7 @@ export function retryOccurrence(db: LocalDb, occurrence: ScheduledOccurrence, no
       attempts: occurrence.attempts + 1,
       retryAt: now + Math.min(3_600_000, 60_000 * 2 ** Math.min(occurrence.attempts, 6)),
     })
-    .where(eq(occurrences.id, occurrence.id))
+    .where(and(eq(occurrences.id, occurrence.id), unfinished))
     .run()
 }
 
@@ -277,7 +312,7 @@ export function retainScheduledReceipts(db: LocalDb, now: number): void {
       and(
         ne(occurrences.state, 'dispatching'),
         ne(occurrences.state, 'submitted'),
-        lt(occurrences.settledAt, now - 30 * 86_400_000),
+        lte(occurrences.settledAt, now - EXTENSION_RETENTION_MS),
       ),
     )
     .run()

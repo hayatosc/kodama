@@ -3,11 +3,17 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { notifications } from '../../../drizzle/durable-object/schema.ts'
+import { contactRequests, notifications } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { openLocalDb } from './local.ts'
-import { recordNotification } from './notifications.ts'
+import {
+  listNotifications,
+  nextNotificationExpiry,
+  readNotification,
+  recordNotification,
+  retainNotifications,
+} from './notifications.ts'
 
 const notice = {
   source: 'contact',
@@ -21,6 +27,106 @@ const notice = {
 function completion() {
   return { ...notice, artifactIds: [...notice.artifactIds] }
 }
+
+describe('inbox operations', () => {
+  it('paginates descending by exclusive sequence despite concurrent inserts and read changes', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      for (let i = 1; i <= 5; i++)
+        recordNotification(db, { ...completion(), sourceId: `contact-${i}` }, 1000)
+      expect(readNotification(db, 4, 1100)).toBe(true)
+      const first = listNotifications(db, { limit: 2, unreadOnly: true }, 1200)
+      expect(first.notifications.map((item) => item.seq)).toEqual([5, 3])
+      expect(first.nextBefore).toBe(3)
+      recordNotification(db, { ...completion(), sourceId: 'new' }, 1300)
+      readNotification(db, 3, 1400)
+      const second = listNotifications(
+        db,
+        { limit: 2, unreadOnly: true, before: first.nextBefore },
+        1500,
+      )
+      expect(second.notifications.map((item) => item.seq)).toEqual([2, 1])
+      expect(second.nextBefore).toBeUndefined()
+      expect(listNotifications(db, {}, 1500).notifications.map((item) => item.seq)).toEqual([
+        6, 5, 4, 3, 2, 1,
+      ])
+      expect(listNotifications(db, { before: 1 }, 1500)).toEqual({ notifications: [] })
+      expect(readNotification(db, 3, 1600)).toBe(true)
+      expect(db.select().from(notifications).where(eq(notifications.seq, 3)).get()?.readAt).toBe(
+        1400,
+      )
+      expect(readNotification(db, 999, 1600)).toBe(false)
+    })
+  })
+
+  it('bounds pages, explicitly describes missing or expired results, and retains results on read', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      db.insert(contactRequests)
+        .values({
+          id: 'contact-1',
+          sourceTask: 'task',
+          sourceEntry: 1,
+          arguments: '{}',
+          targetAgentId: uuidv7(),
+          requestId: 'request',
+          content: 'Work',
+          hop: 1,
+          state: 'settled',
+          retryAt: 1000,
+          result: { outcome: 'succeeded', text: 'Answer', truncated: false, artifactIds: [] },
+          createdAt: 1,
+          settledAt: 1000,
+          expiresAt: 1500,
+        })
+        .run()
+      recordNotification(db, completion(), 1000)
+      expect(listNotifications(db, {}, 1200).notifications[0]?.referenceState).toBe('available')
+      expect(readNotification(db, 1, 1250)).toBe(true)
+      expect(db.select().from(contactRequests).get()?.result?.text).toBe('Answer')
+      expect(listNotifications(db, {}, 1500).notifications[0]?.referenceState).toBe('expired')
+      for (const query of [
+        { limit: 0 },
+        { limit: 101 },
+        { limit: 1.5 },
+        { before: 0 },
+        { before: Number.MAX_SAFE_INTEGER + 1 },
+        { unreadOnly: 'yes' },
+        { after: 1 },
+      ])
+        expect(() => listNotifications(db, query, 1500)).toThrow(TypeError)
+      db.delete(contactRequests).run()
+      expect(listNotifications(db, {}, 1600).notifications[0]?.referenceState).toBe('expired')
+    })
+  })
+
+  it('expires read and unread metadata at the boundary without reusing sequences', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      recordNotification(db, completion(), 1000)
+      recordNotification(db, { ...completion(), sourceId: 'second' }, 2000)
+      readNotification(db, 1, 2000)
+      expect(nextNotificationExpiry(db)).toBe(1000 + EXTENSION_RETENTION_MS)
+      retainNotifications(db, 999 + EXTENSION_RETENTION_MS)
+      expect(db.select().from(notifications).all()).toHaveLength(2)
+      expect(readNotification(db, 1, 1000 + EXTENSION_RETENTION_MS)).toBe(false)
+      expect(
+        listNotifications(db, {}, 1000 + EXTENSION_RETENTION_MS).notifications.map(
+          (item) => item.seq,
+        ),
+      ).toEqual([2])
+      retainNotifications(db, 2000 + EXTENSION_RETENTION_MS)
+      expect(nextNotificationExpiry(db)).toBeUndefined()
+      expect(
+        recordNotification(
+          db,
+          { ...completion(), sourceId: 'third' },
+          3000 + EXTENSION_RETENTION_MS,
+        )?.seq,
+      ).toBe(3)
+    })
+  })
+})
 
 describe('recordNotification', () => {
   it('survives reopening and does not change content or acknowledgement on replay', async () => {

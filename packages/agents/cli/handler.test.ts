@@ -1,5 +1,8 @@
 /** Authenticated local adapter routes registry references without implicit seeding. @module */
-import { exports } from 'cloudflare:workers'
+import { env, exports } from 'cloudflare:workers'
+import { runInDurableObject } from 'cloudflare:test'
+import { recordNotification } from '../src/agent/local-db/notifications.ts'
+import { openLocalDb } from '../src/agent/local-db/local.ts'
 import { expect, it } from 'vitest'
 import { newAgentId } from '../src/testing/management.ts'
 import { seedOnce } from '../src/testing/management.ts'
@@ -101,6 +104,48 @@ it('rejects oversized upload streams before multipart decoding', async () => {
   )
   expect(response.status).toBe(400)
   expect(await exports.default.listArtifacts(owner)).toEqual([])
+})
+
+it('authenticates inbox reads and exact acknowledgements and validates their request bodies', async () => {
+  const id = await newAgentId()
+  await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+    recordNotification(
+      await openLocalDb(state.storage),
+      {
+        source: 'schedule',
+        sourceId: 'cli-execution',
+        outcome: 'succeeded',
+        summary: 'Completed.',
+        artifactIds: [],
+      },
+      Date.now(),
+    )
+  })
+  const post = (action: string, body: unknown, token = 'test-token') =>
+    handleCli(
+      new Request(`http://localhost/cli/${action}/${id}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
+  expect((await post('notifications', {}, 'wrong-token')).status).toBe(401)
+  expect(await (await post('notifications', { unreadOnly: true })).json()).toMatchObject({
+    notifications: [{ seq: 1, readAt: null }],
+  })
+  expect(await (await post('notification-read', { seq: 1 })).json()).toEqual({ found: true })
+  expect(await (await post('notification-read', { seq: 1 })).json()).toEqual({ found: true })
+  expect(await (await post('notifications', { unreadOnly: true })).json()).toEqual({
+    notifications: [],
+  })
+  expect(await (await post('notification-read', { seq: 99 })).json()).toEqual({ found: false })
+  for (const body of [{ limit: 101 }, { before: 0 }, { after: 1 }])
+    expect((await post('notifications', body)).status).toBe(400)
+  for (const body of [{ seq: 0 }, { through: 1 }, { seq: 1, readAt: 123 }])
+    expect((await post('notification-read', body)).status).toBe(400)
 })
 
 it('enables and disables optional tools through versioned configuration without losing credentials', async () => {

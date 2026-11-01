@@ -172,7 +172,7 @@ Some consequences:
 - `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
   descriptions, admission orchestration, external transport, and result formatting. Web definitions,
   execution, and provider protocols live together in `src/tools/web/`; `contact.ts` resolves
-  contact targets and observes replies through the supplied `sendTo` operation.
+  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
   store functions, never construct Drizzle queries or import agent classes. Agents supply shared
@@ -574,7 +574,8 @@ To add a tool:
 
 Agents enable registered tools by name in `tools`. New working agents default to `web_search`
 and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
-`current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory
+`current_time`, `contact_agent`, `list_contacts`, `contact_status`, `contact_result`,
+`discover_agents`, `web_search`, and `web_fetch`. The memory tools come from the memory
 extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
@@ -596,6 +597,8 @@ and forwards to the agent's Durable Object:
 | `submission(agentId, requestId)`                          | Submission status, or `undefined`                            |
 | `snapshot(agentId)`                                       | Committed user/assistant messages and `busy`                 |
 | `cancel(agentId)`                                         | Stop current work; resolves once idle                        |
+| `notifications(agentId, query?)`                          | Newest-first bounded agent-wide inbox                        |
+| `readNotification(agentId, { seq })`                      | Exact agent-wide read acknowledgement                        |
 | `uploadArtifact(agentId, { filename, mediaType, bytes })` | `ArtifactMetadata`; `chat` admission (active only)           |
 | `listArtifacts(agentId, { cursor?, limit? })`             | `ArtifactMetadata[]`; `read` admission                       |
 | `downloadArtifact(agentId, artifactId)`                   | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
@@ -703,13 +706,53 @@ message text. Peer input is always queued as `followUp`, never injected into an 
 turn. Self-contact is refused.
 
 The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
-Its workflow in `src/tools/contact.ts` resolves the registry reference and calls this same `sendTo`
-path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
-the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
-`answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked
-unavailable. Timeout or sender cancellation does not cancel the receiver. Pending is not a reason
-to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
-delivery. Its delivery request ID is scoped to the sender and tool task.
+It reserves an object-local outbox using the actual adopted Pi tool task and full input provenance
+before dispatch. A stable `contactId` and receiver request identity make retries replay-safe. The
+receiver verifies the sender's persisted outbox through the registered sender object, then fences
+pruning before admission. It reconciles the exact submission answer into a durable receipt before
+history may be deleted. Acceptance alone is never successful completion.
+
+The tool returns an immediate answer when available and bounds observation of delivery, result reads,
+and acknowledgement to 30 seconds after outbox reservation. It returns `contactId` with `answered`,
+terminal `failed`/`cancelled`/`unanswered`, or
+`pending`. Timeout, transport uncertainty, or sender cancellation does not cancel accepted receiver
+work. Pending is not a reason to resend. The `contact` alarm retries dispatch and result collection;
+current sender permissions and target admission are rechecked before a new admission. The receiver's
+`sendMessage` also checks assigned credential availability before admission; this is not a guarantee
+of provider-side authentication. A later provider failure can produce a terminal `unanswered` receipt.
+The first sender terminal result and `recordNotification` commit in one SQLite transaction before
+the receiver acknowledges collection. The shared schedule alarm is armed for notification retention
+before remote acknowledgement, including late completion after observers stop. An accepted request
+remains recoverable even if permissions later change. A confirmed pre-admission storage refusal settles as `failed` with
+`storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
+failures keep their fence and remain retryable.
+
+Collection observations have a shared 30-second attempt deadline; each contact alarm has a five-second
+peer-observation budget for its entire batch, not for each of its ten rows. Later due alarm purposes
+therefore do not wait for a blocked peer. Durable retry deadlines alone cannot preempt an alarm:
+Cloudflare runs only one alarm handler per object at a time. Timeout is unknown acceptance, not a
+terminal refusal, and the tool's independent 30-second window remains unchanged.
+
+RPC disposal does not guarantee cancellation of remote effects. A timed-out attempt retains its
+single-flight slot until the actual RPC chain settles, so a tool and an alarm cannot start overlapping
+attempts. Late success still saves the result and notification before ack, and late RPC results are
+disposed normally. At most ten unresolved flights, including blocked acknowledgements, are held per
+object; excess work is durably deferred. Re-observation does not shorten transport backoff or spin a
+past-due alarm. A permanently stalled RPC can pin a slot until it settles or the object restarts; a
+restart retries the same durable identity and receiver receipt, never a new submission. These budgets
+bound peer waiting, not platform storage latency or a claimed ability to cancel remote execution.
+
+Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
+this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
+64 KiB of UTF-8 with explicit `truncated` and `expired` flags; terminal payloads default to 30 days.
+Pending work and unacknowledged receiver receipts do not expire. The legacy low-level `sendTo` RPC
+remains admission-only and does not create a tracked tool contact.
+
+Opt-in `discover_agents({query?, label?, cursor?})` exposes active working agents' IDs, display names,
+slugs, descriptions, and labels, never their credentials or other settings. `query` matches public
+text case-insensitively; `label` is an exact match. Discovery scans at most 50 registry rows per page,
+so a filtered page can be empty with `nextCursor`; continue until no cursor remains. Local contact
+lists use stable ascending contact-ID pagination.
 
 Peer messages retain sender provenance and are data, not owner authorization. Sending or
 receiving them does not change learning permissions. `MAX_CONTACT_HOPS = 3` bounds how far a
@@ -859,13 +902,14 @@ before domain dispatch. Pruning performs one bounded slice per wake, and the mem
 starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
 not the sole guarantee of another wake:
 
-| Purpose    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| `recovery` | resume Pi's scheduler after eviction while work is pending        |
-| `schedule` | reconcile reservations and admit a bounded batch of due inputs    |
-| `extract`  | hand new entries to the memory agent after 10 minutes idle        |
-| `prune`    | archive and delete old entries when storage is over its threshold |
-| `jobs`     | the memory agent's job runner                                     |
+| Purpose    | Meaning                                                               |
+| ---------- | --------------------------------------------------------------------- |
+| `recovery` | resume Pi's scheduler after eviction while work is pending            |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs        |
+| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results |
+| `extract`  | hand new entries to the memory agent after 10 minutes idle            |
+| `prune`    | archive and delete old entries when storage is over its threshold     |
+| `jobs`     | the memory agent's job runner                                         |
 
 The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between
@@ -890,7 +934,7 @@ not duplicate provider billing.
 
 Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task` in
 `settings.tools`. They manage only that agent's reservations. There is no new public scheduling RPC,
-notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
+external notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
 its nominal time; it does not guarantee exact-time execution or wait for the model in the alarm.
 
 `schedule_task` takes `{ schedule, instruction }`. Supported rules are:
@@ -968,8 +1012,13 @@ working agent once, with owner attribution taking precedence over peer and then 
 Dedicated memory jobs retain their requester/job accounting. A scheduled model cannot recursively
 create or cancel definitions, but server-side expansion of an existing immutable recurrence is allowed.
 
-Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, notifications, and UI
-management are outside this version.
+Scheduled terminal completions also produce a durable agent-wide inbox notification atomically with
+the occurrence receipt. The notification references the occurrence ID, not its definition, and never
+wakes a model or inserts owner input. Inbox reads use descending sequence pagination and exact
+acknowledgements; see [extensions.md — Inbox API and retention](extensions.md#inbox-api-and-retention).
+
+Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, external notification
+delivery, and UI management are outside this version.
 
 ## Storage in the Durable Object
 
@@ -1062,6 +1111,9 @@ nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
 nr agent credentials revoke <old-credential-id>
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
+nr agent notifications assistant --unread --limit 20
+nr agent notifications assistant --before 42
+nr agent notification-read assistant 41
 nr agent cancel assistant
 nr agent send assistant "Hello!" --request-id my-test-1
 nr agent send assistant "Change direction." --steer
@@ -1102,6 +1154,10 @@ The CLI works like this:
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
+- `notifications` returns newest-first JSON pages, with an exclusive `nextBefore` cursor for
+  `--before`. `--unread` filters agent-wide unread metadata; `--limit` is 1–100 (default 50).
+  `notification-read <agent> <seq>` acknowledges exactly one sequence, idempotently, without
+  deleting the result. It returns `{ found: false }` for missing or expired metadata.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
 - `artifacts upload/list/download/delete` operates on an admitted working agent's arbitrary binary
   files. Downloads require a new local path, use private file permissions, and never print file bytes

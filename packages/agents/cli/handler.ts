@@ -9,6 +9,8 @@ import {
   ArtifactUploadSchema,
   ExtensionIdSchema,
   ExtensionPageSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
 } from '../src/validation.ts'
 import { MAX_ARTIFACT_BYTES } from '../src/extensions.ts'
 import type AgentService from '../src/index.ts'
@@ -26,6 +28,8 @@ type Service = Pick<
   | 'listArtifacts'
   | 'downloadArtifact'
   | 'deleteArtifact'
+  | 'notifications'
+  | 'readNotification'
 >
 async function uploadForm(request: Request): Promise<FormData> {
   if (!request.body) throw new TypeError('Missing upload body')
@@ -167,6 +171,20 @@ export async function handleCli(
         },
       })
     }
+    if (action === 'notifications')
+      return Response.json(
+        await service.notifications(
+          agentId,
+          parseInput(NotificationQuerySchema, await request.json()),
+        ),
+      )
+    if (action === 'notification-read')
+      return Response.json({
+        found: await service.readNotification(
+          agentId,
+          parseInput(NotificationReadSchema, await request.json()),
+        ),
+      })
     if (action === 'snapshot') return Response.json(await service.snapshot(agentId))
     if (action === 'cancel') {
       await service.cancel(agentId)
