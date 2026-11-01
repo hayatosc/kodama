@@ -280,17 +280,19 @@ code and warm isolates, even after a local compilation cache miss. Cache retenti
 module globals may survive JSON-only calls, but must never be relied on for persistence.
 This is code reuse, not a persistent execution session or a cache of execution results. No live
 Worker stubs are retained across requests. File-mode calls add a fresh random suffix to the loader
-identity, so a subsequent call cannot recover previously selected bytes from module globals. JSON-only
-calls retain their existing cache behavior.
+identity, so a subsequent call cannot recover previously selected bytes from module globals or
+temporary files. JSON-only calls retain their existing cache behavior.
 
-Generated Workers use compatibility date `2026-10-01`, an empty `env`, and `globalOutbound: null`.
-JSON-only calls retain their existing `nodejs_compat` runtime and npm/Node support. File calls instead
-use `no_nodejs_compat` and `no_nodejs_compat_v2` so no native Node module can access the virtual
-filesystem: disabling only `node:fs` does not prevent `node:fs/promises` access. File-mode dependencies
-must work with Web APIs; Node built-in-dependent packages are unsupported in file mode. This runtime
-restriction does not change the existing JSON-only API or its Node compatibility.
-Generated code receives no secrets, credentials, D1, R2, Durable
-Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
+Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty `env`, and
+`globalOutbound: null` in both JSON-only and file modes. Both support Workers-compatible npm packages
+and Node built-ins, including `node:fs` and `node:fs/promises`. As described in Cloudflare's
+[filesystem documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/), these
+APIs expose only the Worker's virtual filesystem: read-only `/bundle` contains its own bundled
+modules, `/tmp` is in-memory scratch space, and `/dev` contains virtual devices. They do not expose
+Kodama host files, other Workers' files, or R2. Temporary IO consumes Worker memory, is not persistent
+storage, and does not create an artifact unless the function explicitly returns its bytes as output.
+Generated code receives only explicitly selected artifact bytes and no secrets, credentials, D1, R2,
+Durable Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
 isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
 default resource limits apply: no application-specific CPU, wall-time, source-size, concurrency, or daily
 quotas and no price accounting are added. Compilation runs in the host before the generated isolate

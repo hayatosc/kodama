@@ -118,13 +118,18 @@ truncation still applies to returned metadata/results. There is no per-agent sto
 format-specific parser. Platform CPU/memory limits and npm compatibility still apply.
 
 The compiler is trusted and may resolve requested npm dependencies; generated code has no host
-bindings, credentials, outbound network, or host filesystem. File-mode Workers also disable native
-Node modules using `no_nodejs_compat` and `no_nodejs_compat_v2`, prohibiting even virtual filesystem
-access: disabling only `node:fs` does not block `node:fs/promises`. File-mode dependencies must work
-with Web APIs; Node built-in-dependent packages are unsupported in file mode. JSON-only calls retain
-their existing `nodejs_compat` runtime and npm/Node behavior. Only explicitly selected bytes enter the isolate. Every file execution uses a fresh Worker identity, preventing module-global
-byte carryover across calls, while compiled source can still be reused. File IDs are owner-local
-references, not capabilities: sharing an ID in chat or a contact never grants another agent access.
+bindings, credentials, outbound network, or host/persistent filesystem. Both file and JSON-only modes
+retain `nodejs_compat` and support Workers-compatible npm packages and Node built-ins. In particular,
+`node:fs` and `node:fs/promises` can read the Worker's own read-only `/bundle` and use temporary
+in-memory `/tmp` and virtual `/dev`, as described in Cloudflare's
+[filesystem documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/).
+This virtual filesystem does not mount Kodama host files or R2. Temporary files consume Worker
+memory and are not artifacts: return their bytes explicitly to persist output. Only explicitly
+selected artifact bytes enter the isolate. Every file execution uses a fresh Worker identity,
+preventing module-global and temporary-file byte carryover across calls, while compiled source can
+still be reused. The original JSON-only API and its cache behavior remain unchanged. File IDs are
+owner-local references, not capabilities: sharing an ID in chat or a contact never grants another
+agent access.
 
 Metadata is reserved as `uploading` before R2 IO under `artifacts/<agent-id>/`, then made `ready`
 only after R2 succeeds. Interrupted uploads remain hidden and are collected after a 60-second

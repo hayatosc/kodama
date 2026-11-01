@@ -1,5 +1,6 @@
 /** Dynamic Worker execution, agent-scoped caching and optional real npm compilation. @module */
 import { env } from 'cloudflare:workers'
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import * as bundler from '@cloudflare/worker-bundler'
 import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
 import { createCodeExecutor, createCodeTool } from './execute.ts'
@@ -85,7 +86,7 @@ describe('binary file execution', () => {
     expect(store.read.mock.calls).toEqual([['input0'], ['input1']])
   })
 
-  it('uses a fresh isolate for file calls so unselected bytes cannot survive in globals', async () => {
+  it('uses fresh file isolates so selected bytes cannot survive in globals or temporary files', async () => {
     const store = fileStore([
       {
         filename: 'secret.bin',
@@ -94,13 +95,24 @@ describe('binary file execution', () => {
       },
     ])
     const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
-    const code =
-      'let previous; export default (_, files) => { const result = previous ?? null; previous = files[0]?.bytes[0]; return { result, files: [] } }'
-    await execute({ code, files: ['input0'] }, allow)
-    expect(JSON.parse(await execute({ code, files: [] }, allow))).toEqual({
-      result: null,
-      files: [],
-    })
+    const code = `import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+      let previous
+      export default (_, files) => {
+        const result = {
+          global: previous ?? null,
+          temporary: existsSync('/tmp/selected.bin') ? [...readFileSync('/tmp/selected.bin')] : null,
+        }
+        if (files[0]) {
+          previous = files[0].bytes[0]
+          writeFileSync('/tmp/selected.bin', files[0].bytes)
+        }
+        return { result, files: [] }
+      }`
+    const clean = { result: { global: null, temporary: null }, files: [] }
+    expect(JSON.parse(await execute({ code, files: ['input0'] }, allow))).toEqual(clean)
+    expect(JSON.parse(await execute({ code, files: [] }, allow))).toEqual(clean)
+    expect(JSON.parse(await execute({ code, files: [] }, allow))).toEqual(clean)
+    expect(store.read.mock.calls).toEqual([['input0']])
     expect(await execute({ code: 'export default () => typeof previous' }, allow)).toBe(
       '"undefined"',
     )
@@ -126,43 +138,97 @@ describe('binary file execution', () => {
     expect(result).toEqual({ result: { bindings: [], network: true }, files: [] })
   })
 
-  it('disables the filesystem module, including temporary files', async () => {
-    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
-    await expect(
-      execute(
+  it.each([
+    ['node:fs', 'writeFileSync', 'readFileSync'],
+    ['node:fs/promises', 'writeFile', 'readFile'],
+  ])('round trips selected binary bytes through %s temporary IO', async (module, write, read) => {
+    const input = {
+      filename: 'selected.bin',
+      mediaType: 'application/octet-stream',
+      bytes: new Uint8Array([0, 128, 255, 42]),
+    }
+    const store = fileStore([input])
+    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), store)
+    const result: unknown = JSON.parse(
+      await execute(
         {
-          files: [],
-          code: `import * as fs from 'node:fs'; export default () => ({result:Object.keys(fs),files:[]})`,
+          files: ['input0'],
+          code: `import { ${write} as write, ${read} as read } from '${module}'
+        export default async (_, files) => {
+          await write('/tmp/selected.bin', files[0].bytes)
+          const bytes = await read('/tmp/selected.bin')
+          return {result: [...bytes], files: [{...files[0], bytes}]}
+        }`,
         },
         allow,
       ),
-    ).rejects.toThrow(/No such module/)
+    )
+    expect(result).toMatchObject({
+      result: [0, 128, 255, 42],
+      files: [{ filename: 'selected.bin' }],
+    })
+    expect(store.outputs).toEqual([input])
   })
 
-  it('preserves JSON-mode Node compatibility even when the same source also runs in file mode', async () => {
+  it('preserves Node-compatible imports in JSON and file calls sharing the same compilation', async () => {
+    const compile = vi.spyOn(bundler, 'createWorker')
     const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
-    const code = `import { Buffer } from 'node:buffer'; export default () => Buffer.from([1,2,255]).toString('hex')`
-    expect(await execute({ code }, allow)).toBe('"0102ff"')
-    await expect(execute({ code, files: [] }, allow)).rejects.toThrow(/No such module/)
-    expect(await execute({ code }, allow)).toBe('"0102ff"')
+    const source = {
+      code: `import { hex } from 'binary-util'; export default (_, files) => files ? {result: hex([1,2,255]), files: []} : hex([1,2,255])`,
+      virtualModules: {
+        'binary-util': `import { Buffer } from 'node:buffer'; export const hex = bytes => Buffer.from(bytes).toString('hex')`,
+      },
+    }
+    expect(await execute(source, allow)).toBe('"0102ff"')
+    expect(JSON.parse(await execute({ ...source, files: [] }, allow))).toEqual({
+      result: '0102ff',
+      files: [],
+    })
+    expect(await execute(source, allow)).toBe('"0102ff"')
+    expect(compile).toHaveBeenCalledTimes(1)
   })
 
-  it('refuses fs/promises access rather than relying on the incomplete fs-only opt-out', async () => {
-    const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
-    await expect(
-      execute(
-        {
-          files: [],
-          code: `
-      import { writeFile, readFile } from 'node:fs/promises'
-      export default async () => {
-        await writeFile('/tmp/unselected', new Uint8Array([1]))
-        return {result: await readFile('/bundle/bundle.js'), files: []}
-      }`,
+  it('exposes only the worker virtual filesystem, not parent files or host paths', async () => {
+    const path = `/tmp/parent-only-${crypto.randomUUID()}`
+    writeFileSync(path, 'parent-private-bytes')
+    try {
+      const execute = createCodeExecutor(env.CODE_LOADER, crypto.randomUUID(), fileStore())
+      const result: unknown = JSON.parse(
+        await execute(
+          {
+            files: [],
+            input: { parent: path },
+            code: `import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
+          export default input => {
+            const refused = path => { try { readFileSync(path); return false } catch { return true } }
+            let readOnly = false
+            try { writeFileSync('/bundle/bundle.js', 'overwrite') } catch { readOnly = true }
+            return {result: {
+              root: readdirSync('/').sort(),
+              ownBundle: readFileSync('/bundle/bundle.js', 'utf8').includes('own-bundle-marker'),
+              readOnly,
+              parentRefused: refused(input.parent),
+              hostRefused: refused('/etc/passwd'),
+            }, files: []}
+          }`,
+          },
+          allow,
+        ),
+      )
+      expect(result).toEqual({
+        result: {
+          root: ['bundle', 'dev', 'tmp'],
+          ownBundle: true,
+          readOnly: true,
+          parentRefused: true,
+          hostRefused: true,
         },
-        allow,
-      ),
-    ).rejects.toThrow(/No such module/)
+        files: [],
+      })
+      expect(readFileSync(path, 'utf8')).toBe('parent-private-bytes')
+    } finally {
+      unlinkSync(path)
+    }
   })
 
   it('refuses missing and duplicate IDs without executing or saving outputs', async () => {
