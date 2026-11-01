@@ -102,6 +102,7 @@ export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings):
           const applied = await settings()
           if (
             [
+              'execute_code',
               'web_search',
               'web_fetch',
               'schedule_task',

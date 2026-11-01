@@ -1,7 +1,7 @@
 /** Provider content and request identities pass through without credential redaction. @module */
 import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vitest'
-import { newAgentId } from '../testing/management.ts'
+import { newAgentId, updateSettings } from '../testing/management.ts'
 import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, toolCallResponse, toolResults } from '../testing/model.ts'
 import { currentTimeTool } from '../tools/current-time.ts'
@@ -64,3 +64,62 @@ it('does not run a registered tool that the applied version does not enable', as
   // The model is told the call failed rather than left waiting for it.
   expect(toolResults(requestBody(vi.mocked(globalThis.fetch).mock.calls[1]?.[1]))).toBe(1)
 })
+
+it('executes opted-in code through the real agent tool loop', async () => {
+  const id = await newAgentId()
+  await updateSettings(id, {
+    tools: ['execute_code'],
+    memoryPolicy: { remember: true, extract: false },
+  })
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    toolCallResponse({
+      name: 'execute_code',
+      arguments: {
+        code: 'export default (input: number[]) => ({ total: input.reduce((a, b) => a + b, 0) })',
+        input: [20, 22],
+      },
+    }),
+  )
+  await exports.default.sendMessage(id, { requestId: 'code-enabled', content: 'Add these numbers' })
+  await waitForAnswer(id, 'code-enabled')
+  expect(JSON.parse(requestBody(vi.mocked(fetch).mock.calls[1]?.[1]))).toMatchObject({
+    input: expect.arrayContaining([
+      expect.objectContaining({
+        type: 'function_call_output',
+        output: expect.stringContaining('{"total":42}'),
+      }),
+    ]),
+  })
+})
+
+it.each(['disabled', 'denied'] as const)(
+  'refuses %s code execution through the agent tool loop',
+  async (mode) => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      tools: mode === 'disabled' ? [] : ['execute_code'],
+      toolPolicy: mode === 'denied' ? { execute_code: 'deny' } : {},
+      memoryPolicy: { remember: true, extract: false },
+    })
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'execute_code',
+        arguments: { code: 'export default () => "should not run"' },
+      }),
+    )
+    await exports.default.sendMessage(id, { requestId: 'code-refused', content: 'Run code' })
+    await waitForAnswer(id, 'code-refused')
+    expect(JSON.parse(requestBody(vi.mocked(fetch).mock.calls[1]?.[1]))).toMatchObject({
+      input: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function_call_output',
+          output: expect.stringContaining(
+            mode === 'disabled'
+              ? 'Tool execute_code is not available'
+              : 'tool execute_code is denied',
+          ),
+        }),
+      ]),
+    })
+  },
+)

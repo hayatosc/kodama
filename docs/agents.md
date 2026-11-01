@@ -211,8 +211,70 @@ Working-agent model and tool composition lives in `src/agent/config.ts`; the mem
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
 the `kodama-memory` extension with its memory tools and prompt sections, whatever tools it enables
-(see [memory.md](memory.md#working-agents)). No execution environment is configured, so a working
-agent sees no files and runs no commands.
+(see [memory.md](memory.md#working-agents)). Working agents can opt into isolated code execution with
+`execute_code`; they have no host filesystem or shell access.
+
+## Code execution
+
+`execute_code` is an optional working-agent tool, implemented in
+[`src/tools/code/execute.ts`](../packages/agents/src/tools/code/execute.ts). Add its name to the agent's
+`settings.tools` to enable it; it is not enabled by default and is not registered for the memory
+agent. `toolPolicy.execute_code: 'deny'` blocks it even when selected. The current lifecycle and tool
+permissions are checked before compilation and again before loading the generated Worker, without
+holding the agent's serial lock during compilation or execution.
+
+The tool accepts:
+
+- `code`: JavaScript or TypeScript exporting a default function. It receives `input` and returns a
+  JSON-serializable value; asynchronous functions are supported.
+- `input`: an optional JSON value, defaulting to `null`.
+- `dependencies`: optional npm package-name/version pairs.
+- `virtualModules`: optional import-name/source pairs passed directly to `createWorker()` for
+  compatibility aliases. Nothing executes in the host as a virtual module.
+
+For example:
+
+```json
+{
+  "code": "import isNumber from 'is-number'; export default input => ({ numeric: isNumber(input) })",
+  "dependencies": { "is-number": "7.0.0" },
+  "input": 42
+}
+```
+
+The result is the returned value serialized as JSON text (`{"numeric":true}` in this example), not
+captured console output. Compilation and runtime failures become normal tool errors. Results are
+untrusted data, not instructions or authorization. This tool does not add a file upload/download API,
+persistent artifact storage, Office-specific operations, a shell, or a persistent session. Binary
+files require an explicit encoding in JSON until a separate file transport is introduced.
+
+Kodama uses the official
+[`createWorker()` flow](https://developers.cloudflare.com/dynamic-workers/getting-started/#using-typescript-and-npm-dependencies),
+with `@cloudflare/worker-bundler` pinned to `0.2.6`. It supplies the source and a `package.json` and
+passes the resulting modules to `CODE_LOADER.load()`. All npm retrieval, resolution, transpilation,
+and bundling belong to that library; Kodama implements none of those mechanisms. The library is
+experimental. Some npm packages need their distributed browser entry or public `virtualModules`
+aliases; support for arbitrary Node packages is not guaranteed.
+
+Each call loads a fresh Dynamic Worker with compatibility date `2026-10-01`, `nodejs_compat`, an empty
+`env`, and `globalOutbound: null`. Generated code receives no secrets, credentials, D1, R2, Durable
+Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
+isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
+default resource limits apply: no application-specific CPU, wall-time, size, concurrency, or daily
+quotas and no price accounting are added.
+
+Execution uses `replay: 'unsafe'`, so interrupted calls are not automatically re-executed during Pi
+recovery. Cancellation is checked around compilation and admission, passed to the execution request,
+and checked after reading the result. It does not guarantee terminating compilation or an already
+running isolate. Pausing or disabling the tool prevents the next phase from starting; it does not
+retroactively kill executing code.
+
+Normal tests run without npm network requests. To exercise actual registry resolution in local
+workerd, run this from `packages/agents`:
+
+```sh
+KODAMA_CODE_NPM_SMOKE=1 nr test src/tools/code/execute.test.ts
+```
 
 ## Management database
 

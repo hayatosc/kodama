@@ -36,6 +36,7 @@ export const agentConfig = defineWorker({
     /** Long-term memory. */
     MEMORY_DB: bindings.d1({ name: 'kodama-memory' }),
     ARCHIVE: bindings.r2({ name: 'kodama-archive' }),
+    CODE_LOADER: bindings.workerLoader(),
     CREDENTIAL_KEK_V1: bindings.secret(),
     DEFAULT_MODEL_PROVIDER: bindings.text('openai'),
     DEFAULT_MODEL_ID: bindings.text('gpt-6-luna'),

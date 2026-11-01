@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { executeCode } from '../tools/code/execute.ts'
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
 import { grantUrls } from './local-db/external-data.ts'
 import { urlsInText } from '../tools/web/url.ts'
@@ -372,6 +373,22 @@ export class Agent extends DurableObject<AgentEnv> {
           await rearmScheduling(local, this.ctx.storage)
           return JSON.stringify(result)
         }),
+      (input, context) =>
+        executeCode(
+          this.env.CODE_LOADER,
+          input,
+          () =>
+            this.#serial(async () => {
+              assertAllowed(this.#refusal)
+              const settings = await appliedSettings(this.ctx.storage)
+              if (
+                !settings?.tools.includes('execute_code') ||
+                settings.toolPolicy?.execute_code === 'deny'
+              )
+                throw new Error('code_disabled')
+            }),
+          context.abortSignal,
+        ),
     )
   }
 
