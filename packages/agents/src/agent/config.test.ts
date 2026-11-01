@@ -114,7 +114,10 @@ it.each([
     vi.mocked(fetch).mockImplementationOnce(async () =>
       toolCallResponse({
         name: 'execute_code',
-        arguments: { code: `export default () => ${JSON.stringify(text)}.repeat(${count})` },
+        arguments: {
+          code: 'export default ({ text, count }) => text.repeat(count)',
+          input: { text, count },
+        },
       }),
     )
     await exports.default.sendMessage(id, { requestId: 'large-code-output', content: 'Run code' })
