@@ -87,6 +87,8 @@ export function createCodeExecutor(loader: WorkerLoader, agentId: string) {
         signal,
       }),
     )
+    signal?.throwIfAborted()
+    if (!response.ok) throw new Error(`code_execution_failed: HTTP ${response.status}`)
     const result = await response.text()
     signal?.throwIfAborted()
     return result

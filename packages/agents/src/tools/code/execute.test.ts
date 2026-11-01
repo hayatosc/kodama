@@ -106,6 +106,18 @@ describe('code execution', () => {
     ).rejects.toThrow('program_failed')
   })
 
+  it('rejects non-success responses instead of returning their bodies as tool output', async () => {
+    await expect(
+      executeCode(
+        {
+          code: `Response.json = () => new Response('failure body', { status: 500 })
+          export default () => 1`,
+        },
+        allow,
+      ),
+    ).rejects.toMatchObject({ message: 'code_execution_failed: HTTP 500' })
+  })
+
   it('marks tool executions unsafe to replay after interruption', () => {
     expect(createCodeTool().replay).toBe('unsafe')
   })
