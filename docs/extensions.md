@@ -103,7 +103,20 @@ notification. The existing `contact` alarm purpose owns dispatch, collection, ac
 and result expiry; a slow or cancelled observer is not the recovery mechanism.
 
 There are at most 100 pending outbound contacts per agent. Alarms process at most ten due contacts
-per wake; accepted pending work is polled every minute and transport failures back off up to one hour.
+per wake with a five-second total peer-observation budget, allowing later due purposes to run. Each
+single-flight collection has a shared 30-second observation deadline, independent of the tool's
+30-second wait. Accepted pending work is polled every minute and transport failures or attempt
+timeouts back off up to one hour. A timeout means unknown acceptance, never a terminal refusal.
+
+A timed-out collection keeps its exclusive slot until the underlying RPC chain actually settles;
+re-observation cannot create overlapping retries or discard late success. Late answers follow the
+same atomic result/notification, acknowledgement, and RPC-result disposal order. At most ten unresolved
+flights are retained per object, including blocked acknowledgements; other work is deferred without
+shortening backoff. A permanently stalled flight can pin its slot until completion or object restart.
+After restart, the stable request ID and receiver receipt recover without duplicate admission.
+The budgets bound peer observation, not platform storage latency or remote execution cancellation:
+RPC disposal does not guarantee cancellation, and a scheduled retry cannot preempt Cloudflare's one
+active alarm invocation per object. No scheduler purpose ordering or priority policy changes.
 Results are capped at 64 KiB of UTF-8 without splitting code points, and terminal payloads expire after
 30 days with explicit expiry in reads. Pending contacts and unacknowledged receiver answers never
 expire. Replay tombstones and immutable request inputs are retained indefinitely; bounded cleanup of

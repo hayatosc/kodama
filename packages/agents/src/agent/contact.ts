@@ -28,6 +28,15 @@ import type { AgentOrigin } from '../protocol.ts'
 /** Bound peer forwarding chains independently of memory or prior external reads. */
 export const MAX_CONTACT_HOPS = 3
 
+/** Bound observation of one exclusive attempt; the remote RPC is not assumed cancelled. */
+export const CONTACT_ATTEMPT_MS = 30_000
+
+/** Bound the entire contact alarm purpose so later due purposes can make progress. */
+export const CONTACT_ALARM_BUDGET_MS = 5_000
+
+/** Bound unresolved RPC lifetimes, including terminal contacts awaiting acknowledgement. */
+export const MAX_CONTACT_FLIGHTS = 10
+
 function inputHop(entry: EntryRecord): number {
   if (entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message') return 0
   const data = entry.data
@@ -217,6 +226,8 @@ export async function collectContact(
     if (receipt?.result) settleContact(local, id, receipt.result, Date.now())
     row = contactRequest(local, id)
     if (row && row.settledAt !== null) {
+      // A hung ack must not leave a past-due result spinning the purpose scheduler.
+      deferContact(local, id, Date.now())
       await peer.acknowledgeTrackedContact(senderAgentId, id)
       finishContactAcknowledgement(local, id)
     } else deferContact(local, id, Date.now())

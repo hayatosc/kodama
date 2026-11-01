@@ -685,6 +685,21 @@ later change. A confirmed pre-admission storage refusal settles as `failed` with
 `storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
 failures keep their fence and remain retryable.
 
+Collection observations have a shared 30-second attempt deadline; each contact alarm has a five-second
+peer-observation budget for its entire batch, not for each of its ten rows. Later due alarm purposes
+therefore do not wait for a blocked peer. Durable retry deadlines alone cannot preempt an alarm:
+Cloudflare runs only one alarm handler per object at a time. Timeout is unknown acceptance, not a
+terminal refusal, and the tool's independent 30-second window remains unchanged.
+
+RPC disposal does not guarantee cancellation of remote effects. A timed-out attempt retains its
+single-flight slot until the actual RPC chain settles, so a tool and an alarm cannot start overlapping
+attempts. Late success still saves the result and notification before ack, and late RPC results are
+disposed normally. At most ten unresolved flights, including blocked acknowledgements, are held per
+object; excess work is durably deferred. Re-observation does not shorten transport backoff or spin a
+past-due alarm. A permanently stalled RPC can pin a slot until it settles or the object restarts; a
+restart retries the same durable identity and receiver receipt, never a new submission. These budgets
+bound peer waiting, not platform storage latency or a claimed ability to cancel remote execution.
+
 Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
 this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
 64 KiB of UTF-8 with explicit `truncated` and `expired` flags; terminal payloads default to 30 days.

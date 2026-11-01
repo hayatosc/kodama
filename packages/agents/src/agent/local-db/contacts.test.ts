@@ -15,6 +15,7 @@ import {
   contactReplay,
   contactRequest,
   contactView,
+  deferContact,
   finishContactAcknowledgement,
   listContacts,
   reserveContact,
@@ -51,6 +52,26 @@ describe('sender contact store', () => {
       })
       expect(db.select().from(notifications).all()).toEqual([])
       expect(listContacts(db).contacts).toHaveLength(1)
+    })
+  })
+
+  it('defers pending delivery and unacknowledged results without shortening backoff or resurrecting an ack', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_, state) => {
+      const db = await openLocalDb(state.storage)
+      const row = reserveContact(db, input(), 1000)
+      deferContact(db, row.id, 2000)
+      expect(contactRequest(db, row.id)?.retryAt).toBe(62_000)
+      retryContact(db, row.id, 3000)
+      retryContact(db, row.id, 4000)
+      deferContact(db, row.id, 5000)
+      expect(contactRequest(db, row.id)?.retryAt).toBe(124_000)
+      settleContact(db, row.id, answer(), 6000)
+      deferContact(db, row.id, 7000)
+      expect(contactRequest(db, row.id)?.retryAt).toBe(67_000)
+      finishContactAcknowledgement(db, row.id)
+      deferContact(db, row.id, 8000)
+      retryContact(db, row.id, 9000)
+      expect(contactRequest(db, row.id)?.retryAt).toBe(0)
     })
   })
 

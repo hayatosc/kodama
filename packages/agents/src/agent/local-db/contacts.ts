@@ -81,18 +81,20 @@ export function acceptContact(db: LocalDb, id: string, submissionId: number, now
     .run()
 }
 
-/** Poll accepted work at a steady interval without treating pending as a transport failure. */
+/** Defer pending delivery or an outstanding ack without treating observation as a failed RPC. */
 export function deferContact(db: LocalDb, id: string, now: number) {
+  const row = contactRequest(db, id)
+  if (!row) return
   db.update(requests)
-    .set({ retryAt: now + 60_000 })
-    .where(and(eq(requests.id, id), pending))
+    .set({ retryAt: Math.max(row.retryAt, now + 60_000) })
+    .where(and(eq(requests.id, id), or(pending, gt(requests.retryAt, 0))))
     .run()
 }
 
 /** Back off without discarding an ambiguous admission or an unacknowledged result. */
 export function retryContact(db: LocalDb, id: string, now: number) {
   const row = contactRequest(db, id)
-  if (!row) return
+  if (!row || (row.settledAt !== null && row.retryAt === 0)) return
   db.update(requests)
     .set({
       attempts: row.attempts + 1,

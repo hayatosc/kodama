@@ -14,6 +14,7 @@ import { applyOperation } from '../memory/store/records.ts'
 import type { Operation } from '../memory/store/records.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
+import { deadline } from '../lib/deadline.ts'
 import { DurableObject } from 'cloudflare:workers'
 import {
   BACKGROUND_CONTEXT,
@@ -84,6 +85,9 @@ import {
   reconcileContactReceipts,
   collectContact,
   boundedContactResult,
+  CONTACT_ATTEMPT_MS,
+  CONTACT_ALARM_BUDGET_MS,
+  MAX_CONTACT_FLIGHTS,
 } from './contact.ts'
 import { CONTACT_WAIT_MS } from '../tools/contact.ts'
 import {
@@ -98,6 +102,8 @@ import {
   listContacts,
   nextContactWake,
   retainContacts,
+  deferContact,
+  retryContact,
 } from './local-db/contacts.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
@@ -517,14 +523,21 @@ export class Agent extends DurableObject<AgentEnv> {
     }
     if (purpose === 'prune') await this.prune()
     if (purpose === 'contact') {
-      for (const row of actionableContacts(await this.#local, Date.now()).slice(0, 10)) {
-        try {
-          await this.#collectContact(row.id)
-        } catch {
-          /* Durable backoff retains uncertain delivery. */
+      using budget = deadline(CONTACT_ALARM_BUDGET_MS)
+      const observing = withAbortSignal(budget.signal, BACKGROUND_CONTEXT)
+      try {
+        for (const row of actionableContacts(await this.#local, Date.now()).slice(0, 10)) {
+          if (budget.signal.aborted) break
+          try {
+            await awaitWithContext(this.#collectContact(row.id), observing)
+          } catch {
+            // Stop observing the batch, not the exclusive attempt or its late durable writes.
+            if (budget.signal.aborted) break
+          }
         }
+      } finally {
+        await this.#rearmContacts()
       }
-      await this.#rearmContacts()
     }
     if (purpose === 'schedule') {
       this.#scheduling ??= (async () =>
@@ -875,22 +888,55 @@ export class Agent extends DurableObject<AgentEnv> {
     await setAlarm(this.ctx.storage, 'contact', nextContactWake(local))
   }
 
-  /** Coalesce observation and alarm retries without holding the admission serial queue over RPC. */
+  /**
+   * Bound observation, not remote effects: a timed-out RPC still owns its flight until it settles.
+   * Re-observers share the same deadline and cannot launch overlapping attempts. Late results keep
+   * the normal save/notification/ack order and RPC disposal. The cap also bounds hung ack flights.
+   */
   #collectContact(id: string): Promise<void> {
     const flight = this.#contactFlights.get(id)
-    if (flight) return flight
+    if (flight) {
+      return (async () => {
+        deferContact(await this.#local, id, Date.now())
+        await this.#rearmContacts()
+        await flight
+      })()
+    }
+    if (this.#contactFlights.size >= MAX_CONTACT_FLIGHTS) {
+      return (async () => {
+        deferContact(await this.#local, id, Date.now())
+        await this.#rearmContacts()
+        throw new Error('contact_collection_busy')
+      })()
+    }
     const operation = (async () => {
+      const local = await this.#local
+      // The batch may stop observing before this attempt does. Do not rearm a past-due busy loop.
+      deferContact(local, id, Date.now())
       await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
       try {
-        await collectContact(await this.#local, this.env, this.#agentId(), id)
+        await collectContact(local, this.env, this.#agentId(), id)
       } finally {
         await this.#rearmContacts()
       }
     })().finally(() => {
+      // Never release exclusivity merely because an observer's deadline expired.
       this.#contactFlights.delete(id)
     })
-    this.#contactFlights.set(id, operation)
-    return operation
+    const observation = (async () => {
+      using budget = deadline(CONTACT_ATTEMPT_MS)
+      try {
+        await awaitWithContext(operation, withAbortSignal(budget.signal, BACKGROUND_CONTEXT))
+      } catch (error) {
+        if (budget.signal.aborted) {
+          retryContact(await this.#local, id, Date.now())
+          await this.#rearmContacts()
+        }
+        throw error
+      }
+    })()
+    this.#contactFlights.set(id, observation)
+    return observation
   }
 
   /** Resolve the registered sender; a caller-supplied sender ID alone never authenticates a peer. */
