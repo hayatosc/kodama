@@ -220,8 +220,8 @@ the `kodama-memory` extension with its memory tools and prompt sections, whateve
 [`src/tools/code/execute.ts`](../packages/agents/src/tools/code/execute.ts). Add its name to the agent's
 `settings.tools` to enable it; it is not enabled by default and is not registered for the memory
 agent. `toolPolicy.execute_code: 'deny'` blocks it even when selected. The current lifecycle and tool
-permissions are checked before compilation and again before loading the generated Worker, without
-holding the agent's serial lock during compilation or execution.
+permissions are checked before compilation/cache lookup and again before invoking the generated
+Worker, including cache hits, without holding the agent's serial lock during compilation or execution.
 
 The tool accepts:
 
@@ -251,13 +251,28 @@ files require an explicit encoding in JSON until a separate file transport is in
 Kodama uses the official
 [`createWorker()` flow](https://developers.cloudflare.com/dynamic-workers/getting-started/#using-typescript-and-npm-dependencies),
 with `@cloudflare/worker-bundler` pinned to `0.2.6`. It supplies the source and a `package.json` and
-passes the resulting modules to `CODE_LOADER.load()`. All npm retrieval, resolution, transpilation,
+passes the resulting modules to `CODE_LOADER.get()`. All npm retrieval, resolution, transpilation,
 and bundling belong to that library; Kodama implements none of those mechanisms. The library is
 experimental. Some npm packages need their distributed browser entry or public `virtualModules`
 aliases; support for arbitrary Node packages is not guaranteed.
 
-Each call loads a fresh Dynamic Worker with compatibility date `2026-10-01`, `nodejs_compat`, an empty
-`env`, and `globalOutbound: null`. Generated code receives no secrets, credentials, D1, R2, Durable
+Each agent retains only its most recent compilation in memory, keyed by source, npm dependency
+specifications, and virtual modules. Dictionary insertion order does not affect this key; `input`
+is not part of it. Repeated and concurrent identical calls reuse that compilation, but always send
+their own input and recheck permissions. A changed source, dependencies, or aliases replaces the
+entry. Failed compilations are discarded so a later call can retry; one caller's cancellation does
+not cancel a shared compilation for another caller. Durable Object eviction clears this local cache.
+
+The Worker Loader cache ID is a SHA-256 fingerprint of the agent ID, the actual compiled modules
+(including binary bytes), and all supplied runtime settings. This avoids sharing globals between
+agents or reusing an ID for different npm resolutions after a rebuild. The loader can reuse compiled
+code and warm isolates, even after a local compilation cache miss. Cache retention is not guaranteed:
+module globals and temporary files may survive calls, but must never be relied on for persistence.
+This is code reuse, not a persistent execution session or a cache of execution results. No live
+Worker stubs are retained across requests.
+
+Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty `env`, and
+`globalOutbound: null`. Generated code receives no secrets, credentials, D1, R2, Durable
 Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
 isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
 default resource limits apply: no application-specific CPU, wall-time, size, concurrency, or daily
