@@ -3,10 +3,10 @@ import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { agents } from '../../drizzle/management/schema.ts'
-import { management, newAgentId, seedOnce } from '../testing/management.ts'
+import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { resolveAgentRef } from './registry.ts'
+import { discoverAgents, resolveAgentRef } from './registry.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -87,6 +87,43 @@ describe('AgentService admission', () => {
       expect(await rejection(exports.default.submission(agentId, 'r'))).toMatch(/agent_unavailable/)
     },
   )
+})
+
+describe('discoverAgents', () => {
+  it('searches public descriptions and exact labels, excluding inactive and dedicated agents', async () => {
+    const active = await newAgentId()
+    const paused = await newAgentId()
+    const wrongLabel = await newAgentId()
+    await updateSettings(active, {
+      description: 'Specialist in Japanese literature',
+      labels: ['literature', 'ja'],
+    })
+    await updateSettings(paused, { description: 'Japanese literature', labels: ['literature'] })
+    await updateSettings(wrongLabel, { description: 'Japanese literature', labels: ['other'] })
+    await management.update(agents).set({ status: 'paused' }).where(eq(agents.agentId, paused))
+    const result = await discoverAgents(management, { query: 'JAPANESE', label: 'literature' })
+    expect(result.agents).toEqual([
+      {
+        agentId: active,
+        displayName: `test ${active.slice(0, 8)}`,
+        slug: null,
+        description: 'Specialist in Japanese literature',
+        labels: ['literature', 'ja'],
+      },
+    ])
+    expect(JSON.stringify(result)).not.toMatch(/credentials|toolPolicy|systemPrompt|ciphertext/)
+    expect((await discoverAgents(management, { query: 'Japanese', label: 'lit' })).agents).toEqual(
+      [],
+    )
+    expect(
+      (await discoverAgents(management, { cursor: active })).agents.every(
+        (agent) => agent.agentId > active,
+      ),
+    ).toBe(true)
+    expect(
+      (await discoverAgents(management, {})).agents.every((agent) => agent.agentId !== paused),
+    ).toBe(true)
+  })
 })
 
 describe('resolveAgentRef', () => {

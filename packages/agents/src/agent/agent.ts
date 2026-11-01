@@ -15,7 +15,11 @@ import type { Operation } from '../memory/store/records.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
 import { DurableObject } from 'cloudflare:workers'
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import {
+  BACKGROUND_CONTEXT,
+  awaitWithContext,
+  withAbortSignal,
+} from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
@@ -29,6 +33,7 @@ import * as v from 'valibot'
 import {
   dispatchAlarms,
   setAlarmNoLaterThan,
+  setAlarm,
   armRecovery,
   refreshRecovery,
 } from './runtime/alarms.ts'
@@ -43,7 +48,13 @@ import {
 } from '../control-plane/config.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
-import { admitAgent, agentRowByObjectName } from '../control-plane/registry.ts'
+import {
+  admitAgent,
+  agentRow,
+  agentRowByObjectName,
+  discoverAgents,
+  resolveAgentRef,
+} from '../control-plane/registry.ts'
 import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.ts'
 import type { UsagePage } from './local-db/usage.ts'
 import type { UsageAttribution } from './local-db/usage.ts'
@@ -66,8 +77,28 @@ import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './runtime/events.ts'
 import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
 import { createAgentOptions } from './config.ts'
-import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
-import { contactAgent } from '../tools/contact.ts'
+import {
+  contactOrigin,
+  MAX_CONTACT_HOPS,
+  reserveToolContact,
+  reconcileContactReceipts,
+  collectContact,
+  boundedContactResult,
+} from './contact.ts'
+import { CONTACT_WAIT_MS } from '../tools/contact.ts'
+import {
+  actionableContacts,
+  contactRequest,
+  contactReceipt,
+  reserveReceipt,
+  pendingContactReceipts,
+  updateReceipt,
+  acknowledgeReceipt,
+  contactView,
+  listContacts,
+  nextContactWake,
+  retainContacts,
+} from './local-db/contacts.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
@@ -91,6 +122,7 @@ import { openLocalDb } from './local-db/local.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
+  ExtensionIdSchema,
   parseInput,
   parseMessage,
   parseRequestId,
@@ -150,6 +182,8 @@ export class Agent extends DurableObject<AgentEnv> {
   #pruning: Promise<PruneOutcome> | undefined
   /** Concurrent alarm/recovery callbacks share one bounded scheduling pass. */
   #scheduling: Promise<void> | undefined
+  /** Concurrent observations share a single network operation per contact. */
+  readonly #contactFlights = new Map<string, Promise<void>>()
   /** A memory change arrived while the agent was busy; refresh at the next idle moment. */
   #memoryChanged = false
   /** Why the next external call must not happen, checked before each one. */
@@ -327,15 +361,78 @@ export class Agent extends DurableObject<AgentEnv> {
       ],
       this.#refusal,
       this.credentialStore(),
-      (target, message, requestId, context) =>
-        contactAgent(
-          this.env,
-          (id, request) => this.sendTo(id, request),
-          target,
-          message,
-          `${this.#agentId()}-${requestId}`,
-          context,
-        ),
+      async (call, api, invocation) => {
+        const local = await this.#local
+        if (call.operation === 'discover')
+          return JSON.stringify(await discoverAgents(managementDb(this.env.MANAGEMENT_DB), call))
+        if (call.operation === 'list') return JSON.stringify(listContacts(local, call.cursor))
+        if (call.operation === 'status' || call.operation === 'result') {
+          const row = contactRequest(local, parseInput(ExtensionIdSchema, call.contact_id))
+          return JSON.stringify(
+            row ? contactView(row, call.operation === 'result') : { status: 'not_found' },
+          )
+        }
+        if (call.operation !== 'send') throw new Error('contact_operation_invalid')
+        const row = await this.#serial(async () => {
+          await this.#checkContactAllowed()
+          const target = await resolveAgentRef(managementDb(this.env.MANAGEMENT_DB), call.target)
+          if (target.agentId === this.#agentId())
+            throw new TypeError('Cannot contact this agent itself')
+          await admitAgent(managementDb(this.env.MANAGEMENT_DB), target.agentId, 'chat')
+          await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+          const reserved = await reserveToolContact(
+            local,
+            await this.#harness,
+            this.#agentId(),
+            target.agentId,
+            call.target,
+            call.message,
+            api,
+            invocation,
+            () => assertAllowed(this.#refusal),
+          )
+          await this.#rearmContacts()
+          return reserved
+        })
+        // Preserve the legacy observation window after admission. Transport uncertainty stays pending.
+        try {
+          await awaitWithContext(this.#collectContact(row.id), invocation)
+        } catch {
+          invocation.abortSignal?.throwIfAborted()
+          return JSON.stringify(contactView(contactRequest(local, row.id) ?? row, true))
+        }
+        const deadline = new AbortController()
+        const timer = setTimeout(() => deadline.abort(), CONTACT_WAIT_MS)
+        const waiting = withAbortSignal(deadline.signal, invocation)
+        try {
+          while (true) {
+            await awaitWithContext(this.#collectContact(row.id), waiting)
+            const current = contactRequest(local, row.id)
+            if (current?.settledAt !== null && current !== undefined)
+              return JSON.stringify(contactView(current, true))
+            let pause: ReturnType<typeof setTimeout> | undefined
+            try {
+              await awaitWithContext(
+                new Promise<void>((resolve) => {
+                  pause = setTimeout(resolve, 250)
+                }),
+                waiting,
+              )
+            } finally {
+              clearTimeout(pause)
+            }
+          }
+        } catch {
+          invocation.abortSignal?.throwIfAborted()
+          // A transient RPC failure cannot erase the durable handle or cancel accepted work.
+          const current = contactRequest(local, row.id)
+          return JSON.stringify(
+            current ? contactView(current, true) : { contactId: row.id, status: 'pending' },
+          )
+        } finally {
+          clearTimeout(timer)
+        }
+      },
       async (tool, argument, context, maximum) =>
         executeWeb(
           await this.#local,
@@ -403,6 +500,7 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async prepare(_harness: Harness): Promise<void> {
     await refreshMemory(this.#workingMemory())
     await rearmScheduling(await this.#local, this.ctx.storage)
+    await this.#rearmContacts()
   }
 
   /**
@@ -424,6 +522,16 @@ export class Agent extends DurableObject<AgentEnv> {
       await this.#serial(() => runExtraction(this.#workingMemory(), harness, this.ctx.storage))
     }
     if (purpose === 'prune') await this.prune()
+    if (purpose === 'contact') {
+      for (const row of actionableContacts(await this.#local, Date.now()).slice(0, 10)) {
+        try {
+          await this.#collectContact(row.id)
+        } catch {
+          /* Durable backoff retains uncertain delivery. */
+        }
+      }
+      await this.#rearmContacts()
+    }
     if (purpose === 'schedule') {
       this.#scheduling ??= (async () =>
         dispatchSchedules(
@@ -514,6 +622,8 @@ export class Agent extends DurableObject<AgentEnv> {
       async (harness) => {
         const local = await this.#local
         await reconcileSchedules(local, harness)
+        await reconcileContactReceipts(local, harness)
+        if (pendingContactReceipts(local).length > 0) return false
         // Never-admitted claims need pruning to recover from storage pressure. Preserve evidence
         // only after admission may have started or an accepted submission remains unresolved.
         if (
@@ -536,6 +646,8 @@ export class Agent extends DurableObject<AgentEnv> {
     return this.#serial(async () => {
       const local = await this.#local
       await reconcileSchedules(local, harness)
+      await reconcileContactReceipts(local, harness)
+      await this.#rearmContacts()
       await rearmScheduling(local, this.ctx.storage)
       await refreshRecovery({
         harness,
@@ -751,6 +863,152 @@ export class Agent extends DurableObject<AgentEnv> {
     })
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** Current sender restrictions are checked again on every new or recovered peer admission. */
+  async #checkContactAllowed(): Promise<void> {
+    assertAllowed(this.#refusal)
+    await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+    const settings = await appliedSettings(this.ctx.storage)
+    if (!settings?.tools.includes('contact_agent') || settings.toolPolicy?.contact_agent === 'deny')
+      throw new Error('contact_disabled')
+  }
+
+  /** Recover all pending work and retention from durable state, not in-memory observers. */
+  async #rearmContacts(): Promise<void> {
+    const local = await this.#local
+    retainContacts(local, Date.now())
+    await setAlarm(this.ctx.storage, 'contact', nextContactWake(local))
+  }
+
+  /** Coalesce observation and alarm retries without holding the admission serial queue over RPC. */
+  #collectContact(id: string): Promise<void> {
+    const flight = this.#contactFlights.get(id)
+    if (flight) return flight
+    const operation = (async () => {
+      await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+      try {
+        await collectContact(await this.#local, this.env, this.#agentId(), id)
+      } finally {
+        await this.#rearmContacts()
+      }
+    })().finally(() => {
+      this.#contactFlights.delete(id)
+    })
+    this.#contactFlights.set(id, operation)
+    return operation
+  }
+
+  /** Resolve the registered sender; a caller-supplied sender ID alone never authenticates a peer. */
+  async #contactSender(senderAgentId: string) {
+    parseAgentId(senderAgentId)
+    const row = await agentRow(managementDb(this.env.MANAGEMENT_DB), senderAgentId)
+    if (row.kind !== 'working' || senderAgentId === this.#agentId())
+      throw new Error('contact_sender_invalid')
+    return this.env.AGENTS.getByName(row.objectName)
+  }
+
+  /** Internal verification: only an immutable outbox addressed to this receiver grants delivery. */
+  async contactDelivery(contactId: string, receiverAgentId: string, admission = false) {
+    parseInput(ExtensionIdSchema, contactId)
+    parseAgentId(receiverAgentId)
+    const row = contactRequest(await this.#local, contactId)
+    if (!row || row.targetAgentId !== receiverAgentId) throw new Error('contact_not_authorized')
+    if (admission) {
+      if (row.settledAt !== null) throw new Error('contact_already_settled')
+      await this.#checkContactAllowed()
+    }
+    return { requestId: row.requestId, content: row.content, hop: row.hop }
+  }
+
+  /** Stable receiver admission recovers the stop before or after Pi accepts the same request. */
+  async acceptTrackedContact(
+    senderAgentId: string,
+    contactId: string,
+  ): Promise<number | undefined> {
+    parseInput(ExtensionIdSchema, contactId)
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    const local = await this.#local
+    const harness = await this.#harness
+    await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+    const receipt = reserveReceipt(local, senderAgentId, delivery.requestId, Date.now())
+    if (receipt.settledAt !== null) return receipt.submissionId || undefined
+    const existing = await submissionOf(harness, delivery.requestId)
+    if (existing) {
+      await reconcileContactReceipts(local, harness)
+      return existing.id
+    }
+    try {
+      using checked = await sender.contactDelivery(contactId, this.#agentId(), true)
+      await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+      assertAllowed(this.#refusal)
+      const submissionId = await this.sendMessage(
+        { requestId: checked.requestId, content: checked.content },
+        { senderAgentId, hop: checked.hop },
+      )
+      updateReceipt(local, receipt, submissionId)
+      await reconcileContactReceipts(local, harness)
+      return submissionId
+    } catch (error) {
+      const accepted = await submissionOf(harness, delivery.requestId)
+      if (accepted) {
+        await reconcileContactReceipts(local, harness)
+        return accepted.id
+      }
+      // Known pre-admission refusals are safe, bounded results, not raw provider exceptions.
+      if (
+        error instanceof Error &&
+        /^(contact_disabled|agent_restricted|agent_unavailable:|credential_unavailable:)/.test(
+          error.message,
+        )
+      ) {
+        const reason = error.message.startsWith('credential_')
+          ? 'credential_unavailable'
+          : error.message.startsWith('agent_unavailable:')
+            ? 'admission_refused:paused_or_unavailable'
+            : 'contact_disabled_or_restricted'
+        updateReceipt(local, receipt, 0, boundedContactResult('failed', reason))
+        return undefined
+      }
+      throw error
+    }
+  }
+
+  /** Internal peer read validates the sender's persisted target, never arbitrary sender arguments. */
+  async trackedContactResult(senderAgentId: string, contactId: string) {
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    const local = await this.#local
+    await reconcileContactReceipts(local, await this.#harness)
+    const receipt = contactReceipt(local, senderAgentId, delivery.requestId)
+    return receipt
+      ? {
+          submissionId: receipt.submissionId,
+          result: receipt.result,
+          expired: receipt.expiresAt !== null && receipt.expiresAt <= Date.now(),
+        }
+      : undefined
+  }
+
+  /** Internal acknowledgement proof is derived from the sender's committed terminal state. */
+  async contactCompletion(contactId: string, receiverAgentId: string): Promise<boolean> {
+    await this.contactDelivery(contactId, receiverAgentId)
+    const row = contactRequest(await this.#local, contactId)
+    return row !== undefined && row.settledAt !== null
+  }
+
+  /** Ack only after sender result plus notification committed atomically; replay does not extend TTL. */
+  async acknowledgeTrackedContact(senderAgentId: string, contactId: string): Promise<void> {
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    if (!(await sender.contactCompletion(contactId, this.#agentId())))
+      throw new Error('contact_completion_not_committed')
+    const local = await this.#local
+    const receipt = contactReceipt(local, senderAgentId, delivery.requestId)
+    if (!receipt || receipt.settledAt === null) throw new Error('contact_receipt_not_settled')
+    acknowledgeReceipt(local, receipt, Date.now())
+    await this.#rearmContacts()
   }
 
   /** Serialize memory commits and check the job's source identity; memory cannot change settings. */

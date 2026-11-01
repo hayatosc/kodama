@@ -172,7 +172,7 @@ Some consequences:
 - `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
   descriptions, admission orchestration, external transport, and result formatting. Web definitions,
   execution, and provider protocols live together in `src/tools/web/`; `contact.ts` resolves
-  contact targets and observes replies through the supplied `sendTo` operation.
+  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
   store functions, never construct Drizzle queries or import agent classes. Agents supply shared
@@ -561,7 +561,8 @@ To add a tool:
 
 Agents enable registered tools by name in `tools`. New working agents default to `web_search`
 and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
-`current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory
+`current_time`, `contact_agent`, `list_contacts`, `contact_status`, `contact_result`,
+`discover_agents`, `web_search`, and `web_fetch`. The memory tools come from the memory
 extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
@@ -664,13 +665,32 @@ message text. Peer input is always queued as `followUp`, never injected into an 
 turn. Self-contact is refused.
 
 The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
-Its workflow in `src/tools/contact.ts` resolves the registry reference and calls this same `sendTo`
-path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
-the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
-`answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked
-unavailable. Timeout or sender cancellation does not cancel the receiver. Pending is not a reason
-to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
-delivery. Its delivery request ID is scoped to the sender and tool task.
+It reserves an object-local outbox using the actual adopted Pi tool task and full input provenance
+before dispatch. A stable `contactId` and receiver request identity make retries replay-safe. The
+receiver verifies the sender's persisted outbox through the registered sender object, then fences
+pruning before admission. It reconciles the exact submission answer into a durable receipt before
+history may be deleted. Acceptance alone is never successful completion.
+
+The tool preserves the immediate answer and 30-second observation window after the first delivery
+attempt. It returns `contactId` with `answered`, terminal `failed`/`cancelled`/`unanswered`, or
+`pending`. Timeout, transport uncertainty, or sender cancellation does not cancel accepted receiver
+work. Pending is not a reason to resend. The `contact` alarm retries dispatch and result collection;
+current sender permissions, target admission, and credentials are checked before a new admission.
+The first sender terminal result and `recordNotification` commit in one SQLite transaction before
+the receiver acknowledges collection. An accepted request remains recoverable even if permissions
+later change.
+
+Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
+this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
+64 KiB of UTF-8 with explicit `truncated` and `expired` flags; terminal payloads default to 30 days.
+Pending work and unacknowledged receiver receipts do not expire. The legacy low-level `sendTo` RPC
+remains admission-only and does not create a tracked tool contact.
+
+Opt-in `discover_agents({query?, label?, cursor?})` exposes active working agents' IDs, display names,
+slugs, descriptions, and labels, never their credentials or other settings. `query` matches public
+text case-insensitively; `label` is an exact match. Discovery scans at most 50 registry rows per page,
+so a filtered page can be empty with `nextCursor`; continue until no cursor remains. Local contact
+lists use stable ascending contact-ID pagination.
 
 Peer messages retain sender provenance and are data, not owner authorization. Sending or
 receiving them does not change learning permissions. `MAX_CONTACT_HOPS = 3` bounds how far a
@@ -820,13 +840,14 @@ before domain dispatch. Pruning performs one bounded slice per wake, and the mem
 starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
 not the sole guarantee of another wake:
 
-| Purpose    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| `recovery` | resume Pi's scheduler after eviction while work is pending        |
-| `schedule` | reconcile reservations and admit a bounded batch of due inputs    |
-| `extract`  | hand new entries to the memory agent after 10 minutes idle        |
-| `prune`    | archive and delete old entries when storage is over its threshold |
-| `jobs`     | the memory agent's job runner                                     |
+| Purpose    | Meaning                                                               |
+| ---------- | --------------------------------------------------------------------- |
+| `recovery` | resume Pi's scheduler after eviction while work is pending            |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs        |
+| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results |
+| `extract`  | hand new entries to the memory agent after 10 minutes idle            |
+| `prune`    | archive and delete old entries when storage is over its threshold     |
+| `jobs`     | the memory agent's job runner                                         |
 
 The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between

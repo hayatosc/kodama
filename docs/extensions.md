@@ -79,6 +79,38 @@ acknowledgement internal to validated peer operations; arbitrary caller-supplied
 not authorization. Add stop/retry/pruning/hop tests. Do not add dynamic agents or use whole-agent
 cancellation to cancel one peer request.
 
+#### Implemented contact protocol and limits
+
+`contact_agent` remains opt-in with the same `target`/`message` arguments and immediate 30-second
+answer observation. Its response now includes a stable `contactId`; `list_contacts`, `contact_status`,
+`contact_result`, and `discover_agents` are separately opt-in tools. Result reads are local and do not
+resend the message. Discovery projects only active working agents' public metadata, matches descriptions
+or names by text and labels exactly, and returns a scan cursor even when a filtered page is empty.
+
+The sender reserves `contactRequests` from the actual adopted tool task and full durable input set.
+It persists the bounded hop before dispatch; model-supplied sender or task identities are not accepted.
+The receiver calls the registered sender object to verify the exact outbox and target, reserves a
+`contactReceipts` pruning fence, and admits the stable Pi request. A receipt with `submissionId = 0`
+means admission must be recovered by that request ID. Recovery checks an existing acceptance before
+applying today's admission restrictions. Before any new admission it rechecks sender permissions,
+receiver lifecycle, and credentials. No whole-agent cancellation is used for peer work.
+
+Receiver reconciliation saves the exact terminal answer before Pi pruning; absent answer evidence
+becomes explicit `unanswered`, never a successful empty answer. The sender commits its first terminal
+result and notification together, then acknowledges the receiver. Stops before/after admission,
+receipt persistence, sender completion, and acknowledgement can all replay without new delivery or
+notification. The existing `contact` alarm purpose owns dispatch, collection, acknowledgement retries,
+and result expiry; a slow or cancelled observer is not the recovery mechanism.
+
+There are at most 100 pending outbound contacts per agent. Alarms process at most ten due contacts
+per wake; accepted pending work is polled every minute and transport failures back off up to one hour.
+Results are capped at 64 KiB of UTF-8 without splitting code points, and terminal payloads expire after
+30 days with explicit expiry in reads. Pending contacts and unacknowledged receiver answers never
+expire. Replay tombstones and immutable request inputs are retained indefinitely; bounded cleanup of
+that evidence is not implemented. Artifact reference arrays are currently empty; a peer reference
+would not grant cross-agent artifact access. The legacy internal `sendTo` RPC stays admission-only.
+No new public service-binding contact-result API is introduced.
+
 ### C: durable inbox
 
 Own notification list/read/retention operations, the notification RPC/CLI, and scheduled completion
