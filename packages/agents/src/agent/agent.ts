@@ -6,6 +6,7 @@
  * @module
  */
 import { createCodeExecutor } from '../tools/code/execute.ts'
+import { artifactReadResult } from '../tools/artifacts.ts'
 import {
   cleanupArtifacts,
   deleteArtifact,
@@ -409,11 +410,26 @@ export class Agent extends DurableObject<AgentEnv> {
         await this.#harness
         return this.#serial(async () => {
           assertAllowed(this.#refusal)
-          const name = call.operation === 'list' ? 'list_artifacts' : 'delete_artifact'
+          const name = {
+            create: 'create_artifact',
+            read: 'read_artifact',
+            list: 'list_artifacts',
+            delete: 'delete_artifact',
+          }[call.operation]
           const settings = await appliedSettings(this.ctx.storage)
           if (!settings?.tools.includes(name) || settings.toolPolicy?.[name] === 'deny')
             throw new Error('artifacts_disabled')
           const local = await this.#local
+          if (call.operation === 'create')
+            return JSON.stringify(
+              await uploadArtifact(local, this.env.ARCHIVE, this.#agentId(), call.upload, (at) =>
+                this.#artifactWake(at),
+              ),
+            )
+          if (call.operation === 'read')
+            return artifactReadResult(
+              await downloadArtifact(local, this.env.ARCHIVE, this.#agentId(), call.artifactId),
+            )
           if (call.operation === 'list') {
             const { operation: _operation, ...page } = call
             return JSON.stringify(readArtifacts(local, page))

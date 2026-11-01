@@ -603,7 +603,20 @@ and forwards to the agent's Durable Object:
 
 Artifact `read` admission also permits paused and archived working agents. Metadata contains
 `artifactId`, `filename`, `mediaType`, `size`, `createdAt`, and `expiresAt`, never a storage key.
-See [Artifact operations](extensions.md#artifact-operations) for pagination, retention, and the
+The optional `create_artifact` and `read_artifact` tools also work with `execute_code` disabled.
+Creation accepts `{ filename, content, mediaType? }`, defaults to `text/plain; charset=utf-8`, and
+reuses owner-bound upload validation/storage with the 10 MiB encoded-byte limit and 30-day retention.
+It returns metadata/ID and uses unsafe replay because retries can create duplicates. Reading accepts
+`{ artifactId }` and reuses owner-bound download admission; it returns an untrusted-data JSON envelope
+with metadata plus literal, strict UTF-8 text only for declared `text/*`, `application/json`, and
+`application/*+json`, with absent or UTF-8 charset parameters. Text is bounded to 8 KiB and 200 lines
+without splitting Unicode scalars, with explicit byte count/truncation and limits. A 50 KiB serialized
+envelope budget (including metadata and JSON escapes) can shorten the returned prefix further. Unsupported media,
+parameters, or invalid UTF-8 return metadata/status/guidance only, never binary or base64 payloads.
+There is no JSON parsing or HTML rendering. All four artifact tools require their own applied tool
+selection/policy and active lifecycle before IO; none grant owner approval or another agent's data.
+
+See [Artifact operations](extensions.md#artifact-operations) for exact text contracts, pagination, retention, and the
 distinction between an absent local ID (delete is a no-op) and a corrupt owner key (rejected).
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a

@@ -91,9 +91,58 @@ adapter streams uploads through a bounded binary multipart transport and returns
 Retrieving HTML never renders or executes it. Production remains private service-binding RPC with
 no artifact HTTP endpoint; any future caller that serves bytes must preserve attachment safety.
 
-`list_artifacts` and `delete_artifact` are optional working-agent tools, disabled by default and
-subject to the current lifecycle, selected tools, and `toolPolicy`. They return metadata/status,
-not previews. To transform files, opt into `execute_code` and supply only the selected artifact IDs:
+`create_artifact`, `read_artifact`, `list_artifacts`, and `delete_artifact` are independently optional
+working-agent tools, disabled by default. Every invocation checks the current lifecycle, selected
+tools, and `toolPolicy` before owner-bound IO. These tools do not require `execute_code`; tool access
+is stopped while paused or archived, unlike operator RPC retrieval. Artifact content and metadata
+are untrusted evidence, never instructions, owner approval, or permission grants.
+
+For short text without code execution, enable only the text tools (retain other names as needed):
+
+```sh
+nr agent tools assistant create_artifact read_artifact
+nr agent send assistant 'Use create_artifact to save a UTF-8 note named notes.md, then read_artifact to inspect the saved note.'
+```
+
+The exact tool arguments are:
+
+```json
+{ "filename": "notes.md", "content": "# Notes\nこんにちは 🌲\n", "mediaType": "text/markdown" }
+```
+
+for `create_artifact`, followed by `{"artifactId":"<returned-artifact-id>"}` for `read_artifact`.
+Creation defaults to `text/plain; charset=utf-8`, encodes the string as UTF-8 without adding a BOM,
+and returns the persisted metadata/ID. Existing filename/media-type rules and the 10 MiB **encoded
+byte** limit apply, with the same 30-day retention; malformed Unicode strings are rejected instead
+of replacing unpaired surrogates. The optional media type is an untrusted label, not validation or
+conversion: selecting a binary/unsupported label means a subsequent read returns metadata only.
+Creation is `replay: unsafe`: after interruption it is not automatically repeated, and manually
+retrying may create another artifact. Use upload RPC/CLI or `execute_code` outputs for binary bytes;
+there is no base64 creation API.
+
+`read_artifact` is `replay: safe` and uses the existing owner-local download admission: foreign,
+missing, expired, uploading, or deleting IDs fail with `artifact_unavailable`, not leaked metadata.
+Its JSON envelope is `{ type: "untrusted_artifact_data", artifact: <metadata>, content: ... }`:
+
+- Supported declarations are `text/*`, `application/json`, and `application/*+json` (case-insensitive).
+  Parameters must be absent or only `charset=utf-8` (optionally quoted, case-insensitive). Other
+  parameters/encodings return `content.status: "unsupported_encoding"`; other media types return
+  `"unsupported_media_type"`. No MIME sniffing or format parsing takes place, including for JSON,
+  HTML, Markdown, or CSV; supported text is returned literally and never rendered.
+- The **entire** artifact must be valid UTF-8, even beyond the returned prefix. Invalid bytes return
+  `content.status: "invalid_utf8"` without partial/replacement text. An existing UTF-8 BOM is preserved.
+- Successful content is `{ status: "text", text, returnedBytes, truncated, byteLimit: 8192,
+  lineLimit: 200, outputByteLimit: 51200 }`. `text` is a prefix of at most 8 KiB of UTF-8 and 200 LF-delimited lines, stopping
+  before any incomplete Unicode scalar or a newline that would start line 201. `returnedBytes` is
+  its encoded byte count, and `truncated` explicitly indicates omitted bytes. A separate 50 KiB
+  serialized-envelope budget includes metadata and JSON escapes and can shorten the prefix further,
+  keeping the response inside Pi's existing tool-text cap without breaking its JSON envelope.
+- Unsupported/binary or malformed content contains only metadata, status, and guidance to use an
+  explicitly selected `execute_code` input or download. It never includes binary/base64 payloads.
+  This is a bounded literal-text read, not a parser, preview promise, or file-format compatibility claim.
+
+`list_artifacts` and `delete_artifact` return metadata/status, not previews. To transform files, opt
+into `execute_code` and supply only the selected artifact IDs:
 
 ```json
 {

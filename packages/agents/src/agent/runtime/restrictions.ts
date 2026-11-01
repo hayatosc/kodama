@@ -103,6 +103,10 @@ export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings):
           if (
             [
               'execute_code',
+              'create_artifact',
+              'read_artifact',
+              'list_artifacts',
+              'delete_artifact',
               'web_search',
               'web_fetch',
               'schedule_task',
