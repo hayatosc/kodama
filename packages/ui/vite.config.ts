@@ -9,7 +9,8 @@ export default defineConfig({
       compilerOptions: {
         // Runes everywhere except dependencies, which may still use the legacy syntax.
         // The parameter is typed here because @rsvelte/vite-plugin-svelte's types import
-        // @rsvelte/compiler, which it does not depend on, so the contextual type is lost.
+        // CompileOptions from @rsvelte/compiler, which does not export it (the type lives in
+        // @rsvelte/vite-plugin-svelte-native), so the contextual type is lost.
         runes: ({ filename }: { filename: string }) =>
           filename.split(/[/\\]/).includes('node_modules') ? undefined : true,
       },
