@@ -516,8 +516,9 @@ window.Kodama = (function () {
       }
       var copyBtn = t.closest('.kd-copy')
       if (copyBtn) {
-        var label = copyBtn.getAttribute('data-label') || copyBtn.innerHTML
-        copyBtn.setAttribute('data-label', label)
+        // Keep the original icon and label as nodes, so restoring them never parses HTML.
+        if (!copyBtn._kdLabel) copyBtn._kdLabel = Array.prototype.slice.call(copyBtn.childNodes)
+        var label = copyBtn._kdLabel
         try {
           var src = copyBtn.closest('.kd-tool-body, .kd-codeblock')
           var pre = src && src.querySelector('pre')
@@ -528,7 +529,7 @@ window.Kodama = (function () {
         }
         copyBtn.textContent = 'コピーしました'
         setTimeout(function () {
-          copyBtn.innerHTML = label
+          copyBtn.replaceChildren.apply(copyBtn, label)
         }, 1400)
         return
       }
