@@ -42,6 +42,8 @@ packages/
   testing, and deployment.
 - [docs/memory.md](docs/memory.md): long-term memory, the memory agent, pruning and the archive,
   skills, and shared memory.
+- [design/README.md](design/README.md): the UI design system for the planned `packages/ui`:
+  tokens, components with live previews, the agent avatar, and the SvelteKit implementation guide.
 
 ## Development
 

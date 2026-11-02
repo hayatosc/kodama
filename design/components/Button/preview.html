@@ -1,0 +1,91 @@
+<!-- @dsCard group="Primitives" height=330 subtitle="primary · secondary · ghost · destructive" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>Button</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .r {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="r">
+        <button class="kd-btn kd-btn-primary">
+          <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg
+          >新しいエージェント
+        </button>
+        <button class="kd-btn kd-btn-secondary">設定を開く</button>
+        <button class="kd-btn kd-btn-ghost">履歴</button>
+        <button class="kd-btn kd-btn-destructive">アーカイブ</button>
+        <button class="kd-btn kd-btn-primary" disabled>送信</button>
+      </div>
+      <div class="r">
+        <button class="kd-btn kd-btn-secondary kd-btn-sm">ロールバック</button>
+        <button class="kd-btn kd-btn-ghost kd-btn-icon" aria-label="検索">
+          <svg class="kd-icon" viewBox="0 0 16 16">
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="m13.5 13.5-3.2-3.2" />
+          </svg>
+        </button>
+        <button class="kd-btn kd-btn-primary kd-btn-round" aria-label="送信">
+          <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg>
+        </button>
+        <button class="kd-btn kd-btn-secondary kd-btn-round" aria-label="停止">
+          <svg class="kd-icon" viewBox="0 0 16 16">
+            <rect x="4.5" y="4.5" width="7" height="7" rx="1.5" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
+      </div>
+      <div class="r">
+        <button class="kd-circle-btn" aria-label="検索">
+          <svg class="kd-icon" viewBox="0 0 16 16">
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="m13.5 13.5-3.2-3.2" />
+          </svg>
+        </button>
+        <button class="kd-circle-btn" aria-label="新しいエージェント">
+          <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+        </button>
+        <button class="kd-chip kd-chip-icon" aria-label="添付">
+          <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+        </button>
+        <button class="kd-chip">
+          claude-sonnet-5-5<svg
+            class="kd-icon"
+            viewBox="0 0 16 16"
+            style="width: 12px; height: 12px"
+          >
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        </button>
+        <button class="kd-select">
+          v12<svg class="kd-icon" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+            <path d="m4 6 4 4 4-4" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>

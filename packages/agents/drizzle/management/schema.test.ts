@@ -40,10 +40,13 @@ it('rejects credential references labeled as a different provider', async () => 
   expect(await db.select().from(schema.agentCredentialRefs)).toHaveLength(1)
 })
 
+/** Orders column names by UTF-16 code units, the same order a bare sort() gives strings. */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
 function declaredColumns(table: SQLiteTable): string[] {
   return getTableConfig(table)
     .columns.map((column) => column.name)
-    .sort()
+    .sort(byCodeUnit)
 }
 
 it('the newest management migration snapshot has the tables and columns of the Drizzle schema', () => {
@@ -53,7 +56,7 @@ it('the newest management migration snapshot has the tables and columns of the D
   const migrated = Object.fromEntries(
     Object.entries(env.TEST_MANAGEMENT_MIGRATED_COLUMNS).map(([name, columns]) => [
       name,
-      [...columns].sort(),
+      [...columns].sort(byCodeUnit),
     ]),
   )
   // A mismatch means drizzle/management/schema.ts changed without `nr db:generate:management`.

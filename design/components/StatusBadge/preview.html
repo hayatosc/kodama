@@ -1,0 +1,65 @@
+<!-- @dsCard group="Primitives" height=264 subtitle="lifecycle and run states, always dot + word" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>StatusBadge</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .r {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .d {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: 12px;
+        font-size: 13px;
+        color: var(--muted-foreground);
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="r">
+        <span class="kd-badge kd-badge-live"><span class="kd-dot kd-dot-live"></span>稼働中</span>
+        <span class="kd-badge kd-badge-running"
+          ><span class="kd-dot kd-dot-running"></span>実行中</span
+        >
+        <span class="kd-badge"><span class="kd-dot kd-dot-queued"></span>待機中</span>
+        <span class="kd-badge"><span class="kd-dot kd-dot-paused"></span>一時停止</span>
+        <span class="kd-badge kd-badge-error"><span class="kd-dot kd-dot-error"></span>失敗</span>
+      </div>
+      <div class="r">
+        <span class="kd-count">2</span>
+        <span class="kd-count">12</span>
+        <span class="d" style="margin-left: 12px"
+          ><span class="kd-dot kd-dot-live"></span>active</span
+        >
+        <span class="d"><span class="kd-dot kd-dot-running"></span>running</span>
+        <span class="d"><span class="kd-dot kd-dot-queued"></span>queued</span>
+        <span class="d"><span class="kd-dot kd-dot-paused"></span>paused</span>
+        <span class="d"><span class="kd-dot kd-dot-error"></span>unanswered</span>
+        <span class="d"><span class="kd-dot"></span>archived</span>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>

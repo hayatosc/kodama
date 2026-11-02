@@ -1,0 +1,118 @@
+<!-- @dsCard group="Content" height=1120 subtitle="user pill · thinking pill · bubble · peer agent" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>Message</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        padding: 40px 48px 24px;
+        height: 560px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="kd-transcript" data-kd-log>
+        <div class="kd-msg kd-msg-user">
+          Durable Objects のアラーム、来週の発表用にまとめておいて
+        </div>
+        <div class="kd-turn">
+          <div class="kd-thinking">research に論文側を頼んでくる。</div>
+          <div style="width: 100%">
+            <div class="kd-tool">
+              <div class="kd-tool-head" role="button" tabindex="0" aria-expanded="false">
+                <svg class="kd-icon kd-tool-chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg
+                ><span class="kd-tool-name">contact_agent</span><span>· research · 返信あり</span
+                ><span class="kd-tool-time">38s</span>
+              </div>
+              <div class="kd-tool-body">
+                <div class="kd-tool-label">
+                  <span>引数</span
+                  ><button class="kd-copy">
+                    <svg
+                      class="kd-icon"
+                      viewBox="0 0 16 16"
+                      style="width: 12px; height: 12px; vertical-align: -2px"
+                    >
+                      <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                      <path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" />
+                    </svg>
+                    コピー
+                  </button>
+                </div>
+                <pre
+                  class="kd-code"
+                >{ <span class="k">"target"</span>: <span class="s">"research"</span>, <span class="k">"message"</span>: <span class="s">"論文側の調査をお願い"</span> }</pre>
+                <div class="kd-tool-out">
+                  <div class="kd-tool-label">
+                    <span>返事</span
+                    ><button class="kd-copy">
+                      <svg
+                        class="kd-icon"
+                        viewBox="0 0 16 16"
+                        style="width: 12px; height: 12px; vertical-align: -2px"
+                      >
+                        <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                        <path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" />
+                      </svg>
+                      コピー
+                    </button>
+                  </div>
+                  <pre class="kd-code">関連する論文を3件見つけました。要約を添えて返します。</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="kd-peer kd-msg">
+            <div class="kd-msg-meta">
+              <span
+                data-avatar="violet"
+                data-shape="drop"
+                data-mood="live"
+                data-badge="off"
+                style="--size: 18px"
+              ></span
+              ><span style="color: var(--foreground); font-weight: 600">research</span
+              ><span class="kd-mono">7f3a9c21</span><span>· hop 1</span>
+            </div>
+            <p>関連する論文を3件見つけました。要約を添えて返します。</p>
+          </div>
+        </div>
+        <div class="kd-turn">
+          <div class="kd-bubble kd-msg">
+            <p>ここまでの材料でざっくり骨組みを作りました。</p>
+            <p><strong>アラームの基本</strong></p>
+            <ul>
+              <li>
+                <strong>1オブジェクト1アラーム</strong>：<code>setAlarm()</code>
+                で次の時刻を上書きする。
+              </li>
+              <li><strong>少なくとも1回</strong>：失敗すると指数バックオフで再実行される。</li>
+              <li>
+                <strong>復旧に使う</strong>：Kodama は中断した run をアラームで拾い直している。
+              </li>
+            </ul>
+            <p>明日の朝 9 時に、公式の変更履歴と突き合わせた版を出します。</p>
+          </div>
+        </div>
+        <div class="kd-turn">
+          <div class="kd-thinking">
+            公式の変更履歴と突き合わせ中 <span class="kd-typing"><i></i><i></i><i></i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>

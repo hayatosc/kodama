@@ -1,0 +1,148 @@
+<!-- @dsCard height=240 -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>Kodama</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 240px;
+        overflow: hidden;
+        background: var(--sidebar);
+      }
+      .kd-pair {
+        height: 240px;
+        align-content: center;
+      }
+      .kd-pane {
+        height: 144px;
+        overflow: hidden;
+      }
+      .cover {
+        position: relative;
+        width: 960px;
+        height: 288px;
+        overflow: hidden;
+        transform: scale(0.5);
+        transform-origin: 0 0;
+      }
+      .art {
+        position: absolute;
+        top: 0;
+        left: 480px;
+        width: 480px;
+        height: 288px;
+        overflow: hidden;
+      }
+      .art svg {
+        display: block;
+        width: 480px;
+        height: 288px;
+      }
+      /* The house keeps its light colours in both themes, like the avatars. */
+      .art {
+        --c-wood: #f0f0f0;
+        --c-roof: #5c5c5c;
+        --c-hole: #2b2b2b;
+        --c-echo: #d9d9d9;
+      }
+      .wood {
+        fill: var(--c-wood);
+      }
+      .roof {
+        fill: none;
+        stroke: var(--c-roof);
+        stroke-width: 22px;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .hole {
+        fill: var(--c-hole);
+      }
+      .pole {
+        stroke: var(--muted-foreground);
+        stroke-width: 4px;
+        stroke-linecap: round;
+      }
+      .orange {
+        fill: var(--agent-orange);
+      }
+      .violet {
+        fill: var(--agent-violet);
+      }
+      .teal {
+        fill: var(--agent-teal);
+      }
+      .echo {
+        fill: none;
+        stroke: var(--c-echo);
+        stroke-width: 2px;
+      }
+      .words {
+        position: absolute;
+        left: var(--spacing-8);
+        bottom: var(--spacing-8);
+        max-width: 440px;
+      }
+      .name {
+        margin: 0;
+        font-family: var(--font-display);
+        font-size: 112px;
+        line-height: 0.92;
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        color: var(--foreground);
+      }
+      .tag {
+        margin: var(--spacing-3) 0 0 6px;
+        font-size: 14px;
+        line-height: 20px;
+        color: var(--muted-foreground);
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="row">
+      <div class="cover">
+        <div class="art" aria-hidden="true">
+          <svg viewBox="0 0 480 288" width="480" height="288">
+            <!--
+  blocks      house-wood gable slab 240 wide bleeding off the bottom (every agent shares this house) · house-roof chevron over it · house-hole disc r=32 · three flags in agent-orange, agent-violet, agent-teal on muted-foreground poles that run off the bottom edge — ≈30% of 960×288; the house keeps its light colours in both themes
+  arrangement one gabled slab with a staggered row of flags to its left, their poles planted below the bottom edge
+  pattern     echo rings — 木霊 is an echo, and each agent lives in its own house: four pale grey rings at a spacing-6 pitch spreading from the entrance, cut into the slab
+  scales      flag poles spacing-12 apart; ring pitch spacing-6; roof stroke rounded like radius-full ends
+-->
+            <defs>
+              <clipPath id="slab"><path d="M168 128L288 48l120 80v180H168z" /></clipPath>
+            </defs>
+            <path class="wood" d="M168 128L288 48l120 80v180H168z" />
+            <g clip-path="url(#slab)">
+              <circle class="echo" cx="288" cy="176" r="56" />
+              <circle class="echo" cx="288" cy="176" r="80" />
+              <circle class="echo" cx="288" cy="176" r="104" />
+              <circle class="echo" cx="288" cy="176" r="128" />
+            </g>
+            <circle class="hole" cx="288" cy="176" r="32" />
+            <path class="roof" d="M150 140L288 40l138 100" />
+            <path class="pole" d="M40 300V112M88 300V152M136 300V192" />
+            <path class="orange" d="M42 112l40 12-40 13z" />
+            <path class="violet" d="M90 152l40 12-40 13z" />
+            <path class="teal" d="M138 192l40 12-40 13z" />
+          </svg>
+        </div>
+        <div class="words">
+          <h1 class="name">Kodama</h1>
+          <p class="tag">A home for agents that keep running.</p>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>
