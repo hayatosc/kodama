@@ -9,6 +9,7 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
+import type { OwnerReply } from './owner-intake.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'
@@ -44,7 +45,7 @@ import { admitAgent } from './control-plane/registry.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './control-plane/models.ts'
 import type { PrincipalRow } from './control-plane/db.ts'
-import { principalOf } from './control-plane/principals.ts'
+import { ownerPrincipal, principalOf } from './control-plane/principals.ts'
 import * as flows from './control-plane/workflows/agents.ts'
 import type { ManagementCall } from './control-plane/workflows/agents.ts'
 import { seed } from './control-plane/workflows/seed.ts'
@@ -77,8 +78,9 @@ export { AgentObject as Agent } from './agent-object.ts'
  * Conversation methods admit registered working-agent UUIDs before forwarding to Durable Objects;
  * unknown IDs never create objects, and dedicated agents cannot be addressed through those methods.
  * Management methods validate their input and call the registry flows. The calling Worker
- * authenticates callers and supplies their actor; all management methods except seed resolve that
- * actor to a principal and reject disabled principals. Roles and permissions are issue #7.
+ * authenticates callers and supplies their actor; management methods register first-time callers
+ * and reject disabled principals. Owner intake requires an existing creator principal instead.
+ * General roles and permissions are issue #7.
  * There is no public HTTP interface.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
@@ -151,6 +153,55 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return { ...call, principal }
   }
 
+  /** Resolve only an existing creator; the trusted UI Worker supplies the actor, never the model. */
+  async #owner(actor: ManagementActor, agentId: string, use: AgentUse) {
+    const id = parseAgentId(agentId)
+    const principal = await ownerPrincipal(
+      managementDb(this.env.MANAGEMENT_DB),
+      parseManagementActor(actor),
+      id,
+    )
+    return { principalId: principal.principalId, agent: await this.#agent(id, use) }
+  }
+
+  /** Admit a sequenced owner reply or cancel through the existing conversation machinery. */
+  async ownerReply(actor: ManagementActor, agentId: string, input: OwnerReply) {
+    const { principalId, agent } = await this.#owner(
+      actor,
+      agentId,
+      input.action === 'cancel' ? 'read' : 'chat',
+    )
+    using result = await agent.ownerReply(principalId, input)
+    const { requestId, submissionId, state } = result
+    return { requestId, submissionId, state }
+  }
+
+  /** Read receipt references and the next agent-wide reply sequence; no implicit receipt or read. */
+  async ownerDeliveries(actor: ManagementActor, agentId: string) {
+    const { agent } = await this.#owner(actor, agentId, 'read')
+    using result = await agent.ownerDeliveries()
+    return { deliveries: Array.from(result.deliveries), nextSequence: result.nextSequence }
+  }
+
+  /** The UI Worker reports its own receipt, independently of browser display and inbox read. */
+  async reportOwnerDelivery(
+    actor: ManagementActor,
+    agentId: string,
+    input: { id: string; state: 'accepted' | 'failed' },
+  ) {
+    const { agent } = await this.#owner(actor, agentId, 'read')
+    using result = await agent.reportOwnerDelivery(input)
+    const { id, source, sourceId, state, createdAt, updatedAt } = result
+    return { id, source, sourceId, state, createdAt, updatedAt }
+  }
+
+  /** Return existing execution/contact waits and delivery failures with available owner actions. */
+  async attention(actor: ManagementActor, agentId: string) {
+    const { agent } = await this.#owner(actor, agentId, 'read')
+    using result = await agent.attention()
+    return Array.from(result)
+  }
+
   /** Read retained management events without exposing credential envelopes or appending read events. */
   async audit(actor: ManagementActor, request: AuditQuery) {
     const call = await this.#call(actor)
@@ -173,8 +224,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * Create the installation's starting rows if missing: the installation ID, the memory agent with
    * its version 1, and the first agent. Idempotent.
    */
-  async seed(credentials?: CredentialRefs): Promise<SeedResult> {
-    return seed(this.#systemCall(), credentials)
+  async seed(actor: ManagementActor, credentials?: CredentialRefs): Promise<SeedResult> {
+    return seed(await this.#call(actor), credentials)
   }
 
   /**

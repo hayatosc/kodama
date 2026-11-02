@@ -9,6 +9,15 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** Authenticated owner intake and Web UI Worker delivery contracts. */
+export type {
+  OwnerReply,
+  OwnerReplyResult,
+  OwnerProvenance,
+  OwnerDelivery,
+  AttentionItem,
+} from './owner-intake.ts'
+
 /** Shared extension payloads; references never grant cross-agent access. */
 export type {
   AgentNotification,

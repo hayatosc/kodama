@@ -153,7 +153,7 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
 /**
  * Create a working agent: a new UUID v7, then the registry row (`provisioning`), version 1, the
  * caller's owner membership, and the audit row in one batch; then initialize the object and
- * activate it. The system (the seed) creates agents with no owner.
+ * activate it. Seed uses the creator as owner and an installation-wide idempotency key.
  *
  * @remarks
  * Reusing `requestId` returns the agent the first attempt created. A stop after the batch leaves the
@@ -167,11 +167,18 @@ export async function createAgent(
     settings?: unknown
     credentials?: unknown
   },
+  seed = false,
 ): Promise<AgentSummary> {
   const creator = actorId(call)
-  const opId = `agent.create:${creator ?? 'system'}:${request.requestId}`
+  const opId = seed
+    ? 'agent.create:installation:seed'
+    : `agent.create:${creator ?? 'system'}:${request.requestId}`
   const earlier = await auditByOpId(call.db, opId)
-  if (earlier !== undefined) return summaryOf(await finishProvisioning(call, earlier.targetId))
+  if (earlier !== undefined) {
+    if (seed && earlier.actorId !== creator)
+      throw new Error('forbidden: seed belongs to another owner')
+    return summaryOf(await finishProvisioning(call, earlier.targetId))
+  }
   const initial =
     request.settings === undefined
       ? defaultAgentSettings(call.env)
@@ -225,7 +232,11 @@ export async function createAgent(
   } catch (error) {
     if (!isConstraintError(error)) throw error
     const replay = await auditByOpId(call.db, opId)
-    if (replay !== undefined) return summaryOf(await finishProvisioning(call, replay.targetId))
+    if (replay !== undefined) {
+      if (seed && replay.actorId !== creator)
+        throw new Error('forbidden: seed belongs to another owner')
+      return summaryOf(await finishProvisioning(call, replay.targetId))
+    }
     if (/agents\.slug/.test(errorText(error))) {
       throw new TypeError(`slug is taken: ${request.slug}`)
     }

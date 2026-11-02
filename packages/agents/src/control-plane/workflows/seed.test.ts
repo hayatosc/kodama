@@ -29,7 +29,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 useMockModel()
 afterEach(() => vi.restoreAllMocks())
 
-const actor = { kind: 'user', externalId: 'seed-tester@example.com' } as const
+const actor = { kind: 'user', externalId: 'tester@example.com' } as const
 
 async function firstAgent() {
   const row = await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG)).get()
@@ -61,7 +61,6 @@ describe('seed', () => {
         seed(
           {
             ...call,
-            principal: null,
             env: { ...env, MEMORY_MODEL_PROVIDER: 'xai', MEMORY_MODEL_ID: 'grok-4.3' },
           },
           refs,
@@ -69,7 +68,7 @@ describe('seed', () => {
       ).rejects.toThrow('credential_unavailable')
       expect(await management.select().from(agents)).toEqual([])
       expect(await management.select().from(systemSettings)).toEqual(identity)
-      await exports.default.seed(await testCredentialRefs())
+      await exports.default.seed(actor, await testCredentialRefs())
     },
   )
 
@@ -79,8 +78,8 @@ describe('seed', () => {
       await state.storage.put('test:marker', 'kept')
     })
 
-    const seeded = await agentService().seed()
-    const again = await agentService().seed()
+    const seeded = await agentService().seed(actor)
+    const again = await agentService().seed(actor)
     expect(again).toEqual(seeded)
     expect(seeded.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
@@ -108,16 +107,16 @@ describe('seed', () => {
       status: 'active',
       currentVersion: 1,
       appliedVersion: 1,
-      ownerId: null,
+      ownerId: expect.any(String),
     })
     expect(first.objectName).toBe(first.agentId)
-    // Like any other agent: no principal, membership, or setting of its own.
+    // The creator owns the agent; the agent itself is not registered as a principal.
     expect(
       await management.select().from(principals).where(eq(principals.externalId, first.agentId)),
     ).toEqual([])
     expect(
       await management.select().from(agentMembers).where(eq(agentMembers.agentId, first.agentId)),
-    ).toEqual([])
+    ).toEqual([{ agentId: first.agentId, principalId: first.ownerId, role: 'owner' }])
     const settings = await management.select().from(systemSettings)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
       { install_id: seeded.installId },
@@ -133,7 +132,7 @@ describe('seed', () => {
   })
 
   it('keeps later changes to the first agent when it runs again', async () => {
-    await agentService().seed()
+    await agentService().seed(actor)
     const { agentId } = await firstAgent()
     const { settings } = await agentService().getConfig(actor, agentId)
     const desired = (await agentService().getAgent(actor, agentId)).desiredVersion
@@ -143,7 +142,7 @@ describe('seed', () => {
       expectedVersion: desired,
     })
     await agentService().renameAgent(actor, agentId, { displayName: 'Renamed' })
-    await agentService().seed()
+    await agentService().seed(actor)
     const after = await agentService().getAgent(actor, agentId)
     expect(after).toMatchObject({ displayName: 'Renamed', desiredVersion: desired + 1 })
     expect((await agentService().getConfig(actor, agentId)).settings.systemPrompt).toBe(
@@ -152,7 +151,7 @@ describe('seed', () => {
   })
 
   it('lets the memory agent take its model from its versions', async () => {
-    await agentService().seed()
+    await agentService().seed(actor)
     const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
     const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: uuidv7(),
@@ -168,7 +167,7 @@ describe('seed', () => {
   })
 
   it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
-    await agentService().seed()
+    await agentService().seed(actor)
     const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
     const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
       requestId: uuidv7(),

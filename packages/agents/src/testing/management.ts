@@ -23,7 +23,9 @@ let seeded: Promise<SeedResult> | undefined
 
 /** The seed's result; the first call of a test file seeds. */
 export function seedOnce(): Promise<SeedResult> {
-  seeded ??= testCredentialRefs().then((refs) => agentService().seed(refs))
+  seeded ??= testCredentialRefs().then((refs) =>
+    agentService().seed({ kind: 'user', externalId: 'tester@example.com' }, refs),
+  )
   return seeded
 }
 
@@ -60,6 +62,7 @@ export async function newAgentId(
     objectName: agentId,
     kind: 'working',
     displayName: `test ${agentId.slice(0, 8)}`,
+    ownerId: await principalIdOf({ kind: 'user', externalId: 'tester@example.com' }),
     status: 'active',
     currentVersion: withCredentials ? 1 : 0,
     createdAt: now,

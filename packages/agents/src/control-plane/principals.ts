@@ -7,10 +7,19 @@
  * @module
  */
 import { and, eq } from 'drizzle-orm'
-import { principals } from '../../drizzle/management/schema.ts'
+import { agents, principals } from '../../drizzle/management/schema.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { ManagementActor } from '../protocol.ts'
 import type { ManagementDb, PrincipalRow } from './db.ts'
+
+/** Resolve an existing, enabled creator without registering an unknown caller. */
+export async function ownerPrincipal(db: ManagementDb, actor: ManagementActor, agentId: string) {
+  const principal = await principalRow(db, actor)
+  const agent = await db.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  if (!principal || principal.disabledAt !== null || agent?.ownerId !== principal.principalId)
+    throw new Error('forbidden: caller is not the agent owner')
+  return principal
+}
 
 async function principalRow(db: ManagementDb, actor: ManagementActor) {
   return db

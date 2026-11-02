@@ -6,6 +6,8 @@
 import * as v from 'valibot'
 import {
   RequestIdSchema,
+  OwnerReplySchema,
+  DeliveryReportSchema,
   ArtifactUploadSchema,
   ExtensionIdSchema,
   ExtensionPageSchema,
@@ -22,6 +24,10 @@ import { CLI_ACTOR, credentialResponse } from './credentials.ts'
 type Service = Pick<
   AgentService,
   | 'send'
+  | 'ownerReply'
+  | 'ownerDeliveries'
+  | 'reportOwnerDelivery'
+  | 'attention'
   | 'snapshot'
   | 'cancel'
   | 'uploadArtifact'
@@ -94,6 +100,7 @@ export async function handleCli(
       const input: unknown = await request.text().then((text) => (text ? JSON.parse(text) : {}))
       return Response.json(
         await management.seed(
+          CLI_ACTOR,
           selectedCredentialRefs(input, await management.listCredentials(CLI_ACTOR)),
         ),
       )
@@ -122,6 +129,25 @@ export async function handleCli(
       )
     }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
+    if (action === 'owner-reply')
+      return Response.json(
+        await service.ownerReply(
+          CLI_ACTOR,
+          agentId,
+          parseInput(OwnerReplySchema, await request.json()),
+        ),
+      )
+    if (action === 'deliveries')
+      return Response.json(await service.ownerDeliveries(CLI_ACTOR, agentId))
+    if (action === 'delivery-report')
+      return Response.json(
+        await service.reportOwnerDelivery(
+          CLI_ACTOR,
+          agentId,
+          parseInput(DeliveryReportSchema, await request.json()),
+        ),
+      )
+    if (action === 'attention') return Response.json(await service.attention(CLI_ACTOR, agentId))
     if (action === 'tools') {
       const input = parseInput(
         v.object({ requestId: RequestIdSchema, tools: v.array(v.string()) }),

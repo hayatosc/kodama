@@ -6,6 +6,8 @@ import { openLocalDb } from '../src/agent/local-db/local.ts'
 import { expect, it } from 'vitest'
 import { newAgentId } from '../src/testing/management.ts'
 import { seedOnce } from '../src/testing/management.ts'
+import { waitForAnswer } from '../src/testing/rpc.ts'
+import type { OwnerDelivery, OwnerReplyResult } from '../src/owner-intake.ts'
 import { CLI_ACTOR } from './credentials.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
@@ -13,6 +15,77 @@ import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
+
+it('round trips an owner request and UI receipt through the authenticated dev adapter', async () => {
+  const post = (path: string, body?: unknown) =>
+    handleCli(
+      new Request(`http://localhost/cli/${path}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
+  const credential = await (
+    await post('credentials/add', {
+      requestId: 'round-trip-key',
+      provider: 'openai',
+      secret: 'round-trip-test-key',
+    })
+  ).json<{ credentialId: string }>()
+  const agent = await (
+    await post('create', {
+      requestId: 'round-trip-create',
+      slug: 'round-trip',
+      displayName: 'Round trip',
+      credentialIds: [credential.credentialId],
+    })
+  ).json<{ agentId: string }>()
+  const input = {
+    requestId: 'round-trip-1',
+    externalMessageId: 'ui-message-1',
+    sequence: 1,
+    action: 'followUp',
+    content: 'Hello',
+  }
+  const first = await (await post('owner-reply/round-trip', input)).json<OwnerReplyResult>()
+  expect(first.state).toBe('accepted')
+  expect(await (await post('owner-reply/round-trip', input)).json()).toEqual(first)
+  await waitForAnswer(agent.agentId, input.requestId)
+  const page = await (await post('deliveries/round-trip')).json<{ deliveries: OwnerDelivery[] }>()
+  const delivery = page.deliveries[0]
+  if (!delivery) throw new Error('Missing delivery')
+  expect(
+    (await post('delivery-report/round-trip', { id: delivery.id, state: 'accepted' })).status,
+  ).toBe(200)
+  const second = {
+    requestId: 'round-trip-2',
+    externalMessageId: 'ui-message-2',
+    sequence: 2,
+    deliveryId: delivery.id,
+    action: 'steer',
+    content: 'Thanks',
+  }
+  expect((await post('owner-reply/round-trip', second)).status).toBe(200)
+  await waitForAnswer(agent.agentId, second.requestId)
+  expect((await post('attention/round-trip')).status).toBe(200)
+  expect(
+    (
+      await handleCli(
+        new Request('http://localhost/cli/owner-reply/round-trip', {
+          method: 'POST',
+          headers: { authorization: 'Bearer impostor' },
+          body: JSON.stringify(second),
+        }),
+        'test-token',
+        exports.default,
+        exports.default,
+      )
+    ).status,
+  ).toBe(401)
+})
 
 it('creates and addresses an agent by slug before seed', async () => {
   const post = (path: string, body?: unknown) =>
@@ -26,7 +99,9 @@ it('creates and addresses an agent by slug before seed', async () => {
       exports.default,
       exports.default,
     )
-  expect(await (await post('list')).json()).toEqual([])
+  expect(await (await post('list')).json()).not.toContainEqual(
+    expect.objectContaining({ slug: 'assistant' }),
+  )
   const added = await post('credentials/add', {
     requestId: 'create-first-key',
     provider: 'openai',
@@ -232,7 +307,7 @@ it('rejects malformed CLI input before RPC admission', async () => {
   expect(response.status).toBe(400)
 })
 
-it('seeds, and sends to the first agent by its slug', async () => {
+it('rejects reseeding another owner’s installation and still resolves the existing slug', async () => {
   await seedOnce()
   const post = (path: string, body?: unknown) =>
     handleCli(
@@ -246,7 +321,7 @@ it('seeds, and sends to the first agent by its slug', async () => {
       exports.default,
     )
   const seeded = await (await post('seed')).json()
-  expect(seeded).toMatchObject({ installId: expect.any(String) })
+  expect(seeded).toMatchObject({ error: 'forbidden: seed belongs to another owner' })
   const sent = await post('send/assistant', { requestId: 'by-slug', content: 'Hello' })
   expect(sent.status).toBe(200)
   expect(JSON.stringify(decodeEvents(await sent.text()))).toContain('Hello from Kodama')

@@ -7,6 +7,7 @@
  * @module
  */
 import { uuidv7 } from '../src/lib/uuid.ts'
+import type { OwnerReply } from '../src/owner-intake.ts'
 import type {
   CreateAgentRequest,
   NotificationQuery,
@@ -22,6 +23,8 @@ import {
   ExtensionIdSchema,
   NotificationQuerySchema,
   NotificationReadSchema,
+  OwnerReplySchema,
+  DeliveryReportSchema,
 } from '../src/validation.ts'
 
 /** Where the local Worker listens. */
@@ -41,6 +44,10 @@ export const USAGE = `Usage:
   nr agent credentials unassign <credential-id> <agent>
   nr agent credentials revoke <credential-id>
   nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
+  nr agent owner-reply <agent> '<reply JSON>'
+  nr agent deliveries <agent>
+  nr agent delivery-report <agent> '<receipt JSON>'
+  nr agent attention <agent>
   nr agent snapshot <agent>
   nr agent notifications <agent> [--before SEQ] [--limit N] [--unread]
   nr agent notification-read <agent> <seq>
@@ -83,7 +90,13 @@ export type Command =
     }
   | { action: 'credentials/revoke'; credentialId: string }
   | { action: 'dev/seed-credentials' }
-  | { action: 'snapshot' | 'cancel'; agentRef: string }
+  | { action: 'snapshot' | 'cancel' | 'deliveries' | 'attention'; agentRef: string }
+  | { action: 'owner-reply'; agentRef: string; request: OwnerReply }
+  | {
+      action: 'delivery-report'
+      agentRef: string
+      request: { id: string; state: 'accepted' | 'failed' }
+    }
   | { action: 'notifications'; agentRef: string; query: NotificationQuery }
   | { action: 'notification-read'; agentRef: string; request: NotificationRead }
   | { action: 'send'; agentRef: string; message: SendMessageRequest; events: boolean }
@@ -137,6 +150,20 @@ export function toCommand(
   newRequestId: () => string = uuidv7,
 ): Command {
   if (values.help || positionals.length === 0) return { action: 'help' }
+  const [ownerAction, ownerAgent, payload] = positionals
+  if (ownerAction === 'deliveries' || ownerAction === 'attention') {
+    if (positionals.length !== 2) throw new TypeError('Expected one agent reference')
+    return { action: ownerAction, agentRef: parseAgentRef(ownerAgent) }
+  }
+  if (ownerAction === 'owner-reply' || ownerAction === 'delivery-report') {
+    if (positionals.length !== 3 || payload === undefined)
+      throw new TypeError('Expected agent and JSON')
+    const input: unknown = JSON.parse(payload)
+    const agentRef = parseAgentRef(ownerAgent)
+    return ownerAction === 'owner-reply'
+      ? { action: ownerAction, agentRef, request: parseInput(OwnerReplySchema, input) }
+      : { action: ownerAction, agentRef, request: parseInput(DeliveryReportSchema, input) }
+  }
   const [action, rawAgentRef, content] = positionals
   if (action === 'dev' && rawAgentRef === 'seed-credentials' && positionals.length === 2)
     return { action: 'dev/seed-credentials' }
@@ -299,26 +326,28 @@ export function commandRequest(
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body:
-        command.action === 'artifact-download' || command.action === 'artifact-delete'
-          ? JSON.stringify({ artifactId: command.artifactId })
-          : command.action === 'artifact-list'
-            ? JSON.stringify({
-                ...(command.cursor ? { cursor: command.cursor } : {}),
-                ...(command.limit === undefined ? {} : { limit: command.limit }),
-              })
-            : command.action === 'send'
-              ? JSON.stringify(command.message)
-              : command.action === 'notifications'
-                ? JSON.stringify(command.query)
-                : command.action === 'notification-read'
-                  ? JSON.stringify(command.request)
-                  : command.action === 'create'
+        command.action === 'owner-reply' || command.action === 'delivery-report'
+          ? JSON.stringify(command.request)
+          : command.action === 'artifact-download' || command.action === 'artifact-delete'
+            ? JSON.stringify({ artifactId: command.artifactId })
+            : command.action === 'artifact-list'
+              ? JSON.stringify({
+                  ...(command.cursor ? { cursor: command.cursor } : {}),
+                  ...(command.limit === undefined ? {} : { limit: command.limit }),
+                })
+              : command.action === 'send'
+                ? JSON.stringify(command.message)
+                : command.action === 'notifications'
+                  ? JSON.stringify(command.query)
+                  : command.action === 'notification-read'
                     ? JSON.stringify(command.request)
-                    : command.action === 'seed' && command.credentialIds
-                      ? JSON.stringify({ credentialIds: command.credentialIds })
-                      : command.action === 'tools'
-                        ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
-                        : credentialJson,
+                    : command.action === 'create'
+                      ? JSON.stringify(command.request)
+                      : command.action === 'seed' && command.credentialIds
+                        ? JSON.stringify({ credentialIds: command.credentialIds })
+                        : command.action === 'tools'
+                          ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
+                          : credentialJson,
       redirect: 'error',
     },
   }

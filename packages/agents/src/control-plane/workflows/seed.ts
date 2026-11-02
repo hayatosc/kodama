@@ -60,7 +60,8 @@ export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
  * or reconfigured since keeps its changes.
  *
  * @remarks
- * The memory agent's rows are inserted only if missing. The system creates the first agent through
+ * The memory agent's rows are inserted only if missing. The authenticated creator owns the first agent.
+ * A different creator cannot reseed an existing installation. Seed creates the first agent through
  * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
 export async function seed(
@@ -68,8 +69,12 @@ export async function seed(
   credentials?: AgentSettings['credentials'],
 ): Promise<SeedResult> {
   const { db, env, now } = call
+  if (!call.principal) throw new Error('forbidden: seed requires an actor')
   const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
-  const existingFirst = await auditByOpId(db, 'agent.create:system:seed')
+  const existingFirst = await auditByOpId(db, 'agent.create:installation:seed')
+  if (existingFirst && existingFirst.actorId !== call.principal.principalId) {
+    throw new Error('forbidden: seed belongs to another owner')
+  }
   const initialSettings = parseSettings(call.models, {
     ...memoryAgentSettings(env),
     ...(credentials ? { credentials } : {}),
@@ -122,12 +127,16 @@ export async function seed(
         throw error
     }
   }
-  await createAgent(call, {
-    requestId: 'seed',
-    displayName: 'Kodama',
-    slug: FIRST_AGENT_SLUG,
-    settings: firstSettings,
-  })
+  await createAgent(
+    call,
+    {
+      requestId: 'seed',
+      displayName: 'Kodama',
+      slug: FIRST_AGENT_SLUG,
+      settings: firstSettings,
+    },
+    true,
+  )
   // The memory agent keeps its existing object; this applies its desired version once.
   await pushDesired(call, MEMORY_AGENT_ID)
   return { installId, memoryAgentId: MEMORY_AGENT_ID }

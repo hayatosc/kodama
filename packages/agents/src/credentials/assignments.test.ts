@@ -44,7 +44,7 @@ it('pushes the committed version even when credential invalidation rejects', asy
 
 it('assigns all agents and unassigns one without revoking the shared key', async () => {
   const db = managementDb(env.MANAGEMENT_DB)
-  await exports.default.seed()
+  await exports.default.seed({ kind: 'user', externalId: 'tester@example.com' })
   const registered = await db.select().from(agents).get()
   if (!registered) throw new Error('Missing registered agent')
   const actor = { kind: 'agent' as const, externalId: registered.agentId }
