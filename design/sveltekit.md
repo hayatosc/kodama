@@ -103,7 +103,7 @@ src/hooks.server.ts              ユーザー認証。locals にユーザーを�
 ```
 
 - `*.remote.ts` は `server` フォルダの中に置けない。ルートの隣に置き、ページから直接 import する。
-- スキーマは `*.remote.ts` から export できないので、`#lib/schemas.ts` に置く（valibot。Standard Schema なのでそのまま渡せる）。
+- スキーマ（`AgentRef`、`SendInput`）は `*.remote.ts` から export できないので、`#lib/schemas.ts` に置く（valibot。Standard Schema なのでそのまま渡せる）。
 
 ## Remote Functions
 
@@ -113,38 +113,58 @@ src/hooks.server.ts              ユーザー認証。locals にユーザーを�
 // src/routes/agents/[slug]/agent.remote.ts
 import { command, form, getRequestEvent, query } from '$app/server'
 import { error } from '@sveltejs/kit'
-import * as v from 'valibot'
-import { Slug, SendInput } from '#lib/schemas'
+import type { ManagementActor } from '@kodama/agents/protocol'
+import { AgentRef, SendInput } from '#lib/schemas'
+import { readEvents } from '#lib/sse'
 
-function agents() {
+/** The service binding and the signed-in user as a management actor. */
+function service() {
   const { locals, platform } = getRequestEvent()
   if (!locals.user || !platform) error(401)
-  return platform.env.AGENT_SERVICE
+  // hooks.server.ts puts the Cloudflare Access identity on locals.user.
+  const actor: ManagementActor = { kind: 'user', externalId: locals.user.email }
+  return { agents: platform.env.AGENT_SERVICE, actor }
+}
+
+/** The route slug as a working agent's UUID: conversation RPCs accept only UUIDs. */
+async function agentId(slug: string): Promise<string> {
+  const { agents, actor } = service()
+  const agent = await agents.resolveAgent(actor, slug)
+  if (agent.kind !== 'working') error(404)
+  return agent.agentId
 }
 
 /** The whole conversation state; always replaced, never appended to. */
-export const getSnapshot = query(Slug, async (slug) => agents().snapshot(slug))
-
-/** subscribe() as a live query: the first value is a snapshot, then run events. */
-export const watchAgent = query.live(Slug, async function* (slug) {
-  for await (const event of agents().subscribe(slug)) yield event
+export const getSnapshot = query(AgentRef, async (slug) => {
+  const { snapshot } = await service().agents.snapshot(await agentId(slug))
+  return snapshot
 })
 
-/** Enter sends now (steer); Tab, or the queue button on phones, sends after the run (followUp). */
-export const sendMessage = form(SendInput, async ({ slug, text, mode, requestId }) => {
-  await agents().send(slug, { text, mode, requestId })
+/** subscribe() as a live query: its SSE bytes, parsed into a snapshot first, then run events. */
+export const watchAgent = query.live(AgentRef, async function* (slug) {
+  const stream = await service().agents.subscribe(await agentId(slug))
+  for await (const event of readEvents(stream)) yield event
+})
+
+/** Enter steers the current run; Tab, or the queue button on phones, follows it up. */
+export const sendMessage = form(SendInput, async ({ slug, content, whenBusy, requestId }) => {
+  // sendMessage() only admits the message; watchAgent streams the run.
+  await service().agents.sendMessage(await agentId(slug), { requestId, content, whenBusy })
   void getSnapshot(slug).refresh()
 })
 
-export const cancelRun = command(Slug, async (slug) => {
-  await agents().cancel(slug)
+export const cancelRun = command(AgentRef, async (slug) => {
+  await service().agents.cancel(await agentId(slug))
   void getSnapshot(slug).refresh()
 })
 ```
 
-- 読むのは `query`、Composer の送信は `form`（`<form {...sendMessage}>`、Enter・Tab は `sendMessage.enhance` の中で `mode` を入れて `submit()`）、停止のようにフォームでない操作は `command`。
+- 会話の RPC（`snapshot` `subscribe` `sendMessage` `cancel`）はエージェントの UUID しか受け付けない。ルートの slug は、サインインしたユーザーを actor にした `resolveAgent` で UUID に引き直す。dedicated なエージェントは 404 にする。
+- 送る値は `SendMessageRequest`（`requestId`、`content`、`whenBusy: 'steer' | 'followUp'`）。Enter は `steer`、Tab とスマートフォンのキューボタンは `followUp`。同じ送信をやり直すときは同じ `requestId` を使う。
+- `subscribe()` は SSE のバイト列（`ReadableStream<Uint8Array>`）を返すので、`#lib/sse` の `readEvents` でイベントに分けてから流す。
+- 読むのは `query`、Composer の送信は `form`（`<form {...sendMessage}>`、Enter・Tab は `sendMessage.enhance` の中で `whenBusy` を入れて `submit()`）、停止のようにフォームでない操作は `command`。
 - 変更のあとは関係する query の `refresh()` を呼ぶ（single-flight mutation）。結果が同じ応答で返り、往復が 1 回で済む。
-- 送信中は `sendMessage.pending`、入力欄の検証エラーは `sendMessage.fields.text.issues()`。
+- 送信中は `sendMessage.pending`、入力欄の検証エラーは `sendMessage.fields.content.issues()`。
 - 一覧の最後の出来事のように、行ごとに同じ問い合わせが並ぶものは `query.batch` でまとめる。
 
 ## ページでの使い方

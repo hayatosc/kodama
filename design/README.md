@@ -89,6 +89,7 @@
 - `tokens.json` がトークンの元。`tokens.css` はそこから生成した CSS 変数・文字スタイル・`@font-face` で、手で直さない。
 - `components/<名前>/preview.html` はブラウザで直接開ける（`tokens.css`、`components/bundle.css`、`components/bundle.js` を読み込む）。ライトとダークを並べて表示し、クリックやキー操作にも反応する。
 - `components/<名前>/README.md` が各部品のガイド、`components/index.d.ts` が受け取る値の型。
+- `components/Cover/preview.html` はこのデザインシステムの表紙の絵で、部品ではない。そのためガイドも型もなく、`bundle.js` 先頭の部品一覧にも入れていない。
 - フォントはファイルを持たず、npm の `gen-interface-jp@0.8.0`（SIL OFL 1.1）から読み込む。`tokens.css` の先頭で jsDelivr の `cdn/400.css`・`cdn/600.css`・`cdn/display-600.css` を `@import` する。アーティファクトからここへ書き出すときは、`tokens.json` の `type.fonts` を空にし、`fonts/` は持ってこない。
 - `images/` はライトモードの Workspace と Mobile を描いた PNG（2 倍の解像度）。
 - 実装の手引きは [sveltekit.md](sveltekit.md)。

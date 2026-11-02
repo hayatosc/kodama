@@ -194,9 +194,9 @@ export interface SelectProps {
   options: SelectOption[]
   value: string
   onchange: (value: string) => void
-  /** 'field' has a border (forms); 'inline' is borderless for settings rows. */
   /** Show a search field (lists longer than 8 options, e.g. models). */
   searchable?: boolean
+  /** 'field' has a border (forms); 'inline' is borderless for settings rows. */
   variant?: 'field' | 'inline'
 }
 
