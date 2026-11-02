@@ -22,7 +22,6 @@ export const ownerReplies = sqliteTable('kodama_owner_replies', {
   requestId: text('request_id').primaryKey(),
   externalMessageId: text('external_message_id').notNull().unique(),
   sequence: integer('sequence').notNull().unique(),
-  principalId: text('principal_id').notNull(),
   arguments: text('arguments').notNull(),
   submissionId: integer('submission_id'),
   state: text('state', { enum: ['accepted', 'unknown'] }).notNull(),

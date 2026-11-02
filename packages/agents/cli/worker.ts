@@ -6,7 +6,6 @@
 import AgentService from '../src/index.ts'
 import { seedLocalCredentials } from '../src/credentials/bootstrap.ts'
 import { handleCli } from './handler.ts'
-import { CLI_ACTOR } from './credentials.ts'
 
 export { AgentObject as Agent } from '../src/agent-object.ts'
 
@@ -22,7 +21,7 @@ export default class CliService extends AgentService {
       if (request.method !== 'POST') return new Response('Use POST', { status: 405 })
       try {
         return Response.json(
-          await seedLocalCredentials(this.env, request, (refs) => this.seed(CLI_ACTOR, refs)),
+          await seedLocalCredentials(this.env, request, (refs) => this.seed(refs)),
         )
       } catch {
         return Response.json(

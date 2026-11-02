@@ -5,12 +5,11 @@
  * @module
  */
 
-/** Identity authenticated by both layers of an envelope, including its owning principal. */
+/** Identity authenticated by both layers of an envelope in this installation. */
 export interface CredentialIdentity {
   credentialId: string
   kind: 'api_key' | 'oauth_subscription'
   provider: string
-  ownerId: string | null
   revision: number
 }
 
@@ -39,8 +38,6 @@ function aad(identity: CredentialIdentity, purpose: string): Uint8Array<ArrayBuf
         identity.credentialId,
         identity.kind,
         identity.provider,
-        identity.ownerId === null ? 'installation' : 'principal',
-        identity.ownerId,
         identity.revision,
       ]),
     ),

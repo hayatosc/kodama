@@ -1,4 +1,4 @@
-/** Owner-only Web UI transport contracts; identities are supplied by the trusted RPC caller.
+/** Direct operator input contracts; provenance is recorded by the trusted host, not by a model.
  * @module
  */
 
@@ -14,7 +14,6 @@ export interface OwnerReply {
 
 /** Host-created entry provenance, never parsed from model arguments or message content. */
 export interface OwnerProvenance {
-  principalId: string
   conversationId: string
   requestId: string
   externalMessageId: string

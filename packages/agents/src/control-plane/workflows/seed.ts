@@ -60,8 +60,7 @@ export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
  * or reconfigured since keeps its changes.
  *
  * @remarks
- * The memory agent's rows are inserted only if missing. The authenticated creator owns the first agent.
- * A different creator cannot reseed an existing installation. Seed creates the first agent through
+ * The memory agent's rows are inserted only if missing. Seed creates the first agent through
  * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
 export async function seed(
@@ -69,12 +68,8 @@ export async function seed(
   credentials?: AgentSettings['credentials'],
 ): Promise<SeedResult> {
   const { db, env, now } = call
-  if (!call.principal) throw new Error('forbidden: seed requires an actor')
   const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
   const existingFirst = await auditByOpId(db, 'agent.create:installation:seed')
-  if (existingFirst && existingFirst.actorId !== call.principal.principalId) {
-    throw new Error('forbidden: seed belongs to another owner')
-  }
   const initialSettings = parseSettings(call.models, {
     ...memoryAgentSettings(env),
     ...(credentials ? { credentials } : {}),
@@ -106,7 +101,7 @@ export async function seed(
           version: 1,
           settingsJson: JSON.stringify(initialSettings),
           schemaVersion: SETTINGS_SCHEMA_VERSION,
-          authorId: null,
+          source: 'system',
           comment: 'seed',
           createdAt: now,
         }),
@@ -115,7 +110,7 @@ export async function seed(
         auditStatement(db, {
           opId: `system.seed:${installId}`,
           at: now,
-          actorId: null,
+          source: 'system',
           action: 'system.seed',
           targetKind: 'system',
           targetId: installId,

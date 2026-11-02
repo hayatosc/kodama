@@ -8,7 +8,6 @@ import { newAgentId } from '../src/testing/management.ts'
 import { seedOnce } from '../src/testing/management.ts'
 import { waitForAnswer } from '../src/testing/rpc.ts'
 import type { OwnerDelivery, OwnerReplyResult } from '../src/owner-intake.ts'
-import { CLI_ACTOR } from './credentials.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -225,7 +224,7 @@ it('authenticates inbox reads and exact acknowledgements and validates their req
 
 it('enables and disables optional tools through versioned configuration without losing credentials', async () => {
   const id = await newAgentId()
-  const before = await exports.default.getConfig(CLI_ACTOR, id)
+  const before = await exports.default.getConfig(id)
   for (const tools of [['contact_agent'], []]) {
     const response = await handleCli(
       new Request(`http://localhost/cli/tools/${id}`, {
@@ -238,7 +237,7 @@ it('enables and disables optional tools through versioned configuration without 
       exports.default,
     )
     expect(response.status).toBe(200)
-    const current = await exports.default.getConfig(CLI_ACTOR, id)
+    const current = await exports.default.getConfig(id)
     expect(current.settings.tools).toEqual(tools)
     expect(current.settings.credentials).toEqual(before.settings.credentials)
   }
@@ -307,8 +306,8 @@ it('rejects malformed CLI input before RPC admission', async () => {
   expect(response.status).toBe(400)
 })
 
-it('rejects reseeding another owner’s installation and still resolves the existing slug', async () => {
-  await seedOnce()
+it('reuses the single installation through authenticated CLI access and resolves its slug', async () => {
+  const initial = await seedOnce()
   const post = (path: string, body?: unknown) =>
     handleCli(
       new Request(`http://localhost/cli/${path}`, {
@@ -321,7 +320,7 @@ it('rejects reseeding another owner’s installation and still resolves the exis
       exports.default,
     )
   const seeded = await (await post('seed')).json()
-  expect(seeded).toMatchObject({ error: 'forbidden: seed belongs to another owner' })
+  expect(seeded).toEqual(initial)
   const sent = await post('send/assistant', { requestId: 'by-slug', content: 'Hello' })
   expect(sent.status).toBe(200)
   expect(JSON.stringify(decodeEvents(await sent.text()))).toContain('Hello from Kodama')

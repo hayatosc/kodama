@@ -16,7 +16,7 @@ const db = managementDb(env.MANAGEMENT_DB)
 afterEach(() => vi.restoreAllMocks())
 
 it('sends with an expired subscription after one refresh, including after eviction', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const credential = await putCredential(call, env, {
     requestId: 'runtime-refresh',
     provider: 'openai',
@@ -81,7 +81,7 @@ it('sends with an expired subscription after one refresh, including after evicti
 })
 
 it('refuses admission with structured reauthentication facts after refresh rejection', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const credential = await putCredential(call, env, {
     requestId: 'runtime-rejection',
     provider: 'openai',

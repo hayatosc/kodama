@@ -98,13 +98,6 @@ export interface AuditQuery {
   limit?: number
 }
 
-/** Who calls the management methods of `AgentService`, as the calling Worker authenticated them. */
-export interface ManagementActor {
-  kind: 'user' | 'service' | 'agent'
-  /** The Access email, service token ID, or agent ID; resolved to a principal. */
-  externalId: string
-}
-
 /** Lifecycle states of an agent. */
 export type AgentStatus =
   | 'provisioning'
@@ -169,8 +162,8 @@ export interface RollbackConfigRequest {
 export interface ConfigVersion {
   version: number
   settings: AgentSettings
-  /** The principal that wrote it; missing for the system (the seed). */
-  authorId?: string
+  /** Host-recorded origin; this installation has no user identities or agent owners. */
+  source: 'operator' | 'system'
   comment?: string
   createdAt: number
 }

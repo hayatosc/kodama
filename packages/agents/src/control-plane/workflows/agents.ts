@@ -10,12 +10,12 @@ import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai'
-import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
+import { agentConfigVersions, agents } from '../../../drizzle/management/schema.ts'
 import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { defaultAgentSettings, parseSettings } from '../../control-plane/config.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
-import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../db.ts'
+import type { AgentRow, ManagementDb, VersionRow } from '../db.ts'
 import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../registry.ts'
 import { reportApplied, versionRow, versionRows, writeVersionStatements } from '../versions.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../../control-plane/config.ts'
@@ -45,14 +45,9 @@ export interface ManagementCall {
   env: ManagementEnv
   db: ManagementDb
   models: Models
-  /** The authorized caller; `null` for the system (the seed and reconciliation). */
-  principal: PrincipalRow | null
+  /** Recorded by the host, never used as a user identity or permission. */
+  source: 'operator' | 'system'
   now: number
-}
-
-/** The acting principal's ID, or `null` for the system. */
-function actorId(call: ManagementCall): string | null {
-  return call.principal?.principalId ?? null
 }
 
 /** A stored version as `AgentService` returns it. */
@@ -60,7 +55,7 @@ function configVersionOf(models: Models, row: VersionRow): ConfigVersion {
   return {
     version: row.version,
     settings: parseSettings(models, JSON.parse(row.settingsJson)),
-    ...(row.authorId === null ? {} : { authorId: row.authorId }),
+    source: row.source,
     ...(row.comment === null ? {} : { comment: row.comment }),
     createdAt: row.createdAt,
   }
@@ -141,7 +136,7 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
     auditStatement(call.db, {
       opId: `agent.activate:${agentId}`,
       at: call.now,
-      actorId: actorId(call),
+      source: call.source,
       action: 'agent.activate',
       targetKind: 'agent',
       targetId: agentId,
@@ -152,8 +147,8 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
 
 /**
  * Create a working agent: a new UUID v7, then the registry row (`provisioning`), version 1, the
- * caller's owner membership, and the audit row in one batch; then initialize the object and
- * activate it. Seed uses the creator as owner and an installation-wide idempotency key.
+ * audit row in one batch; then initialize the object and activate it.
+ * Every working agent belongs to this single-operator installation.
  *
  * @remarks
  * Reusing `requestId` returns the agent the first attempt created. A stop after the batch leaves the
@@ -169,14 +164,9 @@ export async function createAgent(
   },
   seed = false,
 ): Promise<AgentSummary> {
-  const creator = actorId(call)
-  const opId = seed
-    ? 'agent.create:installation:seed'
-    : `agent.create:${creator ?? 'system'}:${request.requestId}`
+  const opId = seed ? 'agent.create:installation:seed' : `agent.create:${request.requestId}`
   const earlier = await auditByOpId(call.db, opId)
   if (earlier !== undefined) {
-    if (seed && earlier.actorId !== creator)
-      throw new Error('forbidden: seed belongs to another owner')
     return summaryOf(await finishProvisioning(call, earlier.targetId))
   }
   const initial =
@@ -189,10 +179,6 @@ export async function createAgent(
       : parseSettings(call.models, { ...initial, credentials: request.credentials })
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
-  const membership =
-    creator === null
-      ? []
-      : [call.db.insert(agentMembers).values({ agentId, principalId: creator, role: 'owner' })]
   try {
     await call.db.batch([
       call.db.insert(agents).values({
@@ -203,7 +189,6 @@ export async function createAgent(
         slug: request.slug ?? null,
         status: 'provisioning',
         currentVersion: 1,
-        ownerId: creator,
         createdAt: call.now,
         updatedAt: call.now,
       }),
@@ -212,17 +197,16 @@ export async function createAgent(
         version: 1,
         settingsJson: JSON.stringify(settings),
         schemaVersion: SETTINGS_SCHEMA_VERSION,
-        authorId: creator,
+        source: call.source,
         comment: 'create',
         createdAt: call.now,
       }),
-      ...membership,
       ...initialGrantStatements(call.db, agentId, settings),
       ...referenceStatements(call.db, agentId, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,
-        actorId: creator,
+        source: call.source,
         action: 'agent.create',
         targetKind: 'agent',
         targetId: agentId,
@@ -233,8 +217,6 @@ export async function createAgent(
     if (!isConstraintError(error)) throw error
     const replay = await auditByOpId(call.db, opId)
     if (replay !== undefined) {
-      if (seed && replay.actorId !== creator)
-        throw new Error('forbidden: seed belongs to another owner')
       return summaryOf(await finishProvisioning(call, replay.targetId))
     }
     if (/agents\.slug/.test(errorText(error))) {
@@ -294,7 +276,7 @@ export async function renameAgent(
       auditStatement(call.db, {
         opId: `agent.rename:${agentId}:${uuidv7(call.now)}`,
         at: call.now,
-        actorId: actorId(call),
+        source: call.source,
         action: 'agent.rename',
         targetKind: 'agent',
         targetId: agentId,
@@ -355,7 +337,7 @@ async function writeVersion(
     await call.db.batch([
       ...writeVersionStatements(
         call.db,
-        { actorId: actorId(call), now: call.now, opId: write.opId },
+        { source: call.source, now: call.now, opId: write.opId },
         agentId,
         write.expected,
         write.settings,

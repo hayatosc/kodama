@@ -9,7 +9,7 @@ import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
 import { MAX_ARTIFACT_BYTES } from './extensions.ts'
-import type { ManagementActor, RenameAgentRequest, SendMessageRequest } from './protocol.ts'
+import type { RenameAgentRequest, SendMessageRequest } from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -166,15 +166,6 @@ export const DisplayNameSchema = v.pipe(
   v.maxLength(100, displayNameMessage),
 )
 
-/** The caller of the management methods on `AgentService`. */
-export const ManagementActorSchema = v.strictObject(
-  {
-    kind: v.picklist(['user', 'service', 'agent'], 'actor.kind must be user, service, or agent'),
-    externalId: v.pipe(v.string(), v.minLength(1), v.maxLength(320)),
-  },
-  'Expected an actor with kind and externalId',
-) satisfies v.GenericSchema<unknown, ManagementActor>
-
 /** A rename: at least one of the display name and the slug. */
 export const RenameAgentSchema = v.pipe(
   v.strictObject(
@@ -288,15 +279,6 @@ export function parseAgentId(value: unknown): string {
  */
 export function parseAgentRef(value: unknown): string {
   return parseInput(AgentRefSchema, value)
-}
-
-/**
- * Parse the caller of the management methods on `AgentService`.
- *
- * @throws {@link TypeError} When `value` is not an actor.
- */
-export function parseManagementActor(value: unknown): ManagementActor {
-  return parseInput(ManagementActorSchema, value)
 }
 
 /**

@@ -13,9 +13,7 @@ it('bootstraps idempotently without returning the key', async () => {
       method: 'POST',
       body: JSON.stringify({ openai: 'local-provider-test-key' }),
     })
-  const result = await seedLocalCredentials(env, request(), (refs) =>
-    exports.default.seed({ kind: 'user', externalId: 'tester@example.com' }, refs),
-  )
+  const result = await seedLocalCredentials(env, request(), (refs) => exports.default.seed(refs))
   expect(result.seeded.memoryAgentId).toBeTruthy()
   expect(result.credentials.openai).toBeTruthy()
   expect(JSON.stringify(result)).not.toContain('local-provider-test-key')
@@ -26,11 +24,9 @@ it('bootstraps idempotently without returning the key', async () => {
   )
   const versions = await management.select().from(agentConfigVersions)
   const grants = await management.select().from(credentialGrants)
-  expect(
-    await seedLocalCredentials(env, request(), (refs) =>
-      exports.default.seed({ kind: 'user', externalId: 'tester@example.com' }, refs),
-    ),
-  ).toEqual(result)
+  expect(await seedLocalCredentials(env, request(), (refs) => exports.default.seed(refs))).toEqual(
+    result,
+  )
   expect(await management.select().from(agentConfigVersions)).toEqual(versions)
   expect(await management.select().from(credentialGrants)).toEqual(grants)
 })
@@ -43,7 +39,7 @@ it('preserves all existing selections and grants when bootstrapped with a differ
         method: 'POST',
         body: JSON.stringify({ openai: key }),
       }),
-      (refs) => exports.default.seed({ kind: 'user', externalId: 'tester@example.com' }, refs),
+      (refs) => exports.default.seed(refs),
     )
   await bootstrap('initial-local-provider-key')
   await newAgentId()
@@ -59,7 +55,7 @@ it('does not echo malformed secret input', async () => {
     seedLocalCredentials(
       env,
       new Request('http://localhost', { method: 'POST', body: 'sk-malformed123456' }),
-      (refs) => exports.default.seed({ kind: 'user', externalId: 'tester@example.com' }, refs),
+      (refs) => exports.default.seed(refs),
     ),
   ).rejects.toThrow('Invalid credential JSON')
 })

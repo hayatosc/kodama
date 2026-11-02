@@ -12,12 +12,7 @@ export function ownerReplyReceipt(db: LocalDb, requestId: string) {
 }
 
 /** Reserve identity before Pi admission; a crash is recovered with the same request ID. */
-export function reserveOwnerReply(
-  db: LocalDb,
-  principalId: string,
-  input: OwnerReply,
-  now: number,
-) {
+export function reserveOwnerReply(db: LocalDb, input: OwnerReply, now: number) {
   const args = JSON.stringify(input)
   return db.transaction((tx) => {
     const existing = tx
@@ -31,8 +26,7 @@ export function reserveOwnerReply(
       )
       .get()
     if (existing) {
-      if (existing.principalId !== principalId || existing.arguments !== args)
-        throw new TypeError('owner_reply_replay_mismatch')
+      if (existing.arguments !== args) throw new TypeError('owner_reply_replay_mismatch')
       return { receipt: existing, replay: true }
     }
     const last = tx.select().from(ownerReplies).orderBy(desc(ownerReplies.sequence)).limit(1).get()
@@ -52,7 +46,6 @@ export function reserveOwnerReply(
         requestId: input.requestId,
         externalMessageId: input.externalMessageId,
         sequence: input.sequence,
-        principalId,
         arguments: args,
         state: 'unknown',
         createdAt: now,

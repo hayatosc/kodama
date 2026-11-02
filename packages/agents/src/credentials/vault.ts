@@ -43,8 +43,6 @@ export function credentialMetadata(row: typeof credentials.$inferSelect) {
     credentialId: row.credentialId,
     kind: row.kind,
     provider: row.provider,
-    ownerScope: row.ownerId === null ? ('installation' as const) : ('principal' as const),
-    ownerId: row.ownerId,
     status: row.status,
     revision: row.revision,
     fingerprint: row.fingerprint,

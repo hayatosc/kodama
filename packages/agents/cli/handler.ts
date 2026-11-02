@@ -19,7 +19,7 @@ import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
 import { selectedCredentialRefs } from '../src/credentials/validation.ts'
-import { CLI_ACTOR, credentialResponse } from './credentials.ts'
+import { credentialResponse } from './credentials.ts'
 
 type Service = Pick<
   AgentService,
@@ -75,7 +75,7 @@ type Management = Pick<
 /** Resolve an existing agent without provisioning unrelated initial agents. */
 async function agentIdOf(management: Management, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  return (await management.resolveAgent(CLI_ACTOR, ref)).agentId
+  return (await management.resolveAgent(ref)).agentId
 }
 
 /** Development-only HTTP adapter; service methods deliver through Durable Object RPC. */
@@ -99,13 +99,10 @@ export async function handleCli(
     if (action === 'seed') {
       const input: unknown = await request.text().then((text) => (text ? JSON.parse(text) : {}))
       return Response.json(
-        await management.seed(
-          CLI_ACTOR,
-          selectedCredentialRefs(input, await management.listCredentials(CLI_ACTOR)),
-        ),
+        await management.seed(selectedCredentialRefs(input, await management.listCredentials())),
       )
     }
-    if (action === 'list') return Response.json(await management.listAgents(CLI_ACTOR))
+    if (action === 'list') return Response.json(await management.listAgents())
     if (action === 'create') {
       const body = parseInput(
         v.strictObject({
@@ -117,10 +114,10 @@ export async function handleCli(
       const { credentialIds, ...input } = body
       const credentials = selectedCredentialRefs(
         { credentialIds },
-        await management.listCredentials(CLI_ACTOR),
+        await management.listCredentials(),
       )
       return Response.json(
-        await management.createAgent(CLI_ACTOR, {
+        await management.createAgent({
           requestId: input.requestId,
           displayName: input.displayName,
           ...(credentials ? { credentials } : {}),
@@ -131,31 +128,25 @@ export async function handleCli(
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
     if (action === 'owner-reply')
       return Response.json(
-        await service.ownerReply(
-          CLI_ACTOR,
-          agentId,
-          parseInput(OwnerReplySchema, await request.json()),
-        ),
+        await service.ownerReply(agentId, parseInput(OwnerReplySchema, await request.json())),
       )
-    if (action === 'deliveries')
-      return Response.json(await service.ownerDeliveries(CLI_ACTOR, agentId))
+    if (action === 'deliveries') return Response.json(await service.ownerDeliveries(agentId))
     if (action === 'delivery-report')
       return Response.json(
         await service.reportOwnerDelivery(
-          CLI_ACTOR,
           agentId,
           parseInput(DeliveryReportSchema, await request.json()),
         ),
       )
-    if (action === 'attention') return Response.json(await service.attention(CLI_ACTOR, agentId))
+    if (action === 'attention') return Response.json(await service.attention(agentId))
     if (action === 'tools') {
       const input = parseInput(
         v.object({ requestId: RequestIdSchema, tools: v.array(v.string()) }),
         await request.json(),
       )
-      const current = await management.getConfig(CLI_ACTOR, agentId)
+      const current = await management.getConfig(agentId)
       return Response.json(
-        await management.updateConfig(CLI_ACTOR, agentId, {
+        await management.updateConfig(agentId, {
           requestId: input.requestId,
           expectedVersion: current.version,
           settings: { ...current.settings, tools: input.tools },

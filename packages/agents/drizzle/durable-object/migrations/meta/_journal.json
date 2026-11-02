@@ -57,6 +57,13 @@
       "when": 1793609239957,
       "tag": "0007_cool_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793639220546,
+      "tag": "0008_complex_yellowjacket",
+      "breakpoints": true
     }
   ]
 }

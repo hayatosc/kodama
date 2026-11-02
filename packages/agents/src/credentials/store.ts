@@ -229,7 +229,7 @@ export function createCredentialStore(
             auditStatement(db, {
               opId: leaseId,
               at: now(),
-              actorId: null,
+              source: 'system',
               action: 'credential.modify.attempt',
               targetKind: 'system',
               targetId: id,

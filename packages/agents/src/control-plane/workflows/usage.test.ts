@@ -14,7 +14,7 @@ import { ingestUsage, usageCheckpoint } from '../usage.ts'
 import { aggregateUsage } from './usage.ts'
 
 it('repairs a committed but unacknowledged page and includes archived and dedicated agents', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const id = await newAgentId()
   const memoryId = (await seedOnce()).memoryAgentId
   const row = usageRecord({ chargedAgentId: id })

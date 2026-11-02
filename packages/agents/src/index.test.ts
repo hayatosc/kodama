@@ -39,6 +39,7 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
       version: 1,
       settingsJson: JSON.stringify({ ...defaultAgentSettings(env), systemPrompt }),
       schemaVersion: 1,
+      source: 'system',
       createdAt: Date.now(),
     }),
     management.update(agents).set({ currentVersion: 1 }).where(eq(agents.agentId, agentId)),

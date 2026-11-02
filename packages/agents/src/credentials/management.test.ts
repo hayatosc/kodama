@@ -4,7 +4,6 @@ import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
-import { principalOf } from '../control-plane/principals.ts'
 import { newAgentId } from '../testing/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../control-plane/models.ts'
@@ -19,33 +18,29 @@ import { credentialFingerprint } from './encryption.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
-async function caller() {
-  const actor = { kind: 'user' as const, externalId: `${uuidv7()}@example.test` }
-  const principal = await principalOf(db, actor, Date.now())
+function caller() {
   return {
-    actor,
     call: {
       db,
       env,
       models: createAgentModels(),
       now: Date.now(),
-      principal,
+      source: 'operator' as const,
     },
   }
 }
 
 it('returns only metadata through RPC and records a secret-free registration audit', async () => {
-  const { actor } = await caller()
   const request = { requestId: uuidv7(), provider: 'openai', secret: 'sk-credential-test-123456' }
-  const result = await exports.default.putCredential(actor, request)
+  const result = await exports.default.putCredential(request)
   expect(result.last4).toBe('3456')
   expect(result.fingerprint).toBe(
     await credentialFingerprint(request.secret, env.CREDENTIAL_KEK_V1),
   )
   expect(result).not.toHaveProperty('ciphertext')
   expect(result).not.toHaveProperty('wrappedDek')
-  expect(await exports.default.putCredential(actor, request)).toEqual(result)
-  expect(JSON.stringify(await exports.default.listCredentials(actor))).not.toContain(request.secret)
+  expect(await exports.default.putCredential(request)).toEqual(result)
+  expect(JSON.stringify(await exports.default.listCredentials())).not.toContain(request.secret)
   const rows = await db
     .select()
     .from(credentials)
@@ -58,8 +53,7 @@ it('returns only metadata through RPC and records a secret-free registration aud
 })
 
 it('lists credential health from metadata without decrypting the envelope', async () => {
-  const { actor } = await caller()
-  const value = await exports.default.putCredential(actor, {
+  const value = await exports.default.putCredential({
     requestId: uuidv7(),
     provider: 'openai',
     kind: 'oauth_subscription',
@@ -88,7 +82,7 @@ it('lists credential health from metadata without decrypting the envelope', asyn
       lastRefreshFailureCategory: 'transient',
     })
     .where(eq(credentials.credentialId, value.credentialId))
-  const metadata = (await exports.default.listCredentials(actor)).find(
+  const metadata = (await exports.default.listCredentials()).find(
     (entry) => entry.credentialId === value.credentialId,
   )
   expect(metadata).toMatchObject({
@@ -106,7 +100,7 @@ it('lists credential health from metadata without decrypting the envelope', asyn
 })
 
 it('replays credential-shaped request IDs without changing their identity', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const before = await db.select().from(credentials)
   const audits = await db.select().from(auditLog)
   const requestId = `sk-${'x'.repeat(32)}`
@@ -118,7 +112,7 @@ it('replays credential-shaped request IDs without changing their identity', asyn
 })
 
 it('replays identical concurrent registrations without extra credentials or audits', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
   const before = await db.select().from(credentials)
   const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put'))
@@ -134,7 +128,7 @@ it('replays identical concurrent registrations without extra credentials or audi
 })
 
 it('reports a credential conflict for concurrent reuse with different content', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
   const before = await db.select().from(credentials)
   const results = await Promise.allSettled([
@@ -149,7 +143,7 @@ it('reports a credential conflict for concurrent reuse with different content', 
 })
 
 it('names credential IDs in validation errors', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   await expect(credentialRow(call, 'invalid')).rejects.toThrow(
     'credentialId must be a lowercase UUID v7',
   )
@@ -157,7 +151,7 @@ it('names credential IDs in validation errors', async () => {
 })
 
 it('replays concurrent duplicate grants with a single audit', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const credential = await putCredential(call, env, {
     requestId: uuidv7(),
     provider: 'openai',
@@ -180,7 +174,7 @@ it('replays concurrent duplicate grants with a single audit', async () => {
 })
 
 it('rejects a grant to an unknown agent without writing a grant or audit', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const credential = await putCredential(call, env, {
     requestId: uuidv7(),
     provider: 'openai',
@@ -200,22 +194,21 @@ it('rejects a grant to an unknown agent without writing a grant or audit', async
   ).toHaveLength(1)
 })
 
-it('allows non-owner callers and does not echo invalid secret inputs', async () => {
-  const { actor, call } = await caller()
-  expect(await exports.default.listCredentials(actor)).toBeInstanceOf(Array)
+it('uses the private operator boundary and does not echo invalid secret inputs', async () => {
+  const { call } = caller()
+  expect(await exports.default.listCredentials()).toBeInstanceOf(Array)
   await expect(putCredential(call, env, { secret: 'sk-sensitive-input' })).rejects.toThrow(
     'Invalid credential registration',
   )
 })
 
-it('uses the same caller rules for principal-owned subscriptions and API keys', async () => {
-  const first = await caller()
-  const second = await caller()
+it('shares subscription credentials across trusted installation calls without user scopes', async () => {
+  const first = caller()
+  const second = caller()
   const registered = await putCredential(first.call, env, {
     requestId: uuidv7(),
     kind: 'oauth_subscription',
     provider: 'openai',
-    ownerScope: 'principal',
     secret: JSON.stringify({
       type: 'oauth',
       access: 'access-token',
@@ -233,7 +226,7 @@ it('uses the same caller rules for principal-owned subscriptions and API keys', 
 })
 
 it('preserves the first revocation and one audit for concurrent retries', async () => {
-  const { call } = await caller()
+  const { call } = caller()
   const credential = await putCredential(call, env, {
     requestId: uuidv7(),
     provider: 'openai',
@@ -269,7 +262,7 @@ it('preserves the first revocation and one audit for concurrent retries', async 
 it.each(['api_key', 'oauth_subscription'] as const)(
   'revokes %s, clears its envelope and lease, and preserves state on retry',
   async (kind) => {
-    const { call } = await caller()
+    const { call } = caller()
     const credential = await putCredential(call, env, {
       requestId: uuidv7(),
       provider: 'openai',

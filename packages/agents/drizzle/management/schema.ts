@@ -23,25 +23,8 @@ import {
   unique,
 } from 'drizzle-orm/sqlite-core'
 
-/**
- * Who can act: a person signed in through Access, a service token, or an agent. A principal is
- * registered on its first management RPC call.
- */
-export const PRINCIPAL_KINDS = ['user', 'service', 'agent'] as const
-/** The installation-wide role; roles on one agent are in `agent_members`. */
-export const SYSTEM_ROLES = ['owner'] as const
-
-/** People and services that call management RPC. */
-export const principals = sqliteTable('principals', {
-  principalId: text('principal_id').primaryKey(),
-  kind: text('kind', { enum: PRINCIPAL_KINDS }).notNull(),
-  /** The Access email, service token ID, or agent ID, as the calling Worker authenticated it. */
-  externalId: text('external_id').notNull().unique(),
-  displayName: text('display_name').notNull(),
-  systemRole: text('system_role', { enum: SYSTEM_ROLES }),
-  createdAt: integer('created_at').notNull(),
-  disabledAt: integer('disabled_at'),
-})
+/** Management actions originate from the authenticated operator or internal automation, not users. */
+export const MANAGEMENT_SOURCES = ['operator', 'system'] as const
 
 /** A working agent, or a dedicated agent under a reserved object name. */
 export const AGENT_KINDS = ['working', 'dedicated'] as const
@@ -78,8 +61,6 @@ export const agents = sqliteTable(
     currentVersion: integer('current_version').notNull(),
     /** The newest version the object reported as fully applied; 0 before the first. */
     appliedVersion: integer('applied_version').notNull().default(0),
-    /** NULL for dedicated agents, which the installation owns. */
-    ownerId: text('owner_id').references(() => principals.principalId),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -101,8 +82,7 @@ export const agentConfigVersions = sqliteTable(
     /** The version's `AgentSettings` as JSON. */
     settingsJson: text('settings_json').notNull(),
     schemaVersion: integer('schema_version').notNull(),
-    /** NULL when the system wrote it (the seed). */
-    authorId: text('author_id').references(() => principals.principalId),
+    source: text('source', { enum: MANAGEMENT_SOURCES }).notNull(),
     comment: text('comment'),
     createdAt: integer('created_at').notNull(),
   },
@@ -116,8 +96,6 @@ export const credentials = sqliteTable(
     credentialId: text('credential_id').primaryKey(),
     kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
     provider: text('provider').notNull(),
-    /** NULL means installation ownership; otherwise the owning principal. */
-    ownerId: text('owner_id').references(() => principals.principalId),
     status: text('status', { enum: ['active', 'revoked', 'needs_reauth'] }).notNull(),
     revision: integer('revision').notNull(),
     ciphertext: text('ciphertext'),
@@ -216,27 +194,6 @@ export const agentCredentialRefs = sqliteTable(
   ],
 )
 
-/** Roles on one agent. */
-export const MEMBER_ROLES = ['owner', 'operator', 'user', 'viewer'] as const
-
-/** Who may do what with one agent. */
-export const agentMembers = sqliteTable(
-  'agent_members',
-  {
-    agentId: text('agent_id')
-      .notNull()
-      .references(() => agents.agentId),
-    principalId: text('principal_id')
-      .notNull()
-      .references(() => principals.principalId),
-    role: text('role', { enum: MEMBER_ROLES }).notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.agentId, t.principalId] }),
-    index('agent_members_by_principal').on(t.principalId),
-  ],
-)
-
 /** Keys of `system_settings`. */
 export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor', 'usage_sweep_cursor'] as const
 
@@ -250,7 +207,7 @@ export const systemSettings = sqliteTable('system_settings', {
 })
 
 /** What an audit row is about. */
-export const AUDIT_TARGETS = ['agent', 'principal', 'system'] as const
+export const AUDIT_TARGETS = ['agent', 'system'] as const
 
 /** Append-only audit, written in the same batch as the change it records. */
 export const auditLog = sqliteTable(
@@ -260,8 +217,7 @@ export const auditLog = sqliteTable(
     /** The retry key: a resent change fails here, and the retry is answered from the first. */
     opId: text('op_id').notNull().unique(),
     at: integer('at').notNull(),
-    /** NULL for the system (seed, reconciliation). */
-    actorId: text('actor_id').references(() => principals.principalId),
+    source: text('source', { enum: MANAGEMENT_SOURCES }).notNull(),
     action: text('action').notNull(),
     targetKind: text('target_kind', { enum: AUDIT_TARGETS }).notNull(),
     targetId: text('target_id').notNull(),

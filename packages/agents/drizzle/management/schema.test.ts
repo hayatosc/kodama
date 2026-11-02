@@ -25,7 +25,6 @@ it('rejects credential references labeled as a different provider', async () => 
     credentialId,
     kind: 'api_key',
     provider: 'openai',
-    ownerId: null,
     status: 'active',
     revision: 1,
     fingerprint: 'test',

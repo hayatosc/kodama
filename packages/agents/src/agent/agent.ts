@@ -892,9 +892,8 @@ export class Agent extends DurableObject<AgentEnv> {
   }
 
   /** Authenticated host intake; replay identity is fenced before touching the conversation. */
-  async ownerReply(principalId: string, request: OwnerReply): Promise<OwnerReplyResult> {
+  async ownerReply(request: OwnerReply): Promise<OwnerReplyResult> {
     const input = parseInput(OwnerReplySchema, request)
-    parseAgentId(principalId)
     return this.#ownerSerial(async () => {
       const db = await this.#local
       const { receipt, replay } = await this.#serial(async () => {
@@ -904,7 +903,7 @@ export class Agent extends DurableObject<AgentEnv> {
         ) {
           throw new TypeError('owner_reply_request_id_reserved')
         }
-        return reserveOwnerReply(db, principalId, input, Date.now())
+        return reserveOwnerReply(db, input, Date.now())
       })
       if (receipt.state === 'accepted' || (replay && input.action === 'cancel'))
         return {
@@ -922,7 +921,6 @@ export class Agent extends DurableObject<AgentEnv> {
         { requestId: input.requestId, content: input.content, whenBusy: input.action },
         undefined,
         {
-          principalId,
           conversationId: String(ROOT_CONVERSATION_ID),
           requestId: input.requestId,
           externalMessageId: input.externalMessageId,
