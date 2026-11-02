@@ -525,7 +525,7 @@ window.Kodama = (function () {
           if (pre && navigator.clipboard)
             navigator.clipboard.writeText(pre.textContent).catch(function () {})
         } catch {
-          // Clipboard access can be refused; the label still confirms the click.
+          /* Clipboard access can be refused; the label still confirms the click. */
         }
         copyBtn.textContent = 'コピーしました'
         setTimeout(function () {
@@ -674,6 +674,7 @@ window.Kodama = (function () {
       // Sidebar selection
       var row = t.closest('.kd-sidebar .kd-row, .kd-sidebar .kd-featured')
       if (row) {
+        e.preventDefault()
         var nav = row.closest('.kd-sidebar'),
           cur = nav.querySelectorAll('[aria-current]')
         for (var m = 0; m < cur.length; m++) cur[m].removeAttribute('aria-current')
@@ -681,6 +682,35 @@ window.Kodama = (function () {
       }
     })
     document.addEventListener('keydown', function (e) {
+      // Elements that act as buttons answer Enter and Space like a click.
+      if (
+        (e.key === 'Enter' || e.key === ' ') &&
+        e.target.matches &&
+        e.target.matches('[role="button"]')
+      ) {
+        e.preventDefault()
+        e.target.click()
+        return
+      }
+      // Left and right move between tabs, selecting and focusing the next one.
+      if (
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        e.target.matches &&
+        e.target.matches('[role="tab"]')
+      ) {
+        var tabsAll = Array.prototype.slice.call(
+          e.target.closest('[role="tablist"]').querySelectorAll('[role="tab"]'),
+        )
+        var next =
+          tabsAll[
+            (tabsAll.indexOf(e.target) + (e.key === 'ArrowRight' ? 1 : tabsAll.length - 1)) %
+              tabsAll.length
+          ]
+        e.preventDefault()
+        next.click()
+        next.focus()
+        return
+      }
       if (e.key === 'Escape') {
         closeMenus()
         var dl = document.querySelectorAll(

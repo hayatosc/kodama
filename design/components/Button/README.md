@@ -2,7 +2,7 @@
 
 操作を起こすボタンで、主操作は反転色の primary、それ以外は secondary か ghost を使う。
 
-- **使う側が渡すもの:** `variant`（primary / secondary / ghost / destructive）、`size`（default 32px / sm 28px / icon / round）、ラベルかアイコン。アイコンだけのボタンには `aria-label` を必ず付ける。
+- **使う側が渡すもの:** `variant`（primary / secondary / ghost / destructive）、`size`（default 36px / sm 32px / icon 36px / round 36px）、ラベルかアイコン。アイコンだけのボタンには `aria-label` を必ず付ける。
 - 1 つの面に primary は 1 つまで。会話ペインでは Composer の送信・停止ボタンがそれにあたる。
 - destructive は `destructive-soft` 地に `destructive` 文字。アーカイブや削除は確認ダイアログを挟む。
 - ラベルは動詞で終える（作成、送信、停止）。

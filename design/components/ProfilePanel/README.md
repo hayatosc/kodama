@@ -6,4 +6,4 @@
 - 上から：大きなアバター（72px）と名前と状態バッジ、タブ（詳細 / 記憶 / ツール）、セクション見出し（`text-xs text-muted-foreground`）、設定カード（`border rounded-xl`、行の高さ 40px、右端に検索つきの小さなセレクト）。
 - タブの選択中は `bg-muted rounded-md`。セレクトは枠なしでホバー時だけ `bg-accent`。
 - アクティビティは ActivityFeed のコンパクト版（時刻列 44px）。
-- 幅 320px、`border-l`。1280px 未満では畳み、ペイン見出しのアバターを押すと開く。
+- 幅 320px、`border-l`。1280px 未満では畳み、中央ペイン右上の詳細ボタン（`info`）で開く。1024px 未満は Mobile の詳細シートになる。

@@ -116,6 +116,7 @@ import { error } from '@sveltejs/kit'
 import type { ManagementActor } from '@kodama/agents/protocol'
 import { AgentRef, SendInput } from '#lib/schemas'
 import { readEvents } from '#lib/sse'
+import { applyEvent, type Conversation } from '#lib/transcript'
 
 /** The service binding and the signed-in user as a management actor. */
 function service() {
@@ -140,13 +141,21 @@ export const getSnapshot = query(AgentRef, async (slug) => {
   return snapshot
 })
 
-/** subscribe() as a live query: its SSE bytes, parsed into a snapshot first, then run events. */
+/**
+ * subscribe() as a live query. message_update carries only changes, and a live query keeps just
+ * the latest value a slow reader has not taken, so fold the events here and yield the whole
+ * conversation: a skipped value then loses nothing.
+ */
 export const watchAgent = query.live(AgentRef, async function* (slug) {
   const stream = await service().agents.subscribe(await agentId(slug))
-  for await (const event of readEvents(stream)) yield event
+  let state: Conversation | undefined
+  for await (const event of readEvents(stream)) {
+    state = applyEvent(state, event)
+    yield state
+  }
 })
 
-/** Enter steers the current run; Tab, or the queue button on phones, follows it up. */
+/** Enter sends now (steering a running agent); queued drafts go through here when a run ends. */
 export const sendMessage = form(SendInput, async ({ slug, content, whenBusy, requestId }) => {
   // sendMessage() only admits the message; watchAgent streams the run.
   await service().agents.sendMessage(await agentId(slug), { requestId, content, whenBusy })
@@ -160,9 +169,9 @@ export const cancelRun = command(AgentRef, async (slug) => {
 ```
 
 - 会話の RPC（`snapshot` `subscribe` `sendMessage` `cancel`）はエージェントの UUID しか受け付けない。ルートの slug は、サインインしたユーザーを actor にした `resolveAgent` で UUID に引き直す。dedicated なエージェントは 404 にする。
-- 送る値は `SendMessageRequest`（`requestId`、`content`、`whenBusy: 'steer' | 'followUp'`）。Enter は `steer`、Tab とスマートフォンのキューボタンは `followUp`。同じ送信をやり直すときは同じ `requestId` を使う。
-- `subscribe()` は SSE のバイト列（`ReadableStream<Uint8Array>`）を返すので、`#lib/sse` の `readEvents` でイベントに分けてから流す。
-- 読むのは `query`、Composer の送信は `form`（`<form {...sendMessage}>`、Enter・Tab は `sendMessage.enhance` の中で `whenBusy` を入れて `submit()`）、停止のようにフォームでない操作は `command`。
+- 送る値は `SendMessageRequest`（`requestId`、`content`、`whenBusy: 'steer' | 'followUp'`）。Enter は実行中なら `steer` で今の run に割り込む。Tab とスマートフォンのキューボタンはまだ送らず、ページのキューに入れる。run が終わったら先頭から 1 件ずつ `sendMessage` で送る（受け付けたメッセージを 1 件だけ取り下げる RPC はないので、取り消せるのは送る前だけ）。同じ送信をやり直すときは同じ `requestId` を使う。
+- `subscribe()` は SSE のバイト列（`ReadableStream<Uint8Array>`）を返すので、`#lib/sse` の `readEvents` でイベントに分ける。`message_update` は差分（`changes`）しか運ばず、live query は読み手が遅れると最新の値だけを残して途中を捨てる。そのためイベントはサーバー側（`watchAgent` の中）で `applyEvent` にかけて会話の状態にまとめ、状態ごと流す。途中の値が捨てられても文字は欠けない。
+- 読むのは `query`、Composer の送信は `form`（`<form {...sendMessage}>`、Enter は `sendMessage.enhance` の中で `whenBusy` を入れて `submit()`）、停止のようにフォームでない操作は `command`。`cancel()` は今の run を止め、受け付け済みの入力も取り下げる。
 - 変更のあとは関係する query の `refresh()` を呼ぶ（single-flight mutation）。結果が同じ応答で返り、往復が 1 回で済む。
 - 送信中は `sendMessage.pending`、入力欄の検証エラーは `sendMessage.fields.content.issues()`。
 - 一覧の最後の出来事のように、行ごとに同じ問い合わせが並ぶものは `query.batch` でまとめる。
@@ -172,18 +181,12 @@ export const cancelRun = command(AgentRef, async (slug) => {
 ```svelte
 <!-- src/routes/agents/[slug]/+page.svelte -->
 <script lang="ts">
-  import { getSnapshot, watchAgent, sendMessage } from './agent.remote'
-  import { applyEvent } from '#lib/transcript'
+  import { watchAgent, sendMessage } from './agent.remote'
 
   let { params } = $props()
-  let state = $derived(await getSnapshot(params.slug))
-
-  $effect(() => {
-    const live = watchAgent(params.slug)
-    ;(async () => {
-      for await (const event of live) state = applyEvent(state, event)
-    })()
-  })
+  // The latest whole conversation; a new slug starts a new live query and drops the old one.
+  const live = $derived(watchAgent(params.slug))
+  const state = $derived(await live)
 </script>
 
 <svelte:boundary>
@@ -194,7 +197,7 @@ export const cancelRun = command(AgentRef, async (slug) => {
 </svelte:boundary>
 ```
 
-- 初回表示は SSR で `await getSnapshot()` の値を描く。`watchAgent` は SSR では最初の値だけ返し、ブラウザで購読を続ける。
+- 初回表示は SSR で描く。`watchAgent` は SSR では最初の値（snapshot をまとめた状態）だけ返し、ブラウザで購読を続ける。`for await` も `$effect` も書かない。ページが使わなくなった live query は SvelteKit が切断し、サーバー側の購読も止まる。
 - 接続が切れたら `watchAgent(slug).connected` が false になる。見出しの状態を「再接続中」にし、`reconnect()` で戻す。
 - 待ち時間の表示は、ページ全体ではなく `<svelte:boundary>` ごとに出す（一覧・会話・右ペインを別々に）。
 
@@ -205,7 +208,7 @@ export const cancelRun = command(AgentRef, async (slug) => {
 
 ## ストリームの扱い
 
-- `subscribe()` は最初に `snapshot` を送り、その後 `message_update` `tool_execution_*` `submission` `run_end` が続く。**snapshot はいつ来ても状態を丸ごと置き換える**（追記しない）。`applyEvent` は snapshot を受けたら state をそのまま差し替える。
+- `subscribe()` は最初に `snapshot` を送り、その後 `message_update` `tool_execution_*` `submission` `run_end` が続く。**snapshot はいつ来ても状態を丸ごと置き換える**（追記しない）。`applyEvent`（`watchAgent` の中でサーバー側が使う）は snapshot を受けたら state をそのまま差し替え、`message_update` の差分は生成中のメッセージにつなぐ。
 - 再接続時はイベント再送がないので、新しい snapshot を待って置き換える。
 - 送信は `accepted` → `snapshot` → run のイベント → `submission` で閉じる。切断しても入力は取り消されないので、同じ `requestId` で再送すれば受領を取り直せる。
 
@@ -217,7 +220,7 @@ export const cancelRun = command(AgentRef, async (slug) => {
 <Streamdown source={message.text} streaming={message.streaming} />
 ```
 
-- **受け取るもの:** Markdown の全文（`source`）と、生成中かどうか（`streaming`）。`message_update` の差分は `applyEvent` が本文につなぎ、Streamdown には毎回全文を渡す。snapshot が来たら本文ごと差し替える。
+- **受け取るもの:** Markdown の全文（`source`）と、生成中かどうか（`streaming`）。`message_update` の差分はサーバー側の `applyEvent` が本文につなぎ、Streamdown には毎回全文を渡す。snapshot が来たら本文ごと差し替える。
 - **閉じていない記法を補う:** 生成中は描く前に `remend` で、閉じていない `**` `_` `` ` `` リンク・コードフェンスを一時的に閉じる。`**強調` の途中で記号がむき出しになったり、コードブロックが本文を飲み込んだりしない。
 - **ブロックに分けて描く:** 全文をトップレベルのブロック（段落、リスト、表、コードブロック）に分け、`{#each blocks as block (block.key)}` で描く。各ブロックは内容の文字列でメモ化するので、生成中に描き直すのは最後のブロックだけ。
 - **安全に描く:** remark（`remark-gfm`、`remark-math`）→ rehype → `rehype-harden` の順に通し、リンクと画像は許可した接頭辞（`https://` など）だけ残す。モデルの出力を `{@html}` に流さず、hast のノードを Svelte の要素として描く。

@@ -143,7 +143,10 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kd-dot-running {
+  .kd-dot-running,
+  .kd-caret,
+  .kd-typing i,
+  .kd-progress::before {
     animation: none;
   }
 }
@@ -732,6 +735,11 @@ body {
   border-radius: var(--radius-xl);
   cursor: pointer;
   --badge-ring: var(--sidebar);
+}
+.kd-featured,
+.kd-row {
+  color: var(--foreground);
+  text-decoration: none;
 }
 .kd-featured:hover {
   background: var(--accent);
