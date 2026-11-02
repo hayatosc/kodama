@@ -282,6 +282,9 @@ importers:
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      '@typescript/native':
+        specifier: npm:typescript@7.0.2
+        version: typescript@7.0.2
       prettier:
         specifier: 3.9.10
         version: 3.9.10

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite dev",
     "prepare": "svelte-kit sync || echo ''",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "typecheck": "svelte-kit sync && svelte-check --tsgo --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "vitest run",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
@@ -35,6 +35,7 @@
     "@sveltejs/kit": "3.1.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tailwindcss/vite": "4.3.3",
+    "@typescript/native": "npm:typescript@7.0.2",
     "prettier": "3.9.10",
     "prettier-plugin-svelte": "4.1.1",
     "storybook": "10.6.5",

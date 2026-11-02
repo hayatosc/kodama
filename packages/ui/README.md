@@ -13,7 +13,7 @@ Run these from `packages/ui`:
 
 - `nr storybook`: start Storybook on port 6006.
 - `nr build-storybook`: build the static Storybook into `storybook-static/`.
-- `nr typecheck`: run `svelte-kit sync` and `svelte-check`.
+- `nr typecheck`: run `svelte-kit sync` and `svelte-check --tsgo`.
 - `nr test`: run the unit tests, such as the check that the token copy matches `design/`.
 - `nr format`: format `.svelte` files with Prettier. Oxfmt formats everything else from the
   repository root, and the root `nr format` runs both.
@@ -33,8 +33,10 @@ Run these from `packages/ui`:
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
-TypeScript is pinned to 6 here: SvelteKit 3 and `svelte-check` do not support the TypeScript 7
-that the rest of the workspace uses.
+Type checking uses TypeScript 7 like the rest of the workspace: `svelte-check --tsgo` runs the
+native compiler from `@typescript/native` (an npm alias of `typescript@7`). The `typescript`
+package stays on 6 only because `svelte-kit sync` and svelte2tsx call its JavaScript API, which
+TypeScript 7 does not provide.
 
 ## Stages
 
