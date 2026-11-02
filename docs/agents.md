@@ -102,8 +102,11 @@ binding per dedicated agent, so adding one changes no Worker configuration:
 - A subclass changes behavior only through `Agent`'s protected hooks: harness options, default
   configuration, the last step of opening (`prepare`), idle work, alarms, and whether pruning
   archives.
-- A method only a dedicated agent serves is declared on `Agent`, which rejects it, and the subclass
-  overrides it. One stub type then covers every object in the namespace, with no type assertion.
+- Public RPC methods stay on `Agent` and delegate specialized behavior to protected hooks. The
+  development server resolves RPC methods on the exported class's prototype, not on the subclass
+  returned by its constructor, so public-method overrides alone are insufficient. Dedicated-only
+  operations reject by default; the subclass overrides their hooks. One stub type covers every
+  object in the namespace, with no type assertion.
 - Reserved names contain `:`, which a public agent ID (a UUID) cannot. Each dedicated agent is a
   registry row with `kind = 'dedicated'` and a fixed UUID mapped to its reserved `object_name`;
   `AgentService` and `sendTo` admit only working agents, so they never reach a dedicated agent.

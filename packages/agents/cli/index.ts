@@ -11,6 +11,7 @@ import { MAX_ARTIFACT_BYTES } from '../src/extensions.ts'
 import { parseArgs } from 'node:util'
 import { createInterface } from 'node:readline/promises'
 import { Writable } from 'node:stream'
+import { text } from 'node:stream/consumers'
 import { apiKeyRegistration, loginRegistration } from '../src/credentials/local-login.ts'
 import { CLI_OPTIONS, commandRequest, toCommand, USAGE } from './command.ts'
 import { readLocalToken } from './token.ts'
@@ -41,7 +42,7 @@ async function main(): Promise<void> {
     credentialJson = apiKeyRegistration(
       command.provider,
       command.requestId,
-      command.keyFromEnv ? (process.env[command.keyFromEnv] ?? '') : readFileSync(0, 'utf8'),
+      command.keyFromEnv ? (process.env[command.keyFromEnv] ?? '') : await text(process.stdin),
     )
   }
   if (command.action === 'credentials/login') {
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
     const { url, init } = commandRequest(
       command,
       token,
-      command.action === 'dev/seed-credentials' ? readFileSync(0, 'utf8') : credentialJson,
+      command.action === 'dev/seed-credentials' ? await text(process.stdin) : credentialJson,
       artifact,
     )
     response = await fetch(url, init)

@@ -3,7 +3,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
+import { and, eq, gt } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import { agents } from '../../drizzle/management/schema.ts'
 import { newAgentId, management, updateSettings } from '../testing/management.ts'
@@ -109,9 +109,15 @@ async function contactAlarm(
 ) {
   await runInDurableObject(env.AGENTS.getByName(sender), async (instance, state) => {
     const db = await openLocalDb(state.storage)
+    // Do not resurrect acknowledged rows while polling a partially drained batch.
     db.update(contactRequests)
       .set({ retryAt: Date.now() - 1 })
-      .where(id === undefined ? undefined : eq(contactRequests.id, id))
+      .where(
+        and(
+          gt(contactRequests.retryAt, 0),
+          id === undefined ? undefined : eq(contactRequests.id, id),
+        ),
+      )
       .run()
     await state.storage.put('kodama:alarm:contact', Date.now() - 2)
     if (maintenance) await state.storage.put('kodama:alarm:prune', Date.now() - 1)
@@ -866,6 +872,7 @@ describe('durable contact recovery', () => {
         } finally {
           held.resolve()
           await alarm
+          vi.mocked(globalThis.setTimeout).mockRestore()
         }
       })
       await waitForAnswer(receiver, row.requestId)
@@ -964,23 +971,25 @@ describe('durable contact recovery', () => {
       held.resolve()
       await alarm
       vi.mocked(globalThis.setTimeout).mockRestore()
-      // Drain the remaining rows before restoring native alarms or the next test's RPC spies.
+      // This cleanup runs ten real receiver turns, unlike the short observation being tested.
+      // Drain them before restoring native alarms or the next test's RPC spies.
       await expect
-        .poll(async () => {
-          await contactAlarm(sender, false, undefined, dispatch)
-          return runInDurableObject(
-            env.AGENTS.getByName(sender),
-            async (_, state) =>
+        .poll(
+          async () => {
+            await contactAlarm(sender, false, undefined, dispatch)
+            return runInDurableObject(env.AGENTS.getByName(sender), async (_, state) =>
               (await openLocalDb(state.storage))
                 .select()
                 .from(contactRequests)
                 .all()
-                .filter((row) => row.retryAt > 0).length,
-          )
-        })
-        .toBe(0)
+                .filter((row) => row.retryAt > 0),
+            )
+          },
+          { timeout: 30_000 },
+        )
+        .toEqual([])
     }
-  })
+  }, 45_000)
 
   it('caps unresolved flights, including after their observation deadlines, and releases slots on late completion', async () => {
     const sender = await enabled()
@@ -1031,7 +1040,8 @@ describe('durable contact recovery', () => {
         (message) => message.role === 'user',
       ),
     ).toHaveLength(11)
-  })
+    // Eleven real, serialized receiver turns must drain even under full-suite workerd load.
+  }, 30_000)
 
   it('retries a late transport rejection after restart without duplicating accepted input', async () => {
     const sender = await enabled()

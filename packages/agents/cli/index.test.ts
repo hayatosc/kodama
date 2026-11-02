@@ -7,11 +7,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { text } from 'node:stream/consumers'
 import { join } from 'node:path'
 import { USAGE } from './command.ts'
 import { readLocalToken } from './token.ts'
 
 vi.mock('node:fs', { spy: true })
+vi.mock('node:stream/consumers', () => ({ text: vi.fn() }))
 
 const prompt = vi.hoisted(() => vi.fn<() => Promise<string>>())
 vi.mock('node:readline/promises', () => ({
@@ -51,6 +53,25 @@ async function run(...args: string[]) {
 }
 
 describe('CLI entrypoint', () => {
+  it.each([
+    ['credentials', 'add', '--provider', 'openai'],
+    ['dev', 'seed-credentials'],
+  ])(
+    'awaits piped input for %s %s instead of reading a nonblocking descriptor',
+    async (...args) => {
+      vi.mocked(text).mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        return args[0] === 'credentials' ? 'test-piped-key\n' : '{"openai":"test-piped-key"}'
+      })
+      fetchMock.mockResolvedValue(Response.json({ ok: true }))
+      await run(...args)
+      expect(process.exitCode).toBeUndefined()
+      expect(text).toHaveBeenCalledWith(process.stdin)
+      expect(readFileSync).not.toHaveBeenCalledWith(0, 'utf8')
+      expect(fetchMock).toHaveBeenCalledOnce()
+    },
+  )
+
   it('uploads a binary file without encoding it as text', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kodama-artifacts-'))
     try {

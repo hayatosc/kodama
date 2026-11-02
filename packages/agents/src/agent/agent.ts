@@ -808,7 +808,15 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws When the database is above the hard storage limit, or the selected provider has no
    * credentials.
    */
-  async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
+  sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
+    return this.onSendMessage(request, origin)
+  }
+
+  /** Admit working-agent input; dedicated agents may reject input outside their job queue. */
+  protected async onSendMessage(
+    request: SendMessageRequest,
+    origin?: AgentOrigin,
+  ): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
       parseAgentId(origin.senderAgentId)
@@ -850,7 +858,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws {@link TypeError} When the message is invalid; nothing is admitted.
    */
-  async send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+  send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+    return this.onSend(request)
+  }
+
+  /** Stream working-agent input through the overridable admission path. */
+  protected async onSend(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     const message = parseMessage(request)
     return sendEvents(await this.#harness, message.requestId, () => this.sendMessage(message))
   }
@@ -958,7 +971,15 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws {@link Error} When this agent's state stops external calls, or the target's state does
    * not admit messages.
    */
-  async sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
+  sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
+    return this.onSendTo(agentId, request)
+  }
+
+  /** Deliver peer input only for agent kinds that support conversation delivery. */
+  protected async onSendTo(
+    agentId: string,
+    request: SendMessageRequest,
+  ): Promise<SendMessageResponse> {
     parseAgentId(agentId)
     const message = parseMessage(request)
     assertAllowed(this.#refusal)
@@ -1214,6 +1235,15 @@ export class Agent extends DurableObject<AgentEnv> {
     limit: number
     throughEntry?: number
   }): Promise<EntryPage> {
+    return this.onReadEntries(request)
+  }
+
+  /** Read source entries for extraction; dedicated agents can refuse extraction of scratch work. */
+  protected onReadEntries(request: {
+    after: number
+    limit: number
+    throughEntry?: number
+  }): Promise<EntryPage> {
     return readEntries(
       {
         agentId: this.#agentId(),
@@ -1229,7 +1259,12 @@ export class Agent extends DurableObject<AgentEnv> {
   /**
    * The memory agent changed this agent's memory: refresh the copy now if idle, else when next idle.
    */
-  async memoryChanged(): Promise<void> {
+  memoryChanged(): Promise<void> {
+    return this.onMemoryChanged()
+  }
+
+  /** Refresh working memory without imposing that policy on dedicated agents. */
+  protected async onMemoryChanged(): Promise<void> {
     if (await isIdle(await this.#harness)) await refreshMemory(this.#workingMemory())
     else this.#memoryChanged = true
   }
@@ -1250,7 +1285,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  enqueue(_job: unknown): Promise<JobStatus> {
+  enqueue(job: unknown): Promise<JobStatus> {
+    return this.onEnqueue(job)
+  }
+
+  /** Dedicated job admission; public RPC dispatch must not depend on constructor-return overrides. */
+  protected onEnqueue(_job: unknown): Promise<JobStatus> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 
@@ -1259,7 +1299,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  jobStatus(_jobId: string): Promise<JobStatus | undefined> {
+  jobStatus(jobId: string): Promise<JobStatus | undefined> {
+    return this.onJobStatus(jobId)
+  }
+
+  /** Read dedicated job state through the same hook path in development and production. */
+  protected onJobStatus(_jobId: string): Promise<JobStatus | undefined> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 
@@ -1268,7 +1313,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  consolidate(_now: number): Promise<{ scopes: number }> {
+  consolidate(now: number): Promise<{ scopes: number }> {
+    return this.onConsolidate(now)
+  }
+
+  /** Dedicated consolidation policy; working agents never accept these jobs. */
+  protected onConsolidate(_now: number): Promise<{ scopes: number }> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 }
