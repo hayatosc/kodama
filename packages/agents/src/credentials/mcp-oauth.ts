@@ -19,6 +19,7 @@ import {
 import {
   discoverMcpOAuth,
   exchangeMcpToken,
+  mcpLoopbackRedirect,
   mcpClientDocument,
   mcpClientSchema,
   registerMcpOAuthClient,
@@ -135,6 +136,7 @@ export async function startMcpOAuth(
   initialTokenId?: string,
   now = Date.now(),
   requestId?: string,
+  loopbackRedirectUri?: string,
 ) {
   await mcpOwner(db, principalId)
   if (
@@ -145,8 +147,10 @@ export async function startMcpOAuth(
   )
     throw new TypeError('mcp_auth_request_invalid')
   const server = await mcpServer(db, serverId)
-  const document = mcpClientDocument(origin)
-  const redirectUri = document.redirect_uris[0]
+  const document = loopbackRedirectUri ? undefined : mcpClientDocument(origin)
+  const redirectUri = loopbackRedirectUri
+    ? mcpLoopbackRedirect(loopbackRedirectUri)
+    : document?.redirect_uris[0]
   if (!redirectUri) throw new Error('mcp_ui_origin_invalid')
   const signal = AbortSignal.timeout(10_000)
   const discovered = await discoverMcpOAuth(server.endpoint, selectedIssuer, signal)
@@ -170,7 +174,7 @@ export async function startMcpOAuth(
       throw new Error('mcp_client_registration_required')
     client = v.parse(mcpClientSchema, json(existing.metadataJson))
     clientSecretId = existing.secretId ?? undefined
-  } else if (metadata.client_id_metadata_document_supported) {
+  } else if (document && metadata.client_id_metadata_document_supported) {
     client = {
       issuer: metadata.issuer,
       clientId: document.client_id,
@@ -216,6 +220,7 @@ export async function startMcpOAuth(
         origin,
         initialToken,
         signal,
+        loopbackRedirectUri,
       )
       client = {
         issuer: metadata.issuer,
@@ -339,7 +344,14 @@ export async function completeMcpOAuth(
   kek: string,
   origin: string,
   principalId: string,
-  input: { state: string; browserNonce: string; code?: string; issuer?: string; denied?: boolean },
+  input: {
+    state: string
+    browserNonce: string
+    code?: string
+    issuer?: string
+    denied?: boolean
+    loopbackRedirectUri?: string
+  },
   now = Date.now(),
 ) {
   await mcpOwner(db, principalId)
@@ -369,7 +381,10 @@ export async function completeMcpOAuth(
   const binding = v.parse(bindingSchema, json(transaction.bindingJson))
   const server = await mcpServer(db, transaction.serverId)
   if (
-    binding.client.redirectUri !== mcpClientDocument(origin).redirect_uris[0] ||
+    binding.client.redirectUri !==
+      (input.loopbackRedirectUri
+        ? mcpLoopbackRedirect(input.loopbackRedirectUri)
+        : mcpClientDocument(origin).redirect_uris[0]) ||
     binding.client.issuer !== binding.issuer ||
     (input.issuer !== undefined && input.issuer !== binding.issuer) ||
     server.revision !== transaction.serverRevision ||

@@ -42,6 +42,24 @@ export function mcpUiOrigin(value: string): string {
   return url.origin
 }
 
+/** CLI redirects are restricted to an exact IPv4 loopback listener and one callback path. */
+export function mcpLoopbackRedirect(value: string): string {
+  const url = new URL(value)
+  if (
+    url.protocol !== 'http:' ||
+    url.hostname !== '127.0.0.1' ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== '/auth/mcp/callback' ||
+    url.href !== value
+  )
+    throw new Error('mcp_loopback_redirect_invalid')
+  return url.href
+}
+
 /** Fixed metadata contract for the future UI Worker's public static route. */
 export function mcpClientDocument(origin: string) {
   const base = mcpUiOrigin(origin)
@@ -143,7 +161,20 @@ export const mcpClientSchema = v.strictObject({
   issuer: https,
   clientId: v.pipe(v.string(), v.minLength(1), v.maxLength(2_048)),
   method: v.picklist(['none', 'client_secret_basic', 'client_secret_post']),
-  redirectUri: https,
+  redirectUri: v.union([
+    https,
+    v.pipe(
+      v.string(),
+      v.check((value) => {
+        try {
+          mcpLoopbackRedirect(value)
+          return true
+        } catch {
+          return false
+        }
+      }),
+    ),
+  ]),
   registration: v.picklist(['preregistered', 'metadata', 'dynamic']),
 })
 /** Client metadata carries no secrets. */
@@ -215,9 +246,17 @@ export async function registerMcpOAuthClient(
   origin: string,
   initialToken: string | undefined,
   signal: AbortSignal,
+  loopbackRedirectUri?: string,
 ) {
   try {
-    const document = mcpClientDocument(origin)
+    const document = loopbackRedirectUri
+      ? {
+          client_name: 'Kodama CLI',
+          redirect_uris: [mcpLoopbackRedirect(loopbackRedirectUri)],
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+        }
+      : mcpClientDocument(origin)
     const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' })
     if (initialToken) headers.set('Authorization', `Bearer ${initialToken}`)
     signal.throwIfAborted()
@@ -228,7 +267,7 @@ export async function registerMcpOAuthClient(
       headers,
       body: JSON.stringify({
         client_name: document.client_name,
-        application_type: 'web',
+        application_type: loopbackRedirectUri ? 'native' : 'web',
         redirect_uris: document.redirect_uris,
         grant_types: document.grant_types,
         response_types: document.response_types,

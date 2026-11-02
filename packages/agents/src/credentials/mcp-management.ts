@@ -5,7 +5,7 @@ import { credentials, mcpOAuthTransactions, mcpRequests } from '../../drizzle/ma
 import type { ManagementDb } from '../control-plane/db.ts'
 import { mcpOwner, mcpServer } from '../control-plane/mcp.ts'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './mcp-oauth.ts'
-import { mcpClientDocument, mcpClientSchema } from './mcp-oauth-http.ts'
+import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './mcp-oauth-http.ts'
 import { mcpEndpoint } from '../tools/mcp/transport.ts'
 import { eraseMcpSecret, mcpSecretInsert } from './mcp-vault.ts'
 
@@ -13,7 +13,8 @@ const id = v.pipe(v.string(), v.uuid())
 const nonce = v.pipe(v.string(), v.minLength(32), v.maxLength(256))
 const schema = v.variant('operation', [
   v.strictObject({
-    operation: v.literal('begin'),
+    operation: v.picklist(['begin', 'begin-loopback']),
+    loopbackRedirectUri: v.optional(v.string()),
     requestId: v.optional(id),
     serverId: id,
     browserNonce: nonce,
@@ -22,7 +23,8 @@ const schema = v.variant('operation', [
     initialTokenId: v.optional(id),
   }),
   v.strictObject({
-    operation: v.literal('complete'),
+    operation: v.picklist(['complete', 'complete-loopback']),
+    loopbackRedirectUri: v.optional(v.string()),
     state: nonce,
     browserNonce: nonce,
     code: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(8_192))),
@@ -30,7 +32,7 @@ const schema = v.variant('operation', [
     denied: v.optional(v.boolean()),
   }),
   v.strictObject({
-    operation: v.literal('client'),
+    operation: v.picklist(['client', 'client-loopback']),
     serverId: id,
     client: mcpClientSchema,
     secret: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(16_384))),
@@ -119,7 +121,10 @@ export async function manageMcpOAuth(
       if (!request || request.expiresAt <= Date.now()) throw new Error('mcp_registration_expired')
       return { status: 'completed', requestId: input.requestId, credentialId: input.credentialId }
     }
-    case 'begin': {
+    case 'begin':
+    case 'begin-loopback': {
+      if (input.operation === 'begin-loopback') mcpLoopbackRedirect(input.loopbackRedirectUri ?? '')
+      else if (input.loopbackRedirectUri !== undefined) throw new Error('mcp_redirect_invalid')
       if (input.requestId) {
         const request = await db
           .select()
@@ -149,18 +154,27 @@ export async function manageMcpOAuth(
         input.initialTokenId,
         Date.now(),
         input.requestId,
+        input.loopbackRedirectUri,
       )
     }
     case 'complete':
+    case 'complete-loopback': {
+      if (input.operation === 'complete-loopback')
+        mcpLoopbackRedirect(input.loopbackRedirectUri ?? '')
+      else if (input.loopbackRedirectUri !== undefined) throw new Error('mcp_redirect_invalid')
       return completeMcpOAuth(db, kek, origin, principalId, {
         state: input.state,
         browserNonce: input.browserNonce,
         code: input.code,
         issuer: input.issuer,
         denied: input.denied,
+        loopbackRedirectUri: input.loopbackRedirectUri,
       })
-    case 'client': {
-      if (input.client.redirectUri !== mcpClientDocument(origin).redirect_uris[0])
+    }
+    case 'client':
+    case 'client-loopback': {
+      if (input.operation === 'client-loopback') mcpLoopbackRedirect(input.client.redirectUri)
+      else if (input.client.redirectUri !== mcpClientDocument(origin).redirect_uris[0])
         throw new Error('mcp_redirect_invalid')
       return configureMcpOAuthClient(
         db,

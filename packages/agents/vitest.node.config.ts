@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config'
 export const nodeTestFiles = [
   'cli/command.test.ts',
   'cli/index.test.ts',
+  'cli/mcp-login.test.ts',
   'cli/migrate.test.ts',
   'cli/stream.test.ts',
   'cli/token.test.ts',

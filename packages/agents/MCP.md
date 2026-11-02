@@ -52,14 +52,56 @@ nr agent mcp unassign < removal.json
 
 `update`, `bearer`, `client`, `initial-token`, `attach`, and `disconnect` also take a JSON object on
 stdin. Secret-bearing JSON must come from a secure source, not command-line arguments or repository
-files. The CLI never receives access or refresh tokens from RPC. `connect` prints the canonical UI
-link; it does not create another OAuth client or localhost callback.
+files. The CLI never receives access or refresh tokens from RPC. `connect` still prints the canonical
+UI link. Use `login` for the UI-free native flow below.
+
+### UI-free browser login
+
+Start `nr dev:agents` with the local KEK and authenticated CLI adapter configured, and register the
+MCP endpoint with `mcp add`. Then run:
+
+```sh
+nr agent mcp login SERVER_UUID
+nr agent mcp auth-status SERVER_UUID
+```
+
+`login` binds an ephemeral port **only on 127.0.0.1**, prints the issuer/resource/client/scope consent
+summary, and opens the system browser. If launching fails, open the printed authorization URL
+manually. Keep the terminal running. The AS redirects to
+`http://127.0.0.1:<port>/auth/mcp/callback`; the CLI verifies the exact host, path, state, and single-use
+response, then forwards it over the existing authenticated development adapter. Agents exchange the
+code with PKCE and store tokens in the vault. The terminal receives only credential/status metadata.
+No UI Worker, public tunnel, deploy, or `KODAMA_UI_ORIGIN` is needed. Ctrl-C cancels an unclaimed
+transaction; the listener closes on completion, error, or the ten-minute deadline.
+
+The AS must support native loopback redirects. The CLI uses a preregistered client for the exact
+redirect, or DCR with `application_type: native`; it never substitutes the UI metadata-document
+client. If DCR is unavailable or disallows loopback redirects, register a native client with the AS
+and save its configuration through stdin:
+
+```sh
+nr agent mcp client-loopback < /secure/path/native-client.json
+nr agent mcp login SERVER_UUID --callback-port 49152
+```
+
+The JSON has `serverId`, `client: { issuer, clientId, method, redirectUri, registration:
+"preregistered" }`, and an optional `secret`. Its `redirectUri` must be exactly
+`http://127.0.0.1:49152/auth/mcp/callback`; do not use `localhost`, another path, or a wildcard.
+Explicit ports must be 1024–65535; omit the option (or use 0) for an ephemeral DCR port. If the AS
+cannot support this native flow, login stops rather than weakening redirect checks.
+
+Optional login flags are `--issuer URL`, `--scope "space separated scopes"`,
+`--initial-token-id CREDENTIAL_UUID`, and `--request-id CHAT_REQUEST_UUID`. The last option resumes
+only the original chat discovery. Without a chat request, use `mcp discover` with the returned
+credential ID, review the catalog, and explicitly `mcp assign`; consent alone exposes no tools.
+Do not share callback URLs or paste them into chat. Access tokens, refresh tokens, client secrets,
+and PKCE verifiers never pass through this listener or the terminal.
 
 ## OAuth host contract
 
 Set the non-secret `KODAMA_UI_ORIGIN` binding in `cloudflare.config.ts` to the actual canonical UI
-origin before enabling browser authorization. Its checked-in empty value fails closed; no production
-origin is assumed. The only redirect URI is `${KODAMA_UI_ORIGIN}/auth/mcp/callback`, and the client
+origin before enabling the future UI's browser authorization. Its checked-in empty value fails
+closed for that flow; no production origin is assumed. The UI flow's only redirect URI is `${KODAMA_UI_ORIGIN}/auth/mcp/callback`, and the client
 metadata document URL is `${KODAMA_UI_ORIGIN}/oauth/mcp-client.json`.
 
 The future UI Worker must authenticate Access JWT signatures, issuer and audience; authorize the
@@ -70,7 +112,7 @@ browser-binding cookie. It calls `AgentService.mcpAuth(actor, input)` over its s
 - `client`: save `serverId`, `client` (issuer, clientId, method, redirectUri,
   registration `preregistered`), and optional secret. Methods are `none`, `client_secret_basic`,
   and `client_secret_post`.
-- `initial-token`: save an owner-supplied DCR `secret`, bound to `serverId`, `issuer`, and `endpoint`.
+- `initial-token`: save an owner-supplied DCR `secret`, bound to `serverId`, `issuer`, and `registrationEndpoint`.
 - `begin`: supply `serverId`, server-side `browserNonce`, optional `issuer`, `scope`, `initialTokenId`,
   and chat `requestId`. The result contains a consent summary and authorization URL, not tokens.
 - `complete`: supply the same browser binding, returned `state`, `code`, optional response `issuer`,
@@ -78,6 +120,11 @@ browser-binding cookie. It calls `AgentService.mcpAuth(actor, input)` over its s
 - `attach`: bind an already-owned `credentialId` to its original chat `requestId`, then resume only
   initial discovery. This is also the secure Bearer-input path for chat registration.
 - `status`: supply `serverId`; receive only the caller's credential and transaction metadata.
+
+The CLI-only counterparts `client-loopback`, `begin-loopback`, and `complete-loopback` retain these
+principal and vault boundaries. Begin/complete require an exact validated `loopbackRedirectUri`
+and a process-local random `browserNonce`. A native transaction cannot be completed through the UI
+callback, or at another loopback port. The normal UI operations reject loopback overrides.
 
 Discovery supports protected-resource metadata, RFC 8414 and OIDC metadata, exact issuer pinning,
 preregistration, metadata-document clients, and explicit dynamic registration. Authorization Code

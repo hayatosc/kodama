@@ -14,6 +14,8 @@ import { completeMcpOAuth, startMcpOAuth } from './mcp-oauth.ts'
 import { mcpToken, putMcpBearer } from './mcp-vault.ts'
 import { authorizeMcp, disconnectMcp } from './mcp-refresh.ts'
 import { parseCredential } from './vault.ts'
+import { manageMcpOAuth } from './mcp-management.ts'
+import { mcpLoopbackRedirect } from './mcp-oauth-http.ts'
 
 const kek = btoa(String.fromCharCode(...new Uint8Array(32).fill(42)))
 const origin = 'https://ui.example.com'
@@ -96,6 +98,115 @@ async function setup() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('MCP OAuth transactions', () => {
+  it('completes native PKCE into the existing vault without a UI origin and fences callback channels', async () => {
+    const { principalId, server, fetcher } = await setup()
+    const loopbackRedirectUri = 'http://127.0.0.1:49152/auth/mcp/callback'
+    await manageMcpOAuth(management, kek, '', principalId, {
+      operation: 'client-loopback',
+      serverId: server.serverId,
+      client: {
+        issuer,
+        clientId: 'native-fixture',
+        method: 'none',
+        redirectUri: loopbackRedirectUri,
+        registration: 'preregistered',
+      },
+    })
+    const started = await startMcpOAuth(
+      management,
+      kek,
+      '',
+      principalId,
+      server.serverId,
+      browserNonce,
+      undefined,
+      '',
+      undefined,
+      Date.now(),
+      undefined,
+      loopbackRedirectUri,
+    )
+    const authorization = new URL(started.authorizationUrl)
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(authorization.searchParams.get('redirect_uri')).toBe(loopbackRedirectUri)
+    const state = authorization.searchParams.get('state') ?? ''
+    await expect(
+      completeMcpOAuth(management, kek, origin, principalId, {
+        state,
+        browserNonce,
+        code: 'native-code',
+      }),
+    ).rejects.toThrow('mcp_auth_binding_changed')
+    await expect(
+      completeMcpOAuth(management, kek, '', principalId, {
+        state,
+        browserNonce,
+        code: 'native-code',
+        loopbackRedirectUri: 'http://127.0.0.1:49153/auth/mcp/callback',
+      }),
+    ).rejects.toThrow('mcp_auth_binding_changed')
+    const completed = await completeMcpOAuth(management, kek, '', principalId, {
+      state,
+      browserNonce,
+      code: 'native-code',
+      loopbackRedirectUri,
+    })
+    if (completed.status !== 'completed') throw new Error('Expected completion')
+    const stored = await mcpToken(
+      management,
+      kek,
+      principalId,
+      server.serverId,
+      completed.credentialId,
+    )
+    expect(stored.value.access).toBe('access-fixture')
+    expect(JSON.stringify(completed)).not.toContain('access-fixture')
+    const tokenBody = tokenCalls(fetcher.mock.calls)[0]?.[1]?.body
+    expect(tokenBody instanceof URLSearchParams && tokenBody.get('redirect_uri')).toBe(
+      loopbackRedirectUri,
+    )
+    await expect(
+      completeMcpOAuth(management, kek, '', principalId, {
+        state,
+        browserNonce,
+        code: 'native-code',
+        loopbackRedirectUri,
+      }),
+    ).rejects.toThrow('mcp_auth_callback_invalid')
+    expect(tokenCalls(fetcher.mock.calls)).toHaveLength(1)
+  })
+
+  it('does not use the UI metadata client for a native redirect', async () => {
+    const { principalId, server } = await setup()
+    await expect(
+      startMcpOAuth(
+        management,
+        kek,
+        '',
+        principalId,
+        server.serverId,
+        browserNonce,
+        undefined,
+        '',
+        undefined,
+        Date.now(),
+        undefined,
+        'http://127.0.0.1:49152/auth/mcp/callback',
+      ),
+    ).rejects.toThrow('mcp_client_registration_required')
+  })
+
+  it.each([
+    'http://localhost:49152/auth/mcp/callback',
+    'http://0.0.0.0:49152/auth/mcp/callback',
+    'https://127.0.0.1:49152/auth/mcp/callback',
+    'http://127.0.0.1:49152/other',
+    'http://127.0.0.1:49152/auth/mcp/callback?x=1',
+    'http://user@127.0.0.1:49152/auth/mcp/callback',
+    'http://2130706433:49152/auth/mcp/callback',
+  ])('rejects noncanonical native redirect %s', (redirect) => {
+    expect(() => mcpLoopbackRedirect(redirect)).toThrow()
+  })
   it('serializes refresh across callers and rotates the encrypted refresh token once', async () => {
     const { principalId, server, fetcher } = await setup()
     const original = fetcher.getMockImplementation()

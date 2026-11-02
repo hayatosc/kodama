@@ -82,6 +82,35 @@ it('encodes Basic client credentials and keeps POST secrets out of headers and U
   expect(post.body.get('client_secret')).toBe('s e:c')
 })
 
+it('registers a native client with only the exact loopback redirect and no UI metadata', async () => {
+  const redirectUri = 'http://127.0.0.1:49152/auth/mcp/callback'
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    Response.json({
+      client_id: 'native',
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: 'none',
+    }),
+  )
+  vi.stubGlobal('fetch', fetcher)
+  await registerMcpOAuthClient(
+    `${issuer}/register`,
+    '',
+    undefined,
+    AbortSignal.timeout(5_000),
+    redirectUri,
+  )
+  const body = fetcher.mock.calls[0]?.[1]?.body
+  if (typeof body !== 'string') throw new Error('Expected JSON registration')
+  expect(JSON.parse(body)).toEqual({
+    client_name: 'Kodama CLI',
+    application_type: 'native',
+    redirect_uris: [redirectUri],
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none',
+  })
+})
+
 it('does not retry uncertain dynamic registration or accept another callback', async () => {
   const fetcher = vi.fn().mockResolvedValue(
     Response.json({

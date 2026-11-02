@@ -14,6 +14,31 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('parses native OAuth options and routes client configuration through authenticated RPC', () => {
+    expect(
+      command(['mcp', 'login', agentId], {
+        'callback-port': '49152',
+        issuer: 'https://as.example.com',
+        scope: 'read',
+      }),
+    ).toMatchObject({
+      action: 'mcp',
+      operation: 'login',
+      serverId: agentId,
+      callbackPort: 49152,
+      issuer: 'https://as.example.com',
+      scope: 'read',
+      stdin: false,
+    })
+    expect(command(['mcp', 'login', agentId])).toMatchObject({ callbackPort: 0 })
+    for (const port of ['-1', '80', '65536', '1.5', 'oops'])
+      expect(() => command(['mcp', 'login', agentId], { 'callback-port': port })).toThrow(
+        'Callback port',
+      )
+    const client = command(['mcp', 'client-loopback'])
+    if (client.action !== 'mcp') throw new Error('Expected MCP')
+    expect(commandRequest(client, 'token', '{}').url).toBe(`${LOCAL_WORKER_URL}/cli/mcp/auth`)
+  })
   it('routes MCP management and secret input without accepting secrets in argv', () => {
     expect(command(['mcp', 'list'])).toEqual({ action: 'mcp', operation: 'list', stdin: false })
     const request = (operation: string, text: string) => {

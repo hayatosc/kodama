@@ -32,6 +32,7 @@ export const USAGE = `Usage:
   nr agent dev seed-credentials < /secure/path/provider-keys.json
   nr agent seed [--credential ID ...]
   nr agent list
+  nr agent mcp login <server-id> [--callback-port PORT] [--issuer URL] [--scope SCOPES]
   nr agent mcp list
   nr agent mcp connect|status|auth-status <server-id>
   nr agent mcp add|update|discover|assign|unassign|bearer|client|initial-token|attach|disconnect < request.json
@@ -70,7 +71,17 @@ already initialized installation. Login does not seed or create agents.`
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
-  | { action: 'mcp'; operation: string; serverId?: string; stdin: boolean }
+  | {
+      action: 'mcp'
+      operation: string
+      serverId?: string
+      stdin: boolean
+      callbackPort?: number
+      issuer?: string
+      scope?: string
+      requestId?: string
+      initialTokenId?: string
+    }
   | { action: 'artifact-upload'; agentRef: string; path: string; mediaType: string }
   | { action: 'artifact-list'; agentRef: string; cursor?: string; limit?: number }
   | { action: 'artifact-download'; agentRef: string; artifactId: string; path: string }
@@ -96,6 +107,10 @@ export type Command =
 /** The CLI's options, for `parseArgs` from `node:util`. */
 export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
+  'callback-port': { type: 'string' },
+  issuer: { type: 'string' },
+  scope: { type: 'string' },
+  'initial-token-id': { type: 'string' },
   'request-id': { type: 'string' },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
@@ -114,6 +129,10 @@ export const CLI_OPTIONS = {
 export interface ParsedArgs {
   values: {
     help?: boolean
+    'callback-port'?: string
+    issuer?: string
+    scope?: string
+    'initial-token-id'?: string
     'request-id'?: string
     steer?: boolean
     events?: boolean
@@ -144,6 +163,28 @@ export function toCommand(
   if (values.help || positionals.length === 0) return { action: 'help' }
   if (positionals[0] === 'mcp') {
     const operation = positionals[1]
+    if (operation === 'login' && positionals.length === 3) {
+      const callbackPort =
+        values['callback-port'] === undefined ? 0 : Number(values['callback-port'])
+      if (
+        !Number.isInteger(callbackPort) ||
+        callbackPort < 0 ||
+        callbackPort > 65_535 ||
+        (callbackPort > 0 && callbackPort < 1024)
+      )
+        throw new Error('Callback port must be 0 or between 1024 and 65535')
+      return {
+        action: 'mcp',
+        operation,
+        serverId: parseAgentId(positionals[2]),
+        stdin: false,
+        callbackPort,
+        issuer: values.issuer,
+        scope: values.scope,
+        requestId: values['request-id'],
+        initialTokenId: values['initial-token-id'],
+      }
+    }
     if (operation === 'list' && positionals.length === 2)
       return { action: 'mcp', operation, stdin: false }
     if (
@@ -162,6 +203,7 @@ export function toCommand(
         'unassign',
         'bearer',
         'client',
+        'client-loopback',
         'initial-token',
         'attach',
         'disconnect',
@@ -312,7 +354,7 @@ export function commandRequest(
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new Error('MCP input must be an object')
     return {
-      url: `${LOCAL_WORKER_URL}/cli/mcp/${['client', 'initial-token', 'attach', 'auth-status'].includes(command.operation) ? 'auth' : 'manage'}`,
+      url: `${LOCAL_WORKER_URL}/cli/mcp/${['client', 'client-loopback', 'initial-token', 'attach', 'auth-status'].includes(command.operation) ? 'auth' : 'manage'}`,
       init: {
         method: 'POST',
         redirect: 'error',
