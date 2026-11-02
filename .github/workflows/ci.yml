@@ -37,3 +37,6 @@ jobs:
       - name: Build agents
         working-directory: packages/agents
         run: nr build
+      - name: Build Storybook
+        working-directory: packages/ui
+        run: nr build-storybook

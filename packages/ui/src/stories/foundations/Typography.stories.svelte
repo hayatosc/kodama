@@ -10,7 +10,11 @@
   const styles: { name: string; use: string; sample: string }[] = [
     { name: 'type-2xl', use: '設定・空状態のページ見出し', sample: 'エージェントを作成' },
     { name: 'type-lg', use: 'メインの名前、ペインの見出し', sample: 'assistant' },
-    { name: 'type-base', use: 'UI の既定（一覧の名前、ボタン、入力欄）', sample: '朝の要約を作成しました' },
+    {
+      name: 'type-base',
+      use: 'UI の既定（一覧の名前、ボタン、入力欄）',
+      sample: '朝の要約を作成しました',
+    },
     { name: 'type-base-semibold', use: 'ボタン、選択中の行、名前', sample: '新しいエージェント' },
     {
       name: 'type-prose',
@@ -18,7 +22,11 @@
       sample:
         '昨日の夜に届いた論文を読んで、要点を三つにまとめました。research にも論文側の確認を頼んであります。',
     },
-    { name: 'type-sm', use: 'メニュー、設定の行、タブ、一覧の 2 行目', sample: 'web_search を 2 回実行' },
+    {
+      name: 'type-sm',
+      use: 'メニュー、設定の行、タブ、一覧の 2 行目',
+      sample: 'web_search を 2 回実行',
+    },
     { name: 'type-sm-semibold', use: '密な部品の強調', sample: 'ツール' },
     { name: 'type-xs', use: '時刻、バッジ、小見出し', sample: '2分前' },
     { name: 'mono-sm', use: 'ツール引数・結果、設定 JSON', sample: '{ "query": "kodama" }' },
