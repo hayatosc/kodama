@@ -34,6 +34,12 @@ async function main(): Promise<void> {
     console.error(`agent=${command.agentRef} requestId=${command.message.requestId}`)
   }
   let credentialJson: string | undefined
+  if (command.action === 'mcp' && command.stdin) {
+    if (process.stdin.isTTY)
+      throw new Error('Pipe MCP request JSON on stdin; secrets must not be arguments')
+    credentialJson = await text(process.stdin)
+    if (credentialJson.length > 65_536) throw new Error('MCP request exceeds 64 KiB')
+  }
   if (command.action === 'credentials/add') {
     if (!command.keyFromEnv && process.stdin.isTTY)
       throw new Error(
@@ -120,7 +126,11 @@ async function main(): Promise<void> {
     throw new Error('Cannot reach the local Worker. Start nr dev:agents first.', { cause: error })
   }
   if (!response.ok) {
-    if (command.action.startsWith('credentials/') || command.action === 'dev/seed-credentials')
+    if (
+      command.action.startsWith('credentials/') ||
+      command.action === 'dev/seed-credentials' ||
+      command.action === 'mcp'
+    )
       throw new Error(
         `Credential operation failed (${response.status}); check the local Worker, KEK and input.`,
       )

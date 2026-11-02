@@ -44,6 +44,16 @@ export type AgentSendEvent =
 /** JSON payload of each named SSE event. Pi may emit a replacement snapshot after overflow. */
 export type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** An owner-selected immutable MCP definition and its server-bound credential reference. */
+export interface McpToolSelection {
+  serverId: string
+  serverRevision: number
+  toolId: string
+  modelName: string
+  digest: string
+  credentialId: string
+}
+
 /** The part of a configuration version that Pi and the memory copy use. */
 export interface AgentConfig {
   model: { provider: string; modelId: string }
@@ -51,6 +61,8 @@ export interface AgentConfig {
   thinkingLevel: ModelThinkingLevel
   webSearchRoute?: 'auto' | 'keyless'
   tools: string[]
+  /** Only explicitly assigned, digest-pinned remote tools may join the registry. */
+  mcp?: McpToolSelection[]
   /** Shared memory spaces the agent reads, earliest first; defaults to `["global"]`. */
   sharedSpaces: string[]
 }

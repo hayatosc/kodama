@@ -7,6 +7,8 @@
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { createCodeTool } from './code/execute.ts'
 import type { CodeCall } from './code/execute.ts'
+import { createMcpRegistrationTool } from './mcp/registration.ts'
+import type { McpRegistrationCall } from './mcp/registration.ts'
 import { createArtifactTools } from './artifacts.ts'
 import type { ArtifactCall } from './artifacts.ts'
 import { createContactAgentTool, createContactReadTools } from './contact.ts'
@@ -28,11 +30,13 @@ export function createAgentTools(
   schedule?: ScheduleTools,
   code?: CodeCall,
   artifacts?: ArtifactCall,
+  mcpRegistration?: McpRegistrationCall,
 ): ToolRegistration[] {
   return [
     currentTimeTool,
     createCodeTool(code),
     ...createArtifactTools(artifacts),
+    createMcpRegistrationTool(mcpRegistration),
     createContactAgentTool(contact),
     ...createContactReadTools(contact),
     createWebSearchTool(web),

@@ -40,8 +40,8 @@ export interface ApplyDeps {
   harness: Harness
   /** How the settings become Pi's change; the memory agent has its own. */
   change: (settings: AgentSettings) => AgentChange
-  /** Prepare agent-specific state before applying settings; throws when it fails. */
-  prepareSettings: (settings: AgentSettings) => Promise<void>
+  /** Prepare while idle; an optional rollback restores published state if persistence fails. */
+  prepareSettings: (settings: AgentSettings) => Promise<void | (() => void)>
   /** Record the applied version in the registry; a failure is left to reconciliation. */
   report: (agentId: string, version: number) => Promise<void>
 }
@@ -119,18 +119,23 @@ async function applyHeld(deps: ApplyDeps): Promise<ApplyResult> {
  * before the last write leaves the previous version recorded and the held one in place.
  */
 async function applyAll(deps: ApplyDeps, { agentId, version, settings }: PushedConfig) {
-  await deps.prepareSettings(settings)
-  await deps.harness.commit(
-    (tx) => configure(tx, ROOT_CONVERSATION_ID, deps.change(settings)),
-    BACKGROUND_CONTEXT,
-  )
-  // One multi-key put is atomic: the version is written together with the copy it describes.
-  await deps.storage.put({
-    [SHARED_SPACES_KEY]: [...settings.sharedSpaces],
-    [APPLIED_SETTINGS_KEY]: settings,
-    [AGENT_ID_KEY]: agentId,
-    [CONFIG_VERSION_KEY]: version,
-  })
+  const rollback = await deps.prepareSettings(settings)
+  try {
+    await deps.harness.commit(
+      (tx) => configure(tx, ROOT_CONVERSATION_ID, deps.change(settings)),
+      BACKGROUND_CONTEXT,
+    )
+    // One multi-key put is atomic: the version is written together with the copy it describes.
+    await deps.storage.put({
+      [SHARED_SPACES_KEY]: [...settings.sharedSpaces],
+      [APPLIED_SETTINGS_KEY]: settings,
+      [AGENT_ID_KEY]: agentId,
+      [CONFIG_VERSION_KEY]: version,
+    })
+  } catch (error) {
+    rollback?.()
+    throw error
+  }
   const held = await deps.storage.get<PushedConfig>(PENDING_CONFIG_KEY)
   if (held !== undefined && held.version <= version) await deps.storage.delete(PENDING_CONFIG_KEY)
 }

@@ -113,14 +113,16 @@ export async function putCredential(
 
 /** List metadata only; envelopes are never part of this result. */
 export async function listCredentials(call: ManagementCall) {
-  return (await call.db.select().from(credentials)).map(credentialMetadata)
+  return (
+    await call.db.select().from(credentials).where(eq(credentials.purpose, 'model_provider'))
+  ).map(credentialMetadata)
 }
 
 /** Read one credential after authorization, rejecting unknown IDs. */
 export async function credentialRow(call: ManagementCall, id: string) {
   if (!UUID_PATTERN.test(id)) throw new TypeError('credentialId must be a lowercase UUID v7')
   const row = await call.db.select().from(credentials).where(eq(credentials.credentialId, id)).get()
-  if (!row) throw new TypeError('Unknown credential')
+  if (!row || row.purpose !== 'model_provider') throw new TypeError('Unknown credential')
   return row
 }
 

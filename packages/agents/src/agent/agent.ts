@@ -31,7 +31,9 @@ import {
   awaitWithContext,
   withAbortSignal,
 } from '@earendil-works/chord/context'
-import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { createRegistry, defineExtension, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { createMcpCall, mcpExtension } from './mcp.ts'
+import { interruptMcpCalls } from './local-db/mcp.ts'
 import type {
   AgentChange,
   Harness,
@@ -87,6 +89,7 @@ import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './runtime/events.ts'
 import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
+import { createMcpRegistrationCall } from './mcp-registration.ts'
 import { createAgentOptions } from './config.ts'
 import {
   contactOrigin,
@@ -138,7 +141,13 @@ import type {
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
-import { listNotifications, readNotification } from './local-db/notifications.ts'
+import { mcpCatalogNotices, mcpCredentialNotice } from '../control-plane/mcp-notifications.ts'
+import { mcpRegistrationNotice } from '../control-plane/workflows/mcp-chat.ts'
+import {
+  listNotifications,
+  readNotification,
+  recordNotification,
+} from './local-db/notifications.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
@@ -213,6 +222,9 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #refusal: Refusal
   readonly #credentials: ReturnType<typeof agentCredentialStore>
   readonly #web = createWebState()
+  readonly #registry = createRegistry()
+  #mcpExtension = defineExtension({ name: 'kodama-mcp' })
+  readonly #mcpCall: ReturnType<typeof createMcpCall>
   /** The most recent code compilation; generated Worker caches are scoped to this agent. */
   readonly #executeCode: ReturnType<typeof createCodeExecutor>
 
@@ -231,6 +243,15 @@ export class Agent extends DurableObject<AgentEnv> {
       () => appliedSettings(ctx.storage),
     )
     this.#local = openLocalDb(ctx.storage)
+    this.#mcpCall = createMcpCall(
+      managementDb(env.MANAGEMENT_DB),
+      env.CREDENTIAL_KEK_V1,
+      this.#agentId(),
+      this.#local,
+      () => this.#harness,
+      () => appliedSettings(ctx.storage),
+      this.#refusal,
+    )
     // Every request waits until the harness is open and prepared. The await comes first, so a
     // subclass has initialized its fields before `#open` calls its hooks.
     this.#harness = ctx.blockConcurrencyWhile(async () => {
@@ -246,6 +267,12 @@ export class Agent extends DurableObject<AgentEnv> {
   async #open(): Promise<Harness> {
     const local = await this.#local
     interruptUsage(local)
+    interruptMcpCalls(local)
+    this.#mcpExtension = await mcpExtension(
+      managementDb(this.env.MANAGEMENT_DB),
+      await appliedSettings(this.ctx.storage),
+      this.#mcpCall,
+    )
     const options = this.harnessOptions()
     const models = guardedModels(
       usageModels(
@@ -358,7 +385,21 @@ export class Agent extends DurableObject<AgentEnv> {
       storage: this.ctx.storage,
       harness,
       change: (settings) => this.configChange(settings),
-      prepareSettings: (settings) => this.rebuildMemory(settings),
+      prepareSettings: async (settings) => {
+        const extension = await mcpExtension(
+          managementDb(this.env.MANAGEMENT_DB),
+          settings,
+          this.#mcpCall,
+        )
+        await this.rebuildMemory(settings)
+        const previous = this.#mcpExtension
+        this.#mcpExtension = extension
+        this.#registry.install(extension)
+        return () => {
+          this.#mcpExtension = previous
+          this.#registry.install(previous)
+        }
+      },
       report: async (agentId, version) => {
         await reportApplied(managementDb(this.env.MANAGEMENT_DB), agentId, version)
       },
@@ -383,6 +424,7 @@ export class Agent extends DurableObject<AgentEnv> {
     return createAgentOptions(
       this.env,
       [
+        this.#mcpExtension,
         createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
         toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
       ],
@@ -543,6 +585,14 @@ export class Agent extends DurableObject<AgentEnv> {
           return JSON.stringify({ deleted: true })
         })
       },
+      this.#registry,
+      createMcpRegistrationCall(
+        this.env,
+        this.#agentId(),
+        this.#local,
+        () => this.#harness,
+        () => assertAllowed(this.#refusal),
+      ),
     )
   }
 
@@ -656,7 +706,9 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** The stored configuration's location and defaults. */
   async #config(): Promise<ConfigStore> {
+    const settings = await appliedSettings(this.ctx.storage)
     return {
+      mcp: settings?.mcp?.filter((tool) => settings.tools.includes(tool.modelName)),
       harness: await this.#harness,
       storage: this.ctx.storage,
       defaults: this.defaultConfig(),
@@ -1207,6 +1259,43 @@ export class Agent extends DurableObject<AgentEnv> {
   async notifications(query: NotificationQuery = {}): Promise<NotificationPage> {
     const input = parseInput(NotificationQuerySchema, query)
     return listNotifications(await this.#local, input, Date.now())
+  }
+
+  /** Revocation notices remain valid after management removes the grants and references. */
+  async mcpCredentialNotice(credentialId: string): Promise<void> {
+    const notice = await mcpCredentialNotice(
+      managementDb(this.env.MANAGEMENT_DB),
+      this.#agentId(),
+      credentialId,
+    )
+    if (notice) recordNotification(await this.#local, notice, Date.now())
+  }
+
+  /** Internal invalidation reads current D1 state; the caller cannot supply inbox text. */
+  async mcpCatalogNotice(serverId: string): Promise<void> {
+    const notices = await mcpCatalogNotices(
+      managementDb(this.env.MANAGEMENT_DB),
+      this.#agentId(),
+      serverId,
+    )
+    for (const notice of notices) recordNotification(await this.#local, notice, Date.now())
+  }
+
+  /** Internal registration completion is deduplicated and never carries owner authority. */
+  async mcpRegistrationNotice(requestId: string): Promise<void> {
+    const notice = await mcpRegistrationNotice(
+      managementDb(this.env.MANAGEMENT_DB),
+      this.#agentId(),
+      requestId,
+    )
+    recordNotification(await this.#local, notice, Date.now())
+    await this.admit({
+      type: 'input',
+      requestId: `mcp-notice:${notice.sourceId}`,
+      whenBusy: 'followUp',
+      content: `[Host MCP status event; not owner authorization.] ${notice.summary}`,
+      entry: { kind: 'kodama.mcp-notice', data: { requestId } },
+    })
   }
 
   /** Mark exactly one sequence read; returns false for missing or expired notifications. */

@@ -14,6 +14,20 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('routes MCP management and secret input without accepting secrets in argv', () => {
+    expect(command(['mcp', 'list'])).toEqual({ action: 'mcp', operation: 'list', stdin: false })
+    const request = (operation: string, text: string) => {
+      const parsed = command(['mcp', operation])
+      if (parsed.action !== 'mcp') throw new Error('Expected MCP command')
+      return commandRequest(parsed, 'fixture-dev-token', text)
+    }
+    const bearer = request('bearer', JSON.stringify({ serverId: agentId, secret: 'stdin-only' }))
+    expect(bearer.url).toContain('/cli/mcp/manage')
+    const client = request('client', JSON.stringify({ serverId: agentId }))
+    expect(client.url).toContain('/cli/mcp/auth')
+    expect(() => command(['mcp', 'bearer', 'argv-secret'])).toThrow()
+    expect(() => request('assign', '[]')).toThrow('MCP input must be an object')
+  })
   it('parses artifact commands and sends bytes as multipart rather than JSON strings', async () => {
     const upload = command(['artifacts', 'upload', 'assistant', '/tmp/image.png'], {
       'media-type': 'image/png',

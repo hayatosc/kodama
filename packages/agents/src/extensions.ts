@@ -19,7 +19,7 @@ export type CompletionOutcome = 'succeeded' | 'failed' | 'cancelled' | 'unanswer
 
 /** A result reference is scoped to the owning object and never grants access itself. */
 export interface CompletionReference {
-  source: 'contact' | 'schedule'
+  source: 'contact' | 'schedule' | 'mcp'
   sourceId: string
 }
 

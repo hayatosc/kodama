@@ -39,7 +39,7 @@ export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
     model: { provider: env.DEFAULT_MODEL_PROVIDER, modelId: env.DEFAULT_MODEL_ID },
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     thinkingLevel: 'off',
-    tools: ['web_search', 'web_fetch'],
+    tools: ['web_search', 'web_fetch', 'mcp_registration'],
     sharedSpaces: [...DEFAULT_SHARED_SPACES],
   }
 }
@@ -69,76 +69,97 @@ const DESCRIPTION_MAX_LENGTH = 1_000
 export function agentSettingsSchema(models: Models) {
   const credentialId = v.pipe(v.string(), v.regex(UUID_PATTERN, 'Credential IDs must be UUIDs'))
   const providerKey = v.pipe(v.string(), v.regex(PROVIDER_ID, 'Invalid provider ID'))
-  return v.strictObject(
-    {
-      schemaVersion: v.literal(SETTINGS_SCHEMA_VERSION, 'schemaVersion must be 1'),
-      model: v.pipe(
-        v.strictObject({ provider: v.string(), modelId: v.string() }, modelMessage),
-        v.check(
-          ({ provider, modelId }) => models.getModel(provider, modelId) !== undefined,
-          (issue) => `Unknown model: ${issue.input.provider}/${issue.input.modelId}`,
+  return v.pipe(
+    v.strictObject(
+      {
+        mcp: v.optional(
+          v.pipe(
+            v.array(
+              v.strictObject({
+                serverId: credentialId,
+                serverRevision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+                toolId: credentialId,
+                modelName: v.pipe(v.string(), v.regex(/^mcp_[a-f0-9]{20}_[a-f0-9]{20}$/u)),
+                digest: v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/u)),
+                credentialId,
+              }),
+            ),
+            v.maxLength(100),
+          ),
         ),
-      ),
-      systemPrompt: v.pipe(
-        v.string(),
-        v.maxLength(
-          SYSTEM_PROMPT_MAX_LENGTH,
-          `systemPrompt must be a string of at most ${SYSTEM_PROMPT_MAX_LENGTH} characters`,
+        schemaVersion: v.literal(SETTINGS_SCHEMA_VERSION, 'schemaVersion must be 1'),
+        model: v.pipe(
+          v.strictObject({ provider: v.string(), modelId: v.string() }, modelMessage),
+          v.check(
+            ({ provider, modelId }) => models.getModel(provider, modelId) !== undefined,
+            (issue) => `Unknown model: ${issue.input.provider}/${issue.input.modelId}`,
+          ),
         ),
-      ),
-      thinkingLevel: v.picklist(THINKING_LEVELS, 'Invalid thinkingLevel'),
-      tools: v.pipe(
-        v.array(v.string(), 'tools must be an array'),
-        v.check(
-          (tools) => new Set(tools).size === tools.length,
-          'tools must contain unique tool names',
-        ),
-        v.check(
-          (tools) => tools.every(isRegisteredTool),
-          (issue) => `Unknown tool: ${issue.input.find((name) => !isRegisteredTool(name))}`,
-        ),
-      ),
-      webSearchRoute: v.optional(v.picklist(['auto', 'keyless'])),
-      sharedSpaces: sharedSpacesSchema,
-      description: v.optional(
-        v.pipe(
+        systemPrompt: v.pipe(
           v.string(),
           v.maxLength(
-            DESCRIPTION_MAX_LENGTH,
-            `description has at most ${DESCRIPTION_MAX_LENGTH} characters`,
+            SYSTEM_PROMPT_MAX_LENGTH,
+            `systemPrompt must be a string of at most ${SYSTEM_PROMPT_MAX_LENGTH} characters`,
           ),
         ),
-      ),
-      labels: v.optional(
-        v.pipe(
-          v.array(
-            v.pipe(
-              v.string(),
-              v.regex(LABEL, 'Labels are 1–32 lowercase letters, digits, or hyphens'),
+        thinkingLevel: v.picklist(THINKING_LEVELS, 'Invalid thinkingLevel'),
+        tools: v.pipe(
+          v.array(v.string(), 'tools must be an array'),
+          v.check(
+            (tools) => new Set(tools).size === tools.length,
+            'tools must contain unique tool names',
+          ),
+        ),
+        webSearchRoute: v.optional(v.picklist(['auto', 'keyless'])),
+        sharedSpaces: sharedSpacesSchema,
+        description: v.optional(
+          v.pipe(
+            v.string(),
+            v.maxLength(
+              DESCRIPTION_MAX_LENGTH,
+              `description has at most ${DESCRIPTION_MAX_LENGTH} characters`,
             ),
           ),
-          v.maxLength(MAX_LABELS, `labels has at most ${MAX_LABELS} labels`),
-          v.check((labels) => new Set(labels).size === labels.length, 'labels must be unique'),
         ),
-      ),
-      memoryPolicy: v.strictObject(
-        { extract: v.boolean(), remember: v.boolean() },
-        'memoryPolicy must have extract and remember',
-      ),
-      credentials: v.optional(
-        v.strictObject(
-          { primary: v.record(providerKey, credentialId) },
-          'credentials must contain only primary references',
+        labels: v.optional(
+          v.pipe(
+            v.array(
+              v.pipe(
+                v.string(),
+                v.regex(LABEL, 'Labels are 1–32 lowercase letters, digits, or hyphens'),
+              ),
+            ),
+            v.maxLength(MAX_LABELS, `labels has at most ${MAX_LABELS} labels`),
+            v.check((labels) => new Set(labels).size === labels.length, 'labels must be unique'),
+          ),
         ),
-      ),
-      toolPolicy: v.optional(
-        v.record(
-          v.pipe(v.string(), v.regex(TOOL_NAME, 'toolPolicy keys must be tool names')),
-          v.picklist(['allow', 'deny'], 'toolPolicy values must be allow or deny'),
+        memoryPolicy: v.strictObject(
+          { extract: v.boolean(), remember: v.boolean() },
+          'memoryPolicy must have extract and remember',
         ),
-      ),
-    },
-    settingsMessage,
+        credentials: v.optional(
+          v.strictObject(
+            { primary: v.record(providerKey, credentialId) },
+            'credentials must contain only primary references',
+          ),
+        ),
+        toolPolicy: v.optional(
+          v.record(
+            v.pipe(v.string(), v.regex(TOOL_NAME, 'toolPolicy keys must be tool names')),
+            v.picklist(['allow', 'deny'], 'toolPolicy values must be allow or deny'),
+          ),
+        ),
+      },
+      settingsMessage,
+    ),
+    v.check((settings) => {
+      const names = settings.mcp?.map((tool) => tool.modelName) ?? []
+      return (
+        new Set(names).size === names.length &&
+        new Set(settings.mcp?.map((tool) => tool.toolId)).size === (settings.mcp?.length ?? 0) &&
+        settings.tools.every((name) => isRegisteredTool(name) || names.includes(name))
+      )
+    }, 'Unknown tool or duplicate MCP selection'),
   ) satisfies v.GenericSchema<unknown, AgentSettings>
 }
 
@@ -171,8 +192,11 @@ export function parseSettings(models: Models, value: unknown): AgentSettings {
  * Stored as the registered tools that are not selected, so tools of other extensions, such as
  * long-term memory, stay enabled.
  */
-function toolChange(selected: readonly string[]): AgentChange['tools'] {
-  resolveTools(selected)
+function toolChange(
+  selected: readonly string[],
+  mcp: AgentConfig['mcp'] = [],
+): AgentChange['tools'] {
+  resolveTools(selected.filter((name) => !mcp.some((tool) => tool.modelName === name)))
   return { remove: agentTools.filter((tool) => !selected.includes(tool.name)) }
 }
 
@@ -186,13 +210,16 @@ export function agentChange(config: AgentConfig): AgentChange {
     model: config.model,
     instructions: config.systemPrompt,
     thinkingLevel: config.thinkingLevel,
-    tools: toolChange(config.tools),
+    tools: toolChange(config.tools, config.mcp),
   }
 }
 
 /** Selected registered tools, in registry order, from either stored form. */
-function selectedTools(stored: string[] | { remove: string[] }): string[] {
-  const names = agentTools.map((tool) => tool.name)
+function selectedTools(
+  stored: string[] | { remove: string[] },
+  mcp: AgentConfig['mcp'] = [],
+): string[] {
+  const names = [...agentTools.map((tool) => tool.name), ...mcp.map((tool) => tool.modelName)]
   if (Array.isArray(stored)) return names.filter((name) => stored.includes(name))
   return names.filter((name) => !stored.remove.includes(name))
 }
@@ -210,7 +237,7 @@ export async function initializeAgentConfig(
     }
     // Agents stored before long-term memory list their tools; keep memory tools enabled.
     if (applied) {
-      await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(applied.tools) })
+      await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(applied.tools, applied.mcp) })
     } else if (Array.isArray(state.tools)) {
       await configure(tx, ROOT_CONVERSATION_ID, { tools: toolChange(selectedTools(state.tools)) })
     }
@@ -225,6 +252,7 @@ export async function initializeAgentConfig(
 export async function readAgentConfig(
   harness: Harness,
   sharedSpaces: readonly string[],
+  mcp: AgentConfig['mcp'] = [],
 ): Promise<AgentConfig> {
   const state = await harness.snapshot(AgentDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
   if (!state?.model || state.instructions === undefined || !state.thinkingLevel) {
@@ -235,7 +263,8 @@ export async function readAgentConfig(
     systemPrompt: state.instructions,
     thinkingLevel: state.thinkingLevel,
     // The memory agent stores no tool selection: its registry holds only its own tools.
-    tools: state.tools ? selectedTools(state.tools) : [],
+    tools: state.tools ? selectedTools(state.tools, mcp) : [],
+    ...(mcp.length ? { mcp } : {}),
     sharedSpaces: [...sharedSpaces],
   }
 }
@@ -260,10 +289,11 @@ export interface ConfigStore {
   harness: Harness
   storage: DurableObjectStorage
   defaults: AgentConfig
+  mcp?: AgentConfig['mcp']
 }
 
 /** The agent's whole configuration. */
 export async function readConfig(store: ConfigStore): Promise<AgentConfig> {
   const spaces = await readSharedSpaces(store.storage, store.defaults.sharedSpaces)
-  return readAgentConfig(store.harness, spaces)
+  return readAgentConfig(store.harness, spaces, store.mcp)
 }

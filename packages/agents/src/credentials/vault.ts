@@ -28,6 +28,7 @@ const oauthSchema = v.looseObject({
 /** Parse the Pi value for either kind; malformed payload errors never contain the secret. */
 export function parseCredential(kind: CredentialIdentity['kind'], secret: string) {
   if (kind === 'api_key') return { type: 'api_key', key: secret } satisfies Credential
+  if (kind !== 'oauth_subscription') throw new TypeError('credential_unavailable: wrong purpose')
   try {
     const parsed = v.safeParse(oauthSchema, JSON.parse(secret))
     if (parsed.success) return parsed.output

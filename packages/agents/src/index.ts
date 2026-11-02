@@ -9,6 +9,13 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
+import { notifyMcpAssignments } from './control-plane/workflows/mcp.ts'
+import { manageMcp } from './control-plane/workflows/mcp-management.ts'
+import {
+  completeMcpRegistration,
+  recoverMcpRegistrations,
+} from './control-plane/workflows/mcp-chat.ts'
+import { manageMcpOAuth, recoverMcpOAuth } from './credentials/mcp-management.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'
@@ -105,6 +112,13 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     } catch (error) {
       console.error('Usage sweep failed', safeFailure(error))
     }
+    try {
+      await recoverMcpOAuth(managementDb(this.env.MANAGEMENT_DB))
+      await recoverMcpRegistrations(this.#systemCall(), this.env.CREDENTIAL_KEK_V1)
+      await notifyMcpAssignments(this.#systemCall())
+    } catch {
+      console.error('MCP recovery failed')
+    }
     await this.env.AGENTS.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
 
@@ -122,6 +136,46 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       use,
     )
     return this.env.AGENTS.getByName(objectName)
+  }
+
+  /** Manage the shared MCP catalog and explicit per-agent selections; this is private RPC only. */
+  async mcpManage(input: unknown) {
+    return manageMcp(
+      this.#call(),
+      this.env.CREDENTIAL_KEK_V1,
+      this.env.KODAMA_UI_ORIGIN,
+      input,
+    )
+  }
+
+  /** OAuth facade for a trusted authenticated UI; no tokens, verifiers or client secrets are returned. */
+  async mcpAuth(input: unknown) {
+    const call = this.#call()
+    const result = await manageMcpOAuth(
+      call.db,
+      this.env.CREDENTIAL_KEK_V1,
+      this.env.KODAMA_UI_ORIGIN,
+      input,
+    )
+    if (
+      result &&
+      typeof result === 'object' &&
+      'requestId' in result &&
+      typeof result.requestId === 'string' &&
+      'credentialId' in result &&
+      typeof result.credentialId === 'string'
+    ) {
+      const request = await completeMcpRegistration(
+        call,
+        this.env.CREDENTIAL_KEK_V1,
+        result.requestId,
+        result.credentialId,
+      )
+      await this.env.AGENTS.getByName(request.sourceAgentId).mcpRegistrationNotice(
+        request.requestId,
+      )
+    }
+    return result
   }
 
   /** Internal automation is distinguishable in audit without inventing a user identity. */

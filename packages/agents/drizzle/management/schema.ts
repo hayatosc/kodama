@@ -12,7 +12,9 @@
  *
  * @module
  */
+import { eq } from 'drizzle-orm'
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -25,6 +27,73 @@ import {
 
 /** Management actions originate from the authenticated operator or internal automation, not users. */
 export const MANAGEMENT_SOURCES = ['operator', 'system'] as const
+
+/** Short-lived host-recognized instructions; the source identity is not model supplied. */
+export const mcpIntents = sqliteTable('mcp_intents', {
+  intentId: text('intent_id').primaryKey(),
+  principalId: text('principal_id').notNull(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  entryId: integer('entry_id').notNull(),
+  submissionId: text('submission_id').notNull(),
+  instructionJson: text('instruction_json').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  consumedAt: integer('consumed_at'),
+})
+
+/** Registration progress survives OAuth without preserving assignment authority. */
+export const mcpRequests = sqliteTable('mcp_requests', {
+  requestId: text('request_id').primaryKey(),
+  principalId: text('principal_id').notNull(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  entryId: integer('entry_id').notNull(),
+  submissionId: text('submission_id').notNull(),
+  serverId: text('server_id'),
+  serverRevision: integer('server_revision'),
+  credentialId: text('credential_id'),
+  status: text('status', {
+    enum: [
+      'awaiting_endpoint',
+      'registered_unverified',
+      'awaiting_owner_auth',
+      'ready_for_discovery',
+      'discovered',
+      'failed',
+    ],
+  }).notNull(),
+  name: text('name').notNull(),
+  notifiedAt: integer('notified_at'),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/** Host-generated review proposal: confirmation must name this target and a subset of its tool IDs. */
+export const mcpProposals = sqliteTable('mcp_proposals', {
+  proposalId: text('proposal_id').primaryKey(),
+  requestId: text('request_id').notNull(),
+  principalId: text('principal_id').notNull(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  serverId: text('server_id').notNull(),
+  serverRevision: integer('server_revision').notNull(),
+  catalogDigest: text('catalog_digest').notNull(),
+  credentialId: text('credential_id').notNull(),
+  agentId: text('agent_id').notNull(),
+  toolIdsJson: text('tool_ids_json').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+})
+
+/** Atomic MCP authorization fences: a false predicate aborts the entire D1 batch. */
+export const mcpCommits = sqliteTable(
+  'mcp_commits',
+  {
+    operationId: text('operation_id').primaryKey(),
+    authorized: integer('authorized', { mode: 'boolean' }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [check('mcp_commit_authorized', eq(table.authorized, true).inlineParams())],
+)
 
 /** A working agent, or a dedicated agent under a reserved object name. */
 export const AGENT_KINDS = ['working', 'dedicated'] as const
@@ -89,14 +158,145 @@ export const agentConfigVersions = sqliteTable(
   (t) => [primaryKey({ columns: [t.agentId, t.version] })],
 )
 
-/** Encrypted provider secrets; only src/credentials/ may access these rows. */
+/** Shared MCP registrations. Only the creator may change the endpoint or vetted catalog. */
+export const mcpServers = sqliteTable('mcp_servers', {
+  serverId: text('server_id').primaryKey(),
+  shortId: text('short_id').notNull().unique(),
+  creatorId: text('creator_id')
+    .notNull()
+    .references(() => principals.principalId),
+  name: text('name').notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  revision: integer('revision').notNull().default(1),
+  catalogDigest: text('catalog_digest'),
+  catalogVersion: integer('catalog_version').notNull().default(0),
+  inspectedAt: integer('inspected_at'),
+  inspectionError: text('inspection_error'),
+  stale: integer('stale', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+/** Stable tool IDs survive renames of the registration; changed definitions require new approval. */
+export const mcpTools = sqliteTable(
+  'mcp_tools',
+  {
+    toolId: text('tool_id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    remoteName: text('remote_name').notNull(),
+    modelName: text('model_name').notNull().unique(),
+    serverRevision: integer('server_revision').notNull(),
+    digest: text('digest').notNull(),
+    definitionJson: text('definition_json').notNull(),
+    rejection: text('rejection'),
+    present: integer('present', { mode: 'boolean' }).notNull().default(true),
+  },
+  (t) => [unique('mcp_tool_remote_name').on(t.serverId, t.remoteName)],
+)
+
+/** Immutable definitions retained for pinned applied versions, never overwritten by discovery. */
+export const mcpDefinitions = sqliteTable('mcp_definitions', {
+  digest: text('digest').primaryKey(),
+  definitionJson: text('definition_json').notNull(),
+})
+
+/** Live selected-tool index; removing a row rejects sends before a delayed safe apply. */
+export const mcpAssignments = sqliteTable(
+  'mcp_assignments',
+  {
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    toolId: text('tool_id')
+      .notNull()
+      .references(() => mcpTools.toolId),
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credentials.credentialId),
+    digest: text('digest').notNull(),
+    serverRevision: integer('server_revision').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.agentId, t.toolId] }),
+    index('mcp_assignments_credential').on(t.credentialId),
+  ],
+)
+
+/** One-time browser-bound OAuth exchanges; the verifier is an envelope in the existing vault. */
+export const mcpOAuthTransactions = sqliteTable('mcp_oauth_transactions', {
+  requestId: text('request_id'),
+  transactionId: text('transaction_id').primaryKey(),
+  principalId: text('principal_id')
+    .notNull()
+    .references(() => principals.principalId),
+  serverId: text('server_id')
+    .notNull()
+    .references(() => mcpServers.serverId),
+  serverRevision: integer('server_revision').notNull(),
+  stateDigest: text('state_digest').notNull().unique(),
+  browserDigest: text('browser_digest').notNull(),
+  bindingJson: text('binding_json').notNull(),
+  verifierId: text('verifier_id').notNull(),
+  status: text('status', {
+    enum: ['pending', 'exchanging', 'completed', 'denied', 'reauth_required'],
+  }).notNull(),
+  credentialId: text('credential_id'),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/** Issuer-bound client registration, including failed DCR claims to prevent automatic replay. */
+export const mcpOAuthClients = sqliteTable(
+  'mcp_oauth_clients',
+  {
+    registrationId: text('registration_id').primaryKey(),
+    principalId: text('principal_id')
+      .notNull()
+      .references(() => principals.principalId),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    issuer: text('issuer').notNull(),
+    redirectUri: text('redirect_uri').notNull(),
+    metadataJson: text('metadata_json'),
+    secretId: text('secret_id'),
+    status: text('status', { enum: ['registering', 'ready', 'reauth_required'] }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    unique('mcp_oauth_client_binding').on(t.principalId, t.serverId, t.issuer, t.redirectUri),
+  ],
+)
+
+/** Encrypted provider and MCP secrets; only src/credentials/ may access these rows. */
 export const credentials = sqliteTable(
   'credentials',
   {
     credentialId: text('credential_id').primaryKey(),
-    kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
+    kind: text('kind', {
+      enum: [
+        'api_key',
+        'oauth_subscription',
+        'mcp_bearer',
+        'mcp_oauth',
+        'mcp_client',
+        'mcp_transaction',
+      ],
+    }).notNull(),
+    purpose: text('purpose', { enum: ['model_provider', 'mcp_server'] })
+      .notNull()
+      .default('model_provider'),
     provider: text('provider').notNull(),
     status: text('status', { enum: ['active', 'revoked', 'needs_reauth'] }).notNull(),
+    mcpAuthState: text('mcp_auth_state', {
+      enum: ['reauth_required', 'scope_required', 'outcome_unknown'],
+    }),
     revision: integer('revision').notNull(),
     ciphertext: text('ciphertext'),
     iv: text('iv'),

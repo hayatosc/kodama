@@ -32,6 +32,9 @@ export const USAGE = `Usage:
   nr agent dev seed-credentials < /secure/path/provider-keys.json
   nr agent seed [--credential ID ...]
   nr agent list
+  nr agent mcp list
+  nr agent mcp connect|status|auth-status <server-id>
+  nr agent mcp add|update|discover|assign|unassign|bearer|client|initial-token|attach|disconnect < request.json
   nr agent create <slug> --credential ID [--credential ID ...] [--name NAME]
   nr agent tools <agent> [tool ...]   Replace enabled optional tools; omit names to disable all
   nr agent credentials add --provider openai [--key-from-env ENV_NAME]
@@ -67,6 +70,7 @@ already initialized installation. Login does not seed or create agents.`
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
+  | { action: 'mcp'; operation: string; serverId?: string; stdin: boolean }
   | { action: 'artifact-upload'; agentRef: string; path: string; mediaType: string }
   | { action: 'artifact-list'; agentRef: string; cursor?: string; limit?: number }
   | { action: 'artifact-download'; agentRef: string; artifactId: string; path: string }
@@ -138,6 +142,37 @@ export function toCommand(
   newRequestId: () => string = uuidv7,
 ): Command {
   if (values.help || positionals.length === 0) return { action: 'help' }
+  if (positionals[0] === 'mcp') {
+    const operation = positionals[1]
+    if (operation === 'list' && positionals.length === 2)
+      return { action: 'mcp', operation, stdin: false }
+    if (
+      operation &&
+      ['connect', 'status', 'auth-status'].includes(operation) &&
+      positionals.length === 3
+    )
+      return { action: 'mcp', operation, serverId: parseAgentId(positionals[2]), stdin: false }
+    if (
+      operation &&
+      [
+        'add',
+        'update',
+        'discover',
+        'assign',
+        'unassign',
+        'bearer',
+        'client',
+        'initial-token',
+        'attach',
+        'disconnect',
+      ].includes(operation) &&
+      positionals.length === 2
+    )
+      return { action: 'mcp', operation, stdin: true }
+    throw new Error(
+      'Invalid MCP command; supply structured input on stdin, never secrets as arguments',
+    )
+  }
   if (positionals[0] === 'attention' && positionals.length === 2)
     return { action: 'attention', agentRef: parseAgentRef(positionals[1]) }
   const [action, rawAgentRef, content] = positionals
@@ -272,6 +307,24 @@ export function commandRequest(
   credentialJson?: string,
   artifact?: { filename: string; bytes: Uint8Array },
 ): { url: string; init: RequestInit } {
+  if (command.action === 'mcp') {
+    const input: unknown = command.stdin ? JSON.parse(credentialJson ?? '') : {}
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('MCP input must be an object')
+    return {
+      url: `${LOCAL_WORKER_URL}/cli/mcp/${['client', 'initial-token', 'attach', 'auth-status'].includes(command.operation) ? 'auth' : 'manage'}`,
+      init: {
+        method: 'POST',
+        redirect: 'error',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...input,
+          operation: command.operation === 'auth-status' ? 'status' : command.operation,
+          ...(command.serverId ? { serverId: command.serverId } : {}),
+        }),
+      },
+    }
+  }
   if (command.action === 'artifact-upload') {
     if (!artifact) throw new Error('Missing upload bytes')
     const form = new FormData()

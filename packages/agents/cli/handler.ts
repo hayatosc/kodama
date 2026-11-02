@@ -78,7 +78,7 @@ export async function handleCli(
   request: Request,
   token: string,
   service: Service,
-  management: Management,
+  management: Management & Partial<Pick<AgentService, 'mcpManage' | 'mcpAuth'>>,
 ): Promise<Response> {
   if (!token || request.headers.get('authorization') !== `Bearer ${token}`) {
     return new Response('Unauthorized', { status: 401 })
@@ -89,6 +89,20 @@ export async function handleCli(
   )
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
+    if (action === 'mcp') {
+      try {
+        const body = await request.text()
+        if (body.length > 65_536) throw new Error('mcp_request_limit')
+        const input: unknown = JSON.parse(body)
+        if (rawAgentRef === 'manage' && management.mcpManage)
+          return Response.json(await management.mcpManage(CLI_ACTOR, input))
+        if (rawAgentRef === 'auth' && management.mcpAuth)
+          return Response.json(await management.mcpAuth(CLI_ACTOR, input))
+        return new Response('Not found', { status: 404 })
+      } catch {
+        return Response.json({ error: 'mcp_management_failed' }, { status: 400 })
+      }
+    }
     if (action === 'credentials')
       return credentialResponse(request, management, rawAgentRef, credentialId, target)
     if (action === 'seed') {

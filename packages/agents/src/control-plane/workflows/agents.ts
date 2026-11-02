@@ -6,11 +6,12 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, exists } from 'drizzle-orm'
 import * as v from 'valibot'
 import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai'
-import { agentConfigVersions, agents } from '../../../drizzle/management/schema.ts'
+import { mcpCommit } from '../mcp.ts'
+import { agentConfigVersions, agents, mcpAssignments } from '../../../drizzle/management/schema.ts'
 import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { defaultAgentSettings, parseSettings } from '../../control-plane/config.ts'
@@ -177,6 +178,8 @@ export async function createAgent(
     request.credentials === undefined
       ? initial
       : parseSettings(call.models, { ...initial, credentials: request.credentials })
+  if (settings.mcp?.length)
+    throw new TypeError('MCP tools require explicit assignment after agent creation')
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   try {
@@ -329,6 +332,32 @@ async function writeVersion(
   const row = await agentRow(call.db, agentId)
   if (row.currentVersion !== write.expected) throw versionConflict(agentId, write.expected)
   await validateCredentialRefs(call.db, write.settings, agentId)
+  const mcpFences = (write.settings.mcp ?? []).map((selected) => {
+    if (!call.principal || row.kind !== 'working' || row.ownerId !== call.principal.principalId)
+      throw new Error('mcp_owner_required')
+    return mcpCommit(
+      call.db,
+      call.principal.principalId,
+      uuidv7(),
+      exists(
+        call.db
+          .select()
+          .from(mcpAssignments)
+          .innerJoin(agents, eq(agents.agentId, mcpAssignments.agentId))
+          .where(
+            and(
+              eq(agents.ownerId, call.principal.principalId),
+              eq(mcpAssignments.agentId, agentId),
+              eq(mcpAssignments.toolId, selected.toolId),
+              eq(mcpAssignments.serverId, selected.serverId),
+              eq(mcpAssignments.serverRevision, selected.serverRevision),
+              eq(mcpAssignments.digest, selected.digest),
+              eq(mcpAssignments.credentialId, selected.credentialId),
+            ),
+          ),
+      ),
+    )
+  })
   const detail = {
     ...(write.comment === undefined ? {} : { comment: write.comment }),
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
@@ -343,6 +372,7 @@ async function writeVersion(
         write.settings,
         detail,
       ),
+      ...mcpFences,
       ...referenceStatements(call.db, agentId, write.settings),
     ])
   } catch (error) {
