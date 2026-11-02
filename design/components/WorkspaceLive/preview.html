@@ -1,0 +1,712 @@
+<!-- @dsCard group="Screens" height=1250 width=1120 subtitle="press a button: every motion is a real Kodama event" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>WorkspaceLive</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .root {
+        position: relative;
+        display: grid;
+        grid-template-rows: 1fr;
+        height: 590px;
+        overflow: hidden;
+      }
+      .kd-pane-label {
+        right: auto;
+        left: 296px;
+      }
+      .controls-top {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--background);
+      }
+      .controls .sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+        margin: 0 4px;
+      }
+      .controls .grp {
+        font-size: 11px;
+        color: var(--muted-foreground);
+        margin-right: 2px;
+      }
+      .body {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        min-height: 0;
+      }
+      .body .kd-sidebar {
+        width: auto;
+        height: 100%;
+      }
+      .kd-row-sub,
+      .kd-featured-sub {
+        transition: color 0.3s;
+      }
+      .stage {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        padding: 20px 32px 20px;
+        background: var(--background);
+      }
+      .conv {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        overflow: auto;
+        padding-top: 24px;
+      }
+      .events {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 32px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--muted);
+        font: 12px/16px var(--font-mono);
+        color: var(--muted-foreground);
+        white-space: nowrap;
+        overflow: hidden;
+      }
+      .events span + span::before {
+        content: '→';
+        margin-right: 14px;
+        color: var(--muted-foreground);
+      }
+      .events b {
+        color: var(--foreground);
+        font-weight: 600;
+      }
+      .events span {
+        animation: logIn 0.3s ease;
+      }
+      @keyframes logIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+      .kd-thinking .slot {
+        margin-left: -6px;
+      }
+      .kd-turn .kd-tool-wrap {
+        width: 100%;
+      }
+      .kd-bubble[hidden] {
+        display: none;
+      }
+      .composer-wrap {
+        position: relative;
+        max-width: 640px;
+        width: 100%;
+        margin: 0 auto;
+      }
+      .composer-wrap .kd-composer {
+        position: relative;
+        z-index: 2;
+      }
+      .slot.peek {
+        position: absolute;
+        right: 76px;
+        bottom: 8px;
+        z-index: 1;
+        transform: translateY(6px);
+        opacity: 0;
+        transition:
+          transform 0.4s cubic-bezier(0.3, 1.5, 0.5, 1),
+          opacity 0.15s;
+      }
+      .slot.peek.up {
+        transform: translateY(-34px);
+        opacity: 1;
+      }
+
+      .slot {
+        position: relative;
+        display: inline-block;
+        flex: none;
+        width: var(--size, 36px);
+        height: var(--size, 36px);
+      }
+      .slot svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+      .fly {
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 5;
+        width: 22px;
+        height: 22px;
+        pointer-events: none;
+      }
+      .fly svg {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+      .ring {
+        animation: ring 0.12s linear 6;
+        transform-origin: 50% 20%;
+        display: inline-block;
+      }
+      @keyframes ring {
+        0%,
+        100% {
+          transform: rotate(0);
+        }
+        25% {
+          transform: rotate(14deg);
+        }
+        75% {
+          transform: rotate(-14deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls-top">
+      <div class="controls">
+        <span class="grp">ユーザー</span>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="type">入力する</button>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="cancel">止める</button>
+        <span class="sep"></span><span class="grp">実行</span>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="tool">ツールを使う</button>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="reply">返答を書く</button>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="unanswered">
+          答えられない
+        </button>
+        <span class="sep"></span><span class="grp">エージェント間</span>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="contact">依頼を送る</button>
+        <span class="sep"></span><span class="grp">時間</span>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="alarm">アラーム</button>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="memory">記憶を抽出</button>
+        <button class="kd-btn kd-btn-secondary kd-btn-sm" data-act="pause">一時停止</button>
+        <span style="flex: 1"></span>
+        <button class="kd-btn kd-btn-primary kd-btn-sm" data-act="story">▶ 通しで見る</button>
+      </div>
+      <div class="events" data-events aria-live="polite">
+        <span>ボタンを押すと、そのイベントに対応した動きが出ます</span>
+      </div>
+    </div>
+    <div data-pair="stack">
+      <div class="root">
+        <div class="body">
+          <nav class="kd-sidebar" aria-label="エージェント">
+            <div class="kd-sidebar-head">
+              <button class="kd-circle-btn" aria-label="検索">
+                <svg class="kd-icon" viewBox="0 0 16 16">
+                  <circle cx="7" cy="7" r="4.5" />
+                  <path d="m13.5 13.5-3.2-3.2" />
+                </svg></button
+              ><button class="kd-circle-btn" aria-label="新しいエージェント">
+                <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+              </button>
+            </div>
+            <a class="kd-featured" aria-current="page"
+              ><span
+                class="slot kd-avatar"
+                data-agent="assistant"
+                style="--size: 56px; --badge-ring: var(--background)"
+              ></span
+              ><span
+                ><span class="kd-featured-kicker">メイン</span><br /><span class="kd-featured-name"
+                  >assistant</span
+                ><span class="kd-featured-sub" data-k="sub-assistant">待機中</span></span
+              ></a
+            >
+            <div class="kd-sidebar-label">エージェント</div>
+            <a class="kd-row"
+              ><span class="slot kd-avatar" data-agent="research"></span
+              ><span class="kd-row-text"
+                ><span class="kd-row-top"><span class="kd-row-name">research</span></span
+                ><span class="kd-row-sub" data-k="sub-research"
+                  >論文3件の要約を返しました</span
+                ></span
+              ></a
+            >
+            <a class="kd-row"
+              ><span class="slot kd-avatar" data-agent="scheduler"></span
+              ><span class="kd-row-text"
+                ><span class="kd-row-top"
+                  ><span class="kd-row-name">scheduler</span
+                  ><span class="kd-row-meta" data-k="clock"
+                    ><svg class="kd-icon" viewBox="0 0 16 16" style="width: 13px; height: 13px">
+                      <circle cx="8" cy="8.5" r="5.5" />
+                      <path d="M8 6v2.5l1.8 1.2M3 3.5 5 2M13 3.5 11 2" /></svg></span></span
+                ><span class="kd-row-sub" data-k="sub-scheduler">03:00 に起きる</span></span
+              ></a
+            >
+            <a class="kd-row"
+              ><span class="slot kd-avatar" data-agent="writer"></span
+              ><span class="kd-row-text"
+                ><span class="kd-row-top"><span class="kd-row-name">writer</span></span
+                ><span class="kd-row-sub" data-k="sub-writer">下書きを保存しました</span></span
+              ></a
+            >
+            <div class="kd-sidebar-label">システム</div>
+            <a class="kd-row"
+              ><span class="slot kd-avatar" data-agent="memory"></span
+              ><span class="kd-row-text"
+                ><span class="kd-row-top"
+                  ><span class="kd-row-name kd-mono" style="font-size: 14px"
+                    >system:memory</span
+                  ></span
+                ><span class="kd-row-sub" data-k="sub-memory">待機中</span></span
+              ></a
+            >
+            <span style="flex: 1"></span>
+            <div class="kd-sidebar-foot">
+              <span class="kd-me">H</span><span style="flex: 1; font-weight: 600">hayatosc</span
+              ><button class="kd-btn kd-btn-ghost kd-btn-icon" aria-label="設定">
+                <svg class="kd-icon" viewBox="0 0 16 16">
+                  <rect x="3" y="3" width="4" height="4" rx="1" />
+                  <rect x="9" y="3" width="4" height="4" rx="1" />
+                  <rect x="3" y="9" width="4" height="4" rx="1" />
+                  <rect x="9" y="9" width="4" height="4" rx="1" />
+                </svg>
+              </button>
+            </div>
+          </nav>
+          <main class="stage" data-kd-chat>
+            <div class="conv" data-kd-log>
+              <div class="kd-msg kd-msg-user" data-k="user">
+                Durable Objects のアラーム、来週の発表用にまとめておいて
+              </div>
+              <div class="kd-turn" data-k="turn">
+                <div class="kd-thinking" data-k="pill">
+                  <span class="slot kd-avatar" data-agent="assistant" style="--size: 20px"></span
+                  ><span data-k="pill-text">何でも言ってね。</span>
+                </div>
+                <div class="kd-bubble kd-msg" data-k="bubble" hidden></div>
+              </div>
+            </div>
+            <div class="composer-wrap">
+              <div
+                class="kd-composer-wrap"
+                data-kd-live
+                data-running="false"
+                data-agent="assistant"
+              >
+                <div class="kd-queue" hidden>
+                  <div class="kd-queue-head">
+                    <span class="kd-queue-count" hidden>キュー 0</span
+                    ><span class="kd-queue-note" hidden>実行が終わったら順に送ります</span
+                    ><span class="kd-queue-add" hidden
+                      ><kbd class="kd-kbd">Tab</kbd> でキューに追加</span
+                    >
+                  </div>
+                  <div class="kd-queue-items"></div>
+                </div>
+                <span
+                  class="slot kd-avatar peek"
+                  data-k="peek"
+                  data-agent="assistant"
+                  style="--size: 40px"
+                ></span>
+                <div class="kd-composer">
+                  <button class="kd-chip kd-chip-icon" aria-label="添付">
+                    <svg class="kd-icon" viewBox="0 0 16 16">
+                      <path d="M8 3v10M3 8h10" />
+                    </svg></button
+                  ><input placeholder="assistantにメッセージ" aria-label="メッセージ" /><span
+                    class="kd-composer-right"
+                  ></span>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+    <script>
+      function instance(root) {
+        var FLY = {
+          letter: [
+            '-1 -1 14 10.4',
+            '<rect width="12" height="8.4" rx="1.6" class="kd-paper"/><path d="M1 1.2l5 3.4 5-3.4" class="kd-fold"/>',
+          ],
+          card: [
+            '-1 -1 11 14',
+            '<path d="M0 0h9v12l-4.5-3L0 12z" class="kd-paper"/><path d="M2 3h5M2 5.5h3" class="kd-fold"/>',
+          ],
+          lens: [
+            '-1 -1 14 14',
+            '<circle cx="5" cy="5" r="4.2" class="kd-glass"/><path d="M8 8l3.5 3.5" class="kd-handle"/>',
+          ],
+        }
+        function icon(name) {
+          return '<svg viewBox="' + FLY[name][0] + '">' + FLY[name][1] + '</svg>'
+        }
+        var AGENTS = {
+          assistant: { color: 'ink', shape: 'mochi', pose: 'idle' },
+          research: { color: 'violet', shape: 'drop', pose: 'idle' },
+          scheduler: { color: 'teal', shape: 'bean', pose: 'sleep' },
+          writer: { color: 'pink', shape: 'mochi', pose: 'idle' },
+          memory: { color: 'system', shape: 'bean', pose: 'idle' },
+        }
+        var $ = function (k) {
+          return root.querySelector('[data-k="' + k + '"]')
+        }
+        var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+        function draw(id) {
+          var nodes = root.querySelectorAll('.slot[data-agent="' + id + '"]')
+          for (var i = 0; i < nodes.length; i++) {
+            var a = AGENTS[id]
+            var size = parseInt(nodes[i].style.getPropertyValue('--size'), 10) || 36
+            nodes[i].innerHTML = Kodama.avatar({
+              color: a.color,
+              shape: a.shape,
+              pose: a.pose,
+              prop: a.prop,
+              mark: a.mark,
+              size: size,
+            })
+          }
+        }
+        function set(id, pose, extra) {
+          var a = AGENTS[id]
+          a.pose = pose
+          a.prop = extra && extra.prop
+          a.mark = extra && extra.mark
+          draw(id)
+        }
+        var TOOL_RUN =
+            '<div class="kd-tool"><div class="kd-tool-head" role="button" tabindex="0" aria-expanded="false"><span class="kd-dot kd-dot-running" style="margin:0 4px"></span><span class="kd-tool-name">web_search</span><span>· Durable Objects alarm retry</span><span class="kd-tool-time">0s</span></div><div class="kd-tool-body"><div class="kd-tool-label"><span>引数</span><button class="kd-copy"><svg class="kd-icon" viewBox="0 0 16 16" style="width:12px;height:12px;vertical-align:-2px"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/></svg> コピー</button></div><pre class="kd-code">{ <span class="k">"query"</span>: <span class="s">"Durable Objects alarm retry"</span>, <span class="k">"limit"</span>: <span class="n">5</span> }</pre><div class="kd-tool-out"><div class="kd-tool-label"><span>結果を待っています</span></div><div class="kd-progress"></div></div></div></div>',
+          TOOL_DONE =
+            '<div class="kd-tool"><div class="kd-tool-head" role="button" tabindex="0" aria-expanded="false"><svg class="kd-icon kd-tool-chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></svg><span class="kd-tool-name">web_search</span><span>· 5 件</span><span class="kd-tool-time">2.6s</span></div><div class="kd-tool-body"><div class="kd-tool-label"><span>引数</span><button class="kd-copy"><svg class="kd-icon" viewBox="0 0 16 16" style="width:12px;height:12px;vertical-align:-2px"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/></svg> コピー</button></div><pre class="kd-code">{ <span class="k">"query"</span>: <span class="s">"Durable Objects alarm retry"</span>, <span class="k">"limit"</span>: <span class="n">5</span> }</pre><div class="kd-tool-out"><div class="kd-tool-label"><span>結果 · 5 件</span><button class="kd-copy"><svg class="kd-icon" viewBox="0 0 16 16" style="width:12px;height:12px;vertical-align:-2px"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/></svg> コピー</button></div><pre class="kd-code">1. Alarms · Cloudflare Durable Objects docs\n2. Durable Objects: alarm retries and backoff\n3. Building reliable schedulers with alarms\n4. Alarm API reference\n5. Changelog: alarm retry limits</pre></div></div></div>'
+        function sub(id, text) {
+          $('sub-' + id).textContent = text
+        }
+        function pill(text) {
+          $('pill-text').textContent = text
+        }
+        function wait(ms) {
+          return new Promise(function (r) {
+            setTimeout(r, reduce ? Math.min(ms, 300) : ms)
+          })
+        }
+        function log(event, note) {
+          var el = document.querySelector('[data-events]')
+          if (root !== document.querySelector('.root')) return
+          var line = document.createElement('span')
+          line.innerHTML = '<b>' + event + '</b>' + (note ? '　' + note : '')
+          el.appendChild(line)
+          while (el.children.length > 3) el.removeChild(el.firstChild)
+        }
+        function center(el) {
+          var r = el.getBoundingClientRect(),
+            o = root.getBoundingClientRect()
+          return { x: r.left - o.left + r.width / 2, y: r.top - o.top + r.height / 2 }
+        }
+        function fly(prop, fromSel, toSel) {
+          var a = center(root.querySelector(fromSel)),
+            b = center(root.querySelector(toSel))
+          var el = document.createElement('div')
+          el.className = 'fly'
+          el.innerHTML = icon(prop)
+          root.appendChild(el)
+          var lift = Math.min(60, Math.abs(b.y - a.y) / 2 + 24)
+          var frames = [
+            { transform: 'translate(' + (a.x - 11) + 'px,' + (a.y - 11) + 'px) scale(.6)' },
+            {
+              transform:
+                'translate(' +
+                ((a.x + b.x) / 2 + 40 - 11) +
+                'px,' +
+                (Math.min(a.y, b.y) - lift - 11) +
+                'px) scale(1.1) rotate(-12deg)',
+            },
+            { transform: 'translate(' + (b.x - 11) + 'px,' + (b.y - 11) + 'px) scale(.6)' },
+          ]
+          var anim = el.animate(frames, {
+            duration: reduce ? 1 : 900,
+            easing: 'cubic-bezier(.4,0,.2,1)',
+          })
+          return anim.finished.then(function () {
+            el.remove()
+          })
+        }
+        function drop(fromSel) {
+          var a = center(root.querySelector(fromSel))
+          var el = document.createElement('div')
+          el.className = 'fly'
+          el.innerHTML = icon('lens')
+          root.appendChild(el)
+          var anim = el.animate(
+            [
+              { transform: 'translate(' + (a.x + 6) + 'px,' + (a.y - 4) + 'px)', opacity: 1 },
+              {
+                transform: 'translate(' + (a.x + 18) + 'px,' + (a.y + 40) + 'px) rotate(70deg)',
+                opacity: 0,
+              },
+            ],
+            { duration: reduce ? 1 : 600, easing: 'cubic-bezier(.5,0,.9,.6)' },
+          )
+          return anim.finished.then(function () {
+            el.remove()
+          })
+        }
+        function typeInto(el, text, ms, prop) {
+          return new Promise(function (resolve) {
+            var i = 0
+            ;(function step() {
+              i++
+              el[prop] = text.slice(0, i)
+              if (prop === 'value') el.dispatchEvent(new Event('input', { bubbles: true }))
+              if (i >= text.length) return resolve()
+              setTimeout(step, reduce ? 0 : ms)
+            })()
+          })
+        }
+
+        var A = {
+          type: async function () {
+            log('入力中', 'ユーザーがタイプしている')
+            var wrap = root.querySelector('.kd-composer-wrap'),
+              input = wrap.querySelector('.kd-composer input'),
+              peek = $('peek')
+            wrap.setAttribute('data-running', 'true')
+            peek.classList.add('up')
+            set('assistant', 'listen')
+            await typeInto(input, 'アラームの再試行についても書いて', 70, 'value')
+            await wait(900)
+            // Tab: the message waits in the queue and is sent when the current run ends.
+            input.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+            )
+            peek.classList.remove('up')
+            set('assistant', 'happy')
+            log('Tab', 'キューに追加 · 実行が終わったら送る')
+            await wait(1600)
+            var item = wrap.querySelector('.kd-queue-item')
+            if (item) item.remove()
+            wrap.setAttribute('data-running', 'false')
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+            $('user').textContent = 'アラームの再試行についても書いて'
+            log('send', 'キューから送信')
+            set('assistant', 'idle')
+          },
+          tool: async function () {
+            log('tool_execution_start', 'web_search')
+            var old = $('turn').querySelectorAll('.kd-tool-wrap')
+            for (var i = 0; i < old.length; i++) old[i].remove()
+            var row = document.createElement('div')
+            row.className = 'kd-tool-wrap'
+            row.innerHTML = TOOL_RUN
+            $('turn').insertBefore(row, $('bubble'))
+            set('assistant', 'work', { prop: 'lens' })
+            sub('assistant', 'web_search を実行中')
+            pill('web_search で調べてる…')
+            var t0 = Date.now(),
+              time = row.querySelector('.kd-tool-time')
+            var tick = setInterval(function () {
+              time.textContent = ((Date.now() - t0) / 1000).toFixed(0) + 's'
+            }, 250)
+            await wait(2600)
+            clearInterval(tick)
+            row.innerHTML = TOOL_DONE
+            log('tool_execution_end', '5 件')
+            set('assistant', 'happy')
+            sub('assistant', '待機中')
+            pill('5件見つかった。')
+            await wait(900)
+            set('assistant', 'idle')
+          },
+          reply: async function () {
+            var b = $('bubble')
+            b.hidden = false
+            b.textContent = ''
+            log('message_update', '生成中')
+            set('assistant', 'write')
+            sub('assistant', '返答を書いている')
+            pill('まとめを書いてる。')
+            await typeInto(
+              b,
+              'アラームは1オブジェクトに1つ。失敗すると再実行されるから、Kodama は中断した run の復旧にも使っている。',
+              45,
+              'textContent',
+            )
+            log('submission', 'done')
+            set('assistant', 'happy')
+            sub('assistant', '待機中')
+            pill('書けた。')
+            await wait(900)
+            set('assistant', 'idle')
+          },
+          unanswered: async function () {
+            log('submission', 'unanswered')
+            set('assistant', 'tilt', { mark: '?' })
+            sub('assistant', '答えられなかった')
+            pill('うまく答えられなかった。')
+            await wait(2000)
+            set('assistant', 'idle')
+            sub('assistant', '待機中')
+          },
+          cancel: async function () {
+            set('assistant', 'work', { prop: 'lens' })
+            sub('assistant', 'web_search を実行中')
+            pill('web_search で調べてる…')
+            await wait(1100)
+            log('cancel', 'ユーザーが止めた')
+            set('assistant', 'surprised', { mark: '!' })
+            drop('.kd-featured .slot')
+            sub('assistant', '止めました')
+            pill('止めた。')
+            await wait(1300)
+            set('assistant', 'idle')
+            sub('assistant', '待機中')
+          },
+          contact: async function () {
+            log('contact_agent', '→ research')
+            set('assistant', 'idle', { prop: 'letter' })
+            pill('research に頼んでくる。')
+            await wait(700)
+            set('assistant', 'idle')
+            sub('assistant', 'research の返事待ち')
+            await fly('letter', '.kd-featured .slot', '[data-agent="research"]')
+            set('research', 'surprised')
+            log('kodama.agent-message', 'assistant から · hop 1')
+            await wait(450)
+            set('research', 'write')
+            sub('research', 'assistant の依頼を調査中')
+            await wait(2400)
+            set('research', 'happy')
+            sub('research', '返信しました')
+            await fly('letter', '[data-agent="research"]', '.kd-featured .slot')
+            log('kodama.agent-message', 'research から返信')
+            set('assistant', 'surprised')
+            await wait(400)
+            set('assistant', 'happy')
+            sub('assistant', '待機中')
+            pill('research から返事が来た。')
+            await wait(800)
+            set('assistant', 'idle')
+            set('research', 'idle')
+          },
+          alarm: async function () {
+            log('alarm', '03:00')
+            var c = $('clock')
+            c.classList.remove('ring')
+            void c.offsetWidth
+            c.classList.add('ring')
+            sub('scheduler', '03:00 起床')
+            await wait(700)
+            set('scheduler', 'stretch')
+            await wait(1000)
+            set('scheduler', 'write')
+            sub('scheduler', '朝のまとめを作成中')
+            await wait(2200)
+            set('scheduler', 'happy')
+            sub('scheduler', 'まとめを送りました')
+            log('run_end', 'scheduler')
+            await wait(1000)
+            set('scheduler', 'sleep')
+            sub('scheduler', '明日 03:00 に起きる')
+          },
+          memory: async function () {
+            log('memory extraction', '2 件')
+            set('assistant', 'idle', { prop: 'paper' })
+            sub('assistant', '覚えたことを渡している')
+            await wait(600)
+            var p = fly('card', '.kd-featured .slot', '[data-agent="memory"]')
+            await wait(250)
+            await Promise.all([p, fly('card', '.kd-featured .slot', '[data-agent="memory"]')])
+            set('assistant', 'idle')
+            sub('assistant', '待機中')
+            set('memory', 'write')
+            sub('memory', '2件を整理中')
+            await wait(2000)
+            set('memory', 'happy')
+            sub('memory', '2件を保存しました')
+            await wait(900)
+            set('memory', 'idle')
+          },
+          pause: async function () {
+            if (AGENTS.writer.pose !== 'paused') {
+              log('lifecycle', 'writer → paused')
+              set('writer', 'paused')
+              sub('writer', '一時停止中')
+            } else {
+              log('lifecycle', 'writer → active')
+              set('writer', 'stretch')
+              sub('writer', '再開しました')
+              await wait(1000)
+              set('writer', 'idle')
+            }
+          },
+          story: async function () {
+            for (var k of ['type', 'tool', 'contact', 'reply', 'memory', 'alarm']) {
+              await A[k]()
+              await wait(500)
+            }
+          },
+        }
+
+        Object.keys(AGENTS).forEach(draw)
+        return A
+      }
+      if (window.Kodama) {
+        Kodama.pair()
+        var screens = Array.prototype.map.call(document.querySelectorAll('.root'), instance)
+        var busy = false,
+          buttons = document.querySelectorAll('[data-act]')
+        Array.prototype.forEach.call(buttons, function (btn) {
+          btn.addEventListener('click', async function () {
+            if (busy) return
+            busy = true
+            Array.prototype.forEach.call(buttons, function (b) {
+              b.disabled = true
+            })
+            try {
+              await Promise.all(
+                screens.map(function (A) {
+                  return A[btn.dataset.act]()
+                }),
+              )
+            } finally {
+              busy = false
+              Array.prototype.forEach.call(buttons, function (b) {
+                b.disabled = false
+              })
+            }
+          })
+        })
+      }
+    </script>
+  </body>
+</html>

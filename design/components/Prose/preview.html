@@ -1,0 +1,88 @@
+<!-- @dsCard group="Content" height=1160 subtitle="Markdown inside an agent bubble" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>Prose</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        padding: 28px 32px 24px;
+      }
+      .kd-bubble {
+        max-width: 560px;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="kd-bubble kd-prose">
+        <h3>アラームの基本</h3>
+        <p>
+          Durable Objects には
+          <strong>1 オブジェクトにつき 1 つ</strong>のアラームを設定できます。<a href="#"
+            >公式ドキュメント</a
+          >に詳しい説明があります。
+        </p>
+        <ul>
+          <li><code>setAlarm()</code> で次の時刻を上書きする</li>
+          <li>失敗すると指数バックオフで再実行される</li>
+        </ul>
+        <ol>
+          <li>状態を保存する</li>
+          <li>アラームを設定する</li>
+          <li>ハンドラで続きを処理する</li>
+        </ol>
+        <div class="kd-codeblock">
+          <div class="kd-codeblock-head">
+            <span>ts</span
+            ><button class="kd-copy">
+              <svg
+                class="kd-icon"
+                viewBox="0 0 16 16"
+                style="width: 12px; height: 12px; vertical-align: -2px"
+              >
+                <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                <path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" />
+              </svg>
+              コピー
+            </button>
+          </div>
+          <pre
+            class="kd-code"
+          ><span class="k">await</span> ctx.storage.<span class="k">setAlarm</span>(Date.now() + <span class="n">60_000</span>)</pre>
+        </div>
+        <blockquote>
+          アラームは少なくとも 1 回実行されます。ちょうど 1 回ではありません。
+        </blockquote>
+        <table>
+          <thead>
+            <tr>
+              <th>項目</th>
+              <th>値</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>再試行</td>
+              <td>最大 6 回</td>
+            </tr>
+            <tr>
+              <td>初回の待ち</td>
+              <td>2 秒</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,213 @@
+<!-- @dsCard group="Primitives" height=900 subtitle="a round avatar: the bird inside a circle tinted with its hue; poses follow real events" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>AgentAvatar</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        padding: 28px 24px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+      }
+      h2 {
+        margin: 0 0 -4px;
+        font: 400 12px/16px var(--font-sans);
+        color: var(--muted-foreground);
+      }
+      .r {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        width: 64px;
+      }
+      figcaption {
+        text-align: center;
+        font-size: 12px;
+        line-height: 16px;
+        color: var(--muted-foreground);
+      }
+      figcaption code {
+        display: block;
+        font: 11px/14px var(--font-mono);
+        color: var(--muted-foreground);
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="r">
+        <figure>
+          <span data-avatar="orange" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>orange</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="yellow" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>yellow</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="green" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>green</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="teal" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>teal</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="sky" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>sky</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="blue" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>blue</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>violet</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="plum" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>plum</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="pink" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>pink</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="red" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>red</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="brown" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>brown</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="ink" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>ink</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="system" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>system</code></figcaption>
+        </figure>
+      </div>
+      <div class="r">
+        <figure>
+          <span data-avatar="violet" data-pose="idle" style="--size: 56px"></span>
+          <figcaption><code>idle</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="listen" style="--size: 56px"></span>
+          <figcaption><code>listen</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="work" style="--size: 56px"></span>
+          <figcaption><code>work</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="write" style="--size: 56px"></span>
+          <figcaption><code>write</code></figcaption>
+        </figure>
+        <figure>
+          <span
+            data-avatar="violet"
+            data-pose="idle"
+            style="--size: 56px"
+            data-prop="letter"
+          ></span>
+          <figcaption><code>letter</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="happy" style="--size: 56px" data-replay></span>
+          <figcaption><code>happy</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="live" style="--size: 56px"></span>
+          <figcaption><code>live</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="tilt" style="--size: 56px" data-mark="?"></span>
+          <figcaption><code>tilt</code></figcaption>
+        </figure>
+        <figure>
+          <span
+            data-avatar="violet"
+            data-pose="surprised"
+            style="--size: 56px"
+            data-mark="!"
+            data-replay
+          ></span>
+          <figcaption><code>surprised</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="stretch" style="--size: 56px" data-replay></span>
+          <figcaption><code>stretch</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="worried" style="--size: 56px"></span>
+          <figcaption><code>worried</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="error" style="--size: 56px"></span>
+          <figcaption><code>error</code></figcaption>
+        </figure>
+      </div>
+      <div class="r">
+        <figure>
+          <span data-avatar="violet" data-pose="sleep" style="--size: 56px"></span>
+          <figcaption><code>sleep</code></figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="violet" data-pose="paused" style="--size: 56px"></span>
+          <figcaption><code>paused</code></figcaption>
+        </figure>
+      </div>
+      <div class="r">
+        <figure>
+          <span data-avatar="ink" data-pose="write" style="--size: 20px"></span>
+          <figcaption>20</figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="ink" data-pose="write" style="--size: 36px"></span>
+          <figcaption>36</figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="ink" data-pose="write" style="--size: 56px"></span>
+          <figcaption>56</figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="ink" data-pose="write" style="--size: 72px"></span>
+          <figcaption>72</figcaption>
+        </figure>
+        <figure>
+          <span data-avatar="teal" data-pose="sleep" style="--size: 36px"></span>
+          <figcaption>36</figcaption>
+        </figure>
+      </div>
+    </div>
+    <script>
+      if (window.Kodama) {
+        Kodama.pair()
+        var replay = document.querySelectorAll('[data-replay]')
+        setInterval(function () {
+          for (var i = 0; i < replay.length; i++) Kodama.renderAvatars(replay[i].parentNode)
+        }, 2600)
+      }
+    </script>
+  </body>
+</html>

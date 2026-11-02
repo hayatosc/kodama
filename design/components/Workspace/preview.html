@@ -1,0 +1,747 @@
+<!-- @dsCard group="Screens" height=1640 width=1440 subtitle="light and dark, the same screen" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>Workspace</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 280px 1fr 320px;
+        height: 820px;
+        overflow: hidden;
+      }
+      .main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--background);
+      }
+      .scroll {
+        flex: 1;
+        overflow: hidden;
+        padding: 48px 40px 0;
+      }
+      .bottom {
+        padding: 16px 40px 24px;
+      }
+      .bottom .kd-composer {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      .kd-sidebar {
+        height: 820px;
+      }
+      .kd-panel {
+        height: 820px;
+        overflow: hidden;
+      }
+      .kd-pane-label {
+        right: auto;
+        left: 300px;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="shell">
+        <nav class="kd-sidebar" aria-label="エージェント">
+          <div class="kd-sidebar-head">
+            <button class="kd-circle-btn" aria-label="検索">
+              <svg class="kd-icon" viewBox="0 0 16 16">
+                <circle cx="7" cy="7" r="4.5" />
+                <path d="m13.5 13.5-3.2-3.2" />
+              </svg></button
+            ><button class="kd-circle-btn" aria-label="新しいエージェント">
+              <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>
+            </button>
+          </div>
+          <a class="kd-featured" aria-current="page"
+            ><span
+              data-avatar="ink"
+              data-shape="mochi"
+              data-mood="running"
+              style="--size: 56px"
+            ></span
+            ><span
+              ><span class="kd-featured-kicker">メイン</span><br /><span class="kd-featured-name"
+                >assistant</span
+              ><span class="kd-featured-sub"
+                ><span style="color: var(--running)">実行中</span> · research と調査中</span
+              ></span
+            ></a
+          >
+          <div class="kd-sidebar-label">エージェント</div>
+          <a class="kd-row"
+            ><span
+              data-avatar="violet"
+              data-shape="drop"
+              data-mood="live"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name">research</span><span class="kd-count">2</span></span
+              ><span class="kd-row-sub">論文3件の要約を返しました</span></span
+            ></a
+          ><a class="kd-row"
+            ><span
+              data-avatar="teal"
+              data-shape="bean"
+              data-mood="queued"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name">scheduler</span
+                ><span class="kd-row-meta">03:00</span></span
+              ><span class="kd-row-sub">次は 03:00 に起きます</span></span
+            ></a
+          ><a class="kd-row"
+            ><span
+              data-avatar="red"
+              data-shape="onigiri"
+              data-mood="error"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name">mailer</span><span class="kd-row-meta">1時間</span></span
+              ><span class="kd-row-sub">認証情報が見つかりません</span></span
+            ></a
+          ><a class="kd-row"
+            ><span
+              data-avatar="orange"
+              data-shape="drop"
+              data-mood="idle"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name">clipper</span><span class="kd-row-meta">昨日</span></span
+              ><span class="kd-row-sub">記事を5件保存しました</span></span
+            ></a
+          ><a class="kd-row"
+            ><span
+              data-avatar="pink"
+              data-shape="mochi"
+              data-mood="paused"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name">writer</span><span class="kd-row-meta">3日</span></span
+              ><span class="kd-row-sub">一時停止中</span></span
+            ></a
+          >
+          <div class="kd-sidebar-label">システム</div>
+          <a class="kd-row"
+            ><span
+              data-avatar="system"
+              data-shape="bean"
+              data-mood="running"
+              data-badge="off"
+              style="--size: 36px"
+            ></span
+            ><span class="kd-row-text"
+              ><span class="kd-row-top"
+                ><span class="kd-row-name kd-mono" style="font-size: 14px">system:memory</span
+                ><span class="kd-row-meta">12件</span></span
+              ><span class="kd-row-sub">記憶の抽出キューを処理中</span></span
+            ></a
+          >
+          <span style="flex: 1"></span>
+          <div class="kd-sidebar-foot">
+            <span class="kd-me">H</span><span style="flex: 1; font-weight: 600">hayatosc</span
+            ><button class="kd-btn kd-btn-ghost kd-btn-icon" aria-label="設定">
+              <svg class="kd-icon" viewBox="0 0 16 16">
+                <rect x="3" y="3" width="4" height="4" rx="1" />
+                <rect x="9" y="3" width="4" height="4" rx="1" />
+                <rect x="3" y="9" width="4" height="4" rx="1" />
+                <path d="M11 9v4M9 11h4" />
+              </svg>
+            </button>
+          </div>
+        </nav>
+        <main class="main" data-kd-chat>
+          <div class="scroll">
+            <div class="kd-transcript" data-kd-log>
+              <div class="kd-msg kd-msg-user">
+                Durable Objects のアラーム、来週の発表用にまとめておいて
+              </div>
+              <div class="kd-turn">
+                <div class="kd-thinking">research に論文側を頼んでくる。</div>
+                <div style="width: 100%">
+                  <div class="kd-tool">
+                    <div class="kd-tool-head" role="button" tabindex="0" aria-expanded="false">
+                      <svg class="kd-icon kd-tool-chev" viewBox="0 0 16 16">
+                        <path d="m6 4 4 4-4 4" /></svg
+                      ><span class="kd-tool-name">contact_agent</span
+                      ><span>· research · 返信あり</span><span class="kd-tool-time">38s</span>
+                    </div>
+                    <div class="kd-tool-body">
+                      <div class="kd-tool-label">
+                        <span>引数</span
+                        ><button class="kd-copy">
+                          <svg
+                            class="kd-icon"
+                            viewBox="0 0 16 16"
+                            style="width: 12px; height: 12px; vertical-align: -2px"
+                          >
+                            <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                            <path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" />
+                          </svg>
+                          コピー
+                        </button>
+                      </div>
+                      <pre
+                        class="kd-code"
+                      >{ <span class="k">"target"</span>: <span class="s">"research"</span>, <span class="k">"message"</span>: <span class="s">"論文側の調査をお願い"</span> }</pre>
+                      <div class="kd-tool-out">
+                        <div class="kd-tool-label">
+                          <span>返事</span
+                          ><button class="kd-copy">
+                            <svg
+                              class="kd-icon"
+                              viewBox="0 0 16 16"
+                              style="width: 12px; height: 12px; vertical-align: -2px"
+                            >
+                              <rect x="5" y="5" width="8" height="8" rx="1.5" />
+                              <path d="M3 10.5V4a1 1 0 0 1 1-1h6.5" />
+                            </svg>
+                            コピー
+                          </button>
+                        </div>
+                        <pre class="kd-code">
+関連する論文を3件見つけました。要約を添えて返します。</pre>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="kd-peer kd-msg">
+                  <div class="kd-msg-meta">
+                    <span
+                      data-avatar="violet"
+                      data-shape="drop"
+                      data-mood="live"
+                      data-badge="off"
+                      style="--size: 18px"
+                    ></span
+                    ><span style="color: var(--foreground); font-weight: 600">research</span
+                    ><span class="kd-mono">7f3a9c21</span><span>· hop 1</span>
+                  </div>
+                  <p>関連する論文を3件見つけました。要約を添えて返します。</p>
+                </div>
+              </div>
+              <div class="kd-turn">
+                <div class="kd-bubble kd-msg">
+                  <p>ここまでの材料でざっくり骨組みを作りました。</p>
+                  <p><strong>アラームの基本</strong></p>
+                  <ul>
+                    <li>
+                      <strong>1オブジェクト1アラーム</strong>：<code>setAlarm()</code>
+                      で次の時刻を上書きする。
+                    </li>
+                    <li>
+                      <strong>少なくとも1回</strong>：失敗すると指数バックオフで再実行される。
+                    </li>
+                    <li>
+                      <strong>復旧に使う</strong>：Kodama は中断した run
+                      をアラームで拾い直している。
+                    </li>
+                  </ul>
+                  <p>明日の朝 9 時に、公式の変更履歴と突き合わせた版を出します。</p>
+                </div>
+              </div>
+              <div class="kd-turn">
+                <div class="kd-thinking">
+                  公式の変更履歴と突き合わせ中 <span class="kd-typing"><i></i><i></i><i></i></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="bottom">
+            <div class="kd-composer-wrap" data-kd-live data-running="true" data-agent="assistant">
+              <div class="kd-queue">
+                <div class="kd-queue-head">
+                  <span class="kd-queue-count">キュー 2</span
+                  ><span class="kd-queue-note">実行が終わったら順に送ります</span
+                  ><span class="kd-queue-add" hidden
+                    ><kbd class="kd-kbd">Tab</kbd> でキューに追加</span
+                  >
+                </div>
+                <div class="kd-queue-items">
+                  <div class="kd-queue-item">
+                    <span class="kd-queue-num">1</span
+                    ><span class="kd-queue-text">出典のURLも添えて</span
+                    ><button
+                      class="kd-chip kd-chip-icon kd-queue-x"
+                      data-kd-unqueue
+                      aria-label="キューから外す"
+                    >
+                      <svg class="kd-icon" viewBox="0 0 16 16">
+                        <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="kd-queue-item">
+                    <span class="kd-queue-num">2</span
+                    ><span class="kd-queue-text">最後に3行で要約して</span
+                    ><button
+                      class="kd-chip kd-chip-icon kd-queue-x"
+                      data-kd-unqueue
+                      aria-label="キューから外す"
+                    >
+                      <svg class="kd-icon" viewBox="0 0 16 16">
+                        <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="kd-composer">
+                <button class="kd-chip kd-chip-icon" aria-label="添付">
+                  <svg class="kd-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg></button
+                ><input placeholder="assistantにメッセージ" aria-label="メッセージ" /><span
+                  class="kd-composer-right"
+                ></span>
+              </div>
+            </div>
+          </div>
+        </main>
+        <aside class="kd-panel" aria-label="エージェントの詳細">
+          <div style="display: flex; justify-content: flex-end; gap: 8px">
+            <button class="kd-circle-btn" aria-label="共有">
+              <svg class="kd-icon" viewBox="0 0 16 16">
+                <path d="M8 10V2.5M5 5l3-3 3 3M3.5 8.5v4h9v-4" />
+              </svg>
+            </button>
+          </div>
+          <div class="kd-panel-hero">
+            <span
+              data-avatar="ink"
+              data-shape="mochi"
+              data-mood="running"
+              style="--size: 72px"
+            ></span
+            ><span class="kd-panel-name">assistant</span
+            ><span class="kd-badge kd-badge-running"
+              ><span class="kd-dot kd-dot-running"></span>実行中</span
+            >
+          </div>
+          <div data-kd-tabs>
+            <div class="kd-tablist" role="tablist">
+              <button role="tab" data-tab="details" aria-selected="true">詳細</button
+              ><button role="tab" data-tab="memory" aria-selected="false">記憶</button
+              ><button role="tab" data-tab="tools" aria-selected="false">ツール</button>
+            </div>
+            <div class="kd-tabpanel" role="tabpanel" data-tab-panel="details">
+              <div class="kd-section-label">ルーティン</div>
+              <div class="kd-settings">
+                <div class="kd-setting">
+                  <span>毎朝のまとめ</span
+                  ><span class="kd-mono kd-muted" style="font-size: 12px; padding-right: 8px"
+                    >09:00 毎日</span
+                  >
+                </div>
+                <div class="kd-setting">
+                  <span>次のアラーム</span
+                  ><span class="kd-mono kd-muted" style="font-size: 12px; padding-right: 8px"
+                    >03:00</span
+                  >
+                </div>
+              </div>
+              <div class="kd-section-label">設定</div>
+              <div class="kd-settings">
+                <div class="kd-setting">
+                  <span>プロバイダー</span>
+                  <div class="kd-dropdown align-right">
+                    <button class="kd-select" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="kd-dropdown-value">Anthropic</span
+                      ><svg class="kd-icon" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                        <path d="m4 6 4 4 4-4" />
+                      </svg>
+                    </button>
+                    <div class="kd-menu" role="listbox">
+                      <div class="kd-menu-search">
+                        <svg class="kd-icon" viewBox="0 0 16 16" style="width: 14px; height: 14px">
+                          <circle cx="7" cy="7" r="4.5" />
+                          <path d="m13.5 13.5-3.2-3.2" /></svg
+                        ><input
+                          type="text"
+                          placeholder="プロバイダーを検索"
+                          aria-label="プロバイダーを検索"
+                          data-kd-filter
+                        />
+                      </div>
+                      <div class="kd-menu-list">
+                        <div
+                          class="kd-menu-item is-active"
+                          role="option"
+                          aria-selected="true"
+                          data-value="Anthropic"
+                        >
+                          <span class="kd-menu-text">Anthropic</span
+                          ><svg class="kd-icon kd-check" viewBox="0 0 16 16">
+                            <path d="m3.5 8.5 3 3 6-7" />
+                          </svg>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="OpenAI"
+                        >
+                          <span class="kd-menu-text">OpenAI</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="Google"
+                        >
+                          <span class="kd-menu-text">Google</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="xAI"
+                        >
+                          <span class="kd-menu-text">xAI</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="Mistral"
+                        >
+                          <span class="kd-menu-text">Mistral</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="DeepSeek"
+                        >
+                          <span class="kd-menu-text">DeepSeek</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="Groq"
+                        >
+                          <span class="kd-menu-text">Groq</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="OpenRouter"
+                        >
+                          <span class="kd-menu-text">OpenRouter</span>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="Cloudflare Workers AI"
+                        >
+                          <span class="kd-menu-text">Cloudflare Workers AI</span>
+                        </div>
+                        <div class="kd-menu-empty" hidden>一致するものがありません</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="kd-setting">
+                  <span>モデル</span>
+                  <div class="kd-dropdown align-right">
+                    <button class="kd-select" aria-haspopup="listbox" aria-expanded="false">
+                      <span class="kd-dropdown-value kd-mono" style="font-size: 12px"
+                        >claude-sonnet-5-5</span
+                      ><svg class="kd-icon" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                        <path d="m4 6 4 4 4-4" />
+                      </svg>
+                    </button>
+                    <div class="kd-menu" role="listbox">
+                      <div class="kd-menu-search">
+                        <svg class="kd-icon" viewBox="0 0 16 16" style="width: 14px; height: 14px">
+                          <circle cx="7" cy="7" r="4.5" />
+                          <path d="m13.5 13.5-3.2-3.2" /></svg
+                        ><input
+                          type="text"
+                          placeholder="モデルを検索"
+                          aria-label="モデルを検索"
+                          data-kd-filter
+                        />
+                      </div>
+                      <div class="kd-menu-list">
+                        <div class="kd-menu-label">最新</div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-opus-5-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-opus-5-5</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item is-active"
+                          role="option"
+                          aria-selected="true"
+                          data-value="claude-sonnet-5-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-sonnet-5-5</span
+                          ><svg class="kd-icon kd-check" viewBox="0 0 16 16">
+                            <path d="m3.5 8.5 3 3 6-7" />
+                          </svg>
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-haiku-5-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-haiku-5-5</span
+                          >
+                        </div>
+                        <div class="kd-menu-label">以前のモデル</div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-opus-4-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-opus-4-5</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-sonnet-4-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-sonnet-4-5</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-haiku-4-5"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-haiku-4-5</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-opus-4-1"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-opus-4-1</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-sonnet-4"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-sonnet-4</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-3-7-sonnet"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-3-7-sonnet</span
+                          >
+                        </div>
+                        <div
+                          class="kd-menu-item"
+                          role="option"
+                          aria-selected="false"
+                          data-value="claude-3-5-haiku"
+                        >
+                          <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                            >claude-3-5-haiku</span
+                          >
+                        </div>
+                        <div class="kd-menu-empty" hidden>一致するものがありません</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="kd-section-label">アクティビティ</div>
+              <ol class="kd-activity kd-activity-compact">
+                <li>
+                  <time>09:00</time
+                  ><span class="kd-node"><span class="kd-dot kd-dot-running"></span></span
+                  ><span><strong>まとめを作成中</strong> <span class="kd-detail"></span></span>
+                </li>
+                <li>
+                  <time>08:12</time
+                  ><span class="kd-node"
+                    ><svg
+                      class="kd-icon"
+                      viewBox="0 0 16 16"
+                      style="color: var(--muted-foreground)"
+                    >
+                      <path d="M3 5h9l-2-2M13 11H4l2 2" /></svg></span
+                  ><span><strong>research</strong> <span class="kd-detail">から返信</span></span>
+                </li>
+                <li>
+                  <time>03:00</time
+                  ><span class="kd-node"
+                    ><svg
+                      class="kd-icon"
+                      viewBox="0 0 16 16"
+                      style="color: var(--muted-foreground)"
+                    >
+                      <circle cx="8" cy="8" r="6" />
+                      <path d="M8 5v3l2 1.5" /></svg></span
+                  ><span><strong>アラームで再開</strong> <span class="kd-detail"></span></span>
+                </li>
+                <li>
+                  <time>02:41</time
+                  ><span class="kd-node"
+                    ><svg
+                      class="kd-icon"
+                      viewBox="0 0 16 16"
+                      style="color: var(--muted-foreground)"
+                    >
+                      <path
+                        d="M3 3.5h4a1 1 0 0 1 1 1V13a1 1 0 0 0-1-1H3zM13 3.5H9a1 1 0 0 0-1 1V13a1 1 0 0 1 1-1h4z"
+                      /></svg></span
+                  ><span><strong>記憶を抽出</strong> <span class="kd-detail">· 2件</span></span>
+                </li>
+                <li>
+                  <time>02:40</time
+                  ><span class="kd-node"><span class="kd-dot kd-dot-error"></span></span
+                  ><span
+                    ><strong style="color: var(--destructive)">web_fetch 失敗</strong>
+                    <span class="kd-detail"></span
+                  ></span>
+                </li>
+              </ol>
+            </div>
+            <div class="kd-tabpanel" role="tabpanel" data-tab-panel="memory" hidden>
+              <div class="kd-search">
+                <svg class="kd-icon" viewBox="0 0 16 16" style="width: 14px; height: 14px">
+                  <circle cx="7" cy="7" r="4.5" />
+                  <path d="m13.5 13.5-3.2-3.2" /></svg
+                >記憶を検索
+              </div>
+              <div class="kd-mem">
+                <div class="kd-mem-top">
+                  <span class="kd-badge" style="height: 18px; padding: 0 6px; font-size: 11px"
+                    >事実</span
+                  ><span>research · 10/30</span>
+                </div>
+                <div class="kd-mem-text">発表は 11/7（木）、持ち時間は 20 分。</div>
+              </div>
+              <div class="kd-mem">
+                <div class="kd-mem-top">
+                  <span class="kd-badge" style="height: 18px; padding: 0 6px; font-size: 11px"
+                    >好み</span
+                  ><span>あなた · 10/28</span>
+                </div>
+                <div class="kd-mem-text">要約は 3 行以内、出典の URL を必ず付ける。</div>
+              </div>
+              <div class="kd-mem">
+                <div class="kd-mem-top">
+                  <span class="kd-badge" style="height: 18px; padding: 0 6px; font-size: 11px"
+                    >手順</span
+                  ><span>scheduler · 10/21</span>
+                </div>
+                <div class="kd-mem-text">朝のまとめは 9:00 に送る。週末は送らない。</div>
+              </div>
+            </div>
+            <div class="kd-tabpanel" role="tabpanel" data-tab-panel="tools" hidden>
+              <div class="kd-toolrow">
+                <div class="kd-toolrow-text"><b>web_search</b><small>Web を検索する</small></div>
+                <button
+                  class="kd-switch"
+                  role="switch"
+                  aria-checked="true"
+                  aria-label="web_search"
+                ></button>
+              </div>
+              <div class="kd-toolrow">
+                <div class="kd-toolrow-text">
+                  <b>web_fetch</b><small>ページや PDF を読む</small>
+                </div>
+                <button
+                  class="kd-switch"
+                  role="switch"
+                  aria-checked="true"
+                  aria-label="web_fetch"
+                ></button>
+              </div>
+              <div class="kd-toolrow">
+                <div class="kd-toolrow-text">
+                  <b>contact_agent</b><small>他のエージェントに依頼する</small>
+                </div>
+                <button
+                  class="kd-switch"
+                  role="switch"
+                  aria-checked="true"
+                  aria-label="contact_agent"
+                ></button>
+              </div>
+              <div class="kd-toolrow">
+                <div class="kd-toolrow-text">
+                  <b>remember</b><small>覚えておくことを保存する</small>
+                </div>
+                <button
+                  class="kd-switch"
+                  role="switch"
+                  aria-checked="false"
+                  aria-label="remember"
+                ></button>
+              </div>
+              <div class="kd-toolrow">
+                <div class="kd-toolrow-text">
+                  <b>history_search</b><small>過去の会話を探す（システムが管理）</small>
+                </div>
+                <button
+                  class="kd-switch"
+                  role="switch"
+                  aria-checked="true"
+                  disabled
+                  aria-label="history_search"
+                ></button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>

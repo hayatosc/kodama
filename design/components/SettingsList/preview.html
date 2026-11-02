@@ -1,0 +1,312 @@
+<!-- @dsCard group="Content" height=760 subtitle="value, select, switch, destructive row · all clickable" -->
+<!doctype html>
+<html lang="ja">
+  <head>
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../bundle.css" />
+    <script src="../bundle.js"></script>
+    <meta charset="utf-8" />
+    <title>SettingsList</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      .pair-src {
+        position: relative;
+        padding: 28px 24px 24px;
+        min-height: 340px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        max-width: 760px;
+        align-items: start;
+      }
+      .kd-dialog-layer {
+        position: absolute;
+        inset: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-pair="stack" class="pair-src">
+      <div class="grid">
+        <div class="kd-settings">
+          <div class="kd-setting">
+            <span>プロバイダー</span>
+            <div class="kd-dropdown align-right">
+              <button class="kd-select" aria-haspopup="listbox" aria-expanded="false">
+                <span class="kd-dropdown-value">Anthropic</span
+                ><svg class="kd-icon" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </button>
+              <div class="kd-menu" role="listbox">
+                <div class="kd-menu-search">
+                  <svg class="kd-icon" viewBox="0 0 16 16" style="width: 14px; height: 14px">
+                    <circle cx="7" cy="7" r="4.5" />
+                    <path d="m13.5 13.5-3.2-3.2" /></svg
+                  ><input
+                    type="text"
+                    placeholder="プロバイダーを検索"
+                    aria-label="プロバイダーを検索"
+                    data-kd-filter
+                  />
+                </div>
+                <div class="kd-menu-list">
+                  <div
+                    class="kd-menu-item is-active"
+                    role="option"
+                    aria-selected="true"
+                    data-value="Anthropic"
+                  >
+                    <span class="kd-menu-text">Anthropic</span
+                    ><svg class="kd-icon kd-check" viewBox="0 0 16 16">
+                      <path d="m3.5 8.5 3 3 6-7" />
+                    </svg>
+                  </div>
+                  <div class="kd-menu-item" role="option" aria-selected="false" data-value="OpenAI">
+                    <span class="kd-menu-text">OpenAI</span>
+                  </div>
+                  <div class="kd-menu-item" role="option" aria-selected="false" data-value="Google">
+                    <span class="kd-menu-text">Google</span>
+                  </div>
+                  <div class="kd-menu-item" role="option" aria-selected="false" data-value="xAI">
+                    <span class="kd-menu-text">xAI</span>
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="Mistral"
+                  >
+                    <span class="kd-menu-text">Mistral</span>
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="DeepSeek"
+                  >
+                    <span class="kd-menu-text">DeepSeek</span>
+                  </div>
+                  <div class="kd-menu-item" role="option" aria-selected="false" data-value="Groq">
+                    <span class="kd-menu-text">Groq</span>
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="OpenRouter"
+                  >
+                    <span class="kd-menu-text">OpenRouter</span>
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="Cloudflare Workers AI"
+                  >
+                    <span class="kd-menu-text">Cloudflare Workers AI</span>
+                  </div>
+                  <div class="kd-menu-empty" hidden>一致するものがありません</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="kd-setting">
+            <span>モデル</span>
+            <div class="kd-dropdown align-right">
+              <button class="kd-select" aria-haspopup="listbox" aria-expanded="false">
+                <span class="kd-dropdown-value kd-mono" style="font-size: 12px"
+                  >claude-sonnet-5-5</span
+                ><svg class="kd-icon" viewBox="0 0 16 16" style="width: 12px; height: 12px">
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </button>
+              <div class="kd-menu" role="listbox">
+                <div class="kd-menu-search">
+                  <svg class="kd-icon" viewBox="0 0 16 16" style="width: 14px; height: 14px">
+                    <circle cx="7" cy="7" r="4.5" />
+                    <path d="m13.5 13.5-3.2-3.2" /></svg
+                  ><input
+                    type="text"
+                    placeholder="モデルを検索"
+                    aria-label="モデルを検索"
+                    data-kd-filter
+                  />
+                </div>
+                <div class="kd-menu-list">
+                  <div class="kd-menu-label">最新</div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-opus-5-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-opus-5-5</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item is-active"
+                    role="option"
+                    aria-selected="true"
+                    data-value="claude-sonnet-5-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-sonnet-5-5</span
+                    ><svg class="kd-icon kd-check" viewBox="0 0 16 16">
+                      <path d="m3.5 8.5 3 3 6-7" />
+                    </svg>
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-haiku-5-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-haiku-5-5</span
+                    >
+                  </div>
+                  <div class="kd-menu-label">以前のモデル</div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-opus-4-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-opus-4-5</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-sonnet-4-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-sonnet-4-5</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-haiku-4-5"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-haiku-4-5</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-opus-4-1"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-opus-4-1</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-sonnet-4"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-sonnet-4</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-3-7-sonnet"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-3-7-sonnet</span
+                    >
+                  </div>
+                  <div
+                    class="kd-menu-item"
+                    role="option"
+                    aria-selected="false"
+                    data-value="claude-3-5-haiku"
+                  >
+                    <span class="kd-menu-text kd-mono" style="font-size: 12px"
+                      >claude-3-5-haiku</span
+                    >
+                  </div>
+                  <div class="kd-menu-empty" hidden>一致するものがありません</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="kd-setting">
+            <span>次のアラーム</span><span class="kd-mono kd-value">03:00</span>
+          </div>
+        </div>
+        <div class="kd-settings">
+          <div class="kd-setting">
+            <span class="kd-setting-label"
+              >外部への連絡<small>他のエージェントへの依頼を許可する</small></span
+            ><button
+              class="kd-switch"
+              role="switch"
+              aria-checked="true"
+              aria-label="切り替え"
+            ></button>
+          </div>
+          <div class="kd-setting">
+            <span class="kd-setting-label"
+              >記憶の自動抽出<small>会話から覚えることを毎晩まとめる</small></span
+            ><button
+              class="kd-switch"
+              role="switch"
+              aria-checked="false"
+              aria-label="切り替え"
+            ></button>
+          </div>
+          <div
+            class="kd-setting is-danger"
+            role="button"
+            tabindex="0"
+            data-kd-dialog-open="archive"
+          >
+            <span>エージェントをアーカイブ</span
+            ><svg
+              class="kd-icon"
+              viewBox="0 0 16 16"
+              style="width: 14px; height: 14px; margin-right: 8px"
+            >
+              <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="kd-dialog-layer" data-kd-dialog="archive" hidden>
+        <div class="kd-scrim">
+          <div class="kd-dialog" role="alertdialog" aria-label="writer をアーカイブしますか？">
+            <h3>writer をアーカイブしますか？</h3>
+            <p>
+              会話と記憶は残りますが、アラームとルーティンは止まり、新しいメッセージを受け取らなくなります。あとで元に戻せます。
+            </p>
+            <div class="kd-dialog-actions">
+              <button class="kd-btn kd-btn-secondary" data-kd-dialog-close>キャンセル</button
+              ><button class="kd-btn kd-btn-danger" data-kd-dialog-close>アーカイブ</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.Kodama && Kodama.pair()
+    </script>
+  </body>
+</html>
