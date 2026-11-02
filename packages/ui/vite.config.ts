@@ -8,7 +8,9 @@ export default defineConfig({
     sveltekit({
       compilerOptions: {
         // Runes everywhere except dependencies, which may still use the legacy syntax.
-        runes: ({ filename }) =>
+        // The parameter is typed here because @rsvelte/vite-plugin-svelte's types import
+        // @rsvelte/compiler, which it does not depend on, so the contextual type is lost.
+        runes: ({ filename }: { filename: string }) =>
           filename.split(/[/\\]/).includes('node_modules') ? undefined : true,
       },
     }),

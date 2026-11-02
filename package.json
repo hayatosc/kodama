@@ -9,11 +9,13 @@
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "oxlint --type-aware",
-    "format": "oxfmt --write . && pnpm -r format",
-    "format:check": "oxfmt --check . && pnpm -r format:check",
+    "format": "rsvelte-fmt",
+    "format:check": "rsvelte-fmt --check",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "devDependencies": {
+    "@rsvelte/fmt": "0.7.25",
+    "@rsvelte/oxlint-plugin": "0.2.6",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0",
     "oxlint-tsgolint": "7.0.2004",

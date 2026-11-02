@@ -1,6 +1,10 @@
 {
   "plugins": ["typescript", "unicorn", "oxc"],
-  "categories": { "correctness": "error" },
+  "jsPlugins": ["@rsvelte/oxlint-plugin"],
+  "extends": ["./node_modules/@rsvelte/oxlint-plugin/recommended.json"],
+  "categories": {
+    "correctness": "error"
+  },
   "ignorePatterns": ["**/.cloudflare/**", "**/.wrangler/**"],
   "rules": {
     "no-restricted-imports": [
@@ -19,9 +23,19 @@
     "typescript/no-explicit-any": "error",
     "typescript/ban-ts-comment": [
       "error",
-      { "ts-expect-error": true, "ts-ignore": true, "ts-nocheck": true, "ts-check": false }
+      {
+        "ts-expect-error": true,
+        "ts-ignore": true,
+        "ts-nocheck": true,
+        "ts-check": false
+      }
     ],
-    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ],
     "typescript/no-unsafe-type-assertion": "error",
     "typescript/no-unnecessary-type-assertion": "error",
     "typescript/consistent-type-imports": "error",
@@ -31,7 +45,9 @@
   "overrides": [
     {
       "files": ["packages/agents/src/lib/sql.ts"],
-      "rules": { "no-restricted-imports": "off" }
+      "rules": {
+        "no-restricted-imports": "off"
+      }
     }
   ]
 }

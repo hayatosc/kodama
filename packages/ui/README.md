@@ -13,10 +13,10 @@ Run these from `packages/ui`:
 
 - `nr storybook`: start Storybook on port 6006.
 - `nr build-storybook`: build the static Storybook into `storybook-static/`.
-- `nr typecheck`: run `svelte-kit sync` and `svelte-check --tsgo`.
+- `nr typecheck`: run `svelte-kit sync` and `rsvelte-check --tsgo`.
 - `nr test`: run the unit tests, such as the check that the token copy matches `design/`.
-- `nr format`: format `.svelte` files with Prettier. Oxfmt formats everything else from the
-  repository root, and the root `nr format` runs both.
+
+Format from the repository root with `nr format`.
 
 ## Layout
 
@@ -33,10 +33,25 @@ Run these from `packages/ui`:
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
-Type checking uses TypeScript 7 like the rest of the workspace: `svelte-check --tsgo` runs the
-native compiler from `@typescript/native` (an npm alias of `typescript@7`). The `typescript`
-package stays on 6 only because `svelte-kit sync` and svelte2tsx call its JavaScript API, which
-TypeScript 7 does not provide.
+## Svelte tooling (rsvelte)
+
+The Svelte tools are [rsvelte](https://github.com/baseballyama/rsvelte), a Rust port of the
+Svelte 5 compiler and its tooling. It is pre-1.0, so each tool can be swapped back on its own:
+
+| Job                                  | rsvelte                                                                               | Official tool it replaces              |
+| ------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------- |
+| Compile (Vite, SvelteKit, Storybook) | `@rsvelte/vite-plugin-svelte`, through the `overrides` entry in `pnpm-workspace.yaml` | `@sveltejs/vite-plugin-svelte`         |
+| Type check                           | `rsvelte-check --tsgo`                                                                | `svelte-check --tsgo`                  |
+| Format                               | `rsvelte-fmt` from the repository root (Oxfmt for every other file)                   | Prettier with `prettier-plugin-svelte` |
+| Lint                                 | `@rsvelte/oxlint-plugin` in `.oxlintrc.json`                                          | eslint-plugin-svelte                   |
+
+The override makes `pnpm peers check` report `@sveltejs/vite-plugin-svelte` 0.5.3 where
+SvelteKit and Storybook ask for 7; that warning is expected.
+
+Type checking uses TypeScript 7 like the rest of the workspace: `--tsgo` runs the native
+compiler from `@typescript/native` (an npm alias of `typescript@7`). The `typescript` package
+stays on 6 only because `svelte-kit sync` calls its JavaScript API, which TypeScript 7 does not
+provide.
 
 ## Stages
 
