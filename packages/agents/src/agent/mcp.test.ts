@@ -1,11 +1,9 @@
 /** Pinned dynamic MCP tools through real Durable Object execution and eviction. @module */
 import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
-import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
-import { principals } from '../../drizzle/management/schema.ts'
 import { mcpCalls } from '../../drizzle/durable-object/schema.ts'
-import { caller, management, newAgentId, principalIdOf } from '../testing/management.ts'
+import { management, newAgentId } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { textResponse, toolCallResponse } from '../testing/model.ts'
 import { registerMcpCatalog } from '../control-plane/mcp.ts'
@@ -21,20 +19,18 @@ useMockModel()
 
 async function fixture(failure = false) {
   const agentId = await newAgentId()
-  const principalId = await principalIdOf(await caller())
-  const principal = await management
-    .select()
-    .from(principals)
-    .where(eq(principals.principalId, principalId))
-    .get()
-  if (!principal) throw new Error('Missing owner')
-  const call = { env, db: management, models: createAgentModels(), principal, now: Date.now() }
+  const call = {
+    env,
+    db: management,
+    models: createAgentModels(),
+    source: 'operator' as const,
+    now: Date.now(),
+  }
   const endpoint = `https://${uuidv7()}.example.com/mcp`
-  const server = await registerMcpCatalog(management, principalId, 'runtime', endpoint, call.now)
+  const server = await registerMcpCatalog(management, 'runtime', endpoint, call.now)
   const credential = await putMcpBearer(
     management,
     env.CREDENTIAL_KEK_V1,
-    principalId,
     server.serverId,
     'fixture-token',
   )
@@ -86,7 +82,6 @@ async function fixture(failure = false) {
   })
   return {
     agentId,
-    principalId,
     server,
     credential,
     remoteCalls: () => remoteCalls,
@@ -128,7 +123,6 @@ it('rejects revoked credentials even while the old selected tool remains install
   await disconnectMcp(
     management,
     env.CREDENTIAL_KEK_V1,
-    test.principalId,
     test.server.serverId,
     test.credential.credentialId,
   )

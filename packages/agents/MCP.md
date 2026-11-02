@@ -5,14 +5,14 @@ implement a UI Worker, or connect to external chat systems. All verification use
 
 ## Authority and catalog
 
-`AgentService.mcpManage(actor, input)` is private service-binding RPC. The authenticated principal
-must own a working agent. Registrations and discovered definitions are shared across the installation.
-Only the registration's creator can change, invalidate, or rediscover it. Another owner can reuse
-that catalog, but must supply their own server-bound credential and select tools for agents they own.
-Creator changes can invalidate other owners' selections.
+Kodama is a single-operator installation. `AgentService.mcpManage(input)` is private service-binding
+RPC, available only through a trusted host. The external host authenticates access; the agents Worker
+has no user IDs, principals, memberships, per-agent owners, or catalog creators. Registrations,
+reviewed definitions, and encrypted credentials belong to the installation. Catalog changes can
+invalidate existing selections on any agent. See [Single-operator model](SINGLE_OPERATOR.md).
 
 Registration and discovery expose **no model tools**. Assignment requires explicit tool IDs, the
-current catalog digest, an owned credential, an owned working agent, and `readOnly: true`. A catalog
+current catalog digest, a server-bound credential, an active working agent, and `readOnly: true`. A catalog
 update never selects additions. Definitions are immutable by digest; names are fixed ASCII
 `mcp_<server short ID>_<tool short ID>`. The registry changes only at the existing safe-apply boundary.
 Live management checks reject revoked credentials, removed selections, changed definitions,
@@ -104,31 +104,32 @@ origin before enabling the future UI's browser authorization. Its checked-in emp
 closed for that flow; no production origin is assumed. The UI flow's only redirect URI is `${KODAMA_UI_ORIGIN}/auth/mcp/callback`, and the client
 metadata document URL is `${KODAMA_UI_ORIGIN}/oauth/mcp-client.json`.
 
-The future UI Worker must authenticate Access JWT signatures, issuer and audience; authorize the
-principal; protect initiation with origin/CSRF checks; and maintain a Secure, HttpOnly, SameSite=Lax
-browser-binding cookie. It calls `AgentService.mcpAuth(actor, input)` over its service binding:
+The future UI Worker must authenticate the installation operator through Access, verifying JWT
+signatures, issuer, audience, and its access policy; protect initiation with origin/CSRF checks; and
+maintain a Secure, HttpOnly, SameSite=Lax browser-binding cookie. It calls
+`AgentService.mcpAuth(input)` over its service binding, without passing a user identity:
 
 - `metadata`: return the fixed public client document.
 - `client`: save `serverId`, `client` (issuer, clientId, method, redirectUri,
   registration `preregistered`), and optional secret. Methods are `none`, `client_secret_basic`,
   and `client_secret_post`.
-- `initial-token`: save an owner-supplied DCR `secret`, bound to `serverId`, `issuer`, and `registrationEndpoint`.
+- `initial-token`: save an operator-supplied DCR `secret`, bound to `serverId`, `issuer`, and `registrationEndpoint`.
 - `begin`: supply `serverId`, server-side `browserNonce`, optional `issuer`, `scope`, `initialTokenId`,
   and chat `requestId`. The result contains a consent summary and authorization URL, not tokens.
 - `complete`: supply the same browser binding, returned `state`, `code`, optional response `issuer`,
   or `denied: true`. A transaction can be claimed only once.
-- `attach`: bind an already-owned `credentialId` to its original chat `requestId`, then resume only
+- `attach`: bind an existing server-bound `credentialId` to its original chat `requestId`, then resume only
   initial discovery. This is also the secure Bearer-input path for chat registration.
-- `status`: supply `serverId`; receive only the caller's credential and transaction metadata.
+- `status`: supply `serverId`; receive only credential and transaction metadata for that server, never secrets.
 
 The CLI-only counterparts `client-loopback`, `begin-loopback`, and `complete-loopback` retain these
-principal and vault boundaries. Begin/complete require an exact validated `loopbackRedirectUri`
+private-host and vault boundaries. Begin/complete require an exact validated `loopbackRedirectUri`
 and a process-local random `browserNonce`. A native transaction cannot be completed through the UI
 callback, or at another loopback port. The normal UI operations reject loopback overrides.
 
 Discovery supports protected-resource metadata, RFC 8414 and OIDC metadata, exact issuer pinning,
 preregistration, metadata-document clients, and explicit dynamic registration. Authorization Code
-uses PKCE S256 and a ten-minute state transaction. Principal, browser, registration revision,
+uses PKCE S256 and a ten-minute state transaction. Browser, registration revision,
 issuer, client, resource, scope, and redirect URI are bound to the transaction. The UI must display
 the consent summary before navigating and must never log callback codes or state. Its callback
 must use `Cache-Control: no-store` and `Referrer-Policy: no-referrer` and redirect to a fixed result
@@ -143,12 +144,12 @@ before best-effort AS revocation. The result distinguishes unconfirmed external 
 ## Chat registration
 
 The default built-in `mcp_registration` tool accepts register/status/connect/discover/assign requests,
-not actor identity, credentials, or approval flags. The host verifies original owner-intake receipts,
-root conversation, adopted input set, principal, and running task. Legacy `pi.user`, peer, schedule,
-and mixed-origin runs cannot authorize mutations. Read-only status can be shown after a non-owner
-completion event.
+not actor identity, credentials, or approval flags. The host verifies original direct-operator input
+receipts, root conversation, adopted input set, and running task. Removing user ownership does not
+make external data authoritative: legacy `pi.user`, peer, schedule, and mixed-origin runs cannot
+authorize mutations. Read-only status can be shown after an MCP completion event.
 
-The deliberately limited, whole-message owner syntax is:
+The deliberately limited, whole-message operator syntax is:
 
 ```text
 /mcp register NAME
@@ -161,12 +162,12 @@ in chat, never searched or invented. The host attempts initial unauthenticated i
 for a secure connection when needed. OAuth consent or credential attachment resumes discovery,
 **not assignment**. A host-generated, paged proposal lists endpoint, revision, tool IDs, names,
 external descriptions, and rejected definitions. Its default target is the current agent; a proposal
-may target another agent owned by the same principal. Only the exact proposal/tool/agent confirmation
+may target another active working agent in this installation. Only the exact proposal/tool/agent confirmation
 consumes the short-lived, single-use selection intent. A vague OK does not count, and there is no
 second UI approval after that confirmation.
 
 Progress is durable. Recovery resumes discovery or deduplicated inbox delivery, never code exchange,
-assignment, or a failed tool call. Completion notices have MCP provenance, not owner provenance.
+assignment, or a failed tool call. Completion notices have MCP provenance, not direct-operator input provenance.
 
 ## Execution limits and external data
 
@@ -184,8 +185,8 @@ A list-change notification marks the catalog stale and creates an inbox notice, 
 
 A durable call journal records safe classifications, not arguments or outputs. An interrupted call
 becomes `outcome_unknown`. Failure refusal survives model steps and eviction, and only an adopted
-authenticated owner input opens a new retry epoch. Credential failures and catalog changes appear
-in the existing inbox; scope expansion requires fresh owner consent.
+authenticated direct-operator input opens a new retry epoch. Credential failures and catalog changes appear
+in the existing inbox; scope expansion requires fresh operator consent.
 
 ## Local verification
 

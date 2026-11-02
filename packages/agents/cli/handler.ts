@@ -95,9 +95,9 @@ export async function handleCli(
         if (body.length > 65_536) throw new Error('mcp_request_limit')
         const input: unknown = JSON.parse(body)
         if (rawAgentRef === 'manage' && management.mcpManage)
-          return Response.json(await management.mcpManage(CLI_ACTOR, input))
+          return Response.json(await management.mcpManage(input))
         if (rawAgentRef === 'auth' && management.mcpAuth)
-          return Response.json(await management.mcpAuth(CLI_ACTOR, input))
+          return Response.json(await management.mcpAuth(input))
         return new Response('Not found', { status: 404 })
       } catch {
         return Response.json({ error: 'mcp_management_failed' }, { status: 400 })

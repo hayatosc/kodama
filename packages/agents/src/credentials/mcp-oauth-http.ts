@@ -32,7 +32,7 @@ const metadataSchema = v.looseObject({
   client_id_metadata_document_supported: v.optional(v.boolean(), false),
 })
 
-/** Immutable issuer endpoints presented to the owner before authorization. */
+/** Immutable issuer endpoints presented to the operator before authorization. */
 export type McpOAuthMetadata = v.InferOutput<typeof metadataSchema>
 
 /** Reject missing configuration rather than constructing a callback from a request Host. */

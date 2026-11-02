@@ -1,5 +1,5 @@
 /** Shared MCP workflows for RPC, CLI and host-authorized chat operations.
- * Discovery never assigns tools. Each assignment is an explicit owner-selected immutable version.
+ * Discovery never assigns tools. Each assignment is an explicit operator-selected immutable version.
  * @module
  */
 import { mcpNoticeRecipients, mcpRevocationRecipients } from '../mcp-notifications.ts'
@@ -20,7 +20,7 @@ import { authorizeMcp } from '../../credentials/mcp-refresh.ts'
 import { mcpToken } from '../../credentials/mcp-vault.ts'
 import { inspectMcpTool, mcpDigest } from '../../tools/mcp/definitions.ts'
 import { closeMcpSession, listMcpTools, openMcpSession } from '../../tools/mcp/transport.ts'
-import { mcpCatalogTools, mcpCommit, ownedMcpServer } from '../mcp.ts'
+import { mcpCatalogTools, mcpCommit, mcpServer } from '../mcp.ts'
 import { auditStatement } from '../audit.ts'
 import { parseSettings } from '../config.ts'
 import { versionRow, writeVersionStatements } from '../versions.ts'
@@ -49,11 +49,6 @@ export async function notifyMcpAssignments(call: ManagementCall, serverId?: stri
   }
 }
 
-function principal(call: ManagementCall) {
-  if (!call.principal || call.principal.disabledAt !== null) throw new Error('mcp_owner_required')
-  return call.principal.principalId
-}
-
 /** Publish only a complete validated discovery; failed inspection leaves the previous catalog intact. */
 export async function discoverMcp(
   call: ManagementCall,
@@ -61,14 +56,13 @@ export async function discoverMcp(
   serverId: string,
   credentialId: string | undefined,
 ) {
-  const principalId = principal(call)
-  const server = await ownedMcpServer(call.db, principalId, serverId)
+  const server = await mcpServer(call.db, serverId)
   const signal = AbortSignal.timeout(10_000)
   const authorize = async () => {
-    const current = await ownedMcpServer(call.db, principalId, serverId)
+    const current = await mcpServer(call.db, serverId)
     if (current.revision !== server.revision) throw new Error('mcp_server_changed')
     return credentialId
-      ? authorizeMcp(call.db, kek, principalId, serverId, credentialId, server.endpoint, signal)
+      ? authorizeMcp(call.db, kek, serverId, credentialId, server.endpoint, signal)
       : undefined
   }
   let inspected: Awaited<ReturnType<typeof inspectMcpTool>>[]
@@ -100,7 +94,7 @@ export async function discoverMcp(
   }
   if (new Set(inspected.map((tool) => tool.name)).size !== inspected.length)
     throw new Error('mcp_catalog_invalid')
-  const current = await ownedMcpServer(call.db, principalId, serverId)
+  const current = await mcpServer(call.db, serverId)
   if (current.revision !== server.revision) throw new Error('mcp_server_changed')
   const previous = await call.db.select().from(mcpTools).where(eq(mcpTools.serverId, serverId))
   const tools = inspected.map((tool) => {
@@ -126,7 +120,6 @@ export async function discoverMcp(
   await call.db.batch([
     mcpCommit(
       call.db,
-      principalId,
       uuidv7(),
       exists(
         call.db
@@ -135,7 +128,6 @@ export async function discoverMcp(
           .where(
             and(
               eq(mcpServers.serverId, serverId),
-              eq(mcpServers.creatorId, principalId),
               eq(mcpServers.revision, server.revision),
               eq(mcpServers.catalogVersion, server.catalogVersion),
             ),
@@ -168,7 +160,7 @@ export async function discoverMcp(
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
-      actorId: principalId,
+      source: call.source,
       action: 'mcp.discover',
       targetKind: 'system',
       targetId: serverId,
@@ -193,11 +185,9 @@ export async function assignMcp(
   },
   intent?: McpIntent,
 ) {
-  const principalId = principal(call)
   if (intent) {
     const instruction = intent.instruction
     if (
-      intent.principalId !== principalId ||
       instruction.operation !== 'assign' ||
       instruction.agentId !== input.agentId ||
       JSON.stringify(instruction.toolIds) !== JSON.stringify([...input.toolIds].sort())
@@ -210,7 +200,6 @@ export async function assignMcp(
       .get()
     if (
       !proposal ||
-      proposal.principalId !== principalId ||
       proposal.sourceAgentId !== intent.sourceAgentId ||
       proposal.conversationId !== intent.conversationId ||
       proposal.agentId !== input.agentId ||
@@ -224,13 +213,7 @@ export async function assignMcp(
     if (!Array.isArray(toolIds) || input.toolIds.some((id) => !toolIds.includes(id)))
       throw new Error('mcp_selection_invalid')
   }
-  const { server, value } = await mcpToken(
-    call.db,
-    kek,
-    principalId,
-    input.serverId,
-    input.credentialId,
-  )
+  const { server, value } = await mcpToken(call.db, kek, input.serverId, input.credentialId)
   if (!server.enabled || server.catalogDigest !== input.catalogDigest)
     throw new Error('mcp_catalog_changed')
   if (
@@ -243,15 +226,9 @@ export async function assignMcp(
   const agent = await call.db
     .select()
     .from(agents)
-    .where(
-      and(
-        eq(agents.agentId, input.agentId),
-        eq(agents.ownerId, principalId),
-        eq(agents.kind, 'working'),
-      ),
-    )
+    .where(and(eq(agents.agentId, input.agentId), eq(agents.kind, 'working')))
     .get()
-  if (!agent || agent.status !== 'active') throw new Error('mcp_agent_owner_required')
+  if (!agent || agent.status !== 'active') throw new Error('mcp_agent_unavailable')
   const catalog = await mcpCatalogTools(call.db, input.serverId)
   const selected = input.toolIds.map((id) => {
     const tool = catalog.find((entry) => entry.toolId === id)
@@ -289,7 +266,6 @@ export async function assignMcp(
   await call.db.batch([
     mcpCommit(
       call.db,
-      principalId,
       uuidv7(),
       and(
         exists(
@@ -312,7 +288,6 @@ export async function assignMcp(
             .where(
               and(
                 eq(agents.agentId, agent.agentId),
-                eq(agents.ownerId, principalId),
                 eq(agents.status, 'active'),
                 eq(agents.currentVersion, agent.currentVersion),
               ),
@@ -325,7 +300,6 @@ export async function assignMcp(
             .where(
               and(
                 eq(credentials.credentialId, input.credentialId),
-                eq(credentials.ownerId, principalId),
                 eq(credentials.status, 'active'),
               ),
             ),
@@ -337,7 +311,6 @@ export async function assignMcp(
       ? [
           mcpCommit(
             call.db,
-            principalId,
             `proposal:${intent.instruction.proposalId}`,
             exists(
               call.db
@@ -346,7 +319,8 @@ export async function assignMcp(
                 .where(
                   and(
                     eq(mcpProposals.proposalId, intent.instruction.proposalId),
-                    eq(mcpProposals.principalId, principalId),
+                    eq(mcpProposals.sourceAgentId, intent.sourceAgentId),
+                    eq(mcpProposals.conversationId, intent.conversationId),
                   ),
                 ),
             ),
@@ -355,11 +329,11 @@ export async function assignMcp(
       : []),
     ...writeVersionStatements(
       call.db,
-      { actorId: principalId, now: call.now, opId: uuidv7() },
+      { source: call.source, now: call.now, opId: uuidv7() },
       agent.agentId,
       agent.currentVersion,
       updated,
-      { comment: 'Owner selected read-only MCP tools' },
+      { comment: 'Operator selected read-only MCP tools' },
     ),
     call.db
       .delete(mcpAssignments)
@@ -379,7 +353,7 @@ export async function assignMcp(
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
-      actorId: principalId,
+      source: call.source,
       action: 'mcp.assign',
       targetKind: 'agent',
       targetId: agent.agentId,
@@ -397,26 +371,18 @@ export async function assignMcp(
   return { agentId: agent.agentId, version: agent.currentVersion + 1, apply }
 }
 
-/** Creator invalidation is immediate at the guard, regardless of other owners' pending versions. */
+/** Invalidation is immediate at the guard, regardless of pending configuration versions. */
 export async function disableMcp(call: ManagementCall, serverId: string) {
-  const principalId = principal(call)
-  const server = await ownedMcpServer(call.db, principalId, serverId)
+  const server = await mcpServer(call.db, serverId)
   await call.db.batch([
     mcpCommit(
       call.db,
-      principalId,
       uuidv7(),
       exists(
         call.db
           .select()
           .from(mcpServers)
-          .where(
-            and(
-              eq(mcpServers.serverId, serverId),
-              eq(mcpServers.revision, server.revision),
-              eq(mcpServers.creatorId, principalId),
-            ),
-          ),
+          .where(and(eq(mcpServers.serverId, serverId), eq(mcpServers.revision, server.revision))),
       ),
     ),
     call.db
@@ -426,7 +392,7 @@ export async function disableMcp(call: ManagementCall, serverId: string) {
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
-      actorId: principalId,
+      source: call.source,
       action: 'mcp.disable',
       targetKind: 'system',
       targetId: serverId,

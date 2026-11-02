@@ -1,10 +1,10 @@
-/** Shared MCP catalog persistence and creator-only mutation boundaries.
+/** Installation-wide MCP catalog persistence and atomic mutation fences.
  * Registration never grants an agent or releases a credential.
  * @module
  */
 import * as v from 'valibot'
 import { versionRow } from './versions.ts'
-import { and, eq, exists, isNull } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import {
   agents,
@@ -16,7 +16,6 @@ import {
   mcpServers,
   mcpTools,
   mcpRequests,
-  principals,
 } from '../../drizzle/management/schema.ts'
 import type { McpToolSelection } from '../protocol.ts'
 import type { ManagementDb } from './db.ts'
@@ -26,44 +25,12 @@ import { consumeMcpIntent, mcpIntentAudit } from './mcp-intents.ts'
 import type { McpIntent } from './mcp-intents.ts'
 
 /** Fail the whole batch if authorization changed, or this operation was already committed. */
-export function mcpCommit(
-  db: ManagementDb,
-  principalId: string,
-  operationId: string,
-  predicate?: SQL,
-) {
-  const authorized = and(
-    exists(
-      db
-        .select()
-        .from(principals)
-        .where(and(eq(principals.principalId, principalId), isNull(principals.disabledAt))),
-    ),
-    exists(
-      db
-        .select()
-        .from(agents)
-        .where(and(eq(agents.ownerId, principalId), eq(agents.kind, 'working'))),
-    ),
-    predicate,
-  )
-  if (!authorized) throw new Error('mcp_owner_required')
-  return db.insert(mcpCommits).values({ operationId, authorized, createdAt: Date.now() })
-}
-
-/** An enabled principal must own at least one working agent to manage MCP connections. */
-export async function mcpOwner(db: ManagementDb, principalId: string): Promise<void> {
-  const principal = await db
-    .select()
-    .from(principals)
-    .where(eq(principals.principalId, principalId))
-    .get()
-  const owned = await db
-    .select({ id: agents.agentId })
-    .from(agents)
-    .where(and(eq(agents.ownerId, principalId), eq(agents.kind, 'working')))
-    .get()
-  if (!principal || principal.disabledAt !== null || !owned) throw new Error('mcp_owner_required')
+export function mcpCommit(db: ManagementDb, operationId: string, predicate?: SQL) {
+  return db.insert(mcpCommits).values({
+    operationId,
+    authorized: predicate ?? true,
+    createdAt: Date.now(),
+  })
 }
 
 /** Resolve a shared registration by ID without creating objects or guessing endpoints. */
@@ -73,23 +40,13 @@ export async function mcpServer(db: ManagementDb, serverId: string) {
   return server
 }
 
-/** Mutations require the creating principal, even when other owners reuse the registration. */
-export async function ownedMcpServer(db: ManagementDb, principalId: string, serverId: string) {
-  await mcpOwner(db, principalId)
-  const server = await mcpServer(db, serverId)
-  if (server.creatorId !== principalId) throw new Error('mcp_creator_required')
-  return server
-}
-
 /** The common catalog contains no credentials or authentication transaction state. */
-export async function listMcpCatalog(db: ManagementDb, principalId: string) {
-  await mcpOwner(db, principalId)
+export async function listMcpCatalog(db: ManagementDb) {
   return db.select().from(mcpServers)
 }
 
 /** Name-only resolution never searches the network or chooses between ambiguous matches. */
-export async function resolveMcpName(db: ManagementDb, principalId: string, name: string) {
-  await mcpOwner(db, principalId)
+export async function resolveMcpName(db: ManagementDb, name: string) {
   const rows = await db.select().from(mcpServers).where(eq(mcpServers.name, name))
   return rows.length === 1 ? rows[0] : undefined
 }
@@ -97,18 +54,15 @@ export async function resolveMcpName(db: ManagementDb, principalId: string, name
 /** Reuse the exact endpoint globally. A new registration remains disabled until vetted. */
 export async function registerMcpCatalog(
   db: ManagementDb,
-  principalId: string,
   name: string,
   endpoint: string,
   now: number,
   intent?: McpIntent,
 ) {
-  await mcpOwner(db, principalId)
   const previous = await db.select().from(mcpServers).where(eq(mcpServers.endpoint, endpoint)).get()
   if (
     intent &&
-    (intent.principalId !== principalId ||
-      intent.instruction.operation !== 'register' ||
+    (intent.instruction.operation !== 'register' ||
       intent.instruction.name !== name ||
       (intent.instruction.endpoint && intent.instruction.endpoint !== endpoint))
   )
@@ -117,7 +71,6 @@ export async function registerMcpCatalog(
   const request = intent
     ? db.insert(mcpRequests).values({
         requestId: uuidv7(now),
-        principalId,
         sourceAgentId: intent.sourceAgentId,
         conversationId: intent.conversationId,
         entryId: intent.entryId,
@@ -133,13 +86,13 @@ export async function registerMcpCatalog(
   if (previous) {
     if (intent && request)
       await db.batch([
-        mcpCommit(db, principalId, `mcp.register.chat:${intent.intentId}`),
+        mcpCommit(db, `mcp.register.chat:${intent.intentId}`),
         ...consumeMcpIntent(db, intent),
         request,
         auditStatement(db, {
           opId: `mcp.register.chat:${intent.intentId}`,
           at: now,
-          actorId: principalId,
+          source: 'operator',
           action: 'mcp.register',
           targetKind: 'system',
           targetId: serverId,
@@ -151,13 +104,12 @@ export async function registerMcpCatalog(
   // Full random UUID material fits the 64-character model name budget with short tool IDs.
   const shortId = serverId.replaceAll('-', '').slice(12)
   await db.batch([
-    mcpCommit(db, principalId, `mcp.register:${serverId}`),
+    mcpCommit(db, `mcp.register:${serverId}`),
     ...(intent ? consumeMcpIntent(db, intent) : []),
     ...(request ? [request] : []),
     db.insert(mcpServers).values({
       serverId,
       shortId,
-      creatorId: principalId,
       name,
       endpoint,
       createdAt: now,
@@ -166,7 +118,7 @@ export async function registerMcpCatalog(
     auditStatement(db, {
       opId: `mcp.register:${serverId}`,
       at: now,
-      actorId: principalId,
+      source: 'operator',
       action: 'mcp.register',
       targetKind: 'system',
       targetId: serverId,
@@ -191,9 +143,8 @@ export async function guardMcpSelection(
   selected: McpToolSelection,
 ) {
   const agent = await db.select().from(agents).where(eq(agents.agentId, agentId)).get()
-  if (!agent || agent.kind !== 'working' || agent.status !== 'active' || !agent.ownerId)
+  if (!agent || agent.kind !== 'working' || agent.status !== 'active')
     throw new Error('mcp_agent_unavailable')
-  await mcpOwner(db, agent.ownerId)
   const desired = await versionRow(db, agent.agentId, agent.currentVersion)
   if (!desired) throw new Error('mcp_tool_disabled')
   const desiredValue: unknown = JSON.parse(desired.settingsJson)
@@ -231,7 +182,6 @@ export async function guardMcpSelection(
     .where(
       and(
         eq(credentials.credentialId, selected.credentialId),
-        eq(credentials.ownerId, agent.ownerId),
         eq(credentials.provider, selected.serverId),
         eq(credentials.purpose, 'mcp_server'),
         eq(credentials.status, 'active'),
@@ -255,7 +205,7 @@ export async function guardMcpSelection(
     assignment.serverRevision !== selected.serverRevision
   )
     throw new Error('mcp_assignment_revoked')
-  return { principalId: agent.ownerId, endpoint: server.endpoint, remoteName: tool.remoteName }
+  return { endpoint: server.endpoint, remoteName: tool.remoteName }
 }
 
 /** Read only the current vetted definitions; descriptions remain untrusted external data. */

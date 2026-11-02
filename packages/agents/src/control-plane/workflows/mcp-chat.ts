@@ -4,7 +4,6 @@ import {
   mcpProposals,
   mcpRequests,
   mcpOAuthTransactions,
-  principals,
 } from '../../../drizzle/management/schema.ts'
 import type { ManagementCall } from './agents.ts'
 import {
@@ -15,8 +14,7 @@ import {
   resolveMcpName,
 } from '../mcp.ts'
 import { record } from '../../tools/web/stream.ts'
-import { agentRowByObjectName } from '../registry.ts'
-import { consumeMcpIntent, mcpChatPrincipal } from '../mcp-intents.ts'
+import { consumeMcpIntent, requireMcpAgent } from '../mcp-intents.ts'
 import type { McpEvidence, McpIntent } from '../mcp-intents.ts'
 import { mcpToken } from '../../credentials/mcp-vault.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
@@ -24,7 +22,7 @@ import type { McpRegistrationInput } from '../../tools/mcp/registration.ts'
 import { assignMcp, discoverMcp } from './mcp.ts'
 import { mcpConnectLink } from './mcp-management.ts'
 
-/** A request belongs to its source owner and conversation, not whoever knows its identifier. */
+/** A request is scoped to its source agent and conversation, not merely its identifier. */
 export async function mcpChatRequest(
   call: ManagementCall,
   evidence: McpEvidence,
@@ -35,7 +33,6 @@ export async function mcpChatRequest(
     .from(mcpRequests)
     .where(
       and(
-        eq(mcpRequests.principalId, evidence.principalId),
         eq(mcpRequests.sourceAgentId, evidence.sourceAgentId),
         eq(mcpRequests.conversationId, evidence.conversationId),
         serverId ? eq(mcpRequests.serverId, serverId) : undefined,
@@ -52,36 +49,22 @@ export async function completeMcpRegistration(
   requestId: string,
   credentialId: string,
 ) {
-  if (!call.principal) throw new Error('mcp_owner_required')
   const request = await call.db
     .select()
     .from(mcpRequests)
     .where(eq(mcpRequests.requestId, requestId))
     .get()
-  if (
-    !request ||
-    request.principalId !== call.principal.principalId ||
-    !request.serverId ||
-    request.expiresAt <= Date.now()
-  )
+  if (!request || !request.serverId || request.expiresAt <= Date.now())
     throw new Error('mcp_registration_expired')
-  const { server } = await mcpToken(
-    call.db,
-    kek,
-    request.principalId,
-    request.serverId,
-    credentialId,
-  )
+  const { server } = await mcpToken(call.db, kek, request.serverId, credentialId)
   if (server.revision !== request.serverRevision) throw new Error('mcp_registration_changed')
   if (request.status === 'discovered') return request
   await call.db
     .update(mcpRequests)
     .set({ credentialId, status: 'ready_for_discovery' })
     .where(eq(mcpRequests.requestId, requestId))
-  // Shared registrations can be reused by another owner, but only the creator can refresh definitions.
-  if (server.creatorId === request.principalId)
-    await discoverMcp(call, kek, server.serverId, credentialId)
-  else if (!server.enabled || !server.catalogDigest) throw new Error('mcp_creator_review_required')
+  await requireMcpAgent(call.db, request.sourceAgentId)
+  await discoverMcp(call, kek, server.serverId, credentialId)
   await call.db
     .update(mcpRequests)
     .set({ status: 'discovered' })
@@ -132,9 +115,8 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
       ),
     )
   const rows = await call.db
-    .select({ request: mcpRequests, principal: principals })
+    .select()
     .from(mcpRequests)
-    .innerJoin(principals, eq(principals.principalId, mcpRequests.principalId))
     .where(
       and(
         isNull(mcpRequests.notifiedAt),
@@ -142,15 +124,10 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
       ),
     )
     .limit(100)
-  for (const { request, principal } of rows) {
+  for (const request of rows) {
     try {
       if (request.status === 'ready_for_discovery' && request.credentialId)
-        await completeMcpRegistration(
-          { ...call, principal },
-          kek,
-          request.requestId,
-          request.credentialId,
-        )
+        await completeMcpRegistration(call, kek, request.requestId, request.credentialId)
       await call.env.AGENTS.getByName(request.sourceAgentId).mcpRegistrationNotice(
         request.requestId,
       )
@@ -164,7 +141,7 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
   }
 }
 
-/** Notice reads are scoped to their original object, not to a model-supplied principal. */
+/** Notice reads are scoped to their original object, never to model-claimed authority. */
 export async function mcpRegistrationNotice(
   db: ManagementCall['db'],
   agentId: string,
@@ -183,8 +160,8 @@ export async function mcpRegistrationNotice(
     outcome: request.status === 'discovered' ? ('succeeded' as const) : ('failed' as const),
     summary:
       request.status === 'discovered'
-        ? `MCP discovery completed for registration ${request.requestId}. No tools were assigned. The owner can request a selection proposal.`
-        : `MCP registration ${request.requestId} requires owner attention. No tools were assigned.`,
+        ? `MCP discovery completed for registration ${request.requestId}. No tools were assigned. The operator can request a selection proposal.`
+        : `MCP registration ${request.requestId} requires operator attention. No tools were assigned.`,
     artifactIds: [],
   }
 }
@@ -207,7 +184,7 @@ async function proposal(
     throw new Error('mcp_catalog_changed')
   const tools = await mcpCatalogTools(call.db, server.serverId)
   const agentId = input.agentId ?? request.sourceAgentId
-  await mcpChatPrincipal(call.db, request.principalId, agentId)
+  await requireMcpAgent(call.db, agentId)
   const page = input.page ?? 0
   if (!Number.isInteger(page) || page < 0 || page > 9) throw new Error('mcp_page_invalid')
   const previous = input.proposalId
@@ -222,7 +199,6 @@ async function proposal(
     (!previous ||
       previous.requestId !== request.requestId ||
       previous.agentId !== agentId ||
-      previous.principalId !== request.principalId ||
       previous.expiresAt <= Date.now() ||
       previous.catalogDigest !== server.catalogDigest ||
       previous.serverRevision !== server.revision ||
@@ -234,7 +210,6 @@ async function proposal(
     await call.db.insert(mcpProposals).values({
       proposalId,
       requestId: request.requestId,
-      principalId: request.principalId,
       sourceAgentId: request.sourceAgentId,
       conversationId: request.conversationId,
       serverId: server.serverId,
@@ -281,9 +256,7 @@ export async function readMcpChatStatus(
   conversationId: string,
   input: McpRegistrationInput,
 ) {
-  const agent = await agentRowByObjectName(db, sourceAgentId)
-  if (!agent?.ownerId) throw new Error('mcp_owner_required')
-  await mcpChatPrincipal(db, agent.ownerId, sourceAgentId)
+  await requireMcpAgent(db, sourceAgentId)
   const request = await db
     .select()
     .from(mcpRequests)
@@ -291,7 +264,6 @@ export async function readMcpChatStatus(
       and(
         eq(mcpRequests.sourceAgentId, sourceAgentId),
         eq(mcpRequests.conversationId, conversationId),
-        eq(mcpRequests.principalId, agent.ownerId),
         input.serverId ? eq(mcpRequests.serverId, input.serverId) : undefined,
       ),
     )
@@ -303,7 +275,7 @@ export async function readMcpChatStatus(
   return proposal({ db }, request, input)
 }
 
-/** Invoked only after the host verifies the still-running owner's adopted inputs. */
+/** Invoked only after the host verifies the still-running operator input receipts. */
 export async function chatMcp(
   call: ManagementCall,
   kek: string,
@@ -312,8 +284,7 @@ export async function chatMcp(
   input: McpRegistrationInput,
   intent?: McpIntent,
 ): Promise<unknown> {
-  if (!call.principal || call.principal.principalId !== evidence.principalId)
-    throw new Error('mcp_owner_required')
+  await requireMcpAgent(call.db, evidence.sourceAgentId)
   if (input.operation === 'register') {
     if (
       !intent ||
@@ -325,11 +296,11 @@ export async function chatMcp(
     const instruction = intent.instruction
     const existing = instruction.endpoint
       ? undefined
-      : await resolveMcpName(call.db, evidence.principalId, instruction.name)
+      : await resolveMcpName(call.db, instruction.name)
     const endpoint = instruction.endpoint ?? existing?.endpoint
     if (!endpoint) {
       await call.db.batch([
-        mcpCommit(call.db, evidence.principalId, uuidv7()),
+        mcpCommit(call.db, uuidv7()),
         ...consumeMcpIntent(call.db, intent),
         call.db.insert(mcpRequests).values({
           requestId: uuidv7(),
@@ -341,18 +312,18 @@ export async function chatMcp(
       ])
       return {
         status: 'awaiting_endpoint',
-        instruction: 'Ask the owner for /mcp register NAME HTTPS_ENDPOINT; do not search or guess.',
+        instruction:
+          'Ask the operator for /mcp register NAME HTTPS_ENDPOINT; do not search or guess.',
       }
     }
     const registered = await registerMcpCatalog(
       call.db,
-      evidence.principalId,
       instruction.name,
       endpoint,
       call.now,
       intent,
     )
-    if (!registered.catalogDigest && registered.creatorId === evidence.principalId) {
+    if (!registered.catalogDigest) {
       try {
         await discoverMcp(call, kek, registered.serverId, undefined)
       } catch {
@@ -366,7 +337,7 @@ export async function chatMcp(
         and(
           eq(mcpRequests.sourceAgentId, evidence.sourceAgentId),
           eq(mcpRequests.entryId, evidence.entryId),
-          eq(mcpRequests.principalId, evidence.principalId),
+          eq(mcpRequests.conversationId, evidence.conversationId),
         ),
       )
   }

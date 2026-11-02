@@ -1,12 +1,7 @@
 /** Local OAuth fixtures exercise PKCE, single-use callbacks and purpose isolation, not real servers. @module */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
-import {
-  agents,
-  credentials,
-  mcpOAuthTransactions,
-  principals,
-} from '../../drizzle/management/schema.ts'
+import { credentials, mcpOAuthTransactions } from '../../drizzle/management/schema.ts'
 import { management } from '../testing/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { registerMcpCatalog } from '../control-plane/mcp.ts'
@@ -27,32 +22,9 @@ const tokenCalls = (calls: Parameters<typeof fetch>[]) =>
   )
 
 async function setup() {
-  const principalId = uuidv7()
-  const agentId = uuidv7()
   const now = Date.now()
-  await management.batch([
-    management.insert(principals).values({
-      principalId,
-      externalId: principalId,
-      kind: 'user',
-      displayName: 'OAuth owner',
-      createdAt: now,
-    }),
-    management.insert(agents).values({
-      agentId,
-      objectName: agentId,
-      kind: 'working',
-      displayName: 'OAuth agent',
-      status: 'active',
-      currentVersion: 1,
-      ownerId: principalId,
-      createdAt: now,
-      updatedAt: now,
-    }),
-  ])
   const server = await registerMcpCatalog(
     management,
-    principalId,
     'OAuth fixture',
     `https://${uuidv7()}.example.com/mcp`,
     now,
@@ -92,16 +64,16 @@ async function setup() {
     throw new Error('Unexpected fixture URL')
   })
   vi.stubGlobal('fetch', fetcher)
-  return { principalId, server, fetcher }
+  return { server, fetcher }
 }
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('MCP OAuth transactions', () => {
   it('completes native PKCE into the existing vault without a UI origin and fences callback channels', async () => {
-    const { principalId, server, fetcher } = await setup()
+    const { server, fetcher } = await setup()
     const loopbackRedirectUri = 'http://127.0.0.1:49152/auth/mcp/callback'
-    await manageMcpOAuth(management, kek, '', principalId, {
+    await manageMcpOAuth(management, kek, '', {
       operation: 'client-loopback',
       serverId: server.serverId,
       client: {
@@ -116,7 +88,6 @@ describe('MCP OAuth transactions', () => {
       management,
       kek,
       '',
-      principalId,
       server.serverId,
       browserNonce,
       undefined,
@@ -131,34 +102,28 @@ describe('MCP OAuth transactions', () => {
     expect(authorization.searchParams.get('redirect_uri')).toBe(loopbackRedirectUri)
     const state = authorization.searchParams.get('state') ?? ''
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, {
+      completeMcpOAuth(management, kek, origin, {
         state,
         browserNonce,
         code: 'native-code',
       }),
     ).rejects.toThrow('mcp_auth_binding_changed')
     await expect(
-      completeMcpOAuth(management, kek, '', principalId, {
+      completeMcpOAuth(management, kek, '', {
         state,
         browserNonce,
         code: 'native-code',
         loopbackRedirectUri: 'http://127.0.0.1:49153/auth/mcp/callback',
       }),
     ).rejects.toThrow('mcp_auth_binding_changed')
-    const completed = await completeMcpOAuth(management, kek, '', principalId, {
+    const completed = await completeMcpOAuth(management, kek, '', {
       state,
       browserNonce,
       code: 'native-code',
       loopbackRedirectUri,
     })
     if (completed.status !== 'completed') throw new Error('Expected completion')
-    const stored = await mcpToken(
-      management,
-      kek,
-      principalId,
-      server.serverId,
-      completed.credentialId,
-    )
+    const stored = await mcpToken(management, kek, server.serverId, completed.credentialId)
     expect(stored.value.access).toBe('access-fixture')
     expect(JSON.stringify(completed)).not.toContain('access-fixture')
     const tokenBody = tokenCalls(fetcher.mock.calls)[0]?.[1]?.body
@@ -166,7 +131,7 @@ describe('MCP OAuth transactions', () => {
       loopbackRedirectUri,
     )
     await expect(
-      completeMcpOAuth(management, kek, '', principalId, {
+      completeMcpOAuth(management, kek, '', {
         state,
         browserNonce,
         code: 'native-code',
@@ -177,13 +142,12 @@ describe('MCP OAuth transactions', () => {
   })
 
   it('does not use the UI metadata client for a native redirect', async () => {
-    const { principalId, server } = await setup()
+    const { server } = await setup()
     await expect(
       startMcpOAuth(
         management,
         kek,
         '',
-        principalId,
         server.serverId,
         browserNonce,
         undefined,
@@ -208,7 +172,7 @@ describe('MCP OAuth transactions', () => {
     expect(() => mcpLoopbackRedirect(redirect)).toThrow()
   })
   it('serializes refresh across callers and rotates the encrypted refresh token once', async () => {
-    const { principalId, server, fetcher } = await setup()
+    const { server, fetcher } = await setup()
     const original = fetcher.getMockImplementation()
     fetcher.mockImplementation(async (input, options) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -230,15 +194,8 @@ describe('MCP OAuth transactions', () => {
       if (!original) throw new Error('Missing fixture')
       return original(input, options)
     })
-    const start = await startMcpOAuth(
-      management,
-      kek,
-      origin,
-      principalId,
-      server.serverId,
-      browserNonce,
-    )
-    const completed = await completeMcpOAuth(management, kek, origin, principalId, {
+    const start = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
+    const completed = await completeMcpOAuth(management, kek, origin, {
       state: new URL(start.authorizationUrl).searchParams.get('state') ?? '',
       browserNonce,
       code: 'code',
@@ -249,7 +206,6 @@ describe('MCP OAuth transactions', () => {
         authorizeMcp(
           management,
           kek,
-          principalId,
           server.serverId,
           completed.credentialId,
           server.endpoint,
@@ -259,27 +215,14 @@ describe('MCP OAuth transactions', () => {
     )
     expect(values).toEqual(['rotated-access', 'rotated-access'])
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(2)
-    const stored = await mcpToken(
-      management,
-      kek,
-      principalId,
-      server.serverId,
-      completed.credentialId,
-    )
+    const stored = await mcpToken(management, kek, server.serverId, completed.credentialId)
     expect(stored.value.kind === 'mcp_oauth' && stored.value.refresh).toBe('rotated-refresh')
   })
 
   it('an expired refresh lease requires reauthorization rather than replay, and remains disconnectable', async () => {
-    const { principalId, server, fetcher } = await setup()
-    const start = await startMcpOAuth(
-      management,
-      kek,
-      origin,
-      principalId,
-      server.serverId,
-      browserNonce,
-    )
-    const completed = await completeMcpOAuth(management, kek, origin, principalId, {
+    const { server, fetcher } = await setup()
+    const start = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
+    const completed = await completeMcpOAuth(management, kek, origin, {
       state: new URL(start.authorizationUrl).searchParams.get('state') ?? '',
       browserNonce,
       code: 'code',
@@ -293,7 +236,6 @@ describe('MCP OAuth transactions', () => {
       authorizeMcp(
         management,
         kek,
-        principalId,
         server.serverId,
         completed.credentialId,
         server.endpoint,
@@ -302,25 +244,16 @@ describe('MCP OAuth transactions', () => {
     ).rejects.toThrow('mcp_reauth_required')
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(1)
     expect(
-      (await disconnectMcp(management, kek, principalId, server.serverId, completed.credentialId))
-        .status,
+      (await disconnectMcp(management, kek, server.serverId, completed.credentialId)).status,
     ).toBe('revoked')
     expect(
-      (await disconnectMcp(management, kek, principalId, server.serverId, completed.credentialId))
-        .status,
+      (await disconnectMcp(management, kek, server.serverId, completed.credentialId)).status,
     ).toBe('revoked')
   })
 
-  it('binds PKCE, resource, browser and principal; creates no agent grant and never returns tokens', async () => {
-    const { principalId, server, fetcher } = await setup()
-    const started = await startMcpOAuth(
-      management,
-      kek,
-      origin,
-      principalId,
-      server.serverId,
-      browserNonce,
-    )
+  it('binds PKCE, resource and browser without a user identity; creates no agent grant and never returns tokens', async () => {
+    const { server, fetcher } = await setup()
+    const started = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
     const authorization = new URL(started.authorizationUrl)
     const state = authorization.searchParams.get('state') ?? ''
     expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
@@ -328,21 +261,21 @@ describe('MCP OAuth transactions', () => {
     expect(authorization.searchParams.get('redirect_uri')).toBe(`${origin}/auth/mcp/callback`)
     expect(authorization.searchParams.get('code_challenge')).toHaveLength(43)
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, {
+      completeMcpOAuth(management, kek, origin, {
         state,
         browserNonce: 'different-browser-nonce-at-least-32-chars',
         code: 'code',
       }),
     ).rejects.toThrow('mcp_auth_callback_invalid')
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, {
+      completeMcpOAuth(management, kek, origin, {
         state,
         browserNonce,
         code: 'code',
         issuer: 'https://evil.example.com/',
       }),
     ).rejects.toThrow('mcp_auth_binding_changed')
-    const completed = await completeMcpOAuth(management, kek, origin, principalId, {
+    const completed = await completeMcpOAuth(management, kek, origin, {
       state,
       browserNonce,
       code: 'code',
@@ -352,8 +285,7 @@ describe('MCP OAuth transactions', () => {
     if (completed.status !== 'completed') throw new Error('Expected completion')
     expect(JSON.stringify(completed)).not.toContain('access-fixture')
     expect(
-      (await mcpToken(management, kek, principalId, server.serverId, completed.credentialId)).value
-        .access,
+      (await mcpToken(management, kek, server.serverId, completed.credentialId)).value.access,
     ).toBe('access-fixture')
     expect(() => parseCredential('mcp_oauth', '{}')).toThrow(
       'credential_unavailable: wrong purpose',
@@ -372,7 +304,7 @@ describe('MCP OAuth transactions', () => {
       .replace(/=+$/u, '')
     expect(challenge).toBe(authorization.searchParams.get('code_challenge'))
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, { state, browserNonce, code: 'code' }),
+      completeMcpOAuth(management, kek, origin, { state, browserNonce, code: 'code' }),
     ).rejects.toThrow('mcp_auth_callback_invalid')
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(1)
     const transaction = await management
@@ -389,39 +321,25 @@ describe('MCP OAuth transactions', () => {
   })
 
   it('makes a failed exchange terminal rather than replaying a code', async () => {
-    const { principalId, server, fetcher } = await setup()
-    const started = await startMcpOAuth(
-      management,
-      kek,
-      origin,
-      principalId,
-      server.serverId,
-      browserNonce,
-    )
+    const { server, fetcher } = await setup()
+    const started = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
     const state = new URL(started.authorizationUrl).searchParams.get('state') ?? ''
     fetcher.mockRejectedValue(new Error('secret upstream diagnostic'))
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, { state, browserNonce, code: 'code' }),
+      completeMcpOAuth(management, kek, origin, { state, browserNonce, code: 'code' }),
     ).rejects.toThrow('mcp_reauth_required')
     await expect(
-      completeMcpOAuth(management, kek, origin, principalId, { state, browserNonce, code: 'code' }),
+      completeMcpOAuth(management, kek, origin, { state, browserNonce, code: 'code' }),
     ).rejects.toThrow('mcp_auth_callback_invalid')
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(1)
   })
 
   it('erases denied transactions without exchanging codes', async () => {
-    const { principalId, server, fetcher } = await setup()
-    const started = await startMcpOAuth(
-      management,
-      kek,
-      origin,
-      principalId,
-      server.serverId,
-      browserNonce,
-    )
+    const { server, fetcher } = await setup()
+    const started = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
     const state = new URL(started.authorizationUrl).searchParams.get('state') ?? ''
     expect(
-      await completeMcpOAuth(management, kek, origin, principalId, {
+      await completeMcpOAuth(management, kek, origin, {
         state,
         browserNonce,
         denied: true,
@@ -430,24 +348,17 @@ describe('MCP OAuth transactions', () => {
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(0)
   })
 
-  it('isolates bearer credentials by owner and endpoint, and revokes locally', async () => {
-    const { principalId, server } = await setup()
+  it('isolates bearer credentials by server and endpoint, and revokes locally', async () => {
+    const { server } = await setup()
     const other = await setup()
-    const created = await putMcpBearer(
-      management,
-      kek,
-      principalId,
-      server.serverId,
-      'bearer-fixture',
-    )
+    const created = await putMcpBearer(management, kek, server.serverId, 'bearer-fixture')
     await expect(
-      mcpToken(management, kek, other.principalId, server.serverId, created.credentialId),
+      mcpToken(management, kek, other.server.serverId, created.credentialId),
     ).rejects.toThrow('mcp_auth_required')
     await expect(
       authorizeMcp(
         management,
         kek,
-        principalId,
         server.serverId,
         created.credentialId,
         'https://other.example.com/mcp',
@@ -458,18 +369,18 @@ describe('MCP OAuth transactions', () => {
       await authorizeMcp(
         management,
         kek,
-        principalId,
         server.serverId,
         created.credentialId,
         server.endpoint,
         AbortSignal.timeout(1000),
       ),
     ).toBe('bearer-fixture')
-    expect(
-      await disconnectMcp(management, kek, principalId, server.serverId, created.credentialId),
-    ).toEqual({ status: 'revoked', externalRevocation: 'unavailable' })
-    await expect(
-      mcpToken(management, kek, principalId, server.serverId, created.credentialId),
-    ).rejects.toThrow('mcp_auth_required')
+    expect(await disconnectMcp(management, kek, server.serverId, created.credentialId)).toEqual({
+      status: 'revoked',
+      externalRevocation: 'unavailable',
+    })
+    await expect(mcpToken(management, kek, server.serverId, created.credentialId)).rejects.toThrow(
+      'mcp_auth_required',
+    )
   })
 })

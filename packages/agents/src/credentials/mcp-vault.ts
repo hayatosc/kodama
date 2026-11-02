@@ -1,12 +1,12 @@
 /** MCP-purpose envelopes in the existing credential vault, isolated from model-provider access.
- * Callers supply authenticated principals; an agent identity alone cannot release a secret.
+ * Private management and live per-agent grants are distinct from server-bound token resolution.
  * @module
  */
 import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import { credentials, credentialGrants, agents } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpOwner, mcpServer } from '../control-plane/mcp.ts'
+import { mcpServer } from '../control-plane/mcp.ts'
 import { auditStatement } from '../control-plane/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
@@ -51,13 +51,12 @@ export function mcpClientSecretPayload(
 export async function mcpClientSecret(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   credentialId: string | undefined,
   client: v.InferOutput<typeof mcpClientSchema>,
 ): Promise<string | undefined> {
   if (!credentialId) return undefined
-  const stored = await mcpSecret(db, kek, principalId, serverId, credentialId)
+  const stored = await mcpSecret(db, kek, serverId, credentialId)
   if (stored.row.kind !== 'mcp_client') throw new Error('mcp_auth_binding_invalid')
   const raw: unknown = JSON.parse(stored.secret)
   const value = v.parse(v.strictObject({ client: mcpClientSchema, secret: token }), raw)
@@ -75,7 +74,6 @@ export async function mcpClientSecret(
 export async function mcpSecretInsert(
   db: ManagementDb,
   kek: string,
-  ownerId: string,
   serverId: string,
   kind: 'mcp_bearer' | 'mcp_oauth' | 'mcp_client' | 'mcp_transaction',
   secret: string,
@@ -89,7 +87,6 @@ export async function mcpSecretInsert(
     purpose: 'mcp_server' as const,
     kind,
     provider: serverId,
-    ownerId,
     revision: 1,
   }
   const envelope = await encryptCredential(identity, secret, kek)
@@ -107,15 +104,13 @@ export async function mcpSecretInsert(
   }
 }
 
-/** Read a principal-owned, server-bound envelope with live revocation checks, never a provider row. */
+/** Read a server-bound envelope with live revocation checks, never a provider row. */
 export async function mcpSecret(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   credentialId: string,
 ) {
-  await mcpOwner(db, principalId)
   const row = await db
     .select()
     .from(credentials)
@@ -123,7 +118,6 @@ export async function mcpSecret(
       and(
         eq(credentials.credentialId, credentialId),
         eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.ownerId, principalId),
         eq(credentials.provider, serverId),
       ),
     )
@@ -154,11 +148,10 @@ export async function mcpSecret(
 export async function mcpToken(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   credentialId: string,
 ) {
-  const stored = await mcpSecret(db, kek, principalId, serverId, credentialId)
+  const stored = await mcpSecret(db, kek, serverId, credentialId)
   const parsed = v.safeParse(
     mcpTokenSchema,
     (() => {
@@ -185,23 +178,13 @@ export async function mcpToken(
   return { row: stored.row, value, server }
 }
 
-/** Agent execution needs both the original owner and a live grant, not merely a config reference. */
-export async function mcpAgentGrant(
-  db: ManagementDb,
-  principalId: string,
-  agentId: string,
-  credentialId: string,
-) {
+/** Agent execution needs an active working agent and a live grant, not merely a config reference. */
+export async function mcpAgentGrant(db: ManagementDb, agentId: string, credentialId: string) {
   const agent = await db
     .select()
     .from(agents)
     .where(
-      and(
-        eq(agents.agentId, agentId),
-        eq(agents.ownerId, principalId),
-        eq(agents.kind, 'working'),
-        eq(agents.status, 'active'),
-      ),
+      and(eq(agents.agentId, agentId), eq(agents.kind, 'working'), eq(agents.status, 'active')),
     )
     .get()
   const grant = await db
@@ -218,12 +201,10 @@ export async function mcpAgentGrant(
 export async function putMcpBearer(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   secret: string,
   now = Date.now(),
 ) {
-  await mcpOwner(db, principalId)
   const server = await mcpServer(db, serverId)
   const parsed = v.safeParse(mcpTokenSchema, {
     kind: 'mcp_bearer',
@@ -237,7 +218,6 @@ export async function putMcpBearer(
   const insert = await mcpSecretInsert(
     db,
     kek,
-    principalId,
     serverId,
     'mcp_bearer',
     JSON.stringify(parsed.output),
@@ -248,7 +228,7 @@ export async function putMcpBearer(
     auditStatement(db, {
       opId: `mcp.credential:${insert.credentialId}`,
       at: now,
-      actorId: principalId,
+      source: 'operator',
       action: 'mcp.credential.create',
       targetKind: 'system',
       targetId: serverId,

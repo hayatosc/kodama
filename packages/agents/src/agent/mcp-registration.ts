@@ -1,11 +1,11 @@
-/** Bind chat management to trusted owner receipts and the adopted running input set. @module */
+/** Bind chat management to trusted operator receipts and the adopted running input set. @module */
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
 import type { AgentEnv } from '../env.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { createAgentModels } from '../control-plane/models.ts'
-import { mcpChatPrincipal, rememberMcpIntent } from '../control-plane/mcp-intents.ts'
+import { requireMcpAgent, rememberMcpIntent } from '../control-plane/mcp-intents.ts'
 import { chatMcp, readMcpChatStatus } from '../control-plane/workflows/mcp-chat.ts'
 import { pushDesired } from '../control-plane/workflows/agents.ts'
 import { parseMcpInstruction } from '../tools/mcp/registration.ts'
@@ -14,8 +14,7 @@ import type { LocalDb } from './local-db/local.ts'
 import { ownerReplyReceipt } from './local-db/owner-intake.ts'
 import { currentRunInputs } from './runtime/inputs.ts'
 
-const provenanceSchema = v.object({
-  principalId: v.string(),
+const provenanceSchema = v.strictObject({
   conversationId: v.string(),
   requestId: v.string(),
   externalMessageId: v.string(),
@@ -68,7 +67,6 @@ export function createMcpRegistrationCall(
         !receipt ||
         receipt.state !== 'accepted' ||
         receipt.submissionId !== live.run?.inputs[index] ||
-        receipt.principalId !== provenance.principalId ||
         receipt.externalMessageId !== provenance.externalMessageId ||
         receipt.sequence !== provenance.sequence ||
         provenance.conversationId !== String(ROOT_CONVERSATION_ID)
@@ -78,7 +76,6 @@ export function createMcpRegistrationCall(
       const message = v.parse(messageSchema, raw)
       return {
         evidence: {
-          principalId: provenance.principalId,
           sourceAgentId: agentId,
           conversationId: provenance.conversationId,
           entryId: entry.id,
@@ -89,10 +86,15 @@ export function createMcpRegistrationCall(
       }
     })
     const first = inputs[0]
-    if (!first || inputs.some((item) => item.evidence.principalId !== first.evidence.principalId))
-      throw new Error('mcp_owner_required')
-    const principal = await mcpChatPrincipal(db, first.evidence.principalId, agentId)
-    const call = { env, db, models: createAgentModels(), principal, now: Date.now() }
+    if (!first) throw new Error('mcp_operator_input_required')
+    await requireMcpAgent(db, agentId)
+    const call = {
+      env,
+      db,
+      models: createAgentModels(),
+      source: 'operator' as const,
+      now: Date.now(),
+    }
     const matching = inputs.filter((item) => item.instruction?.operation === input.operation)
     if ((input.operation === 'register' || input.operation === 'assign') && matching.length !== 1)
       throw new Error('mcp_explicit_instruction_required')
@@ -115,7 +117,7 @@ export function createMcpRegistrationCall(
         throw new Error('mcp_execution_changed')
       context.abortSignal?.throwIfAborted()
       checkAllowed()
-      await mcpChatPrincipal(db, principal.principalId, agentId)
+      await requireMcpAgent(db, agentId)
       return chatMcp(call, env.CREDENTIAL_KEK_V1, env.KODAMA_UI_ORIGIN, evidence, input, intent)
     }, context)
     // Never invoke this object's RPC while holding its harness mutation line.

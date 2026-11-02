@@ -5,7 +5,6 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { credentials, credentialGrants, mcpAssignments } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpOwner } from '../control-plane/mcp.ts'
 import { auditStatement } from '../control-plane/audit.ts'
 import { encryptCredential, credentialFingerprint } from './encryption.ts'
 import { mcpAgentGrant, mcpClientSecret, mcpToken, eraseMcpSecret } from './mcp-vault.ts'
@@ -31,7 +30,6 @@ async function waitForRefresh(signal: AbortSignal) {
 export async function authorizeMcp(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   credentialId: string,
   endpoint: string,
@@ -39,8 +37,8 @@ export async function authorizeMcp(
   agentId?: string,
 ): Promise<string> {
   signal.throwIfAborted()
-  if (agentId) await mcpAgentGrant(db, principalId, agentId, credentialId)
-  const stored = await mcpToken(db, kek, principalId, serverId, credentialId)
+  if (agentId) await mcpAgentGrant(db, agentId, credentialId)
+  const stored = await mcpToken(db, kek, serverId, credentialId)
   if (endpoint !== stored.value.endpoint) throw new Error('mcp_auth_binding_changed')
   const { row, value } = stored
   const now = Date.now()
@@ -59,7 +57,7 @@ export async function authorizeMcp(
       throw new Error('mcp_reauth_required')
     }
     await waitForRefresh(signal)
-    return authorizeMcp(db, kek, principalId, serverId, credentialId, endpoint, signal, agentId)
+    return authorizeMcp(db, kek, serverId, credentialId, endpoint, signal, agentId)
   }
   if (value.expiresAt === null || value.expiresAt > now + 30_000) return value.access
   if (value.kind !== 'mcp_oauth' || !value.refresh) throw new Error('mcp_reauth_required')
@@ -80,17 +78,10 @@ export async function authorizeMcp(
     .get()
   if (!claimed) {
     await waitForRefresh(signal)
-    return authorizeMcp(db, kek, principalId, serverId, credentialId, endpoint, signal, agentId)
+    return authorizeMcp(db, kek, serverId, credentialId, endpoint, signal, agentId)
   }
   try {
-    const secret = await mcpClientSecret(
-      db,
-      kek,
-      principalId,
-      serverId,
-      value.clientSecretId,
-      value.client,
-    )
+    const secret = await mcpClientSecret(db, kek, serverId, value.clientSecretId, value.client)
     signal.throwIfAborted()
     const tokens = await exchangeMcpToken(
       value.tokenEndpoint,
@@ -138,9 +129,9 @@ export async function authorizeMcp(
       .returning()
       .get()
     if (!saved) throw new Error('mcp_reauth_required')
-    // Reread current ownership and binding after the external exchange, before sending anything.
-    if (agentId) await mcpAgentGrant(db, principalId, agentId, credentialId)
-    const current = await mcpToken(db, kek, principalId, serverId, credentialId)
+    // Reread the live grant and server binding after the external exchange, before sending anything.
+    if (agentId) await mcpAgentGrant(db, agentId, credentialId)
+    const current = await mcpToken(db, kek, serverId, credentialId)
     signal.throwIfAborted()
     return current.value.access
   } catch (error) {
@@ -193,13 +184,11 @@ export async function markMcpAuthenticationFailure(
 export async function disconnectMcp(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   credentialId: string,
   now = Date.now(),
 ) {
-  // A stale server revision still permits the owner to destroy their envelope.
-  await mcpOwner(db, principalId)
+  // A stale server revision still permits the operator to destroy the envelope.
   const row = await db
     .select()
     .from(credentials)
@@ -207,7 +196,6 @@ export async function disconnectMcp(
       and(
         eq(credentials.credentialId, credentialId),
         eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.ownerId, principalId),
         eq(credentials.provider, serverId),
       ),
     )
@@ -218,7 +206,7 @@ export async function disconnectMcp(
     return { status: 'revoked' as const, externalRevocation: 'unavailable' as const }
   let active: Awaited<ReturnType<typeof mcpToken>> | undefined
   try {
-    active = await mcpToken(db, kek, principalId, serverId, credentialId)
+    active = await mcpToken(db, kek, serverId, credentialId)
   } catch {
     /* Local revocation must still proceed. */
   }
@@ -229,7 +217,7 @@ export async function disconnectMcp(
     auditStatement(db, {
       opId: `mcp.disconnect:${credentialId}:${row.revision}`,
       at: now,
-      actorId: principalId,
+      source: 'operator',
       action: 'mcp.disconnect',
       targetKind: 'system',
       targetId: serverId,
@@ -240,14 +228,7 @@ export async function disconnectMcp(
   const value = active?.value
   if (value?.kind === 'mcp_oauth' && value.revocationEndpoint) {
     try {
-      const secret = await mcpClientSecret(
-        db,
-        kek,
-        principalId,
-        serverId,
-        value.clientSecretId,
-        value.client,
-      )
+      const secret = await mcpClientSecret(db, kek, serverId, value.clientSecretId, value.client)
       const { body, headers } = mcpClientAuthentication(value.client, secret)
       body.set('token', value.refresh ?? value.access)
       body.set('token_type_hint', value.refresh ? 'refresh_token' : 'access_token')

@@ -1,4 +1,4 @@
-/** Single-use OAuth transactions bound to owner, browser, server revision, issuer and client.
+/** Single-use OAuth transactions bound to browser, server revision, issuer and client.
  * The future authenticated UI is only a pass-through; it must supply its session nonce.
  * @module
  */
@@ -6,7 +6,7 @@ import { and, eq, gt } from 'drizzle-orm'
 import * as v from 'valibot'
 import { mcpOAuthTransactions, mcpOAuthClients } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpOwner, mcpServer } from '../control-plane/mcp.ts'
+import { mcpServer } from '../control-plane/mcp.ts'
 import { auditStatement } from '../control-plane/audit.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import {
@@ -68,13 +68,11 @@ function json(value: string): unknown {
 export async function configureMcpOAuthClient(
   db: ManagementDb,
   kek: string,
-  principalId: string,
   serverId: string,
   clientValue: unknown,
   secret: string | undefined,
   now = Date.now(),
 ) {
-  await mcpOwner(db, principalId)
   await mcpServer(db, serverId)
   const client = v.parse(mcpClientSchema, clientValue)
   if (client.registration !== 'preregistered' || (client.method !== 'none' && !secret))
@@ -84,7 +82,6 @@ export async function configureMcpOAuthClient(
     ? await mcpSecretInsert(
         db,
         kek,
-        principalId,
         serverId,
         'mcp_client',
         mcpClientSecretPayload(client, secret),
@@ -95,7 +92,6 @@ export async function configureMcpOAuthClient(
     .insert(mcpOAuthClients)
     .values({
       registrationId,
-      principalId,
       serverId,
       issuer: client.issuer,
       redirectUri: client.redirectUri,
@@ -105,12 +101,7 @@ export async function configureMcpOAuthClient(
       createdAt: now,
     })
     .onConflictDoUpdate({
-      target: [
-        mcpOAuthClients.principalId,
-        mcpOAuthClients.serverId,
-        mcpOAuthClients.issuer,
-        mcpOAuthClients.redirectUri,
-      ],
+      target: [mcpOAuthClients.serverId, mcpOAuthClients.issuer, mcpOAuthClients.redirectUri],
       set: {
         registrationId,
         metadataJson: JSON.stringify(client),
@@ -128,7 +119,6 @@ export async function startMcpOAuth(
   db: ManagementDb,
   kek: string,
   origin: string,
-  principalId: string,
   serverId: string,
   browserNonce: string,
   selectedIssuer?: string,
@@ -138,7 +128,6 @@ export async function startMcpOAuth(
   requestId?: string,
   loopbackRedirectUri?: string,
 ) {
-  await mcpOwner(db, principalId)
   if (
     browserNonce.length < 32 ||
     browserNonce.length > 256 ||
@@ -160,7 +149,6 @@ export async function startMcpOAuth(
     .from(mcpOAuthClients)
     .where(
       and(
-        eq(mcpOAuthClients.principalId, principalId),
         eq(mcpOAuthClients.serverId, serverId),
         eq(mcpOAuthClients.issuer, metadata.issuer),
         eq(mcpOAuthClients.redirectUri, redirectUri),
@@ -187,7 +175,6 @@ export async function startMcpOAuth(
     // Persist before the external side effect. A crash never silently replays DCR.
     await db.insert(mcpOAuthClients).values({
       registrationId,
-      principalId,
       serverId,
       issuer: metadata.issuer,
       redirectUri,
@@ -197,7 +184,7 @@ export async function startMcpOAuth(
     try {
       let initialToken: string | undefined
       if (initialTokenId) {
-        const stored = await mcpSecret(db, kek, principalId, serverId, initialTokenId)
+        const stored = await mcpSecret(db, kek, serverId, initialTokenId)
         if (stored.row.kind !== 'mcp_client') throw new Error('mcp_auth_binding_invalid')
         const initial = v.parse(
           v.strictObject({
@@ -233,7 +220,6 @@ export async function startMcpOAuth(
         ? await mcpSecretInsert(
             db,
             kek,
-            principalId,
             serverId,
             'mcp_client',
             mcpClientSecretPayload(client, result.client_secret),
@@ -268,7 +254,6 @@ export async function startMcpOAuth(
   const envelope = await mcpSecretInsert(
     db,
     kek,
-    principalId,
     serverId,
     'mcp_transaction',
     verifier,
@@ -291,7 +276,6 @@ export async function startMcpOAuth(
     db.insert(mcpOAuthTransactions).values({
       requestId,
       transactionId,
-      principalId,
       serverId,
       serverRevision: server.revision,
       stateDigest: await digest(state),
@@ -305,7 +289,7 @@ export async function startMcpOAuth(
     auditStatement(db, {
       opId: `mcp.oauth.start:${transactionId}`,
       at: now,
-      actorId: principalId,
+      source: 'operator',
       action: 'mcp.oauth.start',
       targetKind: 'system',
       targetId: serverId,
@@ -343,7 +327,6 @@ export async function completeMcpOAuth(
   db: ManagementDb,
   kek: string,
   origin: string,
-  principalId: string,
   input: {
     state: string
     browserNonce: string
@@ -354,7 +337,6 @@ export async function completeMcpOAuth(
   },
   now = Date.now(),
 ) {
-  await mcpOwner(db, principalId)
   if (
     !input.state ||
     input.state.length > 256 ||
@@ -370,7 +352,6 @@ export async function completeMcpOAuth(
     .where(
       and(
         eq(mcpOAuthTransactions.stateDigest, stateDigest),
-        eq(mcpOAuthTransactions.principalId, principalId),
         eq(mcpOAuthTransactions.browserDigest, await digest(input.browserNonce)),
         eq(mcpOAuthTransactions.status, 'pending'),
         gt(mcpOAuthTransactions.expiresAt, now),
@@ -410,12 +391,11 @@ export async function completeMcpOAuth(
   }
   try {
     if (!input.code) throw new Error('mcp_auth_callback_invalid')
-    const verifier = await mcpSecret(db, kek, principalId, server.serverId, transaction.verifierId)
+    const verifier = await mcpSecret(db, kek, server.serverId, transaction.verifierId)
     if (verifier.row.kind !== 'mcp_transaction') throw new Error('mcp_auth_binding_invalid')
     const secret = await mcpClientSecret(
       db,
       kek,
-      principalId,
       server.serverId,
       binding.clientSecretId,
       binding.client,
@@ -445,7 +425,6 @@ export async function completeMcpOAuth(
     const envelope = await mcpSecretInsert(
       db,
       kek,
-      principalId,
       server.serverId,
       'mcp_oauth',
       JSON.stringify({
@@ -477,7 +456,7 @@ export async function completeMcpOAuth(
       auditStatement(db, {
         opId: `mcp.oauth.complete:${transaction.transactionId}`,
         at: issuedAt,
-        actorId: principalId,
+        source: 'operator',
         action: 'mcp.oauth.complete',
         targetKind: 'system',
         targetId: server.serverId,

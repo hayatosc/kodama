@@ -2,13 +2,8 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
-import {
-  mcpAssignments,
-  mcpProposals,
-  mcpRequests,
-  principals,
-} from '../../../drizzle/management/schema.ts'
-import { caller, management, newAgentId, principalIdOf } from '../../testing/management.ts'
+import { mcpAssignments, mcpProposals, mcpRequests } from '../../../drizzle/management/schema.ts'
+import { management, newAgentId } from '../../testing/management.ts'
 import { createAgentModels } from '../models.ts'
 import { rememberMcpIntent } from '../mcp-intents.ts'
 import { putMcpBearer } from '../../credentials/mcp-vault.ts'
@@ -18,16 +13,14 @@ import { chatMcp, completeMcpRegistration, readMcpChatStatus } from './mcp-chat.
 
 async function fixture() {
   const agentId = await newAgentId()
-  const principalId = await principalIdOf(await caller())
-  const principal = await management
-    .select()
-    .from(principals)
-    .where(eq(principals.principalId, principalId))
-    .get()
-  if (!principal) throw new Error('Missing owner')
-  const call = { env, db: management, models: createAgentModels(), principal, now: Date.now() }
+  const call = {
+    env,
+    db: management,
+    models: createAgentModels(),
+    source: 'operator' as const,
+    now: Date.now(),
+  }
   const evidence = {
-    principalId,
     sourceAgentId: agentId,
     conversationId: 'root',
     entryId: 1,
@@ -114,7 +107,6 @@ it('requires exact intent, leaves OAuth or credential attachment unassigned, the
   const credential = await putMcpBearer(
     management,
     env.CREDENTIAL_KEK_V1,
-    evidence.principalId,
     request.serverId,
     'fixture-secret',
   )

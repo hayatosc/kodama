@@ -1,4 +1,4 @@
-/** Static registration adapter and deliberately limited owner command syntax. @module */
+/** Static registration adapter and deliberately limited operator command syntax. @module */
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi } from '@earendil-works/pi-durable'
@@ -23,7 +23,7 @@ export type McpRegistrationCall = (
   api: ToolExecutionApi,
   context: Context,
 ) => Promise<unknown>
-/** Instructions recognized from a complete raw owner message, never from quoted substrings. */
+/** Instructions recognized from a complete raw operator message, never from quoted substrings. */
 export type McpInstruction =
   | { operation: 'register'; name: string; endpoint?: string }
   | { operation: 'assign'; proposalId: string; toolIds: string[]; agentId: string }
@@ -63,7 +63,7 @@ export function createMcpRegistrationTool(call?: McpRegistrationCall) {
     name: 'mcp_registration',
     replay: 'unsafe',
     description:
-      'Manage MCP only on explicit authenticated owner instruction. Ask for `/mcp register NAME HTTPS_ENDPOINT` (or an existing unique NAME). Never search or guess endpoints. Show the host selection proposal and require `/mcp assign PROPOSAL_ID TOOL_ID,TOOL_ID AGENT_UUID`; this confirms selected tools for read-only use. An OK or OAuth consent is not assignment. Never ask for tokens in chat.',
+      'Manage MCP only on explicit authenticated direct-operator instruction. Ask for `/mcp register NAME HTTPS_ENDPOINT` (or an existing unique NAME). Never search or guess endpoints. Show the host selection proposal and require `/mcp assign PROPOSAL_ID TOOL_ID,TOOL_ID AGENT_UUID`; this confirms selected tools for read-only use. An OK or OAuth consent is not assignment. Never ask for tokens in chat.',
     parameters: Type.Object(
       {
         operation: Type.Union(

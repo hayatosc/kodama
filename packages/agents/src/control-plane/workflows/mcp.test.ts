@@ -2,14 +2,8 @@
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agents, mcpAssignments, mcpTools, principals } from '../../../drizzle/management/schema.ts'
-import {
-  caller,
-  desiredSettings,
-  management,
-  newAgentId,
-  principalIdOf,
-} from '../../testing/management.ts'
+import { mcpAssignments, mcpTools } from '../../../drizzle/management/schema.ts'
+import { desiredSettings, management, newAgentId } from '../../testing/management.ts'
 import { createAgentModels } from '../models.ts'
 import { guardMcpSelection, registerMcpCatalog } from '../mcp.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
@@ -22,17 +16,15 @@ import { manageMcp } from './mcp-management.ts'
 
 async function fixture() {
   const agentId = await newAgentId()
-  const principalId = await principalIdOf(await caller())
-  const principal = await management
-    .select()
-    .from(principals)
-    .where(eq(principals.principalId, principalId))
-    .get()
-  if (!principal) throw new Error('Missing owner')
-  const call = { env, db: management, models: createAgentModels(), principal, now: Date.now() }
+  const call = {
+    env,
+    db: management,
+    models: createAgentModels(),
+    source: 'operator' as const,
+    now: Date.now(),
+  }
   const server = await registerMcpCatalog(
     management,
-    principalId,
     'fixture',
     `https://${uuidv7()}.example.com/mcp`,
     call.now,
@@ -40,7 +32,6 @@ async function fixture() {
   const credential = await putMcpBearer(
     management,
     env.CREDENTIAL_KEK_V1,
-    principalId,
     server.serverId,
     'fixture-bearer',
   )
@@ -130,7 +121,6 @@ describe('MCP assignments', () => {
     expect(selected.digest).toBe(tool.digest)
     expect(await guardMcpSelection(management, agentId, selected)).toMatchObject({
       remoteName: 'read',
-      principalId: call.principal.principalId,
     })
   })
 
@@ -175,52 +165,16 @@ describe('MCP assignments', () => {
     await disconnectMcp(
       management,
       env.CREDENTIAL_KEK_V1,
-      second.call.principal.principalId,
       second.server.serverId,
       second.credential.credentialId,
     )
     await expect(guardMcpSelection(management, second.agentId, other)).rejects.toThrow()
   })
 
-  it('enforces creator catalog authority and target ownership independently', async () => {
-    const { call, server, credential, selection } = await fixture()
-    const otherId = uuidv7()
-    const otherAgentId = uuidv7()
-    await management.insert(principals).values({
-      principalId: otherId,
-      externalId: otherId,
-      kind: 'user',
-      displayName: 'Other',
-      createdAt: Date.now(),
-    })
-    await management.insert(agents).values({
-      agentId: otherAgentId,
-      objectName: otherAgentId,
-      kind: 'working',
-      displayName: 'Other agent',
-      ownerId: otherId,
-      status: 'active',
-      currentVersion: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    const other = await management
-      .select()
-      .from(principals)
-      .where(eq(principals.principalId, otherId))
-      .get()
-    if (!other) throw new Error('Missing second owner')
-    await expect(
-      discoverMcp(
-        { ...call, principal: other },
-        env.CREDENTIAL_KEK_V1,
-        server.serverId,
-        credential.credentialId,
-      ),
-    ).rejects.toThrow()
-    await expect(
-      assignMcp(call, env.CREDENTIAL_KEK_V1, { ...selection, agentId: otherAgentId }),
-    ).rejects.toThrow()
+  it('shares the installation catalog but still requires a separate explicit assignment per agent', async () => {
+    const { call, server, selection } = await fixture()
+    const otherAgentId = await newAgentId()
+    await assignMcp(call, env.CREDENTIAL_KEK_V1, selection)
     expect(
       await management
         .select()
@@ -232,5 +186,14 @@ describe('MCP assignments', () => {
           ),
         ),
     ).toEqual([])
+    await assignMcp(call, env.CREDENTIAL_KEK_V1, { ...selection, agentId: otherAgentId })
+    expect((await desiredSettings(otherAgentId)).mcp).toHaveLength(1)
+    await expect(
+      manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+        operation: 'assign',
+        ...selection,
+        principalId: uuidv7(),
+      }),
+    ).rejects.toThrow()
   })
 })

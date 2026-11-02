@@ -55,7 +55,6 @@ export function createMcpCall(
       if (!live?.run) throw new Error('mcp_execution_changed')
       const inputs = await currentRunInputs(await harness(), context)
       let ownerRequestId: string | undefined
-      let ownerPrincipalId: string | undefined
       if (inputs?.length && inputs.every((entry) => entry.kind === 'kodama.owner-message')) {
         for (const entry of inputs) {
           const data: unknown = entry.data
@@ -72,7 +71,6 @@ export function createMcpCall(
               live.run.inputs.some((id) => id === receipt.submissionId)
             ) {
               ownerRequestId = data.requestId
-              ownerPrincipalId = receipt.principalId
             }
           }
         }
@@ -97,17 +95,13 @@ export function createMcpCall(
         return guardMcpSelection(db, agentId, selected)
       }
       const target = await check()
-      const runId = mcpRecoveryEpoch(
-        store,
-        ownerPrincipalId === target.principalId ? ownerRequestId : undefined,
-      )
+      const runId = mcpRecoveryEpoch(store, ownerRequestId)
       const authorize = async (sendSignal: AbortSignal) => {
         const current = await check()
         if (current.endpoint !== target.endpoint) throw new Error('mcp_auth_binding_changed')
         const token = await authorizeMcp(
           db,
           kek,
-          current.principalId,
           selected.serverId,
           selected.credentialId,
           target.endpoint,

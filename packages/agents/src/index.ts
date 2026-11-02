@@ -140,12 +140,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
 
   /** Manage the shared MCP catalog and explicit per-agent selections; this is private RPC only. */
   async mcpManage(input: unknown) {
-    return manageMcp(
-      this.#call(),
-      this.env.CREDENTIAL_KEK_V1,
-      this.env.KODAMA_UI_ORIGIN,
-      input,
-    )
+    return manageMcp(this.#call(), this.env.CREDENTIAL_KEK_V1, this.env.KODAMA_UI_ORIGIN, input)
   }
 
   /** OAuth facade for a trusted authenticated UI; no tokens, verifiers or client secrets are returned. */

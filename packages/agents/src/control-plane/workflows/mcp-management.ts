@@ -11,9 +11,7 @@ import {
   mcpCatalogTools,
   mcpCommit,
   listMcpCatalog,
-  mcpOwner,
   mcpServer,
-  ownedMcpServer,
   registerMcpCatalog,
 } from '../mcp.ts'
 import { assignMcp, discoverMcp, notifyMcpAssignments } from './mcp.ts'
@@ -77,14 +75,12 @@ export async function manageMcp(
   value: unknown,
 ): Promise<unknown> {
   const input = v.parse(requestSchema, value)
-  const principalId = call.principal?.principalId
-  if (!principalId) throw new Error('mcp_owner_required')
-  await mcpOwner(call.db, principalId)
+
   switch (input.operation) {
     case 'add':
-      return registerMcpCatalog(call.db, principalId, input.name, input.endpoint, call.now)
+      return registerMcpCatalog(call.db, input.name, input.endpoint, call.now)
     case 'list':
-      return listMcpCatalog(call.db, principalId)
+      return listMcpCatalog(call.db)
     case 'status':
       return {
         server: await mcpServer(call.db, input.serverId),
@@ -98,19 +94,13 @@ export async function manageMcp(
     case 'assign':
       return assignMcp(call, kek, input)
     case 'bearer':
-      return putMcpBearer(call.db, kek, principalId, input.serverId, input.secret, call.now)
+      return putMcpBearer(call.db, kek, input.serverId, input.secret, call.now)
     case 'disconnect': {
       const recipients = await call.db
         .selectDistinct({ agentId: mcpAssignments.agentId })
         .from(mcpAssignments)
         .where(eq(mcpAssignments.credentialId, input.credentialId))
-      const result = await disconnectMcp(
-        call.db,
-        kek,
-        principalId,
-        input.serverId,
-        input.credentialId,
-      )
+      const result = await disconnectMcp(call.db, kek, input.serverId, input.credentialId)
       for (const recipient of recipients)
         await call.env.AGENTS.getByName(recipient.agentId).mcpCredentialNotice(input.credentialId)
       return result
@@ -118,14 +108,13 @@ export async function manageMcp(
     case 'unassign':
       return unassignMcp(call, input.agentId, input.serverId)
     case 'update': {
-      const server = await ownedMcpServer(call.db, principalId, input.serverId)
+      const server = await mcpServer(call.db, input.serverId)
       const moved = input.endpoint !== undefined && input.endpoint !== server.endpoint
       if (input.enabled && (moved || !server.catalogDigest))
         throw new Error('mcp_discovery_required')
       await call.db.batch([
         mcpCommit(
           call.db,
-          principalId,
           uuidv7(),
           exists(
             call.db
@@ -155,7 +144,7 @@ export async function manageMcp(
         auditStatement(call.db, {
           opId: uuidv7(),
           at: call.now,
-          actorId: principalId,
+          source: call.source,
           action: 'mcp.update',
           targetKind: 'system',
           targetId: server.serverId,
@@ -170,17 +159,12 @@ export async function manageMcp(
 
 /** Remove the live reference before push; the old applied version is already unable to send. */
 export async function unassignMcp(call: ManagementCall, agentId: string, serverId: string) {
-  const principalId = call.principal?.principalId
-  if (!principalId) throw new Error('mcp_owner_required')
-  await mcpOwner(call.db, principalId)
   const agent = await call.db
     .select()
     .from(agents)
-    .where(
-      and(eq(agents.agentId, agentId), eq(agents.ownerId, principalId), eq(agents.kind, 'working')),
-    )
+    .where(and(eq(agents.agentId, agentId), eq(agents.kind, 'working')))
     .get()
-  if (!agent) throw new Error('mcp_agent_owner_required')
+  if (!agent) throw new Error('mcp_agent_unavailable')
   const previous = await versionRow(call.db, agentId, agent.currentVersion)
   if (!previous) throw new Error('mcp_agent_config_missing')
   const settings = parseSettings(call.models, JSON.parse(previous.settingsJson))
@@ -194,28 +178,21 @@ export async function unassignMcp(call: ManagementCall, agentId: string, serverI
   await call.db.batch([
     mcpCommit(
       call.db,
-      principalId,
       uuidv7(),
       exists(
         call.db
           .select()
           .from(agents)
-          .where(
-            and(
-              eq(agents.agentId, agentId),
-              eq(agents.ownerId, principalId),
-              eq(agents.currentVersion, agent.currentVersion),
-            ),
-          ),
+          .where(and(eq(agents.agentId, agentId), eq(agents.currentVersion, agent.currentVersion))),
       ),
     ),
     ...writeVersionStatements(
       call.db,
-      { actorId: principalId, now: call.now, opId: uuidv7() },
+      { source: call.source, now: call.now, opId: uuidv7() },
       agentId,
       agent.currentVersion,
       updated,
-      { comment: 'Owner removed MCP assignment' },
+      { comment: 'Operator removed MCP assignment' },
     ),
     call.db
       .delete(mcpAssignments)
@@ -232,7 +209,7 @@ export async function unassignMcp(call: ManagementCall, agentId: string, serverI
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
-      actorId: principalId,
+      source: call.source,
       action: 'mcp.unassign',
       targetKind: 'agent',
       targetId: agentId,

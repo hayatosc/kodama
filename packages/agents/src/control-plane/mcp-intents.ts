@@ -1,12 +1,11 @@
 /** Host-only management intent persistence and atomic single-use consumption. @module */
 import { and, eq, exists, gt, isNull } from 'drizzle-orm'
-import { agents, principals, mcpCommits, mcpIntents } from '../../drizzle/management/schema.ts'
+import { agents, mcpCommits, mcpIntents } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from './db.ts'
 import type { McpInstruction } from '../tools/mcp/registration.ts'
 
 /** Trusted transport evidence. This type is never parsed from RPC or tool input. */
 export interface McpEvidence {
-  principalId: string
   sourceAgentId: string
   conversationId: string
   entryId: number
@@ -20,24 +19,17 @@ export interface McpIntent extends McpEvidence {
   expiresAt: number
 }
 
-/** Chat authority always belongs to the current working agent's enabled owner. */
-export async function mcpChatPrincipal(db: ManagementDb, principalId: string, agentId: string) {
+/** Chat management is available only on an active working agent, never a dedicated agent. */
+export async function requireMcpAgent(db: ManagementDb, agentId: string) {
   const row = await db
-    .select({ principal: principals })
-    .from(principals)
-    .innerJoin(agents, eq(agents.ownerId, principals.principalId))
+    .select()
+    .from(agents)
     .where(
-      and(
-        eq(principals.principalId, principalId),
-        isNull(principals.disabledAt),
-        eq(agents.agentId, agentId),
-        eq(agents.kind, 'working'),
-        eq(agents.status, 'active'),
-      ),
+      and(eq(agents.agentId, agentId), eq(agents.kind, 'working'), eq(agents.status, 'active')),
     )
     .get()
-  if (!row) throw new Error('mcp_owner_required')
-  return row.principal
+  if (!row) throw new Error('mcp_agent_unavailable')
+  return row
 }
 
 /** Re-observation cannot renew an old instruction or change its normalized meaning. */
@@ -59,7 +51,9 @@ export async function rememberMcpIntent(
     !stored ||
     stored.consumedAt !== null ||
     stored.instructionJson !== instructionJson ||
-    stored.principalId !== evidence.principalId ||
+    stored.sourceAgentId !== evidence.sourceAgentId ||
+    stored.conversationId !== evidence.conversationId ||
+    stored.submissionId !== evidence.submissionId ||
     stored.expiresAt !== expiresAt
   )
     throw new Error('mcp_intent_unavailable')
@@ -80,7 +74,9 @@ export function consumeMcpIntent(db: ManagementDb, intent: McpIntent) {
           .where(
             and(
               eq(mcpIntents.intentId, intent.intentId),
-              eq(mcpIntents.principalId, intent.principalId),
+              eq(mcpIntents.sourceAgentId, intent.sourceAgentId),
+              eq(mcpIntents.conversationId, intent.conversationId),
+              eq(mcpIntents.submissionId, intent.submissionId),
               eq(mcpIntents.instructionJson, JSON.stringify(intent.instruction)),
               gt(mcpIntents.expiresAt, now),
               isNull(mcpIntents.consumedAt),
@@ -92,11 +88,10 @@ export function consumeMcpIntent(db: ManagementDb, intent: McpIntent) {
   ] as const
 }
 
-/** Audit only references, not the owner's message text or any credentials. */
+/** Audit only references, not the operator's message text or any credentials. */
 export function mcpIntentAudit(intent: McpIntent) {
   return {
     origin: 'chat',
-    principalId: intent.principalId,
     sourceAgentId: intent.sourceAgentId,
     conversationId: intent.conversationId,
     entryId: intent.entryId,

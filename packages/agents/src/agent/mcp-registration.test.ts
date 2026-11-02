@@ -3,7 +3,7 @@ import { exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
 import { mcpRequests } from '../../drizzle/management/schema.ts'
-import { caller, management, newAgentId, updateSettings } from '../testing/management.ts'
+import { management, newAgentId, updateSettings } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { toolCallResponse } from '../testing/model.ts'
 import { uuidv7 } from '../lib/uuid.ts'
@@ -26,7 +26,7 @@ it('accepts the exact authenticated owner instruction and records its real sourc
   vi.mocked(fetch).mockImplementationOnce(async () =>
     toolCallResponse({ name: 'mcp_registration', arguments: { operation: 'register', name } }),
   )
-  await exports.default.ownerReply(await caller(), agentId, {
+  await exports.default.ownerReply(agentId, {
     requestId,
     externalMessageId: uuidv7(),
     sequence: 1,
@@ -64,7 +64,7 @@ it('does not turn a legacy user message or model-invented endpoint into owner au
     }),
   )
   const requestId = uuidv7()
-  await exports.default.ownerReply(await caller(), agentId, {
+  await exports.default.ownerReply(agentId, {
     requestId,
     externalMessageId: uuidv7(),
     sequence: 1,

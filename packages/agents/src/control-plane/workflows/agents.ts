@@ -333,11 +333,9 @@ async function writeVersion(
   if (row.currentVersion !== write.expected) throw versionConflict(agentId, write.expected)
   await validateCredentialRefs(call.db, write.settings, agentId)
   const mcpFences = (write.settings.mcp ?? []).map((selected) => {
-    if (!call.principal || row.kind !== 'working' || row.ownerId !== call.principal.principalId)
-      throw new Error('mcp_owner_required')
+    if (row.kind !== 'working') throw new Error('mcp_agent_unavailable')
     return mcpCommit(
       call.db,
-      call.principal.principalId,
       uuidv7(),
       exists(
         call.db
@@ -346,7 +344,7 @@ async function writeVersion(
           .innerJoin(agents, eq(agents.agentId, mcpAssignments.agentId))
           .where(
             and(
-              eq(agents.ownerId, call.principal.principalId),
+              eq(agents.kind, 'working'),
               eq(mcpAssignments.agentId, agentId),
               eq(mcpAssignments.toolId, selected.toolId),
               eq(mcpAssignments.serverId, selected.serverId),

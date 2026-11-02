@@ -3,7 +3,7 @@ import { and, eq, inArray, lt } from 'drizzle-orm'
 import * as v from 'valibot'
 import { credentials, mcpOAuthTransactions, mcpRequests } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpOwner, mcpServer } from '../control-plane/mcp.ts'
+import { mcpServer } from '../control-plane/mcp.ts'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './mcp-oauth.ts'
 import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './mcp-oauth-http.ts'
 import { mcpEndpoint } from '../tools/mcp/transport.ts'
@@ -76,16 +76,14 @@ export async function recoverMcpOAuth(db: ManagementDb, now = Date.now()) {
     ])
 }
 
-/** The caller supplies an authenticated principal and server-side browser nonce, not model arguments. */
+/** Private management supplies a server-side browser nonce; models cannot invoke this facade. */
 export async function manageMcpOAuth(
   db: ManagementDb,
   kek: string,
   origin: string,
-  principalId: string,
   value: unknown,
 ): Promise<unknown> {
   const input = v.parse(schema, value)
-  await mcpOwner(db, principalId)
   await recoverMcpOAuth(db)
   switch (input.operation) {
     case 'metadata':
@@ -96,7 +94,6 @@ export async function manageMcpOAuth(
       const envelope = await mcpSecretInsert(
         db,
         kek,
-        principalId,
         input.serverId,
         'mcp_client',
         JSON.stringify({
@@ -114,9 +111,7 @@ export async function manageMcpOAuth(
       const request = await db
         .select()
         .from(mcpRequests)
-        .where(
-          and(eq(mcpRequests.requestId, input.requestId), eq(mcpRequests.principalId, principalId)),
-        )
+        .where(eq(mcpRequests.requestId, input.requestId))
         .get()
       if (!request || request.expiresAt <= Date.now()) throw new Error('mcp_registration_expired')
       return { status: 'completed', requestId: input.requestId, credentialId: input.credentialId }
@@ -134,7 +129,6 @@ export async function manageMcpOAuth(
         const server = await mcpServer(db, input.serverId)
         if (
           !request ||
-          request.principalId !== principalId ||
           request.serverId !== server.serverId ||
           request.serverRevision !== server.revision ||
           request.expiresAt <= Date.now() ||
@@ -146,7 +140,6 @@ export async function manageMcpOAuth(
         db,
         kek,
         origin,
-        principalId,
         input.serverId,
         input.browserNonce,
         input.issuer,
@@ -162,7 +155,7 @@ export async function manageMcpOAuth(
       if (input.operation === 'complete-loopback')
         mcpLoopbackRedirect(input.loopbackRedirectUri ?? '')
       else if (input.loopbackRedirectUri !== undefined) throw new Error('mcp_redirect_invalid')
-      return completeMcpOAuth(db, kek, origin, principalId, {
+      return completeMcpOAuth(db, kek, origin, {
         state: input.state,
         browserNonce: input.browserNonce,
         code: input.code,
@@ -176,14 +169,7 @@ export async function manageMcpOAuth(
       if (input.operation === 'client-loopback') mcpLoopbackRedirect(input.client.redirectUri)
       else if (input.client.redirectUri !== mcpClientDocument(origin).redirect_uris[0])
         throw new Error('mcp_redirect_invalid')
-      return configureMcpOAuthClient(
-        db,
-        kek,
-        principalId,
-        input.serverId,
-        input.client,
-        input.secret,
-      )
+      return configureMcpOAuthClient(db, kek, input.serverId, input.client, input.secret)
     }
     case 'status': {
       await mcpServer(db, input.serverId)
@@ -199,7 +185,6 @@ export async function manageMcpOAuth(
         .from(credentials)
         .where(
           and(
-            eq(credentials.ownerId, principalId),
             eq(credentials.provider, input.serverId),
             eq(credentials.purpose, 'mcp_server'),
             inArray(credentials.kind, ['mcp_bearer', 'mcp_oauth']),
@@ -212,12 +197,7 @@ export async function manageMcpOAuth(
           expiresAt: mcpOAuthTransactions.expiresAt,
         })
         .from(mcpOAuthTransactions)
-        .where(
-          and(
-            eq(mcpOAuthTransactions.principalId, principalId),
-            eq(mcpOAuthTransactions.serverId, input.serverId),
-          ),
-        )
+        .where(and(eq(mcpOAuthTransactions.serverId, input.serverId)))
         .limit(100)
       return {
         credentials: rows.map((row) => ({ ...row, expiryKnown: row.expiresAt !== null })),

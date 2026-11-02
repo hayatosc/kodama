@@ -5,7 +5,7 @@
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so
  * an agent ID is never reused, and foreign keys keep SQLite's default `NO ACTION`. Writes use plain
  * inserts, so a constraint violation fails its statement and rolls back the whole `batch()`; only
- * the idempotent seed and the registration of a principal use `ON CONFLICT DO NOTHING`, and
+ * idempotent registrations use `ON CONFLICT DO NOTHING`, and
  * reconciliation upserts its cursor.
  *
  * @see docs/agents.md — Management database
@@ -31,7 +31,6 @@ export const MANAGEMENT_SOURCES = ['operator', 'system'] as const
 /** Short-lived host-recognized instructions; the source identity is not model supplied. */
 export const mcpIntents = sqliteTable('mcp_intents', {
   intentId: text('intent_id').primaryKey(),
-  principalId: text('principal_id').notNull(),
   sourceAgentId: text('source_agent_id').notNull(),
   conversationId: text('conversation_id').notNull(),
   entryId: integer('entry_id').notNull(),
@@ -44,7 +43,6 @@ export const mcpIntents = sqliteTable('mcp_intents', {
 /** Registration progress survives OAuth without preserving assignment authority. */
 export const mcpRequests = sqliteTable('mcp_requests', {
   requestId: text('request_id').primaryKey(),
-  principalId: text('principal_id').notNull(),
   sourceAgentId: text('source_agent_id').notNull(),
   conversationId: text('conversation_id').notNull(),
   entryId: integer('entry_id').notNull(),
@@ -72,7 +70,6 @@ export const mcpRequests = sqliteTable('mcp_requests', {
 export const mcpProposals = sqliteTable('mcp_proposals', {
   proposalId: text('proposal_id').primaryKey(),
   requestId: text('request_id').notNull(),
-  principalId: text('principal_id').notNull(),
   sourceAgentId: text('source_agent_id').notNull(),
   conversationId: text('conversation_id').notNull(),
   serverId: text('server_id').notNull(),
@@ -158,13 +155,10 @@ export const agentConfigVersions = sqliteTable(
   (t) => [primaryKey({ columns: [t.agentId, t.version] })],
 )
 
-/** Shared MCP registrations. Only the creator may change the endpoint or vetted catalog. */
+/** Installation-wide MCP registrations; registration alone grants no tools to an agent. */
 export const mcpServers = sqliteTable('mcp_servers', {
   serverId: text('server_id').primaryKey(),
   shortId: text('short_id').notNull().unique(),
-  creatorId: text('creator_id')
-    .notNull()
-    .references(() => principals.principalId),
   name: text('name').notNull(),
   endpoint: text('endpoint').notNull().unique(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
@@ -232,9 +226,6 @@ export const mcpAssignments = sqliteTable(
 export const mcpOAuthTransactions = sqliteTable('mcp_oauth_transactions', {
   requestId: text('request_id'),
   transactionId: text('transaction_id').primaryKey(),
-  principalId: text('principal_id')
-    .notNull()
-    .references(() => principals.principalId),
   serverId: text('server_id')
     .notNull()
     .references(() => mcpServers.serverId),
@@ -256,9 +247,6 @@ export const mcpOAuthClients = sqliteTable(
   'mcp_oauth_clients',
   {
     registrationId: text('registration_id').primaryKey(),
-    principalId: text('principal_id')
-      .notNull()
-      .references(() => principals.principalId),
     serverId: text('server_id')
       .notNull()
       .references(() => mcpServers.serverId),
@@ -269,9 +257,7 @@ export const mcpOAuthClients = sqliteTable(
     status: text('status', { enum: ['registering', 'ready', 'reauth_required'] }).notNull(),
     createdAt: integer('created_at').notNull(),
   },
-  (t) => [
-    unique('mcp_oauth_client_binding').on(t.principalId, t.serverId, t.issuer, t.redirectUri),
-  ],
+  (t) => [unique('mcp_oauth_client_binding').on(t.serverId, t.issuer, t.redirectUri)],
 )
 
 /** Encrypted provider and MCP secrets; only src/credentials/ may access these rows. */

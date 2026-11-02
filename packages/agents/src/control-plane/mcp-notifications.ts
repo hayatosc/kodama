@@ -1,4 +1,4 @@
-/** Current MCP states that require owner attention, projected into the existing inbox. @module */
+/** Current MCP states that require operator attention, projected into the existing inbox. @module */
 import * as v from 'valibot'
 import { and, eq, ne } from 'drizzle-orm'
 import {
@@ -65,7 +65,7 @@ export async function mcpCatalogNotices(
       source: 'mcp',
       sourceId,
       outcome: 'failed',
-      summary: `MCP server ${serverId} requires owner attention: ${reason}. No tools were automatically added or retried.`,
+      summary: `MCP server ${serverId} requires operator attention: ${reason}. No tools were automatically added or retried.`,
       artifactIds: [],
     })
   }
@@ -81,7 +81,7 @@ export async function mcpCredentialNotice(
   const row = await db
     .select({ credential: credentials })
     .from(credentials)
-    .innerJoin(agents, eq(agents.ownerId, credentials.ownerId))
+    .innerJoin(agents, and(eq(agents.agentId, agentId), eq(agents.kind, 'working')))
     .where(
       and(
         eq(agents.agentId, agentId),
@@ -95,7 +95,7 @@ export async function mcpCredentialNotice(
     source: 'mcp',
     sourceId: `${credentialId}:${row.credential.revision}:${row.credential.status}`,
     outcome: 'failed',
-    summary: `MCP credential ${credentialId} is unavailable (${row.credential.mcpAuthState ?? row.credential.status}). The owner must reconnect or remove its selections; no call was retried.`,
+    summary: `MCP credential ${credentialId} is unavailable (${row.credential.mcpAuthState ?? row.credential.status}). The operator must reconnect or remove its selections; no call was retried.`,
     artifactIds: [],
   }
 }
@@ -109,7 +109,7 @@ export async function mcpRevocationRecipients(db: ManagementDb) {
       settingsJson: agentConfigVersions.settingsJson,
     })
     .from(credentials)
-    .innerJoin(agents, eq(agents.ownerId, credentials.ownerId))
+    .innerJoin(agents, eq(agents.kind, 'working'))
     .innerJoin(
       agentConfigVersions,
       and(

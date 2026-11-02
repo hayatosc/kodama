@@ -165,7 +165,7 @@ export function validateMcpValue(schema: Record<string, unknown>, value: unknown
   }
 }
 
-/** Discovery retains rejected definitions for owner review, but cannot expose them as tools. */
+/** Discovery retains rejected definitions for operator review, but cannot expose them as tools. */
 export async function inspectMcpTool(value: unknown) {
   const definition = record(value)
   const digest = await mcpDigest(definition)
