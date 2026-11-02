@@ -1,15 +1,133 @@
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { isKnownUrl } from './local-db/external-data.ts'
+import { openLocalDb } from './local-db/local.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import AgentService from '../index.ts'
-import { newAgentId } from '../testing/management.ts'
+import { management, newAgentId, seedOnce } from '../testing/management.ts'
+import { agents } from '../../drizzle/management/schema.ts'
+import { eq } from 'drizzle-orm'
+import { recordNotification } from './local-db/notifications.ts'
+import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { parseMessage } from '../validation.ts'
-import { modelResponse, readEvents, useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import {
+  modelResponse,
+  readEvents,
+  rejectionInObject,
+  useMockModel,
+  waitForAnswer,
+} from '../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
+
+describe('notification RPC', () => {
+  it('persists agent-wide exact acknowledgements across eviction without model input', async () => {
+    const id = await newAgentId()
+    const stub = env.AGENTS.getByName(id)
+    await runInDurableObject(stub, async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      for (const sourceId of ['first', 'second', 'third'])
+        recordNotification(
+          local,
+          {
+            source: 'schedule',
+            sourceId,
+            outcome: 'succeeded',
+            summary: 'Completed.',
+            artifactIds: [],
+          },
+          Date.now(),
+        )
+    })
+    const page = await exports.default.notifications(id, { limit: 2 })
+    expect(page.notifications.map((item) => item.seq)).toEqual([3, 2])
+    expect(page.nextBefore).toBe(2)
+    expect(await exports.default.readNotification(id, { seq: 2 })).toBe(true)
+    const readAt = (await exports.default.notifications(id)).notifications.find(
+      (item) => item.seq === 2,
+    )?.readAt
+    expect(readAt).toBeTypeOf('number')
+    page[Symbol.dispose]()
+    await evictDurableObject(stub)
+    expect(await exports.default.readNotification(id, { seq: 2 })).toBe(true)
+    const unread = await exports.default.notifications(id, { unreadOnly: true })
+    expect(unread.notifications.map((item) => item.seq)).toEqual([3, 1])
+    expect(
+      (await exports.default.notifications(id)).notifications.find((item) => item.seq === 2)
+        ?.readAt,
+    ).toBe(readAt)
+    expect((await exports.default.notifications(await newAgentId())).notifications).toEqual([])
+    expect(await exports.default.readNotification(id, { seq: 999 })).toBe(false)
+    expect((await exports.default.snapshot(id)).snapshot.messages).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each(['active', 'pausing', 'paused', 'archived'] as const)(
+    'admits inbox reads and acknowledgement for %s agents',
+    async (status) => {
+      const id = await newAgentId()
+      await management.update(agents).set({ status }).where(eq(agents.agentId, id))
+      expect((await exports.default.notifications(id)).notifications).toEqual([])
+      expect(await exports.default.readNotification(id, { seq: 1 })).toBe(false)
+      expect(fetch).not.toHaveBeenCalled()
+    },
+  )
+
+  it('rejects unknown, dedicated and unavailable agents and invalid queries before admission', async () => {
+    const seeded = await seedOnce()
+    const unavailable = await newAgentId()
+    for (const status of ['provisioning', 'deleting', 'deleted'] as const) {
+      await management.update(agents).set({ status }).where(eq(agents.agentId, unavailable))
+      await expect(Promise.resolve(exports.default.notifications(unavailable))).rejects.toThrow(
+        'agent_unavailable',
+      )
+      await expect(
+        Promise.resolve(exports.default.readNotification(unavailable, { seq: 1 })),
+      ).rejects.toThrow('agent_unavailable')
+    }
+    for (const id of [uuidv7(), seeded.memoryAgentId]) {
+      await expect(Promise.resolve(exports.default.notifications(id))).rejects.toThrow()
+      await expect(
+        Promise.resolve(exports.default.readNotification(id, { seq: 1 })),
+      ).rejects.toThrow()
+    }
+    const id = await newAgentId()
+    for (const query of [{ limit: 101 }, { before: 0 }, { limit: 0 }]) {
+      await expect(Promise.resolve(exports.default.notifications(id, query))).rejects.toThrow()
+      expect(
+        await rejectionInObject(env.AGENTS.getByName(id), (agent) => agent.notifications(query)),
+      ).toContain('TypeError')
+    }
+    for (const seq of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(Promise.resolve(exports.default.readNotification(id, { seq }))).rejects.toThrow()
+      expect(
+        await rejectionInObject(env.AGENTS.getByName(id), (agent) =>
+          agent.readNotification({ seq }),
+        ),
+      ).toContain('TypeError')
+    }
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      recordNotification(
+        await openLocalDb(state.storage),
+        {
+          source: 'schedule',
+          sourceId: 'expired',
+          outcome: 'failed',
+          summary: 'Failed.',
+          artifactIds: [],
+        },
+        Date.now() - EXTENSION_RETENTION_MS,
+      )
+    })
+    expect(await exports.default.readNotification(id, { seq: 1 })).toBe(false)
+    expect((await exports.default.notifications(id)).notifications).toEqual([])
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
 
 describe('agent RPC', () => {
   it('generates an answer through Worker and Durable Object RPC and persists it across eviction', async () => {
@@ -54,6 +172,32 @@ describe('agent RPC', () => {
     expect((await exports.default.snapshot(otherId)).snapshot.messages).toEqual([])
     expect(await exports.default.submission(otherId, 'same')).toBeUndefined()
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('grants only newly admitted owner URLs, not replacement content on a duplicate request', async () => {
+    const agentId = await newAgentId()
+    const first = await exports.default.sendMessage(agentId, {
+      requestId: 'owner-url',
+      content: 'Read https://example.org/original',
+    })
+    await waitForAnswer(agentId, 'owner-url')
+    const duplicate = await exports.default.sendMessage(agentId, {
+      requestId: 'owner-url',
+      content: 'Read https://example.org/replacement',
+    })
+    expect(duplicate.submissionId).toBe(first.submissionId)
+    await env.AGENTS.getByName(uuidv7()).sendTo(agentId, {
+      requestId: 'peer-url',
+      content: 'Read https://example.org/peer',
+    })
+    await waitForAnswer(agentId, 'peer-url')
+    const known = await runInDurableObject(env.AGENTS.getByName(agentId), async (_agent, state) => {
+      const local = await openLocalDb(state.storage)
+      return ['original', 'replacement', 'peer'].map((path) =>
+        isKnownUrl(local, String(ROOT_CONVERSATION_ID), `https://example.org/${path}`),
+      )
+    })
+    expect(known).toEqual([true, false, false])
   })
 
   it('rejects invalid input through service and direct object RPC', async () => {

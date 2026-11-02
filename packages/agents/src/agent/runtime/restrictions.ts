@@ -90,13 +90,9 @@ export type AppliedSettings = () => Promise<AgentSettings | undefined>
 
 /**
  * The extension that checks every tool call: `refusal` first, then the applied version's
- * `toolPolicy`, and `memoryPolicy.remember` for the `remember` tool.
+ * `toolPolicy`, and for the `remember` tool `memoryPolicy.remember`.
  */
-export function toolGuardExtension(
-  refusal: Refusal,
-  settings: AppliedSettings,
-  trusted: () => Promise<void> = async () => {},
-): Extension {
+export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings): Extension {
   return defineExtension({
     name: 'kodama-restrictions',
     hooks: [
@@ -104,15 +100,24 @@ export function toolGuardExtension(
         beforeTool: async (call) => {
           let reason = refusal()
           const applied = await settings()
-          if (!reason && (call.name === 'remember' || call.name === 'contact_agent')) {
-            try {
-              await trusted()
-            } catch {
-              reason = 'untrusted_context'
-            }
-          }
           if (
-            (call.name === 'web_search' || call.name === 'web_fetch') &&
+            [
+              'execute_code',
+              'create_artifact',
+              'read_artifact',
+              'list_artifacts',
+              'delete_artifact',
+              'web_search',
+              'web_fetch',
+              'contact_agent',
+              'list_contacts',
+              'contact_status',
+              'contact_result',
+              'discover_agents',
+              'schedule_task',
+              'list_scheduled_tasks',
+              'cancel_scheduled_task',
+            ].includes(call.name) &&
             !applied?.tools.includes(call.name)
           )
             reason ??= 'tool_disabled'

@@ -5,15 +5,32 @@
  *
  * @module
  */
+import { createCodeExecutor } from '../tools/code/execute.ts'
+import { artifactReadResult } from '../tools/artifacts.ts'
+import {
+  cleanupArtifacts,
+  deleteArtifact,
+  downloadArtifact,
+  readArtifacts,
+  rearmArtifacts,
+  uploadArtifact,
+} from '../artifacts/files.ts'
+import type { ArtifactUpload } from '../extensions.ts'
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
-import { contactBoundary, markContact, requireTrusted } from './local-db/external-data.ts'
-import { latestEntryId } from '../memory/transcript.ts'
+import { grantUrls } from './local-db/external-data.ts'
+import { urlsInText } from '../tools/web/url.ts'
+import type { MemoryJob } from '../memory/jobs.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { Operation } from '../memory/store/records.ts'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { safeFailure } from '../lib/errors.ts'
+import { deadline } from '../lib/deadline.ts'
 import { DurableObject } from 'cloudflare:workers'
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import {
+  BACKGROUND_CONTEXT,
+  awaitWithContext,
+  withAbortSignal,
+} from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type {
   AgentChange,
@@ -24,7 +41,13 @@ import type {
   TaskId,
 } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import { takeDueAlarms, armRecovery, refreshRecovery } from './runtime/alarms.ts'
+import {
+  dispatchAlarms,
+  setAlarm,
+  setAlarmNoLaterThan,
+  armRecovery,
+  refreshRecovery,
+} from './runtime/alarms.ts'
 import type { AlarmPurpose } from './runtime/alarms.ts'
 import {
   agentChange,
@@ -36,7 +59,13 @@ import {
 } from '../control-plane/config.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
-import { admitAgent, agentRowByObjectName } from '../control-plane/registry.ts'
+import {
+  admitAgent,
+  agentRow,
+  agentRowByObjectName,
+  discoverAgents,
+  resolveAgentRef,
+} from '../control-plane/registry.ts'
 import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.ts'
 import type { UsagePage } from './local-db/usage.ts'
 import type { UsageAttribution } from './local-db/usage.ts'
@@ -59,8 +88,33 @@ import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './runtime/events.ts'
 import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
 import { createAgentOptions } from './config.ts'
-import { contactOrigin, MAX_CONTACT_HOPS } from './contact.ts'
-import { contactAgent } from '../tools/contact.ts'
+import {
+  contactOrigin,
+  MAX_CONTACT_HOPS,
+  reserveToolContact,
+  reconcileContactReceipts,
+  collectContact,
+  boundedContactResult,
+  CONTACT_ATTEMPT_MS,
+  CONTACT_ALARM_BUDGET_MS,
+  MAX_CONTACT_FLIGHTS,
+} from './contact.ts'
+import { CONTACT_WAIT_MS } from '../tools/contact.ts'
+import {
+  actionableContacts,
+  contactRequest,
+  contactReceipt,
+  reserveReceipt,
+  pendingContactReceipts,
+  updateReceipt,
+  acknowledgeReceipt,
+  contactView,
+  listContacts,
+  nextContactWake,
+  retainContacts,
+  deferContact,
+  retryContact,
+} from './local-db/contacts.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
@@ -75,24 +129,31 @@ import type {
   AgentSettings,
   AgentSnapshot,
   AgentStatus,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
   ApplyResult,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
+import { listNotifications, readNotification } from './local-db/notifications.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
+  ExtensionIdSchema,
   parseInput,
   parseMessage,
   parseRequestId,
   VersionSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
 } from '../validation.ts'
 import { readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../control-plane/config.ts'
-import { pruneUntilUnder, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
+import { pruneSlice, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
 import {
   extracts,
   markActivity,
@@ -101,6 +162,16 @@ import {
   scheduleExtraction,
 } from './memory.ts'
 import { snapshotOf, submissionOf } from './runtime/views.ts'
+import { currentRunInputs } from './runtime/inputs.ts'
+import {
+  armScheduling,
+  dispatchSchedules,
+  mutateSchedule,
+  readSchedules,
+  rearmScheduling,
+  reconcileSchedules,
+} from './scheduling.ts'
+import { pendingOccurrences } from './local-db/scheduled-tasks.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -131,16 +202,27 @@ export class Agent extends DurableObject<AgentEnv> {
   readonly #watching = new Set<TaskId>()
   /** The pruning pass in progress; concurrent calls share it. */
   #pruning: Promise<PruneOutcome> | undefined
+  /** Concurrent alarm/recovery callbacks share one bounded scheduling pass. */
+  #scheduling: Promise<void> | undefined
+  /** Concurrent observations share a single network operation per contact. */
+  readonly #contactFlights = new Map<string, Promise<void>>()
   /** A memory change arrived while the agent was busy; refresh at the next idle moment. */
   #memoryChanged = false
   /** Why the next external call must not happen, checked before each one. */
   readonly #refusal: Refusal
   readonly #credentials: ReturnType<typeof agentCredentialStore>
   readonly #web = createWebState()
+  /** The most recent code compilation; generated Worker caches are scoped to this agent. */
+  readonly #executeCode: ReturnType<typeof createCodeExecutor>
 
   /** Open the local tables and the harness; every request waits until both are ready. */
   constructor(ctx: DurableObjectState, env: AgentEnv) {
     super(ctx, env)
+    this.#executeCode = createCodeExecutor(env.CODE_LOADER, this.#agentId(), {
+      read: (id) => this.downloadArtifact(id),
+      write: (file) => this.uploadArtifact(file),
+      remove: (id) => this.deleteArtifact(id),
+    })
     this.#refusal = anyRefusal(statusRefusal(ctx.storage))
     this.#credentials = agentCredentialStore(
       env,
@@ -170,6 +252,28 @@ export class Agent extends DurableObject<AgentEnv> {
         local,
         async () => {
           const active = this.ctx.storage.kv.get<UsageAttribution>(USAGE_CONTEXT_KEY)
+          // Dedicated jobs charge their requester, not the object's Pi input provenance.
+          if (active?.jobId) return active
+          const inputs = await currentRunInputs(await this.#harness, context)
+          if (
+            inputs?.some((entry) =>
+              [
+                'pi.user',
+                'kodama.owner-message',
+                'kodama.agent-message',
+                'kodama.scheduled-message',
+              ].includes(entry.kind),
+            )
+          ) {
+            const owner = inputs.some(
+              (entry) => entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message',
+            )
+            const peer = inputs.some((entry) => entry.kind === 'kodama.agent-message')
+            return {
+              chargedAgentId: this.#agentId(),
+              actorKind: owner ? 'user' : peer ? 'agent' : 'system',
+            }
+          }
           if (active) return active
           const agent = await agentRowByObjectName(
             managementDb(this.env.MANAGEMENT_DB),
@@ -279,23 +383,76 @@ export class Agent extends DurableObject<AgentEnv> {
       this.env,
       [
         createWorkingMemoryExtension(this.#workingMemory(), () => this.#harness),
-        toolGuardExtension(
-          this.#refusal,
-          () => appliedSettings(this.ctx.storage),
-          async () => requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID)),
-        ),
+        toolGuardExtension(this.#refusal, () => appliedSettings(this.ctx.storage)),
       ],
       this.#refusal,
       this.credentialStore(),
-      (target, message, requestId, context) =>
-        contactAgent(
-          this.env,
-          (id, request) => this.sendTo(id, request),
-          target,
-          message,
-          `${this.#agentId()}-${requestId}`,
-          context,
-        ),
+      async (call, api, invocation) => {
+        const local = await this.#local
+        if (call.operation === 'discover')
+          return JSON.stringify(await discoverAgents(managementDb(this.env.MANAGEMENT_DB), call))
+        if (call.operation === 'list') return JSON.stringify(listContacts(local, call.cursor))
+        if (call.operation === 'status' || call.operation === 'result') {
+          const row = contactRequest(local, parseInput(ExtensionIdSchema, call.contact_id))
+          return JSON.stringify(
+            row ? contactView(row, call.operation === 'result') : { status: 'not_found' },
+          )
+        }
+        if (call.operation !== 'send') throw new Error('contact_operation_invalid')
+        const row = await this.#serial(async () => {
+          await this.#checkContactAllowed()
+          const target = await resolveAgentRef(managementDb(this.env.MANAGEMENT_DB), call.target)
+          if (target.agentId === this.#agentId())
+            throw new TypeError('Cannot contact this agent itself')
+          await admitAgent(managementDb(this.env.MANAGEMENT_DB), target.agentId, 'chat')
+          await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+          const reserved = await reserveToolContact(
+            local,
+            await this.#harness,
+            this.#agentId(),
+            target.agentId,
+            call.target,
+            call.message,
+            api,
+            invocation,
+            () => assertAllowed(this.#refusal),
+          )
+          await this.#rearmContacts()
+          return reserved
+        })
+        // Bound observation of every peer RPC; durable collection outlives this observer.
+        const deadline = new AbortController()
+        const timer = setTimeout(() => deadline.abort(), CONTACT_WAIT_MS)
+        const waiting = withAbortSignal(deadline.signal, invocation)
+        try {
+          while (true) {
+            await awaitWithContext(this.#collectContact(row.id), waiting)
+            const current = contactRequest(local, row.id)
+            if (current?.settledAt !== null && current !== undefined)
+              return JSON.stringify(contactView(current, true))
+            let pause: ReturnType<typeof setTimeout> | undefined
+            try {
+              await awaitWithContext(
+                new Promise<void>((resolve) => {
+                  pause = setTimeout(resolve, 250)
+                }),
+                waiting,
+              )
+            } finally {
+              clearTimeout(pause)
+            }
+          }
+        } catch {
+          invocation.abortSignal?.throwIfAborted()
+          // A transient RPC failure cannot erase the durable handle or cancel accepted work.
+          const current = contactRequest(local, row.id)
+          return JSON.stringify(
+            current ? contactView(current, true) : { contactId: row.id, status: 'pending' },
+          )
+        } finally {
+          clearTimeout(timer)
+        }
+      },
       async (tool, argument, context, maximum) =>
         executeWeb(
           await this.#local,
@@ -310,6 +467,81 @@ export class Agent extends DurableObject<AgentEnv> {
           context,
           maximum,
         ),
+      (call, api, invocation) =>
+        this.#serial(async () => {
+          assertAllowed(this.#refusal)
+          const settings = await appliedSettings(this.ctx.storage)
+          const tool =
+            call.operation === 'create'
+              ? 'schedule_task'
+              : call.operation === 'cancel'
+                ? 'cancel_scheduled_task'
+                : 'list_scheduled_tasks'
+          if (!settings?.tools.includes(tool) || settings.toolPolicy?.[tool] === 'deny')
+            throw new Error('schedule_disabled')
+          const local = await this.#local
+          if (call.operation === 'list') return JSON.stringify(readSchedules(local, call))
+          await armScheduling(this.ctx.storage)
+          const result = await mutateSchedule(
+            local,
+            await this.#harness,
+            call,
+            api,
+            invocation,
+            () => assertAllowed(this.#refusal),
+          )
+          await rearmScheduling(local, this.ctx.storage)
+          return JSON.stringify(result)
+        }),
+      (input, context) =>
+        this.#executeCode(
+          input,
+          () =>
+            this.#serial(async () => {
+              assertAllowed(this.#refusal)
+              const settings = await appliedSettings(this.ctx.storage)
+              if (
+                !settings?.tools.includes('execute_code') ||
+                settings.toolPolicy?.execute_code === 'deny'
+              )
+                throw new Error('code_disabled')
+            }),
+          context.abortSignal,
+        ),
+      async (call) => {
+        await this.#harness
+        return this.#serial(async () => {
+          assertAllowed(this.#refusal)
+          const name = {
+            create: 'create_artifact',
+            read: 'read_artifact',
+            list: 'list_artifacts',
+            delete: 'delete_artifact',
+          }[call.operation]
+          const settings = await appliedSettings(this.ctx.storage)
+          if (!settings?.tools.includes(name) || settings.toolPolicy?.[name] === 'deny')
+            throw new Error('artifacts_disabled')
+          const local = await this.#local
+          if (call.operation === 'create')
+            return JSON.stringify(
+              await uploadArtifact(local, this.env.ARCHIVE, this.#agentId(), call.upload, (at) =>
+                this.#artifactWake(at),
+              ),
+            )
+          if (call.operation === 'read')
+            return artifactReadResult(
+              await downloadArtifact(local, this.env.ARCHIVE, this.#agentId(), call.artifactId),
+            )
+          if (call.operation === 'list') {
+            const { operation: _operation, ...page } = call
+            return JSON.stringify(readArtifacts(local, page))
+          }
+          await deleteArtifact(local, this.env.ARCHIVE, this.#agentId(), call.artifactId, (at) =>
+            this.#artifactWake(at),
+          )
+          return JSON.stringify({ deleted: true })
+        })
+      },
     )
   }
 
@@ -321,6 +553,9 @@ export class Agent extends DurableObject<AgentEnv> {
   /** The last step of opening, before recovery: a working agent refreshes its memory copy. */
   protected async prepare(_harness: Harness): Promise<void> {
     await refreshMemory(this.#workingMemory())
+    await rearmScheduling(await this.#local, this.ctx.storage)
+    await rearmArtifacts(await this.#local, (at) => this.#artifactWake(at))
+    await this.#rearmContacts()
   }
 
   /**
@@ -337,11 +572,62 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Handle one due alarm purpose: extraction once idle, and pruning. */
   protected async onAlarm(purpose: AlarmPurpose): Promise<void> {
+    if (purpose === 'artifacts')
+      await this.#serial(async () =>
+        cleanupArtifacts(await this.#local, this.env.ARCHIVE, this.#agentId(), (at) =>
+          this.#artifactWake(at),
+        ),
+      )
     if (purpose === 'extract') {
       const harness = await this.#harness
       await this.#serial(() => runExtraction(this.#workingMemory(), harness, this.ctx.storage))
     }
     if (purpose === 'prune') await this.prune()
+    if (purpose === 'contact') {
+      using budget = deadline(CONTACT_ALARM_BUDGET_MS)
+      const observing = withAbortSignal(budget.signal, BACKGROUND_CONTEXT)
+      try {
+        for (const row of actionableContacts(await this.#local, Date.now()).slice(0, 10)) {
+          if (budget.signal.aborted) break
+          try {
+            await awaitWithContext(this.#collectContact(row.id), observing)
+          } catch {
+            // Stop observing the batch, not the exclusive attempt or its late durable writes.
+            if (budget.signal.aborted) break
+          }
+        }
+      } finally {
+        await this.#rearmContacts()
+      }
+    }
+    if (purpose === 'schedule') {
+      this.#scheduling ??= (async () =>
+        dispatchSchedules(
+          await this.#local,
+          await this.#harness,
+          this.ctx.storage,
+          (operation) => this.#serial(operation),
+          () => this.#prepareScheduled(),
+          (draft) => this.admit(draft, 'system'),
+        ))().finally(() => {
+        this.#scheduling = undefined
+      })
+      await this.#scheduling
+    }
+  }
+
+  /** Current admission checks, not permissions frozen at reservation creation. */
+  async #prepareScheduled(): Promise<void> {
+    assertAllowed(this.#refusal)
+    await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+    const settings = await appliedSettings(this.ctx.storage)
+    if (!settings?.tools.includes('schedule_task') || settings.toolPolicy?.schedule_task === 'deny')
+      throw new Error('schedule_disabled')
+    await refuseWhenFull(this.ctx.storage)
+    const config = await readConfig(await this.#config())
+    await this.credentialStore().read(config.model.provider)
+    if (await isIdle(await this.#harness))
+      await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
   }
 
   /** Whether pruning archives entries to R2 before deleting them. */
@@ -360,12 +646,7 @@ export class Agent extends DurableObject<AgentEnv> {
   #workingMemory(): WorkingMemoryDeps {
     return {
       env: this.env,
-      trusted: (operation) =>
-        this.#serial(async () => {
-          requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
-          return operation()
-        }),
-      contact: () => this.#serial(async () => this.#contact('history')),
+      serialize: (operation) => this.#serial(operation),
       agentId: () => this.#agentId(),
       local: () => this.#local,
       sharedSpaces: () => this.#sharedSpaces(),
@@ -403,15 +684,40 @@ export class Agent extends DurableObject<AgentEnv> {
 
   /** Close the harness for `mutate` if `check` passes, then reopen it; see `exclusiveSection`. */
   async #exclusive(check: (harness: Harness) => Promise<boolean>, mutate: () => void) {
-    const section = exclusiveSection(this.ctx, this.#harness, check, mutate, () => this.#open())
+    const section = exclusiveSection(
+      this.ctx,
+      this.#harness,
+      async (harness) => {
+        const local = await this.#local
+        await reconcileSchedules(local, harness)
+        await reconcileContactReceipts(local, harness)
+        if (pendingContactReceipts(local).length > 0) return false
+        // Never-admitted claims need pruning to recover from storage pressure. Preserve evidence
+        // only after admission may have started or an accepted submission remains unresolved.
+        if (
+          pendingOccurrences(local).some(
+            ({ occurrence }) => occurrence.admissionStarted || occurrence.state === 'submitted',
+          )
+        )
+          return false
+        return check(harness)
+      },
+      mutate,
+      () => this.#open(),
+    )
     this.#harness = section.then((result) => result.harness)
     return (await section).mutated
   }
 
   /** Keep the recovery alarm in step with Pi's tasks; runs in the serial queue. */
   #refreshRecovery(harness: Harness): Promise<void> {
-    return this.#serial(() =>
-      refreshRecovery({
+    return this.#serial(async () => {
+      const local = await this.#local
+      await reconcileSchedules(local, harness)
+      await reconcileContactReceipts(local, harness)
+      await this.#rearmContacts()
+      await rearmScheduling(local, this.ctx.storage)
+      await refreshRecovery({
         harness,
         storage: this.ctx.storage,
         watching: this.#watching,
@@ -421,21 +727,20 @@ export class Agent extends DurableObject<AgentEnv> {
           await this.onIdle()
         },
         refreshAgain: () => this.#refreshRecovery(harness),
-      }),
-    )
+      })
+    })
   }
 
   /**
-   * The platform alarm: take the due purposes, refresh recovery, and handle each purpose.
-   *
-   * @remarks
-   * Due purposes are taken first. Successful extraction clears its pending activity and deadline,
-   * including any deadline restored by the recovery refresh.
+   * Dispatch independently claimed purposes. Recovery also covers old platform-only wakes;
+   * its retry is durable before opening or refreshing Pi can fail.
    */
   override async alarm(): Promise<void> {
-    const due = await takeDueAlarms(this.ctx.storage, Date.now())
-    await this.#refreshRecovery(await this.#harness)
-    for (const purpose of due) await this.onAlarm(purpose)
+    await setAlarmNoLaterThan(this.ctx.storage, 'recovery', Date.now())
+    await dispatchAlarms(this.ctx.storage, Date.now(), async (purpose) => {
+      if (purpose === 'recovery') await this.#refreshRecovery(await this.#harness)
+      await this.onAlarm(purpose)
+    })
   }
 
   /**
@@ -445,7 +750,10 @@ export class Agent extends DurableObject<AgentEnv> {
    * The recovery alarm is persisted first, in the serial queue, which also covers the window between
    * admission and Pi's scheduler.
    */
-  protected async admit(draft: SubmissionDraft, actorKind?: 'user' | 'agent'): Promise<Submission> {
+  protected async admit(
+    draft: SubmissionDraft,
+    actorKind?: 'user' | 'agent' | 'system',
+  ): Promise<Submission> {
     const harness = await this.#harness
     const conversation = await harness.root(context)
     const submission = await this.#serial(async () => {
@@ -458,7 +766,15 @@ export class Agent extends DurableObject<AgentEnv> {
         )
         if (existing) return conversation.submit(draft, context)
       }
-      if (actorKind === 'agent') await this.#contact('peer')
+      if (actorKind === 'system') {
+        assertAllowed(this.#refusal)
+        const settings = await appliedSettings(this.ctx.storage)
+        if (
+          !settings?.tools.includes('schedule_task') ||
+          settings.toolPolicy?.schedule_task === 'deny'
+        )
+          throw new Error('schedule_disabled')
+      }
       await armRecovery(this.ctx.storage)
       await markActivity(this.ctx.storage)
       if (actorKind) {
@@ -469,7 +785,16 @@ export class Agent extends DurableObject<AgentEnv> {
           actorKind: !idle && previous?.actorKind === 'user' ? 'user' : actorKind,
         } satisfies UsageAttribution)
       }
-      return conversation.submit(draft, context)
+      const admitted = await conversation.submit(draft, context)
+      // Only newly admitted owner text grants URLs; web admission shares this queue.
+      if (actorKind === 'user' && draft.type === 'input' && typeof draft.content === 'string')
+        grantUrls(
+          await this.#local,
+          String(ROOT_CONVERSATION_ID),
+          'owner',
+          urlsInText(draft.content),
+        )
+      return admitted
     })
     await this.#refreshRecovery(harness)
     return submission
@@ -483,10 +808,17 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws When the database is above the hard storage limit, or the selected provider has no
    * credentials.
    */
-  async sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
+  sendMessage(request: SendMessageRequest, origin?: AgentOrigin): Promise<number> {
+    return this.onSendMessage(request, origin)
+  }
+
+  /** Admit working-agent input; dedicated agents may reject input outside their job queue. */
+  protected async onSendMessage(
+    request: SendMessageRequest,
+    origin?: AgentOrigin,
+  ): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       parseAgentId(origin.senderAgentId)
       if (!Number.isInteger(origin.hop) || origin.hop < 1 || origin.hop > MAX_CONTACT_HOPS)
         throw new TypeError('Invalid delegation hop')
@@ -513,17 +845,7 @@ export class Agent extends DurableObject<AgentEnv> {
               },
             }
           : {
-              entry: {
-                kind: 'kodama.owner-message',
-                data: {
-                  webPermissions: {
-                    ...(message.webPermissions?.queries
-                      ? { queries: message.webPermissions.queries }
-                      : {}),
-                    ...(message.webPermissions?.urls ? { urls: message.webPermissions.urls } : {}),
-                  },
-                },
-              },
+              entry: { kind: 'kodama.owner-message' },
             }),
       },
       origin ? 'agent' : 'user',
@@ -536,9 +858,54 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws {@link TypeError} When the message is invalid; nothing is admitted.
    */
-  async send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+  send(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+    return this.onSend(request)
+  }
+
+  /** Stream working-agent input through the overridable admission path. */
+  protected async onSend(request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     const message = parseMessage(request)
     return sendEvents(await this.#harness, message.requestId, () => this.sendMessage(message))
+  }
+
+  /** Persist cleanup in the object's shared purpose-based alarm scheduler. */
+  #artifactWake(at: number | undefined): Promise<void> {
+    return setAlarm(this.ctx.storage, 'artifacts', at)
+  }
+
+  /** Upload arbitrary bytes without interpreting their extension or declared media type. */
+  async uploadArtifact(input: ArtifactUpload) {
+    await this.#harness
+    return this.#serial(async () => {
+      assertAllowed(this.#refusal)
+      return uploadArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), input, (at) =>
+        this.#artifactWake(at),
+      )
+    })
+  }
+
+  /** Read only this object's unexpired metadata. */
+  async listArtifacts(page: { cursor?: string; limit?: number } = {}) {
+    await this.#harness
+    return this.#serial(async () => readArtifacts(await this.#local, page))
+  }
+
+  /** Return bytes through private RPC, never an executable public response or R2 URL. */
+  async downloadArtifact(id: string) {
+    await this.#harness
+    return this.#serial(async () =>
+      downloadArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), id),
+    )
+  }
+
+  /** Hide immediately and retry interrupted storage deletion using the shared alarm. */
+  async deleteArtifact(id: string): Promise<void> {
+    await this.#harness
+    return this.#serial(async () =>
+      deleteArtifact(await this.#local, this.env.ARCHIVE, this.#agentId(), id, (at) =>
+        this.#artifactWake(at),
+      ),
+    )
   }
 
   /** The stored configuration. */
@@ -604,51 +971,218 @@ export class Agent extends DurableObject<AgentEnv> {
    * @throws {@link Error} When this agent's state stops external calls, or the target's state does
    * not admit messages.
    */
-  async sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
+  sendTo(agentId: string, request: SendMessageRequest): Promise<SendMessageResponse> {
+    return this.onSendTo(agentId, request)
+  }
+
+  /** Deliver peer input only for agent kinds that support conversation delivery. */
+  protected async onSendTo(
+    agentId: string,
+    request: SendMessageRequest,
+  ): Promise<SendMessageResponse> {
     parseAgentId(agentId)
     const message = parseMessage(request)
     assertAllowed(this.#refusal)
     const objectName = await admitAgent(managementDb(this.env.MANAGEMENT_DB), agentId, 'chat')
     if (agentId === this.#agentId()) throw new TypeError('Cannot contact this agent itself')
     const origin = await this.#serial(async () => {
-      requireTrusted(await this.#local, String(ROOT_CONVERSATION_ID))
       assertAllowed(this.#refusal)
-      if (message.webPermissions) throw new TypeError('Peer permissions are forbidden')
       const origin = await contactOrigin(await this.#harness, this.#agentId())
-      await this.#contact('peer')
       return origin
     })
     const submissionId = await this.env.AGENTS.getByName(objectName).sendMessage(message, origin)
     return { agentId, requestId: message.requestId, submissionId }
   }
 
-  /** Capture the last eligible entry before admitting or exposing external data. */
-  async #contact(reason: string): Promise<void> {
-    markContact(
-      await this.#local,
-      String(ROOT_CONVERSATION_ID),
-      reason,
-      (await latestEntryId(await this.#harness)) ?? 0,
-    )
+  /** Current sender restrictions are checked again on every new or recovered peer admission. */
+  async #checkContactAllowed(): Promise<void> {
+    assertAllowed(this.#refusal)
+    await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+    const settings = await appliedSettings(this.ctx.storage)
+    if (!settings?.tools.includes('contact_agent') || settings.toolPolicy?.contact_agent === 'deny')
+      throw new Error('contact_disabled')
   }
 
-  /** Source-owned write authorization serializes D1 commit with contact admission. */
-  async applyExtractionOperation(context: OperationContext, operation: Operation) {
-    return this.#serial(async () => {
-      const boundary = contactBoundary(await this.#local, String(ROOT_CONVERSATION_ID))
-      const end =
-        operation.type === 'write' || operation.type === 'supersede'
-          ? operation.record.sourceEntries?.to
-          : operation.type === 'invalidate'
-            ? operation.evidence.sourceEntries?.to
-            : undefined
-      if (
-        boundary !== undefined &&
-        operation.type !== 'checkpoint' &&
-        operation.type !== 'decline' &&
-        (end === undefined || end > boundary)
+  /** Recover all pending work and retention from durable state, not in-memory observers. */
+  async #rearmContacts(): Promise<void> {
+    const local = await this.#local
+    retainContacts(local, Date.now())
+    await setAlarm(this.ctx.storage, 'contact', nextContactWake(local))
+  }
+
+  /**
+   * Bound observation, not remote effects: a timed-out RPC still owns its flight until it settles.
+   * Re-observers share the same deadline and cannot launch overlapping attempts. Late results keep
+   * the normal save/notification/ack order and RPC disposal. The cap also bounds hung ack flights.
+   */
+  #collectContact(id: string): Promise<void> {
+    const flight = this.#contactFlights.get(id)
+    if (flight) {
+      return (async () => {
+        deferContact(await this.#local, id, Date.now())
+        await this.#rearmContacts()
+        await flight
+      })()
+    }
+    if (this.#contactFlights.size >= MAX_CONTACT_FLIGHTS) {
+      return (async () => {
+        deferContact(await this.#local, id, Date.now())
+        await this.#rearmContacts()
+        throw new Error('contact_collection_busy')
+      })()
+    }
+    const operation = (async () => {
+      const local = await this.#local
+      // The batch may stop observing before this attempt does. Do not rearm a past-due busy loop.
+      deferContact(local, id, Date.now())
+      await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+      try {
+        await collectContact(local, this.env, this.#agentId(), id, () =>
+          rearmScheduling(local, this.ctx.storage),
+        )
+      } finally {
+        await this.#rearmContacts()
+      }
+    })().finally(() => {
+      // Never release exclusivity merely because an observer's deadline expired.
+      this.#contactFlights.delete(id)
+    })
+    const observation = (async () => {
+      using budget = deadline(CONTACT_ATTEMPT_MS)
+      try {
+        await awaitWithContext(operation, withAbortSignal(budget.signal, BACKGROUND_CONTEXT))
+      } catch (error) {
+        if (budget.signal.aborted) {
+          retryContact(await this.#local, id, Date.now())
+          await this.#rearmContacts()
+        }
+        throw error
+      }
+    })()
+    this.#contactFlights.set(id, observation)
+    return observation
+  }
+
+  /** Resolve the registered sender; a caller-supplied sender ID alone never authenticates a peer. */
+  async #contactSender(senderAgentId: string) {
+    parseAgentId(senderAgentId)
+    const row = await agentRow(managementDb(this.env.MANAGEMENT_DB), senderAgentId)
+    if (row.kind !== 'working' || senderAgentId === this.#agentId())
+      throw new Error('contact_sender_invalid')
+    return this.env.AGENTS.getByName(row.objectName)
+  }
+
+  /** Internal verification: only an immutable outbox addressed to this receiver grants delivery. */
+  async contactDelivery(contactId: string, receiverAgentId: string, admission = false) {
+    parseInput(ExtensionIdSchema, contactId)
+    parseAgentId(receiverAgentId)
+    const row = contactRequest(await this.#local, contactId)
+    if (!row || row.targetAgentId !== receiverAgentId) throw new Error('contact_not_authorized')
+    if (admission) {
+      if (row.settledAt !== null) throw new Error('contact_already_settled')
+      await this.#checkContactAllowed()
+    }
+    return { requestId: row.requestId, content: row.content, hop: row.hop }
+  }
+
+  /** Stable receiver admission recovers the stop before or after Pi accepts the same request. */
+  async acceptTrackedContact(
+    senderAgentId: string,
+    contactId: string,
+  ): Promise<number | undefined> {
+    parseInput(ExtensionIdSchema, contactId)
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    const local = await this.#local
+    const harness = await this.#harness
+    await setAlarmNoLaterThan(this.ctx.storage, 'contact', Date.now() + 60_000)
+    const receipt = reserveReceipt(local, senderAgentId, delivery.requestId, Date.now())
+    if (receipt.settledAt !== null) return receipt.submissionId || undefined
+    const existing = await submissionOf(harness, delivery.requestId)
+    if (existing) {
+      await reconcileContactReceipts(local, harness)
+      return existing.id
+    }
+    try {
+      using checked = await sender.contactDelivery(contactId, this.#agentId(), true)
+      await admitAgent(managementDb(this.env.MANAGEMENT_DB), this.#agentId(), 'chat')
+      assertAllowed(this.#refusal)
+      const submissionId = await this.sendMessage(
+        { requestId: checked.requestId, content: checked.content },
+        { senderAgentId, hop: checked.hop },
       )
-        throw new Error('untrusted_context')
+      updateReceipt(local, receipt, submissionId)
+      await reconcileContactReceipts(local, harness)
+      return submissionId
+    } catch (error) {
+      const accepted = await submissionOf(harness, delivery.requestId)
+      if (accepted) {
+        await reconcileContactReceipts(local, harness)
+        return accepted.id
+      }
+      // Known pre-admission refusals are safe, bounded results, not raw provider exceptions.
+      if (
+        error instanceof Error &&
+        /^(contact_disabled|agent_restricted|agent_unavailable:|credential_unavailable:|storage_maintenance:)/.test(
+          error.message,
+        )
+      ) {
+        // A proven storage refusal must release the fence so pruning can make progress.
+        const reason = error.message.startsWith('storage_maintenance:')
+          ? 'storage_maintenance'
+          : error.message.startsWith('credential_')
+            ? 'credential_unavailable'
+            : error.message.startsWith('agent_unavailable:')
+              ? 'admission_refused:paused_or_unavailable'
+              : 'contact_disabled_or_restricted'
+        updateReceipt(local, receipt, 0, boundedContactResult('failed', reason))
+        return undefined
+      }
+      throw error
+    }
+  }
+
+  /** Internal peer read validates the sender's persisted target, never arbitrary sender arguments. */
+  async trackedContactResult(senderAgentId: string, contactId: string) {
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    const local = await this.#local
+    await reconcileContactReceipts(local, await this.#harness)
+    const receipt = contactReceipt(local, senderAgentId, delivery.requestId)
+    return receipt
+      ? {
+          submissionId: receipt.submissionId,
+          result: receipt.result,
+          expired: receipt.expiresAt !== null && receipt.expiresAt <= Date.now(),
+        }
+      : undefined
+  }
+
+  /** Internal acknowledgement proof is derived from the sender's committed terminal state. */
+  async contactCompletion(contactId: string, receiverAgentId: string): Promise<boolean> {
+    await this.contactDelivery(contactId, receiverAgentId)
+    const row = contactRequest(await this.#local, contactId)
+    return row !== undefined && row.settledAt !== null
+  }
+
+  /** Ack only after sender result plus notification committed atomically; replay does not extend TTL. */
+  async acknowledgeTrackedContact(senderAgentId: string, contactId: string): Promise<void> {
+    const sender = await this.#contactSender(senderAgentId)
+    using delivery = await sender.contactDelivery(contactId, this.#agentId())
+    if (!(await sender.contactCompletion(contactId, this.#agentId())))
+      throw new Error('contact_completion_not_committed')
+    const local = await this.#local
+    const receipt = contactReceipt(local, senderAgentId, delivery.requestId)
+    if (!receipt || receipt.settledAt === null) throw new Error('contact_receipt_not_settled')
+    acknowledgeReceipt(local, receipt, Date.now())
+    await this.#rearmContacts()
+  }
+
+  /** Serialize memory commits and check the job's source identity; memory cannot change settings. */
+  async applyExtractionOperation(context: OperationContext, operation: Operation, job?: MemoryJob) {
+    return this.#serial(async () => {
+      if (job && 'sourceAgentId' in job && job.sourceAgentId !== this.#agentId())
+        throw new Error('Invalid extraction source')
       return applyOperation(memoryDb(this.env.MEMORY_DB), context, operation)
     })
   }
@@ -661,6 +1195,18 @@ export class Agent extends DurableObject<AgentEnv> {
   /** Acknowledge a D1-committed prefix and perform safe local detail retention. */
   async acknowledgeUsage(through: number): Promise<void> {
     acknowledgeUsage(await this.#local, through)
+  }
+
+  /** Newest-first agent-wide inbox; reading metadata never admits model input. */
+  async notifications(query: NotificationQuery = {}): Promise<NotificationPage> {
+    const input = parseInput(NotificationQuerySchema, query)
+    return listNotifications(await this.#local, input, Date.now())
+  }
+
+  /** Mark exactly one sequence read; returns false for missing or expired notifications. */
+  async readNotification(request: NotificationRead): Promise<boolean> {
+    const input = parseInput(NotificationReadSchema, request)
+    return readNotification(await this.#local, input.seq, Date.now())
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */
@@ -684,7 +1230,20 @@ export class Agent extends DurableObject<AgentEnv> {
    * @remarks
    * Entries already pruned are read from their archived segment in R2.
    */
-  readEntries(request: { after: number; limit: number }): Promise<EntryPage> {
+  readEntries(request: {
+    after: number
+    limit: number
+    throughEntry?: number
+  }): Promise<EntryPage> {
+    return this.onReadEntries(request)
+  }
+
+  /** Read source entries for extraction; dedicated agents can refuse extraction of scratch work. */
+  protected onReadEntries(request: {
+    after: number
+    limit: number
+    throughEntry?: number
+  }): Promise<EntryPage> {
     return readEntries(
       {
         agentId: this.#agentId(),
@@ -700,17 +1259,22 @@ export class Agent extends DurableObject<AgentEnv> {
   /**
    * The memory agent changed this agent's memory: refresh the copy now if idle, else when next idle.
    */
-  async memoryChanged(): Promise<void> {
+  memoryChanged(): Promise<void> {
+    return this.onMemoryChanged()
+  }
+
+  /** Refresh working memory without imposing that policy on dedicated agents. */
+  protected async onMemoryChanged(): Promise<void> {
     if (await isIdle(await this.#harness)) await refreshMemory(this.#workingMemory())
     else this.#memoryChanged = true
   }
 
   /**
-   * Archive and delete old entries until the database is under the threshold, or run once with
-   * `force`. Concurrent calls share the running pass.
+   * Archive and delete one bounded slice, scheduling another wake if still over the threshold.
+   * With `force`, run once. Concurrent calls share the running pass.
    */
   prune(request: { force?: boolean } = {}): Promise<PruneOutcome> {
-    this.#pruning ??= pruneUntilUnder(this.#pruneDeps(), request.force === true).finally(() => {
+    this.#pruning ??= pruneSlice(this.#pruneDeps(), request.force === true).finally(() => {
       this.#pruning = undefined
     })
     return this.#pruning
@@ -721,7 +1285,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  enqueue(_job: unknown): Promise<JobStatus> {
+  enqueue(job: unknown): Promise<JobStatus> {
+    return this.onEnqueue(job)
+  }
+
+  /** Dedicated job admission; public RPC dispatch must not depend on constructor-return overrides. */
+  protected onEnqueue(_job: unknown): Promise<JobStatus> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 
@@ -730,7 +1299,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  jobStatus(_jobId: string): Promise<JobStatus | undefined> {
+  jobStatus(jobId: string): Promise<JobStatus | undefined> {
+    return this.onJobStatus(jobId)
+  }
+
+  /** Read dedicated job state through the same hook path in development and production. */
+  protected onJobStatus(_jobId: string): Promise<JobStatus | undefined> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 
@@ -739,7 +1313,12 @@ export class Agent extends DurableObject<AgentEnv> {
    *
    * @throws Always, unless overridden by `MemoryAgent`.
    */
-  consolidate(_now: number): Promise<{ scopes: number }> {
+  consolidate(now: number): Promise<{ scopes: number }> {
+    return this.onConsolidate(now)
+  }
+
+  /** Dedicated consolidation policy; working agents never accept these jobs. */
+  protected onConsolidate(_now: number): Promise<{ scopes: number }> {
     return Promise.reject(new Error('Only the memory agent takes jobs'))
   }
 }

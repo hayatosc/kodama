@@ -88,7 +88,6 @@ export function historySearchTool(deps: WorkingMemoryDeps): ToolRegistration {
         query,
         { before, cursor },
       )
-      await deps.contact?.()
       return { output: [{ type: 'text', text: formatHistory(result) }] }
     },
   })

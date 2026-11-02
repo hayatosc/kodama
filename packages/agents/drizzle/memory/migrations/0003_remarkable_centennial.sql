@@ -1,0 +1,1 @@
+ALTER TABLE `memory_records` DROP COLUMN `external`;

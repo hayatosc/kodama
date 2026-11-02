@@ -9,6 +9,21 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** Shared extension payloads; references never grant cross-agent access. */
+export type {
+  AgentNotification,
+  ArtifactMetadata,
+  ArtifactUpload,
+  CompletionNotice,
+  CompletionOutcome,
+  CompletionReference,
+  ContactResult,
+  NotificationItem,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
+} from './extensions.ts'
+
 /**
  * An event of an `AgentService.send` stream: Pi's events, preceded by `accepted` once the
  * message is admitted.
@@ -172,14 +187,7 @@ export interface SeedResult {
 }
 
 /** Reuse requestId when retrying the same message; a new turn needs a new ID. */
-/** Exact, one-shot permissions issued only by owner-origin input. */
-export interface WebPermissions {
-  queries?: string[]
-  urls?: string[]
-}
-
 export interface SendMessageRequest {
-  webPermissions?: WebPermissions
   requestId: string
   content: string
   /** Defaults to followUp; steer joins the current run at the next tool-round boundary. */

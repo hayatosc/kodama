@@ -23,10 +23,12 @@
     "db:generate:management": "drizzle-kit generate --config drizzle.management.config.ts"
   },
   "dependencies": {
+    "@cloudflare/worker-bundler": "0.2.6",
     "@earendil-works/chord": "1.2.0",
     "@earendil-works/pi-ai": "1.2.0",
     "@earendil-works/pi-durable": "1.2.0",
     "drizzle-orm": "0.45.3",
+    "temporal-polyfill-lite": "^1.0.0",
     "uuid": "^14.0.3",
     "valibot": "1.5.0"
   },

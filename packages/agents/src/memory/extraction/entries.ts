@@ -19,12 +19,8 @@ export async function readExtractionEntries(deps: MemoryJobDeps, after?: number,
   const page = await deps.env.AGENTS.getByName(job.sourceAgentId).readEntries({
     after: Math.max(after ?? job.afterEntry, job.afterEntry),
     limit: limit ?? 50,
+    throughEntry: job.throughEntry,
   })
   await advanceExtractionProgress(deps.storage, running.jobId, through, page.through)
-  return {
-    ...page,
-    entries: page.entries.filter(
-      (entry) => job.eligibleThrough === undefined || entry.id <= job.eligibleThrough,
-    ),
-  }
+  return page
 }

@@ -102,8 +102,11 @@ binding per dedicated agent, so adding one changes no Worker configuration:
 - A subclass changes behavior only through `Agent`'s protected hooks: harness options, default
   configuration, the last step of opening (`prepare`), idle work, alarms, and whether pruning
   archives.
-- A method only a dedicated agent serves is declared on `Agent`, which rejects it, and the subclass
-  overrides it. One stub type then covers every object in the namespace, with no type assertion.
+- Public RPC methods stay on `Agent` and delegate specialized behavior to protected hooks. The
+  development server resolves RPC methods on the exported class's prototype, not on the subclass
+  returned by its constructor, so public-method overrides alone are insufficient. Dedicated-only
+  operations reject by default; the subclass overrides their hooks. One stub type covers every
+  object in the namespace, with no type assertion.
 - Reserved names contain `:`, which a public agent ID (a UUID) cannot. Each dedicated agent is a
   registry row with `kind = 'dedicated'` and a fixed UUID mapped to its reserved `object_name`;
   `AgentService` and `sendTo` admit only working agents, so they never reach a dedicated agent.
@@ -172,7 +175,7 @@ Some consequences:
 - `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
   descriptions, admission orchestration, external transport, and result formatting. Web definitions,
   execution, and provider protocols live together in `src/tools/web/`; `contact.ts` resolves
-  contact targets and observes replies through the supplied `sendTo` operation.
+  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
   store functions, never construct Drizzle queries or import agent classes. Agents supply shared
@@ -211,8 +214,106 @@ Working-agent model and tool composition lives in `src/agent/config.ts`; the mem
 
 The registry holds the `kodama` extension with every registered tool. Each working agent also gets
 the `kodama-memory` extension with its memory tools and prompt sections, whatever tools it enables
-(see [memory.md](memory.md#working-agents)). No execution environment is configured, so a working
-agent sees no files and runs no commands.
+(see [memory.md](memory.md#working-agents)). Working agents can opt into isolated code execution with
+`execute_code`; they have no host filesystem or shell access.
+
+## Code execution
+
+`execute_code` is an optional working-agent tool, implemented in
+[`src/tools/code/execute.ts`](../packages/agents/src/tools/code/execute.ts). Add its name to the agent's
+`settings.tools` to enable it; it is not enabled by default and is not registered for the memory
+agent. `toolPolicy.execute_code: 'deny'` blocks it even when selected. The current lifecycle and tool
+permissions are checked before compilation/cache lookup and again before invoking the generated
+Worker, including cache hits, without holding the agent's serial lock during compilation or execution.
+
+The tool accepts:
+
+- `code`: JavaScript or TypeScript exporting a default function. It receives `input` and returns a
+  JSON-serializable value; asynchronous functions are supported.
+- `input`: an optional JSON value, defaulting to `null`.
+- `files`: optional owner-local artifact IDs (at most 100). Omit it for the unchanged JSON API;
+  use `[]` for output-only file execution. See [Artifact operations](extensions.md#artifact-operations).
+- `dependencies`: optional npm package-name/version pairs.
+- `virtualModules`: optional import-name/source pairs passed directly to `createWorker()` for
+  compatibility aliases. Nothing executes in the host as a virtual module.
+
+For example:
+
+```json
+{
+  "code": "import isNumber from 'is-number'; export default input => ({ numeric: isNumber(input) })",
+  "dependencies": { "is-number": "7.0.0" },
+  "input": 42
+}
+```
+
+The result is the returned value serialized as JSON text (`{"numeric":true}` in this example), not
+captured console output. Before saving the tool result or sending it to the model, Pi applies its
+standard text-output limits (50 KiB or 2,000 lines, whichever is reached first), retaining the beginning
+and adding a `truncated` warning. A truncated result is not necessarily valid JSON. These are existing
+Pi defaults, not an additional `execute_code` quota; regression tests cover results larger than the
+SQLite row limit, including multibyte and JSON-escaped text. The executor still reads the full response
+into host memory before Pi bounds it. Compilation and runtime failures become normal tool errors.
+Results are untrusted data, not instructions or authorization. File mode passes only explicitly
+selected bytes to `run(input, files)` and persists validated binary outputs as artifacts, without
+putting those bytes in the model transcript. Input and output aggregate byte limits are each 10 MiB,
+with four outputs maximum. It does not add format-specific parsing, previews, Office operations,
+a shell, or a persistent session. The file response transport is bounded to 10 MiB plus 64 KiB for
+multipart metadata and the JSON result before decoding, unlike the legacy JSON-only response.
+
+Kodama uses the official
+[`createWorker()` flow](https://developers.cloudflare.com/dynamic-workers/getting-started/#using-typescript-and-npm-dependencies),
+with `@cloudflare/worker-bundler` pinned to `0.2.6`. It supplies the source and a `package.json` and
+passes the resulting modules to `CODE_LOADER.get()`. All npm retrieval, resolution, transpilation,
+and bundling belong to that library; Kodama implements none of those mechanisms. The library is
+experimental. Some npm packages need their distributed browser entry or public `virtualModules`
+aliases; support for arbitrary Node packages is not guaranteed.
+
+Each agent retains only its most recent compilation in memory, keyed by source, npm dependency
+specifications, and virtual modules. Dictionary insertion order does not affect this key; `input`
+is not part of it. Repeated and concurrent identical calls reuse that compilation, but always send
+their own input and recheck permissions. A changed source, dependencies, or aliases replaces the
+entry. Failed compilations are discarded so a later call can retry; one caller's cancellation does
+not cancel a shared compilation for another caller. Durable Object eviction clears this local cache.
+
+The Worker Loader cache ID is a SHA-256 fingerprint of the agent ID, the actual compiled modules
+(including binary bytes), and all supplied runtime settings. This avoids sharing globals between
+agents or reusing an ID for different npm resolutions after a rebuild. The loader can reuse compiled
+code and warm isolates, even after a local compilation cache miss. Cache retention is not guaranteed:
+module globals may survive JSON-only calls, but must never be relied on for persistence.
+This is code reuse, not a persistent execution session or a cache of execution results. No live
+Worker stubs are retained across requests. File-mode calls add a fresh random suffix to the loader
+identity, so a subsequent call cannot recover previously selected bytes from module globals or
+temporary files. JSON-only calls retain their existing cache behavior.
+
+Generated Workers use compatibility date `2026-10-01`, `nodejs_compat`, an empty `env`, and
+`globalOutbound: null` in both JSON-only and file modes. Both support Workers-compatible npm packages
+and Node built-ins, including `node:fs` and `node:fs/promises`. As described in Cloudflare's
+[filesystem documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/), these
+APIs expose only the Worker's virtual filesystem: read-only `/bundle` contains its own bundled
+modules, `/tmp` is in-memory scratch space, and `/dev` contains virtual devices. They do not expose
+Kodama host files, other Workers' files, or R2. Temporary IO consumes Worker memory, is not persistent
+storage, and does not create an artifact unless the function explicitly returns its bytes as output.
+Generated code receives only explicitly selected artifact bytes and no secrets, credentials, D1, R2,
+Durable Objects, loader binding, or outbound networking. The trusted compiler can access npm before the
+isolate starts; network isolation applies to generated code, not dependency resolution. Cloudflare's
+default resource limits apply: no application-specific CPU, wall-time, source-size, concurrency, or daily
+quotas and no price accounting are added. Compilation runs in the host before the generated isolate
+starts, so large source or dependency inputs can exhaust the host's platform CPU or memory budget;
+the generated Worker's isolation does not protect that compilation phase.
+
+Execution uses `replay: 'unsafe'`, so interrupted calls are not automatically re-executed during Pi
+recovery. Cancellation is checked around compilation and admission, passed to the execution request,
+and checked after reading the result. It does not guarantee terminating compilation or an already
+running isolate. Pausing or disabling the tool prevents the next phase from starting; it does not
+retroactively kill executing code.
+
+Normal tests run without npm network requests. To exercise actual registry resolution in local
+workerd, run this from `packages/agents`:
+
+```sh
+KODAMA_CODE_NPM_SMOKE=1 nr test src/tools/code/execute.test.ts
+```
 
 ## Management database
 
@@ -476,7 +577,8 @@ To add a tool:
 
 Agents enable registered tools by name in `tools`. New working agents default to `web_search`
 and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
-`current_time`, `contact_agent`, `web_search`, and `web_fetch`. The memory tools come from the memory
+`current_time`, `contact_agent`, `list_contacts`, `contact_status`, `contact_result`,
+`discover_agents`, `web_search`, and `web_fetch`. The memory tools come from the memory
 extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
@@ -490,29 +592,57 @@ Omit tool names to disable all optional tools.
 at the boundary, admits them from the registry (see [Registry and admission](#registry-and-admission)),
 and forwards to the agent's Durable Object:
 
-| Method                                         | Result                                       |
-| ---------------------------------------------- | -------------------------------------------- |
-| `send(agentId, { requestId, content })`        | SSE response through terminal submission     |
-| `subscribe(agentId)`                           | Continuous agent-wide SSE observation        |
-| `sendMessage(agentId, { requestId, content })` | Durable acceptance with `submissionId`       |
-| `submission(agentId, requestId)`               | Submission status, or `undefined`            |
-| `snapshot(agentId)`                            | Committed user/assistant messages and `busy` |
-| `cancel(agentId)`                              | Stop current work; resolves once idle        |
+| Method                                                    | Result                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| `send(agentId, { requestId, content })`                   | SSE response through terminal submission                     |
+| `subscribe(agentId)`                                      | Continuous agent-wide SSE observation                        |
+| `sendMessage(agentId, { requestId, content })`            | Durable acceptance with `submissionId`                       |
+| `submission(agentId, requestId)`                          | Submission status, or `undefined`                            |
+| `snapshot(agentId)`                                       | Committed user/assistant messages and `busy`                 |
+| `cancel(agentId)`                                         | Stop current work; resolves once idle                        |
+| `notifications(agentId, query?)`                          | Newest-first bounded agent-wide inbox                        |
+| `readNotification(agentId, { seq })`                      | Exact agent-wide read acknowledgement                        |
+| `uploadArtifact(agentId, { filename, mediaType, bytes })` | `ArtifactMetadata`; `chat` admission (active only)           |
+| `listArtifacts(agentId, { cursor?, limit? })`             | `ArtifactMetadata[]`; `read` admission                       |
+| `downloadArtifact(agentId, artifactId)`                   | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
+| `deleteArtifact(agentId, artifactId)`                     | `void`; `read` admission                                     |
+
+Artifact `read` admission also permits paused and archived working agents. Metadata contains
+`artifactId`, `filename`, `mediaType`, `size`, `createdAt`, and `expiresAt`, never a storage key.
+The optional `create_artifact` and `read_artifact` tools also work with `execute_code` disabled.
+Creation accepts `{ filename, content, mediaType? }`, defaults to `text/plain; charset=utf-8`, and
+reuses owner-bound upload validation/storage with the 10 MiB encoded-byte limit and 30-day retention.
+It returns metadata/ID and uses unsafe replay because retries can create duplicates. Reading accepts
+`{ artifactId }` and reuses owner-bound download admission; it returns an untrusted-data JSON envelope
+with metadata plus literal, strict UTF-8 text only for declared `text/*`, `application/json`, and
+`application/*+json`, with absent or UTF-8 charset parameters. Text is bounded to 8 KiB and 200 lines
+without splitting Unicode scalars, with explicit byte count/truncation and limits. A 50 KiB serialized
+envelope budget (including metadata and JSON escapes) can shorten the returned prefix further. Unsupported media,
+parameters, or invalid UTF-8 return metadata/status/guidance only, never binary or base64 payloads.
+There is no JSON parsing or HTML rendering. All four artifact tools require their own applied tool
+selection/policy and active lifecycle before IO; none grant owner approval or another agent's data.
+
+See [Artifact operations](extensions.md#artifact-operations) for exact text contracts, pagination, retention, and the
+distinction between an absent local ID (delete is a no-op) and a corrupt owner key (rejected).
 
 `AgentService` cannot reach the memory agent: it admits only working agents. The Agent object has a
 few more methods, for other Durable Objects and for `AgentService`:
 
-| Method                          | Caller       | Effect                                                         |
-| ------------------------------- | ------------ | -------------------------------------------------------------- |
-| `sendTo(agentId, message)`      | an agent     | deliver to another agent; returns once the target admits input |
-| `applyConfig(pushed)`           | AgentService | apply a configuration version now, or hold it until idle       |
-| `setStatus(status)`             | AgentService | set the object's copy of its registry state                    |
-| `getConfig()`                   | tests, tools | the applied configuration as Pi holds it                       |
-| `readEntries({ after, limit })` | memory agent | conversation text after an entry, from Pi or from the archive  |
-| `memoryChanged()`               | memory agent | refresh the always-loaded memory now, or when next idle        |
-| `prune({ force })`              | maintenance  | archive and delete old entries                                 |
-| `enqueue(job)`, `jobStatus(id)` | agents       | queue a memory job and read its status (memory agent only)     |
-| `consolidate(now)`              | cron         | the daily consolidation (memory agent only)                    |
+| Method                          | Caller                              | Effect                                                              |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------- |
+| `sendTo(agentId, message)`      | an agent                            | deliver to another agent; returns once the target admits input      |
+| `applyConfig(pushed)`           | AgentService                        | apply a configuration version now, or hold it until idle            |
+| `setStatus(status)`             | AgentService                        | set the object's copy of its registry state                         |
+| `getConfig()`                   | tests, tools                        | the applied configuration as Pi holds it                            |
+| `readEntries({ after, limit })` | memory agent                        | conversation text after an entry, from Pi or from the archive       |
+| `memoryChanged()`               | memory agent                        | refresh the always-loaded memory now, or when next idle             |
+| `prune({ force })`              | maintenance                         | archive and delete old entries                                      |
+| `enqueue(job)`, `jobStatus(id)` | agents                              | queue a memory job and read its status (memory agent only)          |
+| `consolidate(now)`              | cron                                | the daily consolidation (memory agent only)                         |
+| `uploadArtifact(input)`         | AgentService, owner-bound execution | return `ArtifactMetadata`; active only (`chat` at service boundary) |
+| `listArtifacts(page)`           | AgentService                        | return `ArtifactMetadata[]`; `read` at service boundary             |
+| `downloadArtifact(id)`          | AgentService, owner-bound execution | return metadata and `Uint8Array` bytes; `read` at service boundary  |
+| `deleteArtifact(id)`            | AgentService, owner-bound execution | retryable deletion returning `void`; `read` at service boundary     |
 
 ### IDs, limits, and retries
 
@@ -579,20 +709,58 @@ message text. Peer input is always queued as `followUp`, never injected into an 
 turn. Self-contact is refused.
 
 The opt-in `contact_agent` tool accepts `target` (UUID, slug, or unique UUID prefix) and `message`.
-Its workflow in `src/tools/contact.ts` resolves the registry reference and calls this same `sendTo`
-path. It polls the request-specific submission for at most 30 seconds after acceptance, then reads
-the exact `answerEntryId`, not the latest unrelated assistant message. Results distinguish
-`answered`, terminal `unanswered`, and accepted `pending`; a pruned answer is explicitly marked
-unavailable. Timeout or sender cancellation does not cancel the receiver. Pending is not a reason
-to resend the question. The tool is replay-unsafe: recovery does not silently repeat external
-delivery. Its delivery request ID is scoped to the sender and tool task.
+It reserves an object-local outbox using the actual adopted Pi tool task and full input provenance
+before dispatch. A stable `contactId` and receiver request identity make retries replay-safe. The
+receiver verifies the sender's persisted outbox through the registered sender object, then fences
+pruning before admission. It reconciles the exact submission answer into a durable receipt before
+history may be deleted. Acceptance alone is never successful completion.
 
-`MAX_CONTACT_HOPS = 3` remains a defensive provenance cap, but the permanent external-contact
-boundary is stricter: receiving any peer message or sending a peer request prevents subsequent
-`contact_agent` and `remember` calls for that root. A new owner message, steering, compaction,
-cancellation or eviction never clears contact. Both the early tool guard and the serialized
-side-effect boundary enforce the refusal. Delivery commits sender contact before crossing the
-object boundary and never holds its serial queue while waiting on another object.
+The tool returns an immediate answer when available and bounds observation of delivery, result reads,
+and acknowledgement to 30 seconds after outbox reservation. It returns `contactId` with `answered`,
+terminal `failed`/`cancelled`/`unanswered`, or
+`pending`. Timeout, transport uncertainty, or sender cancellation does not cancel accepted receiver
+work. Pending is not a reason to resend. The `contact` alarm retries dispatch and result collection;
+current sender permissions and target admission are rechecked before a new admission. The receiver's
+`sendMessage` also checks assigned credential availability before admission; this is not a guarantee
+of provider-side authentication. A later provider failure can produce a terminal `unanswered` receipt.
+The first sender terminal result and `recordNotification` commit in one SQLite transaction before
+the receiver acknowledges collection. The shared schedule alarm is armed for notification retention
+before remote acknowledgement, including late completion after observers stop. An accepted request
+remains recoverable even if permissions later change. A confirmed pre-admission storage refusal settles as `failed` with
+`storage_maintenance`, releasing the receipt fence so pruning can free space; ambiguous transport
+failures keep their fence and remain retryable.
+
+Collection observations have a shared 30-second attempt deadline; each contact alarm has a five-second
+peer-observation budget for its entire batch, not for each of its ten rows. Later due alarm purposes
+therefore do not wait for a blocked peer. Durable retry deadlines alone cannot preempt an alarm:
+Cloudflare runs only one alarm handler per object at a time. Timeout is unknown acceptance, not a
+terminal refusal, and the tool's independent 30-second window remains unchanged.
+
+RPC disposal does not guarantee cancellation of remote effects. A timed-out attempt retains its
+single-flight slot until the actual RPC chain settles, so a tool and an alarm cannot start overlapping
+attempts. Late success still saves the result and notification before ack, and late RPC results are
+disposed normally. At most ten unresolved flights, including blocked acknowledgements, are held per
+object; excess work is durably deferred. Re-observation does not shorten transport backoff or spin a
+past-due alarm. A permanently stalled RPC can pin a slot until it settles or the object restarts; a
+restart retries the same durable identity and receiver receipt, never a new submission. These budgets
+bound peer waiting, not platform storage latency or a claimed ability to cancel remote execution.
+
+Opt-in `list_contacts`, `contact_status({contact_id})`, and `contact_result({contact_id})` read only
+this agent's durable outbox, including after eviction or peer history pruning. Results retain at most
+64 KiB of UTF-8 with explicit `truncated` and `expired` flags; terminal payloads default to 30 days.
+Pending work and unacknowledged receiver receipts do not expire. The legacy low-level `sendTo` RPC
+remains admission-only and does not create a tracked tool contact.
+
+Opt-in `discover_agents({query?, label?, cursor?})` exposes active working agents' IDs, display names,
+slugs, descriptions, and labels, never their credentials or other settings. `query` matches public
+text case-insensitively; `label` is an exact match. Discovery scans at most 50 registry rows per page,
+so a filtered page can be empty with `nextCursor`; continue until no cursor remains. Local contact
+lists use stable ascending contact-ID pagination.
+
+Peer messages retain sender provenance and are data, not owner authorization. Sending or
+receiving them does not change learning permissions. `MAX_CONTACT_HOPS = 3` bounds how far a
+chain started by one input can forward. Delivery never holds its serial queue while waiting
+on another object.
 
 ## Public web tools
 
@@ -634,27 +802,43 @@ admissions, 30 fetch admissions and 10 actual anonymous sends. Native responses 
 512 KiB; anonymous attempts to 256 KiB/5 seconds with a 512 KiB total; fetch transfer/decoded text
 to 2 MiB. Envelopes are valid JSON ≤128 KiB marked `untrusted_external_data`, not instructions.
 
-Immediately before the first outbound web send, SQLite atomically commits first contact,
-admission and any permission consumption. Failed traffic never clears contact. Later web
-traffic requires an exact owner permission from an input actually adopted into this run:
+Admission applies the same operation-level rules from the first call onward. There is no
+agent-wide taint state, and reading does not reduce learning permissions. The rules constrain
+outbound arguments rather than treating external reading as a permanent loss of trust:
 
-```sh
-nr agent send assistant "Research the release" --web-query "exact release query" \
-  --web-url "https://example.org/release"
-```
+- `web_search` stays available, but its query may not contain a URL (`query_contains_url`): a
+  scheme with `://`, or a host followed by a path, query or fragment. A provider's own search
+  may open such a URL. A bare domain, as in a `site:` filter, is allowed.
+- `web_fetch` reaches only a known URL (`unverified_url`): one written in an owner message,
+  returned by a successful search, or linked from a fetched page. A URL the model composed or
+  edited cannot be fetched, so it cannot carry context data to an attacker's server.
 
-Each repeatable permission array has at most 20 entries. Queries are trim-only; URLs share the
-tool's normalization including IDNA/default port/fragment removal while preserving path/query.
-Prose, peer inputs and model output cannot mint permissions. Permissions bind root, the logical
-run's first adopted submission, input, tool and exact argument and consume once. Pi's generation
-task ID changes after tool rounds, so it is recorded separately rather than used as run identity.
-Successful search sources grant one fetch per validated URL in that same run; edited URLs,
-page links, another run and repeated consumption do not. Redirects grant nothing reusable.
+Both refusals return a `hint` (search with words, then fetch a result), so a long-running agent
+finds another route instead of stopping.
+
+Known URLs live in `kodama_known_urls`, per root and not consumed, so a page stays readable on
+later turns and after eviction. Owner URLs are taken from the message text when `sendMessage`
+admits it, so a UI only sends what the user typed; peer messages add none. Search sources (at
+most 20 per search) are recorded after the search succeeds. A fetched page returns `links`: at
+most 50 public links, normalized and resolved against the final URL, from anchors outside
+removed navigation and hidden subtrees, or from URLs written in a plain-text page; they are
+recorded after the fetch. Links longer than 500 characters are dropped, model output adds no
+known URL, and redirects add none. The newest 1,000 known URLs per root are kept; granting one
+again refreshes it.
 
 A non-removable system section marks web, peer and history content as evidence, not approval.
-Read tools and final answers remain available after contact; remember and peer delivery do not.
-Wrong answers, persuasion and disclosure of pre-contact generated queries remain residual risks.
-Exact permissions are authorization, not sanitization.
+Read tools, the web tools under these rules, peer delivery and final answers remain available
+throughout the agent's lifetime; `remember` learns reusable knowledge and procedures under its
+normal quota and policy. Memory can influence behavior but cannot change owner-managed system
+settings, tool permissions, or these admission checks. Wrong answers, malicious persistent
+learning, persuasion, which known URL or link the model
+chooses to fetch (an attacker's page can offer many links), and what a search query discloses
+to the search provider remain residual risks. Known URLs are authorization, not sanitization.
+For the Responses dialect only (OpenAI and xAI), native search is agentic: a query can steer
+`open_page` in prose, spell an attacker URL in words, or disclose data in a bare subdomain that
+passes URL detection. Response validation rejects unexpected actions only after execution, so
+it cannot prevent this egress. This risk is accepted rather than switching search routes based on reading history. Whether OpenAI applies its [URL safety check](https://openai.com/index/ai-agent-link-safety/)
+to API `web_search` is unverified.
 
 All five native routes have mocked transport/schema fixtures, not universal model compatibility
 claims. The owner personally must verify real native dialect/auth/grounding, anonymous endpoints
@@ -707,15 +891,28 @@ Delivery works like this:
 ## Alarms and recovery
 
 A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/runtime/alarms.ts) stores one due
-time per purpose and sets the platform alarm to the earliest. It reads and writes the times with the
-synchronous storage API (`ctx.storage.kv`), so two updates never interleave:
+time per purpose and sets the platform alarm to the earliest actionable deadline. Each purpose also
+has a durable in-flight claim with a unique identity and a 60-second retry deadline. Asynchronous
+storage transactions commit pending times, claims, and the platform alarm together. Legacy scalar
+pending times remain readable. Before handlers run, claiming consumes their old pending times and
+persists retry wakes. Acknowledgement removes only the matching claim, preserving a new pending
+time written during execution. Clearing a pending time does not cancel a running claim.
 
-| Purpose    | Meaning                                                           |
-| ---------- | ----------------------------------------------------------------- |
-| `recovery` | resume Pi's scheduler after eviction while work is pending        |
-| `extract`  | hand new entries to the memory agent after 10 minutes idle        |
-| `prune`    | archive and delete old entries when storage is over its threshold |
-| `jobs`     | the memory agent's job runner                                     |
+Due purposes run sequentially in deadline order, with recovery and scheduled input ahead of
+maintenance on ties. A handler failure leaves its retry wake and does not prevent another due
+purpose from running; claim/acknowledgement storage failures propagate. This includes recovery
+before domain dispatch. Pruning performs one bounded slice per wake, and the memory jobs purpose
+starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
+not the sole guarantee of another wake:
+
+| Purpose    | Meaning                                                               |
+| ---------- | --------------------------------------------------------------------- |
+| `recovery` | resume Pi's scheduler after eviction while work is pending            |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs        |
+| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results |
+| `extract`  | hand new entries to the memory agent after 10 minutes idle            |
+| `prune`    | archive and delete old entries when storage is over its threshold     |
+| `jobs`     | the memory agent's job runner                                         |
 
 The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between
@@ -736,6 +933,96 @@ deadline. Without new input, later recovery or eviction does not schedule anothe
 Model calls can be repeated after an interruption. Request IDs prevent duplicate durable inputs,
 not duplicate provider billing.
 
+## Scheduled tasks
+
+Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task` in
+`settings.tools`. They manage only that agent's reservations. There is no new public scheduling RPC,
+external notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
+its nominal time; it does not guarantee exact-time execution or wait for the model in the alarm.
+
+`schedule_task` takes `{ schedule, instruction }`. Supported rules are:
+
+- `{ kind: 'once', run_at: '2027-01-10T09:00:00+09:00' }` for one execution.
+- `{ kind: 'interval', every_seconds: 3600, start_at?, end_at? }` for a fixed elapsed-time cadence.
+  The default anchor is creation time plus the period; later times are anchor plus integer multiples,
+  never completion time plus the period.
+- `{ kind: 'cron', expression: '0 9 * * 0', timezone: 'Asia/Tokyo', start_at?, end_at? }` for Sunday at
+  09:00 local time. Cron has exactly five numeric fields supporting `*`, lists, ranges, and steps.
+  Day-of-month or day-of-week must be the literal `*`; macros, names, seconds, years, `L`, `W`, and `#`
+  are not accepted. The zone must be explicit IANA, not an offset or guessed from the conversation.
+
+Dates require RFC3339 with an explicit offset. Creation requires a future start within 365 days.
+Intervals range from 60 to 31,536,000 seconds. Start is inclusive; end is exclusive and optional.
+Cron without an explicit start begins strictly after creation. Invalid calendar dates are rejected;
+day 31 skips shorter months. Missing DST wall-clock minutes are skipped, and a repeated minute runs
+only at its earlier instant. The numeric cron parser and bounded eight-year calendar search are
+implemented in `agent/cron.ts`. Search walks calendar dates and allowed hours/minutes on matching
+dates, not elapsed minutes or missed occurrences. Both directions validate the earlier instant by
+round-tripping to the requested wall time, which skips DST gaps without silently shifting work.
+
+Datetime parsing and calendar/timezone operations import Temporal only through `lib/temporal.ts`.
+This boundary currently exports the Gregorian/ISO bundle of `temporal-polyfill-lite` without patching
+globals. It uses platform IANA data and works even when the Workers runtime does not expose native
+Temporal. Once native support is available, switch the implementation at this boundary rather than
+changing each caller.
+No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
+
+The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
+`agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. There are two
+local tables: immutable definitions with next-time/cursor progress, and uniquely addressed occurrence
+receipts. No future occurrence queue is pre-generated. At most 100 active or stopped-but-unsettled
+reservations are allowed; instructions are limited to 16,000 characters, listings to 50 per stable-ID
+page, and dispatch to 10 attempts per pass. Listings accept a definition-state filter and cursor.
+
+After downtime, only the latest due nominal occurrence is materialized, recording the coalesced
+range. A definition has at most one unfinished occurrence, including Pi's pending/running input.
+Long executions therefore do not overlap themselves. Completion callbacks, recovery, and a
+60-second receipt fallback unblock the next occurrence without spinning on a past deadline.
+
+The durable request ID is `scheduled-<task UUID>-<nominal epoch milliseconds>`. Claiming atomically
+inserts that occurrence and advances its definition cursor; a persistent alarm claim already covers
+the handoff. Retries reconcile Pi acceptance before rechecking current admission policy. An
+`admissionStarted` marker is persisted before crossing that boundary, so a later refusal or retry
+limit cannot turn uncertain acceptance into terminal failure. Confirmed pre-admission transient
+failures retry with exponential backoff (60 seconds to one hour), stopping after five attempts;
+permanent refusal stops immediately. Uncertain admission retries without that terminal cutoff.
+Current lifecycle, tool policy, credentials, and storage checks still apply. Accepted model failure
+settles that occurrence, not the recurring definition. `submitted` means accepted, not successful.
+
+Creation replays use the durable tool-task identity and canonical arguments before revalidating dates
+or generating a default anchor. Cancellation stops future materialization, reports any already
+claimed execution as too late to cancel, and never calls global conversation cancellation. Global
+conversation cancellation likewise does not remove future reservations. Terminal receipts are saved
+before pruning; pruning defers while admission may have started or an accepted submission remains
+unresolved. Never-admitted claims do not block pruning, so storage-pressure retries can recover.
+Settled receipt details may be removed after 30 days, while definitions and cursors are retained as
+replay tombstones. This is
+conservative retention, not a complete history-retention policy. Request IDs prevent duplicate input
+admission, not repeated model calls or provider billing after interruption.
+
+Creation and cancellation require a nonempty adopted **owner-only current run**, checked again at
+the mutation boundary against the running tool and exact input set. Earlier peer history and web
+reads do not revoke this permission. Peer-only, scheduled-only, mixed owner/nonowner, idle, or
+unresolved provenance fails closed. After a mixed run settles, a new owner-only run can mutate again.
+Listing is read-only and available to other runs when enabled. Opt-in grants bounded model discretion,
+not proof of the owner's approval of every argument; prompt injection and recurring-cost risks remain.
+
+Scheduled inputs use `kodama.scheduled-message`, never owner provenance. They do not grant URLs from
+the instruction; existing known URLs and normal search remain usable, with no restored contact-taint
+ban or one-shot web permission. They start their own contact hop at zero and retain the three-hop
+peer limit. Scheduled-only model usage is attributed to the system; an adopted mixed run charges the
+working agent once, with owner attribution taking precedence over peer and then system attribution.
+Dedicated memory jobs retain their requester/job accounting. A scheduled model cannot recursively
+create or cancel definitions, but server-side expansion of an existing immutable recurrence is allowed.
+
+Scheduled terminal completions also produce a durable agent-wide inbox notification atomically with
+the occurrence receipt. The notification references the occurrence ID, not its definition, and never
+wakes a model or inserts owner input. Inbox reads use descending sequence pagination and exact
+acknowledgements; see [extensions.md — Inbox API and retention](extensions.md#inbox-api-and-retention).
+
+Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, external notification
+delivery, and UI management are outside this version.
+
 ## Storage in the Durable Object
 
 Each object's SQLite holds two sets of tables:
@@ -748,8 +1035,9 @@ Each object's SQLite holds two sets of tables:
   [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): model
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
-  (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), permanent external contact
-  (`kodama_external_data`), and one-shot web permissions (`kodama_web_permissions`). Their
+  (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
+  (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), and scheduled
+  definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`). Their
   migrations are generated into `drizzle/durable-object/migrations` and applied by
   `src/agent/local-db/local.ts` before the harness opens.
 
@@ -760,11 +1048,13 @@ shared spaces, the applied configuration (`kodama:config-version`, `kodama:appli
 ## Development
 
 Issue #26's local SQLite migration (`0003`) adds only `kodama_external_data` and
-`kodama_web_permissions` for permanent external contact and atomic one-shot permissions; web
+`kodama_web_permissions` for permanent external contact and atomic one-shot permissions;
+migration `0004` replaces the permissions with `kodama_known_urls`
+(see [Public web tools](#public-web-tools)); web
 rate limits/cooldowns are held in memory and tool execution logs rely on Pi Durable's own
 `entries` table rather than extending `kodama_usage` or management D1. Existing development state is disposable; start
-with fresh local state when resetting local databases. Current-runtime persistence, permanent external contact,
-atomic permissions, and interruption recovery remain required.
+with fresh local state when resetting local databases. Current-runtime persistence, durable URL
+provenance checked on every fetch, and interruption recovery remain required.
 
 Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
 
@@ -824,6 +1114,9 @@ nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
 nr agent credentials revoke <old-credential-id>
 nr agent send assistant "Continue the conversation."
 nr agent snapshot assistant
+nr agent notifications assistant --unread --limit 20
+nr agent notifications assistant --before 42
+nr agent notification-read assistant 41
 nr agent cancel assistant
 nr agent send assistant "Hello!" --request-id my-test-1
 nr agent send assistant "Change direction." --steer
@@ -864,7 +1157,15 @@ The CLI works like this:
 - The same agent keeps its conversation in local Durable Object storage.
 - `send` prints assistant text as it arrives, prints request IDs on stderr, and exits nonzero on a
   model failure or an interrupted stream. `--events` prints the JSON events instead.
+- `notifications` returns newest-first JSON pages, with an exclusive `nextBefore` cursor for
+  `--before`. `--unread` filters agent-wide unread metadata; `--limit` is 1–100 (default 50).
+  `notification-read <agent> <seq>` acknowledges exactly one sequence, idempotently, without
+  deleting the result. It returns `{ found: false }` for missing or expired metadata.
 - Ctrl+C disconnects the CLI without stopping the agent; `cancel` stops it.
+- `artifacts upload/list/download/delete` operates on an admitted working agent's arbitrary binary
+  files. Downloads require a new local path, use private file permissions, and never print file bytes
+  to the terminal or overwrite an existing file. See [Artifact operations](extensions.md#artifact-operations)
+  for upload, tool configuration, code execution, and download examples.
 
 The CLI ([`cli/`](../packages/agents/cli/)) connects to a token-authenticated adapter at
 `127.0.0.1:5173`, which calls the Durable Object RPC methods. Only the `development` mode selects

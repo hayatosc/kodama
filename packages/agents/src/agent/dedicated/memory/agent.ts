@@ -110,35 +110,38 @@ export class MemoryAgent extends Agent {
   /**
    * @throws Always: input that bypassed the queue would break "one job at a time".
    */
-  override sendMessage(_request: SendMessageRequest): Promise<number> {
+  protected override onSendMessage(_request: SendMessageRequest): Promise<number> {
     return Promise.reject(new Error('The memory agent takes no chat input; use enqueue'))
   }
 
   /**
    * @throws Always, like {@link MemoryAgent.sendMessage}.
    */
-  override send(_request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
+  protected override onSend(_request: SendMessageRequest): Promise<ReadableStream<Uint8Array>> {
     return Promise.reject(new Error('The memory agent takes no chat input; use enqueue'))
   }
 
   /**
    * @throws Always: the memory agent messages no other agent.
    */
-  override sendTo(_agentId: string, _request: SendMessageRequest): Promise<SendMessageResponse> {
+  protected override onSendTo(
+    _agentId: string,
+    _request: SendMessageRequest,
+  ): Promise<SendMessageResponse> {
     return Promise.reject(new Error('The memory agent does not message other agents'))
   }
 
   /**
    * @throws Always: it keeps no memory to extract, so its own entries are never read.
    */
-  override readEntries(_request: { after: number; limit: number }): Promise<EntryPage> {
+  protected override onReadEntries(_request: { after: number; limit: number }): Promise<EntryPage> {
     return Promise.reject(new Error('The memory agent has no entries to extract'))
   }
 
   /**
    * @throws Always: it keeps no always-loaded memory to refresh.
    */
-  override memoryChanged(): Promise<void> {
+  protected override onMemoryChanged(): Promise<void> {
     return Promise.reject(new Error('The memory agent keeps no memory of its own'))
   }
 
@@ -148,14 +151,14 @@ export class MemoryAgent extends Agent {
    * @returns The job's status; delivering the same job again returns the existing one.
    * @throws {@link TypeError} When `job` is not a valid memory job.
    */
-  override async enqueue(job: unknown): Promise<JobStatus> {
+  protected override async onEnqueue(job: unknown): Promise<JobStatus> {
     const status = await enqueueJob(this.#context(), job)
     this.#jobs.start()
     return status
   }
 
   /** A memory job's status, if the job is known. */
-  override async jobStatus(jobId: string): Promise<JobStatus | undefined> {
+  protected override async onJobStatus(jobId: string): Promise<JobStatus | undefined> {
     return jobStatus(await this.local(), jobId)
   }
 
@@ -164,7 +167,7 @@ export class MemoryAgent extends Agent {
    *
    * @returns How many scopes got a `consolidate` job.
    */
-  override consolidate(now: number): Promise<{ scopes: number }> {
+  protected override onConsolidate(now: number): Promise<{ scopes: number }> {
     return consolidate(this.#context(), now, (job) => this.enqueue(job))
   }
 }

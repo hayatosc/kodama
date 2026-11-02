@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { extractionJobs } from '../jobs.ts'
 import { safeFailure } from '../../lib/errors.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
@@ -59,13 +60,8 @@ export async function prepare(
   // Extraction is off for some agents; pruning must not hand their entries over behind its back.
   if (deps.archive && (await deps.extracts())) {
     const checkpoint = await extractionCheckpoint(memoryDb(deps.env.MEMORY_DB), deps.agentId())
-    if (checkpoint < last) {
-      await enqueueQuietly(deps, {
-        kind: 'extract',
-        sourceAgentId: deps.agentId(),
-        afterEntry: checkpoint,
-      })
-    }
+    for (const job of extractionJobs(deps.agentId(), checkpoint, last))
+      await enqueueQuietly(deps, job)
   }
   return run
 }

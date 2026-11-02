@@ -7,8 +7,22 @@
  * @module
  */
 import { uuidv7 } from '../src/lib/uuid.ts'
-import type { CreateAgentRequest, SendMessageRequest } from '../src/protocol.ts'
-import { parseAgentId, parseAgentRef, parseMessage, parseRequestId } from '../src/validation.ts'
+import type {
+  CreateAgentRequest,
+  NotificationQuery,
+  NotificationRead,
+  SendMessageRequest,
+} from '../src/protocol.ts'
+import {
+  parseAgentId,
+  parseAgentRef,
+  parseInput,
+  parseMessage,
+  parseRequestId,
+  ExtensionIdSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
+} from '../src/validation.ts'
 
 /** Where the local Worker listens. */
 export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
@@ -26,9 +40,15 @@ export const USAGE = `Usage:
   nr agent credentials assign <credential-id> <agent>
   nr agent credentials unassign <credential-id> <agent>
   nr agent credentials revoke <credential-id>
-  nr agent send <agent> "message" [--request-id ID] [--steer] [--events] [--web-query QUERY ...] [--web-url URL ...]
+  nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
   nr agent snapshot <agent>
+  nr agent notifications <agent> [--before SEQ] [--limit N] [--unread]
+  nr agent notification-read <agent> <seq>
   nr agent cancel <agent>
+  nr agent artifacts upload <agent> <path> [--media-type TYPE]
+  nr agent artifacts list <agent> [--cursor ID] [--limit N]
+  nr agent artifacts download <agent> <artifact-id> <new-path>
+  nr agent artifacts delete <agent> <artifact-id>
 
 Start nr dev:agents in another terminal first (localhost:5173).
 <agent> is a UUID, a slug, or a unique UUID prefix; the seed creates the
@@ -46,6 +66,10 @@ already initialized installation. Login does not seed or create agents.`
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
+  | { action: 'artifact-upload'; agentRef: string; path: string; mediaType: string }
+  | { action: 'artifact-list'; agentRef: string; cursor?: string; limit?: number }
+  | { action: 'artifact-download'; agentRef: string; artifactId: string; path: string }
+  | { action: 'artifact-delete'; agentRef: string; artifactId: string }
   | { action: 'list' | 'credentials/list' | 'credentials/installation' }
   | { action: 'seed'; credentialIds?: string[] }
   | { action: 'create'; request: CreateAgentRequest & { credentialIds?: string[] } }
@@ -60,20 +84,25 @@ export type Command =
   | { action: 'credentials/revoke'; credentialId: string }
   | { action: 'dev/seed-credentials' }
   | { action: 'snapshot' | 'cancel'; agentRef: string }
+  | { action: 'notifications'; agentRef: string; query: NotificationQuery }
+  | { action: 'notification-read'; agentRef: string; request: NotificationRead }
   | { action: 'send'; agentRef: string; message: SendMessageRequest; events: boolean }
 
 /** The CLI's options, for `parseArgs` from `node:util`. */
 export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
   'request-id': { type: 'string' },
-  'web-query': { type: 'string', multiple: true },
-  'web-url': { type: 'string', multiple: true },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
+  before: { type: 'string' },
+  limit: { type: 'string' },
+  unread: { type: 'boolean' },
   name: { type: 'string' },
   credential: { type: 'string', multiple: true },
   provider: { type: 'string' },
   'key-from-env': { type: 'string' },
+  'media-type': { type: 'string' },
+  cursor: { type: 'string' },
 } as const
 
 /** What `parseArgs` returns for {@link CLI_OPTIONS}. */
@@ -81,14 +110,17 @@ export interface ParsedArgs {
   values: {
     help?: boolean
     'request-id'?: string
-    'web-query'?: string[]
-    'web-url'?: string[]
     steer?: boolean
     events?: boolean
+    before?: string
+    limit?: string
+    unread?: boolean
     name?: string
     credential?: string[]
     provider?: string
     'key-from-env'?: string
+    'media-type'?: string
+    cursor?: string
   }
   positionals: string[]
 }
@@ -126,6 +158,44 @@ export function toCommand(
         ...(values.credential ? { credentialIds: values.credential.map(parseAgentId) } : {}),
       },
     }
+  if (action === 'artifacts') {
+    const agentRef = parseAgentRef(content)
+    const argument = positionals[3]
+    if (rawAgentRef === 'upload' && positionals.length === 4 && argument)
+      return {
+        action: 'artifact-upload',
+        agentRef,
+        path: argument,
+        mediaType: values['media-type'] ?? 'application/octet-stream',
+      }
+    if (rawAgentRef === 'list' && positionals.length === 3) {
+      const limit = values.limit === undefined ? undefined : Number(values.limit)
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100))
+        throw new Error('Artifact limit must be 1–100')
+      return {
+        action: 'artifact-list',
+        agentRef,
+        ...(values.cursor === undefined
+          ? {}
+          : { cursor: parseInput(ExtensionIdSchema, values.cursor) }),
+        ...(limit === undefined ? {} : { limit }),
+      }
+    }
+    if (rawAgentRef === 'download' && positionals.length === 5 && positionals[4])
+      return {
+        action: 'artifact-download',
+        agentRef,
+        artifactId: parseInput(ExtensionIdSchema, argument),
+        path: positionals[4],
+      }
+    if (rawAgentRef === 'delete' && positionals.length === 4)
+      return {
+        action: 'artifact-delete',
+        agentRef,
+        artifactId: parseInput(ExtensionIdSchema, argument),
+      }
+    throw new Error('Invalid artifacts command; see nr agent --help')
+  }
   if (action === 'credentials') {
     if (rawAgentRef === 'list' && positionals.length === 2) return { action: 'credentials/list' }
     if ((rawAgentRef === 'add' || rawAgentRef === 'login') && positionals.length === 2) {
@@ -154,8 +224,24 @@ export function toCommand(
       }
     throw new Error('Invalid credential command; see nr agent --help')
   }
+  if (action === 'notifications' && positionals.length === 2)
+    return {
+      action,
+      agentRef: parseAgentRef(rawAgentRef),
+      query: parseInput(NotificationQuerySchema, {
+        ...(values.before === undefined ? {} : { before: Number(values.before) }),
+        ...(values.limit === undefined ? {} : { limit: Number(values.limit) }),
+        unreadOnly: values.unread === true,
+      }),
+    }
+  if (action === 'notification-read' && positionals.length === 3)
+    return {
+      action,
+      agentRef: parseAgentRef(rawAgentRef),
+      request: parseInput(NotificationReadSchema, { seq: Number(content) }),
+    }
   if (action !== 'seed' && action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
-    throw new Error('Expected seed, send, snapshot, or cancel; see nr agent --help')
+    throw new Error('Invalid command or arguments; see nr agent --help')
   }
   const expected = action === 'send' ? 3 : action === 'seed' ? 1 : 2
   if (positionals.length !== expected) {
@@ -171,9 +257,6 @@ export function toCommand(
   const message = parseMessage({
     requestId: values['request-id'] ?? newRequestId(),
     content,
-    ...(values['web-query'] || values['web-url']
-      ? { webPermissions: { queries: values['web-query'], urls: values['web-url'] } }
-      : {}),
     whenBusy: values.steer ? 'steer' : 'followUp',
   })
   return { action, agentRef, message, events: values.events === true }
@@ -184,7 +267,24 @@ export function commandRequest(
   command: Exclude<Command, { action: 'help' }>,
   token: string,
   credentialJson?: string,
+  artifact?: { filename: string; bytes: Uint8Array },
 ): { url: string; init: RequestInit } {
+  if (command.action === 'artifact-upload') {
+    if (!artifact) throw new Error('Missing upload bytes')
+    const form = new FormData()
+    form.set('filename', artifact.filename)
+    form.set('mediaType', command.mediaType)
+    form.set('file', new Blob([new Uint8Array(artifact.bytes)]))
+    return {
+      url: `${LOCAL_WORKER_URL}/cli/artifact-upload/${command.agentRef}`,
+      init: {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        body: form,
+        redirect: 'error',
+      },
+    }
+  }
   const path =
     'credentialId' in command
       ? `${command.action}/${command.credentialId}${'agentRef' in command ? `/${command.agentRef}` : ''}`
@@ -199,15 +299,26 @@ export function commandRequest(
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body:
-        command.action === 'send'
-          ? JSON.stringify(command.message)
-          : command.action === 'create'
-            ? JSON.stringify(command.request)
-            : command.action === 'seed' && command.credentialIds
-              ? JSON.stringify({ credentialIds: command.credentialIds })
-              : command.action === 'tools'
-                ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
-                : credentialJson,
+        command.action === 'artifact-download' || command.action === 'artifact-delete'
+          ? JSON.stringify({ artifactId: command.artifactId })
+          : command.action === 'artifact-list'
+            ? JSON.stringify({
+                ...(command.cursor ? { cursor: command.cursor } : {}),
+                ...(command.limit === undefined ? {} : { limit: command.limit }),
+              })
+            : command.action === 'send'
+              ? JSON.stringify(command.message)
+              : command.action === 'notifications'
+                ? JSON.stringify(command.query)
+                : command.action === 'notification-read'
+                  ? JSON.stringify(command.request)
+                  : command.action === 'create'
+                    ? JSON.stringify(command.request)
+                    : command.action === 'seed' && command.credentialIds
+                      ? JSON.stringify({ credentialIds: command.credentialIds })
+                      : command.action === 'tools'
+                        ? JSON.stringify({ tools: command.tools, requestId: command.requestId })
+                        : credentialJson,
       redirect: 'error',
     },
   }

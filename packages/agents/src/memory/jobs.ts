@@ -29,8 +29,8 @@ export const MemoryJobSchema = v.variant('kind', [
     sourceAgentId: AgentIdSchema,
     /** Extract entries after this one. */
     afterEntry: EntryIdSchema,
-    /** Frozen upper bound at enqueue; current source contact can only tighten it. */
-    eligibleThrough: v.optional(EntryIdSchema),
+    /** Fixed end of this extraction window. */
+    throughEntry: v.optional(EntryIdSchema),
   }),
   v.object({
     kind: v.literal('consolidate'),
@@ -79,10 +79,23 @@ export function jobId(job: MemoryJob): Promise<string> {
         JSON.stringify([job.kind, job.sourceAgentId, job.sourceEntries.from, job.content]),
       )
     case 'extract':
-      return sha256Hex(JSON.stringify([job.kind, job.sourceAgentId, job.afterEntry]))
+      return sha256Hex(
+        JSON.stringify([job.kind, job.sourceAgentId, job.afterEntry, job.throughEntry]),
+      )
     case 'consolidate':
       return sha256Hex(JSON.stringify([job.kind, job.scope, job.day]))
   }
+}
+
+/** Freeze the unread window without classifying the agent's trust by its browsing history. */
+export function extractionJobs(
+  sourceAgentId: string,
+  checkpoint: number,
+  throughEntry: number,
+): MemoryJob[] {
+  return throughEntry > checkpoint
+    ? [{ kind: 'extract', sourceAgentId, afterEntry: checkpoint, throughEntry }]
+    : []
 }
 
 /**

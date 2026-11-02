@@ -30,9 +30,12 @@ is marked not applicable. This is catalog accounting, not a provider invoice rec
 
 Memory jobs persist their accounting context before submission and restore it before resumed
 requests. Each stream snapshots that context. A job cannot relinquish it or start the next
-job until every Pi task, including background compaction, settles. When working admissions
-mix user and peer input while busy, user attribution takes precedence. Actual parent/sub-agent
-and working-agent scheduled execution do not exist yet and are not simulated here.
+job until every Pi task, including background compaction, settles. Working invocations use the
+currently adopted run inputs, with owner (`user`) attribution taking precedence over peer (`agent`),
+then scheduled (`system`) input. Scheduled-only runs charge the working registry UUID with actor
+`system`; queued inputs that have not been adopted do not change that run's attribution. Dedicated
+memory-job accounting remains separate and retains its persisted requester context. Actual
+parent/sub-agent execution does not exist yet and is not simulated here.
 
 ## Daily usage reads
 
@@ -84,5 +87,5 @@ including their arguments, returned JSON envelopes, refusal/error codes, and `be
 blocks, are persisted directly by Pi Durable in its conversation `entries` table and archived to
 R2 when pruned. Web concurrency limits, 60-second rolling rate windows, keyless 429 provider
 cooldowns, and Parallel session reuse live in memory on each `Agent` Durable Object, while
-Durable Object SQLite persists only permanent external contact (`kodama_external_data`) and
-one-shot exact owner permissions (`kodama_web_permissions`).
+Durable Object SQLite retains legacy contact metadata (`kodama_external_data`) and persists
+the known URLs checked on every `web_fetch` call (`kodama_known_urls`).

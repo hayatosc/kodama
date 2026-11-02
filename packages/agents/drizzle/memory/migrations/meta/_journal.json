@@ -15,6 +15,20 @@
       "when": 1793162430032,
       "tag": "0001_gorgeous_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793375962839,
+      "tag": "0002_secret_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793378980202,
+      "tag": "0003_remarkable_centennial",
+      "breakpoints": true
     }
   ]
 }

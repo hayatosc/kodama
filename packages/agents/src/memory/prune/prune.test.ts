@@ -3,7 +3,14 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'c
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
+import { refuseWhenFull, STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
+import { setAlarm } from '../../agent/runtime/alarms.ts'
+import {
+  insertReservation,
+  claimOccurrence,
+  listReservations,
+} from '../../agent/local-db/scheduled-tasks.ts'
+import { waitForAnswer } from '../../testing/rpc.ts'
 import { searchHistory } from '../archive/history.ts'
 import { applyOperation } from '../store/records.ts'
 import type { NewRecord } from '../store/records.ts'
@@ -14,7 +21,11 @@ import { prunedThrough } from '../../agent/local-db/pruning.ts'
 import { memoryDb } from '../store/db.ts'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import { memoryJobs, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
+import {
+  memoryJobs,
+  pruneRuns,
+  scheduledTaskOccurrences,
+} from '../../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { markContact } from '../../agent/local-db/external-data.ts'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
@@ -80,6 +91,20 @@ describe('pruning', () => {
     const page = await stub.readEntries({ after: 0, limit: 5 })
     expect(page.entries[0]?.text).toContain(codename)
     expect(page.end).toBe(false)
+    const throughEntry = page.entries[0]?.id
+    if (throughEntry === undefined) throw new Error('Missing archived evidence')
+    expect(page.entries.some((entry) => entry.id > throughEntry)).toBe(true)
+    const bounded = await stub.readEntries({ after: 0, limit: 5, throughEntry })
+    expect(bounded).toEqual({
+      entries: page.entries.filter((entry) => entry.id <= throughEntry),
+      through: throughEntry,
+      end: true,
+    })
+    expect(await stub.readEntries({ after: throughEntry, limit: 5, throughEntry })).toEqual({
+      entries: [],
+      through: throughEntry,
+      end: true,
+    })
 
     await say(agentId, 'after', 'Still there?')
     expect(bodies.at(-1)).toContain('Summary: the user set a codename')
@@ -98,7 +123,7 @@ describe('pruning', () => {
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
       'extract',
     ])
-    // Contact while an archive page is in flight excludes its text, not its scan progress.
+    // Historical contact metadata cannot hide evidence during an archive read.
     const excluded = await runInDurableObject(stub, async (agent, state) => {
       const reached = Promise.withResolvers<void>()
       const release = Promise.withResolvers<void>()
@@ -115,7 +140,7 @@ describe('pruning', () => {
       release.resolve()
       return reading.finally(() => spy.mockRestore())
     })
-    expect(excluded.entries).toEqual([])
+    expect(excluded.entries).toEqual(page.entries)
     expect(excluded.through).toBe(page.through)
     expect(excluded.end).toBe(false)
   })
@@ -236,6 +261,101 @@ describe('pruning', () => {
     }
 
     await expect.poll(pruned).toBe(true)
+  })
+
+  it('prunes before admitting a claimed reservation that has never reached Pi', async () => {
+    const agentId = await newAgentId()
+    await updateSettings(agentId, {
+      tools: ['schedule_task'],
+      memoryPolicy: { remember: true, extract: false },
+    })
+    mockModel({ usage: COMPACT_AFTER_TURN_7 })
+    await compactedAgent(agentId, 'pending schedule')
+    const stub = env.AGENTS.getByName(agentId)
+    const requestId = await runInDurableObject(stub, async (instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const start = Date.now() - 1000
+      const task = insertReservation(
+        local,
+        {
+          sourceTask: 'pending-prune',
+          sourceEntry: 1,
+          arguments: '{}',
+          instruction: 'After maintenance',
+          rule: { kind: 'once', start },
+          nextDue: start,
+        },
+        start - 1,
+      )
+      const occurrence = claimOccurrence(local, task, start, undefined, Date.now() + 3_600_000)
+      const hardBytes = state.storage.sql.databaseSize - 1
+      await state.storage.put(PRUNE_LIMITS_KEY, { hardBytes })
+      await expect(refuseWhenFull(state.storage)).rejects.toThrow(STORAGE_MAINTENANCE_ERROR)
+      expect(await instance.prune({ force: true })).toBe('pruned')
+      expect(state.storage.sql.databaseSize).toBeLessThanOrEqual(hardBytes)
+      local
+        .update(scheduledTaskOccurrences)
+        .set({ retryAt: Date.now() - 1 })
+        .run()
+      await setAlarm(state.storage, 'schedule', Date.now() - 1)
+      await instance.alarm()
+      return occurrence.id
+    })
+    await waitForAnswer(agentId, requestId)
+    await expect
+      .poll(() =>
+        runInDurableObject(
+          stub,
+          async (_instance, state) =>
+            listReservations(await openLocalDb(state.storage)).tasks[0]?.latest?.outcome,
+        ),
+      )
+      .toBe('done')
+  })
+
+  it.each(['dispatching', 'submitted'] as const)(
+    'still defers pruning for unresolved %s admission evidence',
+    async (status) => {
+      const agentId = await newAgentId()
+      await updateSettings(agentId, { memoryPolicy: { remember: true, extract: false } })
+      mockModel({ usage: COMPACT_AFTER_TURN_7 })
+      await compactedAgent(agentId, 'protected schedule')
+      const stub = env.AGENTS.getByName(agentId)
+      await runInDurableObject(stub, async (instance, state) => {
+        const local = await openLocalDb(state.storage)
+        const start = Date.now() - 1000
+        const task = insertReservation(
+          local,
+          {
+            sourceTask: 'protected-prune',
+            sourceEntry: 1,
+            arguments: '{}',
+            instruction: 'Uncertain',
+            rule: { kind: 'once', start },
+            nextDue: start,
+          },
+          start - 1,
+        )
+        claimOccurrence(local, task, start, undefined, Date.now() + 3_600_000)
+        local
+          .update(scheduledTaskOccurrences)
+          .set({ state: status, admissionStarted: status === 'dispatching' })
+          .run()
+        expect(await instance.prune({ force: true })).toBe('deferred')
+      })
+    },
+  )
+
+  it('immediately schedules another bounded slice after successful partial pruning', async () => {
+    const agentId = await newAgentId()
+    await updateSettings(agentId, { memoryPolicy: { remember: true, extract: false } })
+    mockModel({ usage: COMPACT_AFTER_TURN_7 })
+    await compactedAgent(agentId, 'small slices')
+    await runInDurableObject(env.AGENTS.getByName(agentId), async (instance, state) => {
+      await state.storage.put(PRUNE_LIMITS_KEY, { thresholdBytes: 0, runBytes: 1 })
+      expect(await instance.prune()).toBe('pruned')
+      expect(await state.storage.get('kodama:alarm:prune')).toBeLessThanOrEqual(Date.now())
+    })
   })
 
   it('refuses input above the hard limit with a retryable error', async () => {

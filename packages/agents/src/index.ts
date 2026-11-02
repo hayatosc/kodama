@@ -7,6 +7,7 @@
  * @module
  */
 import { safeFailure } from './lib/errors.ts'
+import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
@@ -14,6 +15,9 @@ import { assignCredential } from './credentials/assignments.ts'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
+  NotificationPage,
+  NotificationQuery,
+  NotificationRead,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
@@ -52,6 +56,8 @@ import {
   ListFilterSchema,
   HistoryPageSchema,
   RenameAgentSchema,
+  NotificationQuerySchema,
+  NotificationReadSchema,
   parseManagementActor,
   parseAgentId,
   parseAgentRef,
@@ -345,6 +351,37 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     )
   }
 
+  /** Store arbitrary bytes under the admitted working agent; no public URL is created. */
+  async uploadArtifact(agentId: string, input: ArtifactUpload): Promise<ArtifactMetadata> {
+    using result = await (await this.#agent(agentId, 'chat')).uploadArtifact(input)
+    const { artifactId, filename, mediaType, size, createdAt, expiresAt } = result
+    return { artifactId, filename, mediaType, size, createdAt, expiresAt }
+  }
+
+  /** Page only this agent's ready, unexpired metadata. */
+  async listArtifacts(
+    agentId: string,
+    page: { cursor?: string; limit?: number } = {},
+  ): Promise<ArtifactMetadata[]> {
+    using result = await (await this.#agent(agentId, 'read')).listArtifacts(page)
+    return Array.from(result)
+  }
+
+  /** Download binary data; the calling Worker must not render active content inline. */
+  async downloadArtifact(
+    agentId: string,
+    artifactId: string,
+  ): Promise<ArtifactMetadata & { bytes: Uint8Array }> {
+    using result = await (await this.#agent(agentId, 'read')).downloadArtifact(artifactId)
+    const { filename, mediaType, size, createdAt, expiresAt, bytes } = result
+    return { artifactId, filename, mediaType, size, createdAt, expiresAt, bytes }
+  }
+
+  /** Retryable deletion; absent local IDs are no-ops, but corrupt owner keys reject. */
+  async deleteArtifact(agentId: string, artifactId: string): Promise<void> {
+    return (await this.#agent(agentId, 'read')).deleteArtifact(artifactId)
+  }
+
   /** An SSE stream of the agent's events, starting with a snapshot. */
   async subscribe(agentId: string): Promise<ReadableStream<Uint8Array>> {
     return (await this.#agent(agentId, 'read')).subscribe()
@@ -373,6 +410,22 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   async sendMessage(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
     const submissionId = await (await this.#agent(agentId, 'chat')).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /** List the admitted working agent's inbox; paused and archived agents remain readable. */
+  async notifications(agentId: string, query: NotificationQuery = {}): Promise<NotificationPage> {
+    const input = parseInput(NotificationQuerySchema, query)
+    using page = await (await this.#agent(agentId, 'read')).notifications(input)
+    return {
+      notifications: page.notifications,
+      ...(page.nextBefore === undefined ? {} : { nextBefore: page.nextBefore }),
+    }
+  }
+
+  /** Acknowledge one exact sequence agent-wide without deleting the referenced result. */
+  async readNotification(agentId: string, request: NotificationRead): Promise<boolean> {
+    const input = parseInput(NotificationReadSchema, request)
+    return (await this.#agent(agentId, 'read')).readNotification(input)
   }
 
   /** Committed user and assistant messages, and whether the agent is busy. */

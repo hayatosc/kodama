@@ -14,6 +14,56 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('parses artifact commands and sends bytes as multipart rather than JSON strings', async () => {
+    const upload = command(['artifacts', 'upload', 'assistant', '/tmp/image.png'], {
+      'media-type': 'image/png',
+    })
+    expect(upload).toEqual({
+      action: 'artifact-upload',
+      agentRef: 'assistant',
+      path: '/tmp/image.png',
+      mediaType: 'image/png',
+    })
+    if (upload.action !== 'artifact-upload') throw new Error('Expected upload')
+    const request = commandRequest(upload, 'token', undefined, {
+      filename: 'image.png',
+      bytes: new Uint8Array([0, 255, 128]),
+    })
+    expect(request.url).toBe(`${LOCAL_WORKER_URL}/cli/artifact-upload/assistant`)
+    const form = request.init.body
+    if (!(form instanceof FormData)) throw new Error('Expected multipart body')
+    const file = form.get('file')
+    if (!file || typeof file === 'string') throw new Error('Expected binary form file')
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([0, 255, 128]))
+    expect(command(['artifacts', 'list', 'assistant'], { cursor: 'id', limit: '2' })).toEqual({
+      action: 'artifact-list',
+      agentRef: 'assistant',
+      cursor: 'id',
+      limit: 2,
+    })
+    expect(command(['artifacts', 'download', 'assistant', 'id', 'new.zip'])).toEqual({
+      action: 'artifact-download',
+      agentRef: 'assistant',
+      artifactId: 'id',
+      path: 'new.zip',
+    })
+    expect(command(['artifacts', 'delete', 'assistant', 'id'])).toEqual({
+      action: 'artifact-delete',
+      agentRef: 'assistant',
+      artifactId: 'id',
+    })
+    expect(() => command(['artifacts', 'list', 'assistant'], { limit: '101' })).toThrow()
+    expect(() => command(['artifacts', 'download', 'assistant', '../key', 'x'])).toThrow()
+    expect(() => command(['artifacts', 'download', 'assistant', 'id'])).toThrow()
+  })
+  it('omits an absent artifact cursor but rejects an explicitly empty one', () => {
+    expect(command(['artifacts', 'list', 'assistant'])).toEqual({
+      action: 'artifact-list',
+      agentRef: 'assistant',
+    })
+    expect(() => command(['artifacts', 'list', 'assistant'], { cursor: '' })).toThrow(TypeError)
+  })
+
   it('sets the full optional tool selection, including an empty selection', () => {
     expect(command(['tools', 'assistant', 'contact_agent'])).toEqual({
       action: 'tools',
@@ -101,6 +151,41 @@ describe('toCommand', () => {
     expect(command(['cancel', agentId])).toEqual({ action: 'cancel', agentRef: agentId })
   })
 
+  it('lists notifications and acknowledges exact sequences with validated bounded arguments', () => {
+    const parsed = command(['notifications', 'assistant'], {
+      before: '42',
+      limit: '2',
+      unread: true,
+    })
+    expect(parsed).toEqual({
+      action: 'notifications',
+      agentRef: 'assistant',
+      query: { before: 42, limit: 2, unreadOnly: true },
+    })
+    if (parsed.action !== 'notifications') throw new Error('Unexpected command')
+    expect(commandRequest(parsed, 'token')).toMatchObject({
+      url: `${LOCAL_WORKER_URL}/cli/notifications/assistant`,
+      init: { body: JSON.stringify(parsed.query) },
+    })
+    const read = command(['notification-read', 'assistant', '41'])
+    expect(read).toEqual({
+      action: 'notification-read',
+      agentRef: 'assistant',
+      request: { seq: 41 },
+    })
+    if (read.action !== 'notification-read') throw new Error('Unexpected command')
+    expect(commandRequest(read, 'token')).toMatchObject({
+      url: `${LOCAL_WORKER_URL}/cli/notification-read/assistant`,
+      init: { body: '{"seq":41}' },
+    })
+    for (const value of ['0', '-1', '1.5', 'abc', '9007199254740992']) {
+      expect(() => command(['notification-read', 'assistant', value])).toThrow()
+      expect(() => command(['notifications', 'assistant'], { before: value })).toThrow()
+    }
+    for (const limit of ['0', '101', '1.5', 'abc'])
+      expect(() => command(['notifications', 'assistant'], { limit })).toThrow()
+  })
+
   it('reads a message with its request ID, steering, and event output', () => {
     expect(
       command(['send', 'assistant', 'Hello'], { 'request-id': 'r1', steer: true, events: true }),
@@ -131,7 +216,9 @@ describe('toCommand', () => {
   })
 
   it.each([
-    [['deploy'], /Expected seed, send, snapshot, or cancel/],
+    [['deploy'], /Invalid command or arguments; see nr agent --help/],
+    [['notifications'], /Invalid command or arguments; see nr agent --help/],
+    [['notification-read', 'assistant'], /Invalid command or arguments; see nr agent --help/],
     [['seed', 'assistant'], /Unexpected arguments/],
     [['send', 'assistant'], /Unexpected arguments/],
     [['snapshot', 'Not A Ref!'], TypeError],
@@ -165,29 +252,4 @@ describe('commandRequest', () => {
     })
     expect(seed).toMatchObject({ url: `${LOCAL_WORKER_URL}/cli/seed`, init: { body: undefined } })
   })
-})
-
-it('carries repeatable exact owner permissions through send without changing replacement tools', () => {
-  const parsed = command(['send', 'assistant', 'Question'], {
-    'web-query': ['  exact question  ', 'second'],
-    'web-url': ['HTTPS://Example.org:443/page#fragment'],
-  })
-  if (parsed.action !== 'send') throw new Error('Expected send')
-  expect(parsed.message.webPermissions).toEqual({
-    queries: ['exact question', 'second'],
-    urls: ['https://example.org/page'],
-  })
-  const body = commandRequest(parsed, 'local-token').init.body
-  if (typeof body !== 'string') throw new Error('Missing body')
-  expect(JSON.parse(body)).toMatchObject({
-    webPermissions: parsed.message.webPermissions,
-  })
-  expect(() =>
-    command(['send', 'assistant', 'Question'], { 'web-url': ['http://127.0.0.1/'] }),
-  ).toThrow()
-  expect(() =>
-    command(['send', 'assistant', 'Question'], {
-      'web-query': Array.from({ length: 21 }, () => 'query'),
-    }),
-  ).toThrow()
 })

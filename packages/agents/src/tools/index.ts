@@ -5,23 +5,39 @@
  * @module
  */
 import type { ToolRegistration } from '@earendil-works/pi-durable'
-import { createContactAgentTool } from './contact.ts'
+import { createCodeTool } from './code/execute.ts'
+import type { CodeCall } from './code/execute.ts'
+import { createArtifactTools } from './artifacts.ts'
+import type { ArtifactCall } from './artifacts.ts'
+import { createContactAgentTool, createContactReadTools } from './contact.ts'
 import type { ContactAgent } from './contact.ts'
 import { createWebSearchTool } from './web/search.ts'
 import type { WebCall } from './web/search.ts'
 import { createWebFetchTool } from './web/fetch.ts'
 import { currentTimeTool } from './current-time.ts'
+import { createScheduleTools } from './scheduled-tasks.ts'
+import type { ScheduleTools } from './scheduled-tasks.ts'
 
 /** Every registered tool. Add a tool here; each agent enables an explicit subset by name. */
 export const agentTools: readonly ToolRegistration[] = createAgentTools()
 
 /** Bind runtime-only delivery while retaining the same opt-in names and schemas. */
-export function createAgentTools(contact?: ContactAgent, web?: WebCall): ToolRegistration[] {
+export function createAgentTools(
+  contact?: ContactAgent,
+  web?: WebCall,
+  schedule?: ScheduleTools,
+  code?: CodeCall,
+  artifacts?: ArtifactCall,
+): ToolRegistration[] {
   return [
     currentTimeTool,
+    createCodeTool(code),
+    ...createArtifactTools(artifacts),
     createContactAgentTool(contact),
+    ...createContactReadTools(contact),
     createWebSearchTool(web),
     createWebFetchTool(web),
+    ...createScheduleTools(schedule),
   ]
 }
 

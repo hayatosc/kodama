@@ -14,6 +14,7 @@ import { JOB_TIME_LIMIT_MS } from './runner.ts'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from '../../agent.ts'
+import { AgentObject } from '../../../agent-object.ts'
 import { memoryAgent } from '../../../testing/memory.ts'
 import { rejectionInObject } from '../../../testing/rpc.ts'
 import { MEMORY_AGENT_NAME } from '../../../memory/jobs.ts'
@@ -22,6 +23,25 @@ import { MemoryAgent } from './agent.ts'
 afterEach(() => vi.restoreAllMocks())
 
 describe('the memory agent', () => {
+  it('preserves dedicated hooks when development RPC dispatches from the exported prototype', async () => {
+    await runInDurableObject(memoryAgent(), async (instance) => {
+      // Vite resolves RPC methods on the exported constructor, not the returned subclass.
+      const rpc = AgentObject.prototype
+      await expect(rpc.enqueue.call(instance, { kind: 'unknown' })).rejects.toThrow('Invalid type')
+      expect(await rpc.jobStatus.call(instance, 'unknown-job')).toBeUndefined()
+      const message = { requestId: 'dev-direct', content: 'Do not admit this input' }
+      await expect(rpc.sendMessage.call(instance, message)).rejects.toThrow('use enqueue')
+      await expect(rpc.send.call(instance, message)).rejects.toThrow('use enqueue')
+      await expect(rpc.sendTo.call(instance, uuidv7(), message)).rejects.toThrow(
+        'does not message other agents',
+      )
+      await expect(rpc.readEntries.call(instance, { after: 0, limit: 5 })).rejects.toThrow(
+        'no entries to extract',
+      )
+      await expect(rpc.memoryChanged.call(instance)).rejects.toThrow('no memory of its own')
+    })
+  })
+
   it('cancel stops the running job, which is queued again like a failed attempt', async () => {
     const started = Promise.withResolvers<void>()
     vi.spyOn(globalThis, 'fetch').mockImplementation(
