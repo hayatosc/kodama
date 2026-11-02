@@ -6,10 +6,13 @@ import * as schema from './schema.ts'
 
 const tables = Object.values(schema).filter((value) => value instanceof SQLiteTable)
 
+/** Orders column names by UTF-16 code units, the same order a bare sort() gives strings. */
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
 function declaredColumns(table: SQLiteTable): string[] {
   return getTableConfig(table)
     .columns.map((column) => column.name)
-    .sort()
+    .sort(byCodeUnit)
 }
 
 it('the newest D1 migration snapshot has the tables and columns of the Drizzle schema', () => {
@@ -17,7 +20,10 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
     tables.map((table) => [getTableConfig(table).name, declaredColumns(table)]),
   )
   const migrated = Object.fromEntries(
-    Object.entries(env.TEST_MIGRATED_COLUMNS).map(([name, columns]) => [name, [...columns].sort()]),
+    Object.entries(env.TEST_MIGRATED_COLUMNS).map(([name, columns]) => [
+      name,
+      [...columns].sort(byCodeUnit),
+    ]),
   )
   // A mismatch means drizzle/memory/schema.ts changed without `nr db:generate:memory`.
   expect(migrated).toEqual(declared)
