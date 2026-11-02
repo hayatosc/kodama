@@ -1,5 +1,10 @@
 /* Kodama — generated from tokens.json */
 
+/* Gen Interface JP from npm (gen-interface-jp@0.8.0, SIL OFL 1.1), served by jsDelivr. */
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/400.css');
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/600.css');
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/display-600.css');
+
 :root,
 [data-theme='light'] {
   --background: #ffffff;
@@ -191,28 +196,4 @@
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;
-}
-
-@font-face {
-  font-family: 'Gen Interface JP';
-  src: url('fonts/GenInterfaceJP-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Gen Interface JP';
-  src: url('fonts/GenInterfaceJP-SemiBold.woff2') format('woff2');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Gen Interface JP Display';
-  src: url('fonts/GenInterfaceJPDisplay-SemiBold.woff2') format('woff2');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
 }

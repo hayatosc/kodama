@@ -8,7 +8,7 @@
 - Tailwind CSS v4（`@tailwindcss/vite`）。設定ファイルは作らず、`app.css` の `@theme inline` でトークンをユーティリティにつなぐ。
 - shadcn-svelte（bits-ui ベース）を土台にし、Button・Badge・Dialog・DropdownMenu・Tooltip・Collapsible・ScrollArea はそれを使う。AgentAvatar・Sidebar・Message・ToolCall・Composer・ProfilePanel・ActivityFeed は Kodama 固有として自作する。
 - アイコンは `@lucide/svelte`。
-- 書体は npm の `gen-interface-jp`（`import 'gen-interface-jp/400.css'` と `600.css` の2つだけ読み込む。unicode-range の分割 WOFF2 なので必要な文字だけ届く）。等幅は Geist Mono（400 と 600）。
+- 書体は npm の `gen-interface-jp`（`import 'gen-interface-jp/400.css'`、`600.css`、`display-600.css` の3つだけ読み込む。unicode-range の分割 WOFF2 なので必要な文字だけ届く）。等幅は Geist Mono（400 と 600）。
 
 ## トークンのつなぎ方
 

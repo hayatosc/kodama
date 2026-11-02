@@ -33,7 +33,7 @@
 ## タイポグラフィ
 
 - 書体は Gen Interface JP（Inter と Noto Sans JP をもとにした、和欧のバランスを揃えた UI 用書体。SIL OFL 1.1）。本文・UI は `sans`（Gen Interface JP）、ページ見出し・ペイン見出し・メインの名前は `display`（Gen Interface JP Display）。等幅は Geist Mono。
-- フォントファイルはこのシステムの `fonts/` に WOFF2 で入れてある（Regular・SemiBold と Display SemiBold）。アプリでは npm の `gen-interface-jp`（unicode-range で分割された WOFF2）を使ってもよい。
+- フォントは npm の `gen-interface-jp`（unicode-range で分割された WOFF2）から読み込む。使うのは本文の 400・600 と Display の 600 だけ。
 - ウェイトは 400 と 600 の2つだけ。フォントの読み込みを軽くするため、`font-medium`（500）や `font-bold` は使わない。強調は 600、小見出しやメタ情報は 400 のまま色（`muted-foreground`）で下げる。
 - UI の既定は `type-base`（16/24）。一覧の名前、ボタン、ツールの行、ペイン見出し、入力欄はこれ。ボタン・選択中の行・名前は `type-base-semibold`。
 - 会話本文は `type-prose`（16/28）。日本語は行間が詰まると読みにくいので、本文だけ `leading-7` に上げる。
@@ -89,6 +89,6 @@
 - `tokens.json` がトークンの元。`tokens.css` はそこから生成した CSS 変数・文字スタイル・`@font-face` で、手で直さない。
 - `components/<名前>/preview.html` はブラウザで直接開ける（`tokens.css`、`components/bundle.css`、`components/bundle.js` を読み込む）。ライトとダークを並べて表示し、クリックやキー操作にも反応する。
 - `components/<名前>/README.md` が各部品のガイド、`components/index.d.ts` が受け取る値の型。
-- `fonts/` は Gen Interface JP の Regular・SemiBold と Display SemiBold（SIL OFL 1.1、`fonts/OFL.txt`）。アプリでは npm の `gen-interface-jp` を使う。
+- フォントはファイルを持たず、npm の `gen-interface-jp@0.8.0`（SIL OFL 1.1）から読み込む。`tokens.css` の先頭で jsDelivr の `cdn/400.css`・`cdn/600.css`・`cdn/display-600.css` を `@import` する。アーティファクトからここへ書き出すときは、`tokens.json` の `type.fonts` を空にし、`fonts/` は持ってこない。
 - `images/` はライトモードの Workspace と Mobile を描いた PNG（2 倍の解像度）。
 - 実装の手引きは [sveltekit.md](sveltekit.md)。
