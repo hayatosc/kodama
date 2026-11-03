@@ -71,6 +71,13 @@
       "when": 1793667432580,
       "tag": "0009_certain_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793667682267,
+      "tag": "0010_chunky_ironclad",
+      "breakpoints": true
     }
   ]
 }

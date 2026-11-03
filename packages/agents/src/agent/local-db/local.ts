@@ -19,6 +19,7 @@ import m0006 from '../../../drizzle/durable-object/migrations/0006_jazzy_doctor_
 import m0007 from '../../../drizzle/durable-object/migrations/0007_cool_psylocke.sql?raw'
 import m0008 from '../../../drizzle/durable-object/migrations/0008_complex_yellowjacket.sql?raw'
 import m0009 from '../../../drizzle/durable-object/migrations/0009_certain_shocker.sql?raw'
+import m0010 from '../../../drizzle/durable-object/migrations/0010_chunky_ironclad.sql?raw'
 import * as schema from '../../../drizzle/durable-object/schema.ts'
 
 /** Drizzle handle of one object's local tables. */
@@ -33,7 +34,7 @@ export type LocalDb = DrizzleSqliteDODatabase<typeof schema>
  */
 export const localMigrations = {
   journal,
-  migrations: { m0000, m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009 },
+  migrations: { m0000, m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010 },
 }
 
 /** Open the object's local tables, migrated to the current schema. */

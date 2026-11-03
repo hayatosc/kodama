@@ -10,8 +10,7 @@ import { authorizeMcp, markMcpAuthenticationFailure } from '../credentials/mcp-r
 import { createMcpTool, validateMcpResult } from '../tools/mcp/tool.ts'
 import type { McpCall } from '../tools/mcp/tool.ts'
 import { closeMcpSession, mcpRequest, openMcpSession } from '../tools/mcp/transport.ts'
-import { currentRunInputs } from './runtime/inputs.ts'
-import { ownerReplyReceipt } from './local-db/owner-intake.ts'
+import { currentRunInputs, operatorInput } from './runtime/inputs.ts'
 import { beginMcpCall, finishMcpCall, pruneMcpCalls, mcpRecoveryEpoch } from './local-db/mcp.ts'
 import type { LocalDb } from './local-db/local.ts'
 import { assertAllowed } from './runtime/restrictions.ts'
@@ -54,27 +53,8 @@ export function createMcpCall(
       const live = await (await harness()).snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
       if (!live?.run) throw new Error('mcp_execution_changed')
       const inputs = await currentRunInputs(await harness(), context)
-      let ownerRequestId: string | undefined
-      if (inputs?.length && inputs.every((entry) => entry.kind === 'kodama.owner-message')) {
-        for (const entry of inputs) {
-          const data: unknown = entry.data
-          if (
-            data &&
-            typeof data === 'object' &&
-            'requestId' in data &&
-            typeof data.requestId === 'string'
-          ) {
-            const receipt = ownerReplyReceipt(store, data.requestId)
-            if (
-              receipt?.state === 'accepted' &&
-              receipt.submissionId &&
-              live.run.inputs.some((id) => id === receipt.submissionId)
-            ) {
-              ownerRequestId = data.requestId
-            }
-          }
-        }
-      }
+      const operatorEntry =
+        inputs?.length && inputs.every((entry) => operatorInput(entry)) ? inputs.at(-1) : undefined
       const signal = AbortSignal.any([
         ...(context.abortSignal ? [context.abortSignal] : []),
         AbortSignal.timeout(30_000),
@@ -95,7 +75,7 @@ export function createMcpCall(
         return guardMcpSelection(db, agentId, selected)
       }
       const target = await check()
-      const runId = mcpRecoveryEpoch(store, ownerRequestId)
+      const runId = mcpRecoveryEpoch(store, operatorEntry ? String(operatorEntry.id) : undefined)
       const authorize = async (sendSignal: AbortSignal) => {
         const current = await check()
         if (current.endpoint !== target.endpoint) throw new Error('mcp_auth_binding_changed')

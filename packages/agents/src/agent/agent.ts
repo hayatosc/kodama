@@ -589,7 +589,6 @@ export class Agent extends DurableObject<AgentEnv> {
       createMcpRegistrationCall(
         this.env,
         this.#agentId(),
-        this.#local,
         () => this.#harness,
         () => assertAllowed(this.#refusal),
       ),

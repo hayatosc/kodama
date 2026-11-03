@@ -1,7 +1,6 @@
-/** Bind chat management to trusted operator receipts and the adopted running input set. @module */
+/** Bind chat management to host-admitted conversation inputs, without a separate intake ledger. @module */
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
-import * as v from 'valibot'
 import type { AgentEnv } from '../env.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { createAgentModels } from '../control-plane/models.ts'
@@ -10,34 +9,18 @@ import { chatMcp, readMcpChatStatus } from '../control-plane/workflows/mcp-chat.
 import { pushDesired } from '../control-plane/workflows/agents.ts'
 import { parseMcpInstruction } from '../tools/mcp/registration.ts'
 import type { McpRegistrationCall } from '../tools/mcp/registration.ts'
-import type { LocalDb } from './local-db/local.ts'
-import { ownerReplyReceipt } from './local-db/owner-intake.ts'
-import { currentRunInputs } from './runtime/inputs.ts'
-
-const provenanceSchema = v.strictObject({
-  conversationId: v.string(),
-  requestId: v.string(),
-  externalMessageId: v.string(),
-  sequence: v.number(),
-})
-const messageSchema = v.object({
-  content: v.string(),
-  externalMessageId: v.string(),
-  requestId: v.string(),
-  sequence: v.number(),
-})
+import { currentRunInputs, operatorInput } from './runtime/inputs.ts'
 
 /** Legacy pi.user, peer, schedule, completion and mixed inputs never authorize management. */
 export function createMcpRegistrationCall(
   env: AgentEnv,
   agentId: string,
-  local: Promise<LocalDb>,
   harness: () => Promise<Harness>,
   checkAllowed: () => void,
 ): McpRegistrationCall {
   return async (input, api, context) => {
     context.abortSignal?.throwIfAborted()
-    if (api.conversationId !== ROOT_CONVERSATION_ID) throw new Error('mcp_owner_required')
+    if (api.conversationId !== ROOT_CONVERSATION_ID) throw new Error('mcp_operator_input_required')
     const runtime = await harness()
     const live = await runtime.snapshot(LiveDoc, ROOT_CONVERSATION_ID, context)
     const db = managementDb(env.MANAGEMENT_DB)
@@ -53,34 +36,18 @@ export function createMcpRegistrationCall(
       return readMcpChatStatus(db, agentId, String(ROOT_CONVERSATION_ID), input)
     }
     const entries = await currentRunInputs(runtime, context)
-    if (
-      !live?.run ||
-      !entries?.length ||
-      entries.some((entry) => entry.kind !== 'kodama.owner-message')
-    )
-      throw new Error('mcp_owner_required')
-    const store = await local
+    if (!live?.run || !entries?.length) throw new Error('mcp_operator_input_required')
     const inputs = entries.map((entry, index) => {
-      const provenance = v.parse(provenanceSchema, entry.data)
-      const receipt = ownerReplyReceipt(store, provenance.requestId)
-      if (
-        !receipt ||
-        receipt.state !== 'accepted' ||
-        receipt.submissionId !== live.run?.inputs[index] ||
-        receipt.externalMessageId !== provenance.externalMessageId ||
-        receipt.sequence !== provenance.sequence ||
-        provenance.conversationId !== String(ROOT_CONVERSATION_ID)
-      )
-        throw new Error('mcp_owner_evidence_invalid')
-      const raw: unknown = JSON.parse(receipt.arguments)
-      const message = v.parse(messageSchema, raw)
+      const message = operatorInput(entry)
+      const submissionId = live.run?.inputs[index]
+      if (!message || submissionId === undefined) throw new Error('mcp_operator_input_required')
       return {
         evidence: {
           sourceAgentId: agentId,
-          conversationId: provenance.conversationId,
+          conversationId: String(ROOT_CONVERSATION_ID),
           entryId: entry.id,
-          submissionId: String(receipt.submissionId),
-          createdAt: receipt.createdAt,
+          submissionId: String(submissionId),
+          createdAt: message.createdAt,
         },
         instruction: parseMcpInstruction(message.content),
       }

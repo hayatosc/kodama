@@ -144,10 +144,12 @@ before best-effort AS revocation. The result distinguishes unconfirmed external 
 ## Chat registration
 
 The default built-in `mcp_registration` tool accepts register/status/connect/discover/assign requests,
-not actor identity, credentials, or approval flags. The host verifies original direct-operator input
-receipts, root conversation, adopted input set, and running task. Removing user ownership does not
-make external data authoritative: legacy `pi.user`, peer, schedule, and mixed-origin runs cannot
-authorize mutations. Read-only status can be shown after an MCP completion event.
+not actor identity, credentials, or approval flags. Ordinary `send` / `sendMessage` (including steer)
+is the only reply admission path. The host resolves the adopted submission IDs to their existing
+conversation entries and parses the original user text and timestamp there; there is no second
+intake receipt table or owner-specific API. Pi's request index deduplicates retries. Root conversation,
+adopted input set and running-task checks remain. Unstamped `pi.user`, peer, schedule, and mixed-origin
+runs cannot authorize mutations. Read-only status can be shown after an MCP completion event.
 
 The deliberately limited, whole-message operator syntax is:
 
@@ -191,6 +193,6 @@ in the existing inbox; scope expansion requires fresh operator consent.
 ## Local verification
 
 Run `nr check` at the repository root. Fixtures exercise workerd RPC, D1, object SQLite, encrypted
-credentials, eviction, OAuth discovery and exchange, refresh contention, chat receipts and selection,
+credentials, eviction, OAuth discovery and exchange, refresh contention, submission provenance and selection,
 revocation, and failure refusal. No real provider keys or external MCP connection are needed. Passing
 these checks does not establish interoperability with a particular production server or browser UI.

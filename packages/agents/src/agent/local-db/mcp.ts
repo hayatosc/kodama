@@ -11,15 +11,15 @@ export function interruptMcpCalls(db: LocalDb, now = Date.now()) {
     .run()
 }
 
-/** Pi task IDs change between model steps; only an adopted authenticated owner input resets refusal. */
-export function mcpRecoveryEpoch(db: LocalDb, ownerRequestId?: string): string {
-  return ownerRequestId
-    ? `owner:${ownerRequestId}`
+/** Pi task IDs change between steps; an adopted operator entry resets refusal without an intake ledger. */
+export function mcpRecoveryEpoch(db: LocalDb, operatorEntryId?: string): string {
+  return operatorEntryId
+    ? `operator:${operatorEntryId}`
     : (db.select({ runId: mcpCalls.runId }).from(mcpCalls).orderBy(desc(mcpCalls.createdAt)).get()
-        ?.runId ?? 'no-owner-input')
+        ?.runId ?? 'no-operator-input')
 }
 
-/** Reserve before sending; a duplicate call or a prior failed call in this owner-input epoch is refused. */
+/** Reserve before sending; a duplicate call or a prior failed call in this operator-input epoch is refused. */
 export function beginMcpCall(
   db: LocalDb,
   callId: string,
@@ -34,7 +34,7 @@ export function beginMcpCall(
       and(eq(mcpCalls.runId, runId), eq(mcpCalls.toolId, toolId), ne(mcpCalls.state, 'succeeded')),
     )
     .get()
-  if (failed) throw new Error('mcp_retry_requires_new_owner_input')
+  if (failed) throw new Error('mcp_retry_requires_new_operator_input')
   db.insert(mcpCalls).values({ callId, runId, toolId, state: 'running', createdAt: now }).run()
 }
 
