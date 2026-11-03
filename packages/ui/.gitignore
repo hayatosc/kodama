@@ -3,3 +3,5 @@
 storybook-static
 *storybook.log
 vite.config.ts.timestamp-*
+/storybook-single
+/storybook.html

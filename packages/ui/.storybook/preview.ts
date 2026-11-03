@@ -5,6 +5,7 @@
  */
 
 import '../src/app.css'
+import '../src/lib/styles/fonts.css'
 import { withThemeByDataAttribute } from '@storybook/addon-themes'
 import type { Preview } from '@storybook/sveltekit'
 

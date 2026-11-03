@@ -1,0 +1,9 @@
+/*
+ * The same fonts as fonts.css, loaded from jsDelivr like design/tokens.css. The single-file
+ * Storybook build uses this file so the HTML does not embed every font subset (about 11 MB).
+ */
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/400.css');
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/600.css');
+@import url('https://cdn.jsdelivr.net/npm/gen-interface-jp@0.8.0/cdn/display-600.css');
+@import url('https://cdn.jsdelivr.net/npm/@fontsource/geist-mono@5.3.0/400.css');
+@import url('https://cdn.jsdelivr.net/npm/@fontsource/geist-mono@5.3.0/600.css');
