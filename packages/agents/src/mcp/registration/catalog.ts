@@ -188,7 +188,7 @@ export async function guardMcpSelection(
       ),
     )
     .get()
-  if (!credential) throw new Error('mcp_auth_required')
+  if (!credential) throw new Error('mcp_assignment_revoked')
   if (
     !server.enabled ||
     server.revision !== selected.serverRevision ||

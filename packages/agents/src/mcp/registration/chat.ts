@@ -1,5 +1,5 @@
 /** Shared registration progress and host-generated selection proposals for chat. @module */
-import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, notExists, or } from 'drizzle-orm'
 import {
   mcpProposals,
   mcpRequests,
@@ -54,8 +54,28 @@ export async function completeMcpRegistration(
     .from(mcpRequests)
     .where(eq(mcpRequests.requestId, requestId))
     .get()
-  if (!request || !request.serverId || request.expiresAt <= Date.now())
+  if (!request?.serverId || request.serverRevision === null)
     throw new Error('mcp_registration_expired')
+  const attached =
+    ['ready_for_discovery', 'discovered'].includes(request.status) &&
+    request.credentialId === credentialId
+  const completed =
+    !attached && request.status === 'awaiting_owner_auth'
+      ? await call.db
+          .select()
+          .from(mcpOAuthTransactions)
+          .where(
+            and(
+              eq(mcpOAuthTransactions.requestId, requestId),
+              eq(mcpOAuthTransactions.serverId, request.serverId),
+              eq(mcpOAuthTransactions.serverRevision, request.serverRevision),
+              eq(mcpOAuthTransactions.credentialId, credentialId),
+              eq(mcpOAuthTransactions.status, 'completed'),
+            ),
+          )
+          .get()
+      : undefined
+  if (!attached && !completed) throw new Error('mcp_registration_expired')
   const { server } = await mcpToken(call.db, kek, request.serverId, credentialId)
   if (server.revision !== request.serverRevision) throw new Error('mcp_registration_changed')
   if (request.status === 'discovered') return request
@@ -89,7 +109,10 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
     await call.db
       .update(mcpRequests)
       .set(
-        transaction.status === 'completed' && transaction.credentialId
+        transaction.status === 'completed' &&
+          transaction.credentialId &&
+          transaction.serverId === request.serverId &&
+          transaction.serverRevision === request.serverRevision
           ? { status: 'ready_for_discovery', credentialId: transaction.credentialId }
           : { status: 'failed' },
       )
@@ -106,11 +129,29 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
     .where(
       and(
         lt(mcpRequests.expiresAt, Date.now()),
+        // Completion may be outside the recovery batch or commit after its read.
+        or(
+          ne(mcpRequests.status, 'awaiting_owner_auth'),
+          notExists(
+            call.db
+              .select({ id: mcpOAuthTransactions.transactionId })
+              .from(mcpOAuthTransactions)
+              .where(
+                and(
+                  eq(mcpOAuthTransactions.requestId, mcpRequests.requestId),
+                  eq(mcpOAuthTransactions.serverId, mcpRequests.serverId),
+                  eq(mcpOAuthTransactions.serverRevision, mcpRequests.serverRevision),
+                  eq(mcpOAuthTransactions.status, 'completed'),
+                  isNotNull(mcpOAuthTransactions.credentialId),
+                  ne(mcpOAuthTransactions.credentialId, ''),
+                ),
+              ),
+          ),
+        ),
         inArray(mcpRequests.status, [
           'awaiting_endpoint',
           'registered_unverified',
           'awaiting_owner_auth',
-          'ready_for_discovery',
         ]),
       ),
     )

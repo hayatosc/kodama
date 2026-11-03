@@ -90,7 +90,17 @@ export function createMcpCall(
         )
         // A refresh can yield; check again immediately before transport sends the token.
         await check()
-        return token
+        return {
+          ...token,
+          onAuthenticationFailure: (failure: string, revision: number) =>
+            markMcpAuthenticationFailure(
+              db,
+              selected.serverId,
+              selected.credentialId,
+              failure,
+              revision,
+            ),
+        }
       }
       pruneMcpCalls(store, runId)
       beginMcpCall(store, callId, runId, selected.toolId)
@@ -122,7 +132,6 @@ export function createMcpCall(
           : 'mcp_interrupted'
       if (started) {
         finishMcpCall(store, callId, failure)
-        await markMcpAuthenticationFailure(db, selected.serverId, selected.credentialId, failure)
       }
       for (const notice of await mcpCatalogNotices(db, agentId, selected.serverId))
         recordNotification(store, notice, Date.now())

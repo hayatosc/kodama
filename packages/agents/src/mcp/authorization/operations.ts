@@ -1,5 +1,5 @@
 /** Secret-safe OAuth management facade for the future authenticated UI and local CLI. @module */
-import { and, eq, inArray, lt } from 'drizzle-orm'
+import { and, eq, inArray, lt, gt } from 'drizzle-orm'
 import * as v from 'valibot'
 import {
   credentials,
@@ -11,7 +11,7 @@ import { mcpServer } from '../registration/catalog.ts'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './oauth.ts'
 import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './oauth-http.ts'
 import { mcpEndpoint } from '../connection/transport.ts'
-import { eraseMcpSecret, mcpSecretInsert } from './vault.ts'
+import { eraseMcpSecret, mcpSecretInsert, mcpToken } from './vault.ts'
 
 const id = v.pipe(v.string(), v.uuid())
 const nonce = v.pipe(v.string(), v.minLength(32), v.maxLength(256))
@@ -117,7 +117,28 @@ export async function manageMcpOAuth(
         .from(mcpRequests)
         .where(eq(mcpRequests.requestId, input.requestId))
         .get()
-      if (!request || request.expiresAt <= Date.now()) throw new Error('mcp_registration_expired')
+      if (
+        !request?.serverId ||
+        request.expiresAt <= Date.now() ||
+        request.status !== 'awaiting_owner_auth'
+      )
+        throw new Error('mcp_registration_expired')
+      const { server } = await mcpToken(db, kek, request.serverId, input.credentialId)
+      if (server.revision !== request.serverRevision) throw new Error('mcp_registration_changed')
+      // Persist consumed attachment permission before the service attempts discovery.
+      const attached = await db
+        .update(mcpRequests)
+        .set({ status: 'ready_for_discovery', credentialId: input.credentialId })
+        .where(
+          and(
+            eq(mcpRequests.requestId, request.requestId),
+            eq(mcpRequests.status, 'awaiting_owner_auth'),
+            gt(mcpRequests.expiresAt, Date.now()),
+          ),
+        )
+        .returning()
+        .get()
+      if (!attached) throw new Error('mcp_registration_expired')
       return { status: 'completed', requestId: input.requestId, credentialId: input.credentialId }
     }
     case 'begin':

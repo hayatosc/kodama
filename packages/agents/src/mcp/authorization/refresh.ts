@@ -39,7 +39,7 @@ export async function authorizeMcp(
   endpoint: string,
   signal: AbortSignal,
   agentId?: string,
-): Promise<string> {
+): Promise<{ access: string; revision: number }> {
   signal.throwIfAborted()
   if (agentId) await mcpAgentGrant(db, agentId, credentialId)
   const stored = await mcpToken(db, kek, serverId, credentialId)
@@ -63,7 +63,8 @@ export async function authorizeMcp(
     await waitForRefresh(signal)
     return authorizeMcp(db, kek, serverId, credentialId, endpoint, signal, agentId)
   }
-  if (value.expiresAt === null || value.expiresAt > now + 30_000) return value.access
+  if (value.expiresAt === null || value.expiresAt > now + 30_000)
+    return { access: value.access, revision: row.revision }
   if (value.kind !== 'mcp_oauth' || !value.refresh) throw new Error('mcp_reauth_required')
   const leaseId = crypto.randomUUID()
   const claimed = await db
@@ -137,8 +138,9 @@ export async function authorizeMcp(
     if (agentId) await mcpAgentGrant(db, agentId, credentialId)
     const current = await mcpToken(db, kek, serverId, credentialId)
     signal.throwIfAborted()
-    return current.value.access
+    return { access: current.value.access, revision: current.row.revision }
   } catch (error) {
+    if (error instanceof Error && error.message === 'mcp_assignment_revoked') throw error
     const reason =
       error instanceof Error && error.message === 'mcp_scope_required'
         ? 'scope_required'
@@ -166,6 +168,7 @@ export async function markMcpAuthenticationFailure(
   serverId: string,
   credentialId: string,
   failure: string,
+  revision: number,
 ) {
   if (failure !== 'mcp_auth_required' && failure !== 'mcp_scope_required') return
   await db
@@ -180,6 +183,7 @@ export async function markMcpAuthenticationFailure(
         eq(credentials.provider, serverId),
         eq(credentials.purpose, 'mcp_server'),
         eq(credentials.status, 'active'),
+        eq(credentials.revision, revision),
       ),
     )
 }

@@ -10,7 +10,7 @@ import {
 } from './transport.ts'
 
 const endpoint = 'https://mcp.vendor.com/mcp'
-const authorize = async () => 'fixture-token'
+const authorize = async () => ({ access: 'fixture-token', revision: 1 })
 const signal = () => AbortSignal.timeout(5_000)
 const session = () => ({ endpoint, nextId: 1, stale: false, bytes: 0 })
 const reply = (id: number, result: unknown, headers = {}) =>
@@ -140,7 +140,7 @@ describe('MCP Streamable HTTP', () => {
         {},
         async () => {
           controller.abort()
-          return 'token'
+          return { access: 'token', revision: 1 }
         },
         controller.signal,
       ),

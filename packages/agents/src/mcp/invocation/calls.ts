@@ -1,14 +1,36 @@
 /** Durable unsafe-call accounting and same-run failure refusal for MCP. @module */
-import { and, desc, eq, ne, lt, or } from 'drizzle-orm'
+import * as v from 'valibot'
+import { piTasks } from '../../agent/local-db/pi-tables.ts'
+import { and, desc, eq, ne, lt } from 'drizzle-orm'
 import { mcpCalls } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from '../../agent/local-db/local.ts'
 
-/** Recovery never replays a remote call whose response was not committed. */
+// Pi 1.2.0 settles the tool result and this outcome in one commit, after execute returns.
+const completion = v.object({
+  state: v.object({
+    status: v.picklist(['terminal', 'completing']),
+    outcome: v.object({ status: v.literal('completed') }),
+  }),
+})
+
+function committedMcpCall(db: LocalDb, callId: string): boolean {
+  const task = db
+    .select()
+    .from(piTasks)
+    .where(eq(piTasks.id, Number(callId)))
+    .get()
+  if (!task) return false
+  const value: unknown = JSON.parse(task.record)
+  return v.safeParse(completion, value).success
+}
+
+/** Recovery never releases a response receipt until Pi durably committed its tool result. */
 export function interruptMcpCalls(db: LocalDb, now = Date.now()) {
-  db.update(mcpCalls)
-    .set({ state: 'outcome_unknown', failure: 'mcp_outcome_unknown', completedAt: now })
-    .where(eq(mcpCalls.state, 'running'))
-    .run()
+  for (const call of db.select().from(mcpCalls).all()) {
+    if (call.state !== 'running' && call.state !== 'succeeded') continue
+    if (call.state === 'succeeded' && committedMcpCall(db, call.callId)) continue
+    finishMcpCall(db, call.callId, 'mcp_outcome_unknown', now)
+  }
 }
 
 /** Pi task IDs change between steps; an adopted operator entry resets refusal without an intake ledger. */
@@ -30,15 +52,14 @@ export function beginMcpCall(
   const failed = db
     .select()
     .from(mcpCalls)
-    .where(
-      and(eq(mcpCalls.runId, runId), eq(mcpCalls.toolId, toolId), ne(mcpCalls.state, 'succeeded')),
-    )
-    .get()
+    .where(and(eq(mcpCalls.runId, runId), eq(mcpCalls.toolId, toolId)))
+    .all()
+    .some((call) => call.state !== 'succeeded' || !committedMcpCall(db, call.callId))
   if (failed) throw new Error('mcp_retry_requires_new_operator_input')
   db.insert(mcpCalls).values({ callId, runId, toolId, state: 'running', createdAt: now }).run()
 }
 
-/** Store only a local failure code, never arguments, outputs, session IDs or remote diagnostics. */
+/** Success is provisional until the Pi task settles; store no remote arguments or outputs. */
 export function finishMcpCall(db: LocalDb, callId: string, failure?: string, now = Date.now()) {
   db.update(mcpCalls)
     .set({
@@ -56,13 +77,17 @@ export function finishMcpCall(db: LocalDb, callId: string, failure?: string, now
 
 /** Bound terminal receipts without deleting uncertainty from the currently active run. */
 export function pruneMcpCalls(db: LocalDb, currentRunId: string, now = Date.now()) {
-  db.delete(mcpCalls)
-    .where(
-      and(
-        or(ne(mcpCalls.runId, currentRunId), eq(mcpCalls.state, 'succeeded')),
-        ne(mcpCalls.state, 'running'),
-        lt(mcpCalls.createdAt, now - 7 * 86_400_000),
-      ),
+  const old = db
+    .select()
+    .from(mcpCalls)
+    .where(and(ne(mcpCalls.state, 'running'), lt(mcpCalls.createdAt, now - 7 * 86_400_000)))
+    .all()
+  for (const call of old) {
+    if (
+      call.runId === currentRunId &&
+      (call.state !== 'succeeded' || !committedMcpCall(db, call.callId))
     )
-    .run()
+      continue
+    db.delete(mcpCalls).where(eq(mcpCalls.callId, call.callId)).run()
+  }
 }

@@ -7,9 +7,10 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { registerMcpCatalog } from '../registration/catalog.ts'
 import { completeMcpOAuth, startMcpOAuth } from './oauth.ts'
 import { mcpToken, putMcpBearer } from './vault.ts'
-import { authorizeMcp, disconnectMcp } from './refresh.ts'
+import { authorizeMcp, disconnectMcp, markMcpAuthenticationFailure } from './refresh.ts'
 import { parseCredential } from '../../credentials/vault.ts'
 import { manageMcpOAuth } from './operations.ts'
+import { mcpRequest, closeMcpSession } from '../connection/transport.ts'
 import { mcpLoopbackRedirect } from './oauth-http.ts'
 
 const kek = btoa(String.fromCharCode(...new Uint8Array(32).fill(42)))
@@ -67,7 +68,10 @@ async function setup() {
   return { server, fetcher }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 describe('MCP OAuth transactions', () => {
   it('completes native PKCE into the existing vault without a UI origin and fences callback channels', async () => {
@@ -213,11 +217,114 @@ describe('MCP OAuth transactions', () => {
         ),
       ),
     )
-    expect(values).toEqual(['rotated-access', 'rotated-access'])
+    expect(values).toEqual([
+      { access: 'rotated-access', revision: 2 },
+      { access: 'rotated-access', revision: 2 },
+    ])
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(2)
     const stored = await mcpToken(management, kek, server.serverId, completed.credentialId)
     expect(stored.value.kind === 'mcp_oauth' && stored.value.refresh).toBe('rotated-refresh')
   })
+
+  it.each([401, 403])(
+    'does not invalidate a rotated credential for a delayed HTTP %s',
+    async (status) => {
+      const { server, fetcher } = await setup()
+      const start = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
+      const completed = await completeMcpOAuth(management, kek, origin, {
+        state: new URL(start.authorizationUrl).searchParams.get('state') ?? '',
+        browserNonce,
+        code: 'code',
+      })
+      if (completed.status !== 'completed') throw new Error('Fixture authorization failed')
+      const sent = Promise.withResolvers<void>()
+      const response = Promise.withResolvers<Response>()
+      const original = fetcher.getMockImplementation()
+      let remoteCalls = 0
+      let cleanupToken = ''
+      fetcher.mockImplementation(async (input, options) => {
+        if (input === server.endpoint) {
+          if (options?.method === 'DELETE') {
+            cleanupToken = new Headers(options.headers).get('Authorization') ?? ''
+            return new Response(null, { status: 204 })
+          }
+          remoteCalls++
+          expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer access-fixture')
+          sent.resolve()
+          return response.promise
+        }
+        if (input === 'https://auth.example.com/token')
+          return Response.json({
+            access_token: 'rotated-access',
+            refresh_token: 'rotated-refresh',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          })
+        if (!original) throw new Error('Missing fixture')
+        return original(input, options)
+      })
+      const authorize = async (signal: AbortSignal) => ({
+        ...(await authorizeMcp(
+          management,
+          kek,
+          server.serverId,
+          completed.credentialId,
+          server.endpoint,
+          signal,
+        )),
+        onAuthenticationFailure: (failure: string, revision: number) =>
+          markMcpAuthenticationFailure(
+            management,
+            server.serverId,
+            completed.credentialId,
+            failure,
+            revision,
+          ),
+      })
+      const session = {
+        endpoint: server.endpoint,
+        sessionId: 'fixture',
+        nextId: 1,
+        bytes: 0,
+        stale: false,
+      }
+      const pending = mcpRequest(session, 'tools/call', {}, authorize, AbortSignal.timeout(5_000))
+      const rejected = expect(pending).rejects.toThrow(
+        status === 401 ? 'mcp_auth_required' : 'mcp_scope_required',
+      )
+      await sent.promise
+      // A concurrent caller refreshes while the resource still owes revision 1 a response.
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3_600_000)
+      expect(await authorize(AbortSignal.timeout(5_000))).toMatchObject({
+        access: 'rotated-access',
+        revision: 2,
+      })
+      response.resolve(new Response(null, { status }))
+      await rejected
+      await closeMcpSession(session, authorize)
+      expect(cleanupToken).toBe('Bearer rotated-access')
+      expect(remoteCalls).toBe(1)
+      expect(tokenCalls(fetcher.mock.calls)).toHaveLength(2)
+      expect(
+        (await mcpToken(management, kek, server.serverId, completed.credentialId)).row,
+      ).toMatchObject({ status: 'active', revision: 2 })
+      // A current-revision failure still requires operator reauthorization.
+      await markMcpAuthenticationFailure(
+        management,
+        server.serverId,
+        completed.credentialId,
+        status === 401 ? 'mcp_auth_required' : 'mcp_scope_required',
+        2,
+      )
+      expect(
+        await management
+          .select()
+          .from(credentials)
+          .where(eq(credentials.credentialId, completed.credentialId))
+          .get(),
+      ).toMatchObject({ status: 'needs_reauth', revision: 2 })
+    },
+  )
 
   it('an expired refresh lease requires reauthorization rather than replay, and remains disconnectable', async () => {
     const { server, fetcher } = await setup()
@@ -374,7 +481,7 @@ describe('MCP OAuth transactions', () => {
         server.endpoint,
         AbortSignal.timeout(1000),
       ),
-    ).toBe('bearer-fixture')
+    ).toEqual({ access: 'bearer-fixture', revision: 1 })
     expect(await disconnectMcp(management, kek, server.serverId, created.credentialId)).toEqual({
       status: 'revoked',
       externalRevocation: 'unavailable',

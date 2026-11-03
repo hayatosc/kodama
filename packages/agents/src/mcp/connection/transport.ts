@@ -27,7 +27,14 @@ export interface McpSession {
 }
 
 /** Reauthorize immediately before every send; the callback must check the live grant and binding. */
-export type McpAuthorization = (signal: AbortSignal) => Promise<string | undefined>
+export type McpAuthorization = (signal: AbortSignal) => Promise<
+  | {
+      access: string
+      revision: number
+      onAuthenticationFailure?: (failure: string, revision: number) => Promise<void>
+    }
+  | undefined
+>
 
 /** Initialize with no sampling, roots, elicitation, or other client capabilities. */
 export async function openMcpSession(
@@ -75,7 +82,7 @@ export async function mcpRequest(
     Accept: 'application/json, text/event-stream',
     'MCP-Protocol-Version': MCP_PROTOCOL,
   })
-  if (token !== undefined) headers.set('Authorization', `Bearer ${token}`)
+  if (token !== undefined) headers.set('Authorization', `Bearer ${token.access}`)
   if (session.sessionId !== undefined) headers.set('MCP-Session-Id', session.sessionId)
   let response: Response
   try {
@@ -91,8 +98,12 @@ export async function mcpRequest(
   }
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined)
-    if (response.status === 401) throw new Error('mcp_auth_required')
-    if (response.status === 403) throw new Error('mcp_scope_required')
+    if (response.status === 401 || response.status === 403) {
+      const failure = response.status === 401 ? 'mcp_auth_required' : 'mcp_scope_required'
+      // Capture the token of this request, never a later cleanup/refresh authorization.
+      await token?.onAuthenticationFailure?.(failure, token.revision)
+      throw new Error(failure)
+    }
     if (response.status === 404 && session.sessionId) {
       delete session.sessionId
       throw new Error('mcp_session_expired')
@@ -254,7 +265,7 @@ export async function closeMcpSession(
       'MCP-Session-Id': session.sessionId,
       'MCP-Protocol-Version': MCP_PROTOCOL,
     })
-    if (token !== undefined) headers.set('Authorization', `Bearer ${token}`)
+    if (token !== undefined) headers.set('Authorization', `Bearer ${token.access}`)
     const response = await fetch(session.endpoint, {
       method: 'DELETE',
       headers,

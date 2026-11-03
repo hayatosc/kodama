@@ -1,5 +1,5 @@
 /**
- * Pi Durable 1.2.0's own SQLite tables, declared only for pruning to read and delete from. Pi
+ * Pi Durable 1.2.0's own SQLite tables, declared for pruning and MCP completion reconciliation. Pi
  * creates and migrates them; drizzle-kit never sees this file.
  *
  * @see docs/memory.md — Pruning
@@ -28,6 +28,7 @@ export const piConversations = sqliteTable('conversations', {
 export const piTasks = sqliteTable('tasks', {
   id: integer('id').primaryKey(),
   status: text('status').notNull(),
+  record: text('record').notNull(),
 })
 
 /** Documents (`defineDoc`) and who owns them. */
