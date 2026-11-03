@@ -37,6 +37,36 @@ The Workers filesystem cannot read Vitest's host-side transformed-module cache. 
 `node_modules/.vitest-cache/...` file. Prebundling dependencies was also tested but did not
 improve the measured representative run, so it is not enabled.
 
+MCP transport/OAuth HTTP fixtures and definition/registration parsing also run in Node;
+credential persistence, assignment, recovery and invocation remain in workerd.
+
+## MCP recovery fixture
+
+The 101-request OAuth recovery regression deliberately crosses the recovery batch limit of 100. Keep all 101 real D1 requests, completed transactions, credential checks, expiry checks
+and two recovery passes. It also asserts all 101 discovery invocations and notice IDs, no
+code exchange, and no assignment.
+
+This batch-volume test uses one real discovery result for its shared server and mocks the
+completion-notice RPC, instead of repeating catalog writes and launching 101 model runs.
+Adjacent single-request recovery tests still use real discovery and durable notices. The
+batch test's timeout was reduced from 120 seconds to 30 seconds, not increased.
+
+## Measured full-stack result
+
+The complete review covered 101 test files: 25 now run in Node and 76 in workerd. Twenty
+files moved out of workerd; no test cases or assertions were removed. The full local check
+retained **1,029 passed / 1 skipped**, with TypeScript, lint and formatting passing.
+
+| Configuration                            | Local full-suite wall time |
+| ---------------------------------------- | -------------------------: |
+| Before the review                        |                   430.63 s |
+| Runtime separation only                  |                   393.84 s |
+| Separation plus bounded recovery fixture |                   344.99 s |
+
+This is about a 20% local improvement, not a claimed GitHub-hosted runner result. The Node
+project alone ran its 351 tests in 9.41 seconds. Most remaining time belongs to the genuine
+Workers integration suite; isolation and storage checks were not disabled to reduce it.
+
 ## Targeted runs and measurement
 
 From the workspace root:

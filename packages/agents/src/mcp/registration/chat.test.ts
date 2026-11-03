@@ -1,5 +1,6 @@
 /** Chat registration requires durable host intent and a separate exact selection confirmation. @module */
 import { env } from 'cloudflare:workers'
+import { Agent } from '../../agent/agent.ts'
 import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import {
@@ -13,6 +14,7 @@ import {
 import { management, newAgentId } from '../../testing/management.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import { rememberMcpIntent } from './intents.ts'
+import * as serverWorkflows from './servers.ts'
 import { manageMcpOAuth } from '../authorization/operations.ts'
 import { completeMcpOAuth } from '../authorization/oauth.ts'
 import { putMcpBearer } from '../authorization/vault.ts'
@@ -409,9 +411,18 @@ function completedTransaction(
   }
 }
 
-// Allow 101 real encrypted-credential discoveries and durable notices under full-suite load.
 it('recovers all 101 expired completed OAuth requests across bounded batches without exchange or assignment', async () => {
   const { call, evidence, request, serverId, fetcher } = await pendingRegistration()
+  // Keep 101 real D1 recoveries, but inspect this shared fixture's catalog only once.
+  // Adjacent single-request cases cover real discovery and the durable completion notice.
+  const discover = serverWorkflows.discoverMcp
+  let inspected: ReturnType<typeof discover> | undefined
+  const inspection = vi.spyOn(serverWorkflows, 'discoverMcp').mockImplementation((...args) => {
+    inspected ??= discover(...args)
+    return inspected
+  })
+  const notice = vi.fn<(requestId: string) => Promise<void>>().mockResolvedValue()
+  vi.spyOn(Agent.prototype, 'mcpRegistrationNotice').mockImplementation(notice)
   const { credentialId } = await putMcpBearer(
     management,
     env.CREDENTIAL_KEK_V1,
@@ -450,6 +461,13 @@ it('recovers all 101 expired completed OAuth requests across bounded batches wit
     .from(mcpRequests)
     .where(eq(mcpRequests.sourceAgentId, evidence.sourceAgentId))
   expect(recovered).toHaveLength(101)
+  expect(notice.mock.calls.map(([requestId]) => requestId).sort()).toEqual(
+    requests.map((row) => row.requestId).sort(),
+  )
+  expect(inspection).toHaveBeenCalledTimes(101)
+  expect(
+    inspection.mock.calls.every((args) => args[2] === serverId && args[3] === credentialId),
+  ).toBe(true)
   expect(
     recovered.every((row) => row.status === 'discovered' && row.credentialId === credentialId),
   ).toBe(true)
@@ -466,7 +484,7 @@ it('recovers all 101 expired completed OAuth requests across bounded batches wit
       .from(mcpAssignments)
       .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
   ).toEqual([])
-}, 120_000)
+}, 30_000)
 
 it('keeps OAuth completion committed between the terminal read and expiry sweep recoverable', async () => {
   const { call, evidence, request, serverId, fetcher } = await pendingRegistration()
