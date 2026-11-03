@@ -7,7 +7,7 @@ import {
   mcpRequests,
 } from '../../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../../control-plane/db.ts'
-import { mcpServer } from '../storage/catalog.ts'
+import { mcpServer } from '../store/catalog.ts'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './oauth.ts'
 import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './oauth-http.ts'
 import { mcpEndpoint } from '../tools/transport.ts'

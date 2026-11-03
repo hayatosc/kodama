@@ -33,7 +33,7 @@ import {
 } from '@earendil-works/chord/context'
 import { createRegistry, defineExtension, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { createMcpCall, mcpExtension } from '../mcp/runtime/execution.ts'
-import { interruptMcpCalls } from '../mcp/storage/calls.ts'
+import { interruptMcpCalls } from '../mcp/local-db/calls.ts'
 import type {
   AgentChange,
   Harness,
@@ -141,8 +141,8 @@ import type {
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
-import { mcpCatalogNotices, mcpCredentialNotice } from '../mcp/storage/notifications.ts'
-import { mcpRegistrationNotice } from '../mcp/management/chat.ts'
+import { mcpCatalogNotices, mcpCredentialNotice } from '../mcp/store/notifications.ts'
+import { mcpRegistrationNotice } from '../mcp/workflows/chat.ts'
 import {
   listNotifications,
   readNotification,

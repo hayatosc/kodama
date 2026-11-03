@@ -6,7 +6,7 @@ import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
 import { credentials, credentialGrants, agents } from '../../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../../control-plane/db.ts'
-import { mcpServer } from '../storage/catalog.ts'
+import { mcpServer } from '../store/catalog.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import {

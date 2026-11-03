@@ -2,9 +2,9 @@
  * Discovery never assigns tools. Each assignment is an explicit operator-selected immutable version.
  * @module
  */
-import { mcpNoticeRecipients, mcpRevocationRecipients } from '../storage/notifications.ts'
-import { consumeMcpIntent, mcpIntentAudit } from '../storage/intents.ts'
-import type { McpIntent } from '../storage/intents.ts'
+import { mcpNoticeRecipients, mcpRevocationRecipients } from '../store/notifications.ts'
+import { consumeMcpIntent, mcpIntentAudit } from '../store/intents.ts'
+import type { McpIntent } from '../store/intents.ts'
 import { mcpProposals } from '../../../drizzle/management/schema.ts'
 import { and, eq, exists } from 'drizzle-orm'
 import {
@@ -20,7 +20,7 @@ import { authorizeMcp } from '../credentials/refresh.ts'
 import { mcpToken } from '../credentials/vault.ts'
 import { inspectMcpTool, mcpDigest } from '../tools/definitions.ts'
 import { closeMcpSession, listMcpTools, openMcpSession } from '../tools/transport.ts'
-import { mcpCatalogTools, mcpCommit, mcpServer } from '../storage/catalog.ts'
+import { mcpCatalogTools, mcpCommit, mcpServer } from '../store/catalog.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
 import { parseSettings } from '../../control-plane/config.ts'
 import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'

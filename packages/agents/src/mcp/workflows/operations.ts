@@ -13,7 +13,7 @@ import {
   listMcpCatalog,
   mcpServer,
   registerMcpCatalog,
-} from '../storage/catalog.ts'
+} from '../store/catalog.ts'
 import { assignMcp, discoverMcp, notifyMcpAssignments } from './servers.ts'
 import { mcpEndpoint } from '../tools/transport.ts'
 import { mcpUiOrigin } from '../credentials/oauth-http.ts'

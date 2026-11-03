@@ -12,10 +12,10 @@ import {
   mcpServer,
   registerMcpCatalog,
   resolveMcpName,
-} from '../storage/catalog.ts'
+} from '../store/catalog.ts'
 import { record } from '../../tools/web/stream.ts'
-import { consumeMcpIntent, requireMcpAgent } from '../storage/intents.ts'
-import type { McpEvidence, McpIntent } from '../storage/intents.ts'
+import { consumeMcpIntent, requireMcpAgent } from '../store/intents.ts'
+import type { McpEvidence, McpIntent } from '../store/intents.ts'
 import { mcpToken } from '../credentials/vault.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { McpRegistrationInput } from '../tools/registration.ts'
