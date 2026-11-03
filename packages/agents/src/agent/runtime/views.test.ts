@@ -3,7 +3,13 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { afterEach, expect, it, vi } from 'vitest'
 import { withHarness } from '../../testing/harness.ts'
 import { openLocalDb } from '../local-db/local.ts'
-import { acceptContact, reserveContact } from '../local-db/contacts.ts'
+import {
+  acceptContact,
+  actionableContacts,
+  contactRequest,
+  reserveContact,
+  settleContact,
+} from '../local-db/contacts.ts'
 import { attentionOf } from './views.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -41,6 +47,56 @@ it('reports an actual model retry wait and exposes only the existing cancel acti
       ).toEqual([])
     },
   )
+})
+
+it('reports pending contacts behind 100 terminal acknowledgement retries without changing peer state', async () => {
+  await withHarness({}, async (harness, state) => {
+    const db = await openLocalDb(state.storage)
+    const input = {
+      sourceEntry: 1,
+      arguments: '{}',
+      targetAgentId: 'peer',
+      content: 'Hello',
+      hop: 1,
+    }
+    for (let index = 0; index < 100; index++) {
+      const terminal = reserveContact(db, { ...input, sourceTask: `terminal-${index}` }, 100)
+      settleContact(
+        db,
+        terminal.id,
+        { outcome: 'succeeded', text: 'Done', truncated: false, artifactIds: [] },
+        200,
+      )
+    }
+    const pending = reserveContact(db, { ...input, sourceTask: 'pending' }, 300)
+    const retries = actionableContacts(db)
+    expect(retries).toHaveLength(100)
+    expect(retries.every((row) => row.state === 'settled' && row.retryAt === 200)).toBe(true)
+    expect(await attentionOf(harness, db)).toEqual([
+      {
+        source: 'contact',
+        id: pending.id,
+        reason: 'contact_delivery_wait',
+        lastProgressAt: 300,
+        actions: [],
+      },
+    ])
+    expect(contactRequest(db, pending.id)).toEqual(pending)
+
+    acceptContact(db, pending.id, 1, 400)
+    const submitted = contactRequest(db, pending.id)
+    expect(await attentionOf(harness, db)).toEqual([
+      {
+        source: 'contact',
+        id: pending.id,
+        reason: 'contact_result_wait',
+        lastProgressAt: 300,
+        actions: [],
+      },
+    ])
+    expect(contactRequest(db, pending.id)).toEqual(submitted)
+    expect(actionableContacts(db)).toEqual(retries)
+  })
 })
 
 it('reports dispatch and result waits without changing peer state', async () => {

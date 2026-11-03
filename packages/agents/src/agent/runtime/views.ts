@@ -13,7 +13,7 @@ import type {
   AttentionItem,
 } from '../../protocol.ts'
 import type { LocalDb } from '../local-db/local.ts'
-import { actionableContacts } from '../local-db/contacts.ts'
+import { pendingContacts } from '../local-db/contacts.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -67,8 +67,7 @@ export async function attentionOf(harness: Harness, db: LocalDb): Promise<Attent
         actions: ['cancel'],
       })
     }
-    for (const row of actionableContacts(db)) {
-      if (row.state !== 'dispatching' && row.state !== 'submitted') continue
+    for (const row of pendingContacts(db)) {
       items.push({
         source: 'contact',
         id: row.id,
