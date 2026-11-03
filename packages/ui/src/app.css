@@ -1,9 +1,11 @@
-/*
- * Kodama UI — Tailwind CSS v4 wired to the design tokens (design/sveltekit.md — トークンのつなぎ方).
- * Fonts are separate (lib/styles/fonts.css) so the single-file review build can load them from a CDN.
- */
+/* Kodama UI — Tailwind CSS v4 wired to the design tokens (design/sveltekit.md — トークンのつなぎ方). */
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'gen-interface-jp/400.css';
+@import 'gen-interface-jp/600.css';
+@import 'gen-interface-jp/display-600.css';
+@import '@fontsource/geist-mono/400.css';
+@import '@fontsource/geist-mono/600.css';
 /* In the base layer so utilities still override the type-* classes it declares. */
 @import './lib/styles/tokens.css' layer(base);
 

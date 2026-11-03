@@ -1,6 +1,0 @@
-/* The UI fonts from npm, served with the app. Only the weights the design uses: 400 and 600. */
-@import 'gen-interface-jp/400.css';
-@import 'gen-interface-jp/600.css';
-@import 'gen-interface-jp/display-600.css';
-@import '@fontsource/geist-mono/400.css';
-@import '@fontsource/geist-mono/600.css';
