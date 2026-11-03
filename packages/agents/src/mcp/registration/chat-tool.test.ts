@@ -1,6 +1,6 @@
 /** Only explicit, whole-message owner syntax can become a management instruction. @module */
 import { describe, expect, it } from 'vitest'
-import { parseMcpInstruction, createMcpRegistrationTool } from './registration.ts'
+import { parseMcpInstruction, createMcpRegistrationTool } from './chat-tool.ts'
 
 const proposal = '019a4c6e-51bc-7000-8000-111111111111'
 const tool = '019a4c6e-51bc-7000-8000-222222222222'

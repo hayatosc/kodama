@@ -12,13 +12,13 @@ import {
   mcpServer,
   registerMcpCatalog,
   resolveMcpName,
-} from '../store/catalog.ts'
+} from './catalog.ts'
 import { record } from '../../tools/web/stream.ts'
-import { consumeMcpIntent, requireMcpAgent } from '../store/intents.ts'
-import type { McpEvidence, McpIntent } from '../store/intents.ts'
-import { mcpToken } from '../credentials/vault.ts'
+import { consumeMcpIntent, requireMcpAgent } from './intents.ts'
+import type { McpEvidence, McpIntent } from './intents.ts'
+import { mcpToken } from '../authorization/vault.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import type { McpRegistrationInput } from '../tools/registration.ts'
+import type { McpRegistrationInput } from './chat-tool.ts'
 import { assignMcp, discoverMcp } from './servers.ts'
 import { mcpConnectLink } from './operations.ts'
 

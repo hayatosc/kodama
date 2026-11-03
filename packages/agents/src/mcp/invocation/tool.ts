@@ -7,7 +7,7 @@ import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import type { Context } from '@earendil-works/chord/context'
 import type { McpToolSelection } from '../../protocol.ts'
-import { inspectMcpSchema, validateMcpValue } from './definitions.ts'
+import { inspectMcpSchema, validateMcpValue } from '../registration/definitions.ts'
 import { record } from '../../tools/web/stream.ts'
 
 /** Host-owned lifecycle operation; tool arguments cannot select a server, credential or endpoint. */

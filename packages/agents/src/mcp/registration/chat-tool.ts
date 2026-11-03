@@ -4,7 +4,7 @@ import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi } from '@earendil-works/pi-durable'
 import type { Context } from '@earendil-works/chord/context'
 import { isUuid } from '../../lib/uuid.ts'
-import { mcpEndpoint } from './transport.ts'
+import { mcpEndpoint } from '../connection/transport.ts'
 
 /** Model arguments contain no identity, approval, bearer token or OAuth material. */
 export interface McpRegistrationInput {

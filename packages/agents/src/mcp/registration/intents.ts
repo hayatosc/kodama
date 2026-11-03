@@ -2,7 +2,7 @@
 import { and, eq, exists, gt, isNull } from 'drizzle-orm'
 import { agents, mcpCommits, mcpIntents } from '../../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../../control-plane/db.ts'
-import type { McpInstruction } from '../tools/registration.ts'
+import type { McpInstruction } from './chat-tool.ts'
 
 /** Trusted transport evidence. This type is never parsed from RPC or tool input. */
 export interface McpEvidence {

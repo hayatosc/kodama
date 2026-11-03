@@ -3,7 +3,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { mcpEndpoint } from '../tools/transport.ts'
+import { mcpEndpoint } from '../connection/transport.ts'
 import { decodeUtf8, parseJson, readBody } from '../../tools/web/stream.ts'
 
 const https = v.pipe(

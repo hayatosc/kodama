@@ -13,12 +13,12 @@ import {
   listMcpCatalog,
   mcpServer,
   registerMcpCatalog,
-} from '../store/catalog.ts'
+} from './catalog.ts'
 import { assignMcp, discoverMcp, notifyMcpAssignments } from './servers.ts'
-import { mcpEndpoint } from '../tools/transport.ts'
-import { mcpUiOrigin } from '../credentials/oauth-http.ts'
-import { putMcpBearer } from '../credentials/vault.ts'
-import { disconnectMcp } from '../credentials/refresh.ts'
+import { mcpEndpoint } from '../connection/transport.ts'
+import { mcpUiOrigin } from '../authorization/oauth-http.ts'
+import { putMcpBearer } from '../authorization/vault.ts'
+import { disconnectMcp } from '../authorization/refresh.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
 import { parseSettings } from '../../control-plane/config.ts'
 import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'

@@ -32,8 +32,8 @@ import {
   withAbortSignal,
 } from '@earendil-works/chord/context'
 import { createRegistry, defineExtension, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { createMcpCall, mcpExtension } from '../mcp/runtime/execution.ts'
-import { interruptMcpCalls } from '../mcp/local-db/calls.ts'
+import { createMcpCall, mcpExtension } from '../mcp/invocation/execution.ts'
+import { interruptMcpCalls } from '../mcp/invocation/calls.ts'
 import type {
   AgentChange,
   Harness,
@@ -89,7 +89,7 @@ import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './runtime/events.ts'
 import { exclusiveSection, isIdle, openHarness } from './runtime/harness.ts'
-import { createMcpRegistrationCall } from '../mcp/runtime/registration.ts'
+import { createMcpRegistrationCall } from '../mcp/registration/chat-input.ts'
 import { createAgentOptions } from './config.ts'
 import {
   contactOrigin,
@@ -141,8 +141,8 @@ import type {
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
-import { mcpCatalogNotices, mcpCredentialNotice } from '../mcp/store/notifications.ts'
-import { mcpRegistrationNotice } from '../mcp/workflows/chat.ts'
+import { mcpCatalogNotices, mcpCredentialNotice } from '../mcp/registration/notifications.ts'
+import { mcpRegistrationNotice } from '../mcp/registration/chat.ts'
 import {
   listNotifications,
   readNotification,
