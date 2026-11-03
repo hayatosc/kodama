@@ -37,29 +37,6 @@ export function idSchema(name: string, maxLength: number) {
   return v.pipe(v.string(message), v.maxLength(maxLength, message), v.regex(ID_PATTERN, message))
 }
 
-/** Strict transport input: callers cannot attach principal or entry provenance. */
-export const OwnerReplySchema = v.pipe(
-  v.strictObject({
-    requestId: idSchema('requestId', 128),
-    externalMessageId: idSchema('externalMessageId', 128),
-    sequence: v.pipe(v.number(), v.safeInteger(), v.minValue(1)),
-    deliveryId: v.optional(idSchema('deliveryId', 139)),
-    action: v.picklist(['followUp', 'steer', 'cancel']),
-    content: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100_000))),
-  }),
-  v.check(
-    (input) =>
-      input.action === 'cancel' ? input.content === undefined : input.content !== undefined,
-    'A reply requires content; cancellation must not include content',
-  ),
-)
-
-/** UI receipt reports allow recovery from failure but never reverse confirmed acceptance. */
-export const DeliveryReportSchema = v.strictObject({
-  id: idSchema('deliveryId', 139),
-  state: v.picklist(['accepted', 'failed']),
-})
-
 const agentIdMessage = 'agentId must be a lowercase UUID v7'
 
 /** A public agent ID: a lowercase v7 UUID. Reserved names such as `kodama:memory` fail. */

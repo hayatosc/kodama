@@ -6,9 +6,9 @@ Kodama is operated by one person. It has no user registry, principals, membershi
 
 Production management RPC is available only through the private service binding. Its caller must authenticate access before forwarding requests. The development HTTP adapter still requires its bearer token. Removing user identities does not make management public, and callers cannot supply an actor or claim a role through model arguments.
 
-Direct operator input remains distinct from model output, peer messages, scheduled work, and external data. The host records immutable request IDs, external message IDs, conversation references, sequence numbers, and admitted submission references. Replayed requests must match their original arguments. A message saying that its author is an administrator grants no authority.
+Direct operator input remains distinct from model output, peer messages, scheduled work, and external data. The existing send/steer path stamps the entry source; callers cannot supply that metadata. Pi's conversation submission index deduplicates the stable request ID, including concurrent sends and retries after eviction. A repeated ID returns the original submission, not new content or authority. There is no parallel reply receipt, external-message index, sequence counter, or strict sequence-gap validation. A message saying that its author is an administrator grants no authority.
 
-The existing owner-intake transport names refer to direct operator input, not to ownership of individual agents. Delivery acknowledgements remain separate from message admission, browser display, and inbox read state.
+Use `sendMessage` / `send` with `whenBusy: 'followUp' | 'steer'`, or the existing `cancel` RPC. CLI replies use `send --request-id ID` (and optionally `--steer`); cancellation uses `cancel`. The old owner-reply, delivery-list and delivery-report APIs are removed. There is no UI delivery ledger, `deliveryId`, or delivery accepted boundary. Attention is a read-only view of existing execution/contact state in the normal runtime views module. Submission completion and inbox read state are not UI receipt acknowledgements.
 
 ## Persistence and credentials
 

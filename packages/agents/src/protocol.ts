@@ -9,14 +9,14 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
-/** Authenticated owner intake and Web UI Worker delivery contracts. */
-export type {
-  OwnerReply,
-  OwnerReplyResult,
-  OwnerProvenance,
-  OwnerDelivery,
-  AttentionItem,
-} from './owner-intake.ts'
+/** A read-only projection of existing execution/contact state, never a delivery ledger. */
+export interface AttentionItem {
+  source: 'execution' | 'contact'
+  id: string
+  reason: string
+  lastProgressAt: number | null
+  actions: 'cancel'[]
+}
 
 /** Shared extension payloads; references never grant cross-agent access. */
 export type {

@@ -6,8 +6,6 @@
 import * as v from 'valibot'
 import {
   RequestIdSchema,
-  OwnerReplySchema,
-  DeliveryReportSchema,
   ArtifactUploadSchema,
   ExtensionIdSchema,
   ExtensionPageSchema,
@@ -24,9 +22,6 @@ import { credentialResponse } from './credentials.ts'
 type Service = Pick<
   AgentService,
   | 'send'
-  | 'ownerReply'
-  | 'ownerDeliveries'
-  | 'reportOwnerDelivery'
   | 'attention'
   | 'snapshot'
   | 'cancel'
@@ -126,18 +121,6 @@ export async function handleCli(
       )
     }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
-    if (action === 'owner-reply')
-      return Response.json(
-        await service.ownerReply(agentId, parseInput(OwnerReplySchema, await request.json())),
-      )
-    if (action === 'deliveries') return Response.json(await service.ownerDeliveries(agentId))
-    if (action === 'delivery-report')
-      return Response.json(
-        await service.reportOwnerDelivery(
-          agentId,
-          parseInput(DeliveryReportSchema, await request.json()),
-        ),
-      )
     if (action === 'attention') return Response.json(await service.attention(agentId))
     if (action === 'tools') {
       const input = parseInput(

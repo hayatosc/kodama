@@ -17,27 +17,6 @@ import {
 import type { ScheduleSpec } from '../../src/agent/schedule-spec.ts'
 import type { CompletionOutcome, ContactResult } from '../../src/extensions.ts'
 
-/** Owner transport receipts retain replay identity independently of prunable Pi entries. */
-export const ownerReplies = sqliteTable('kodama_owner_replies', {
-  requestId: text('request_id').primaryKey(),
-  externalMessageId: text('external_message_id').notNull().unique(),
-  sequence: integer('sequence').notNull().unique(),
-  arguments: text('arguments').notNull(),
-  submissionId: integer('submission_id'),
-  state: text('state', { enum: ['accepted', 'unknown'] }).notNull(),
-  createdAt: integer('created_at').notNull(),
-})
-
-/** A UI Worker delivery receipt never changes inbox read state. */
-export const ownerDeliveries = sqliteTable('kodama_owner_deliveries', {
-  id: text('id').primaryKey(),
-  source: text('source', { enum: ['submission', 'notification'] }).notNull(),
-  sourceId: text('source_id').notNull(),
-  state: text('state', { enum: ['accepted', 'failed', 'unknown'] }).notNull(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
-})
-
 /** Object-owned metadata; bytes live under an agent-scoped R2 prefix, never in SQLite. */
 export const artifacts = sqliteTable(
   'kodama_artifacts',

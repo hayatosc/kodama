@@ -7,7 +7,6 @@ import { expect, it } from 'vitest'
 import { newAgentId } from '../src/testing/management.ts'
 import { seedOnce } from '../src/testing/management.ts'
 import { waitForAnswer } from '../src/testing/rpc.ts'
-import type { OwnerDelivery, OwnerReplyResult } from '../src/owner-intake.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
@@ -15,7 +14,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
 
-it('round trips an owner request and UI receipt through the authenticated dev adapter', async () => {
+it('uses ordinary sends for replies without a UI delivery ledger', async () => {
   const post = (path: string, body?: unknown) =>
     handleCli(
       new Request(`http://localhost/cli/${path}`, {
@@ -44,36 +43,26 @@ it('round trips an owner request and UI receipt through the authenticated dev ad
   ).json<{ agentId: string }>()
   const input = {
     requestId: 'round-trip-1',
-    externalMessageId: 'ui-message-1',
-    sequence: 1,
-    action: 'followUp',
+    whenBusy: 'followUp',
     content: 'Hello',
   }
-  const first = await (await post('owner-reply/round-trip', input)).json<OwnerReplyResult>()
-  expect(first.state).toBe('accepted')
-  expect(await (await post('owner-reply/round-trip', input)).json()).toEqual(first)
+  expect((await post('send/round-trip', input)).status).toBe(200)
+  expect((await post('send/round-trip', input)).status).toBe(200)
   await waitForAnswer(agent.agentId, input.requestId)
-  const page = await (await post('deliveries/round-trip')).json<{ deliveries: OwnerDelivery[] }>()
-  const delivery = page.deliveries[0]
-  if (!delivery) throw new Error('Missing delivery')
-  expect(
-    (await post('delivery-report/round-trip', { id: delivery.id, state: 'accepted' })).status,
-  ).toBe(200)
+  for (const removed of ['owner-reply', 'deliveries', 'delivery-report'])
+    expect((await post(`${removed}/round-trip`, input)).status).toBe(404)
   const second = {
     requestId: 'round-trip-2',
-    externalMessageId: 'ui-message-2',
-    sequence: 2,
-    deliveryId: delivery.id,
-    action: 'steer',
+    whenBusy: 'steer',
     content: 'Thanks',
   }
-  expect((await post('owner-reply/round-trip', second)).status).toBe(200)
+  expect((await post('send/round-trip', second)).status).toBe(200)
   await waitForAnswer(agent.agentId, second.requestId)
   expect((await post('attention/round-trip')).status).toBe(200)
   expect(
     (
       await handleCli(
-        new Request('http://localhost/cli/owner-reply/round-trip', {
+        new Request('http://localhost/cli/send/round-trip', {
           method: 'POST',
           headers: { authorization: 'Bearer impostor' },
           body: JSON.stringify(second),

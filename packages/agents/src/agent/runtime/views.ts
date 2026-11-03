@@ -6,7 +6,14 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID, watchEvents } from '@earendil-works/pi-durable'
 import type { Harness, AgentEventStream, SubmissionRecord } from '@earendil-works/pi-durable'
-import type { AgentSnapshot, SubmissionStatus, AgentMessage } from '../../protocol.ts'
+import type {
+  AgentSnapshot,
+  SubmissionStatus,
+  AgentMessage,
+  AttentionItem,
+} from '../../protocol.ts'
+import type { LocalDb } from '../local-db/local.ts'
+import { actionableContacts } from '../local-db/contacts.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -30,6 +37,50 @@ export async function submissionOf(
     context,
   )
   return submission === undefined ? undefined : toSubmissionStatus(requestId, submission)
+}
+
+/** Project execution/contact waits; unknown progress timestamps remain null. */
+export async function attentionOf(harness: Harness, db: LocalDb): Promise<AttentionItem[]> {
+  const watch = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
+  try {
+    const view = watch.snapshot
+    const items: AttentionItem[] = []
+    if (view.run || view.inbox.length > 0) {
+      const timestamps = view.entries.flatMap((entry) =>
+        (entry.model ?? []).map((message) => message.timestamp),
+      )
+      const partialAt = view.generation?.message?.timestamp
+      if (partialAt !== undefined) timestamps.push(partialAt)
+      items.push({
+        source: 'execution',
+        id: String(ROOT_CONVERSATION_ID),
+        reason: view.generation?.retry
+          ? 'model_retry_wait'
+          : view.generation?.deferred
+            ? 'model_deferred_wait'
+            : view.tools.length > 0
+              ? 'tool_execution'
+              : view.run
+                ? 'model_execution'
+                : 'queued_input',
+        lastProgressAt: timestamps.length ? Math.max(...timestamps) : null,
+        actions: ['cancel'],
+      })
+    }
+    for (const row of actionableContacts(db)) {
+      if (row.state !== 'dispatching' && row.state !== 'submitted') continue
+      items.push({
+        source: 'contact',
+        id: row.id,
+        reason: row.state === 'dispatching' ? 'contact_delivery_wait' : 'contact_result_wait',
+        lastProgressAt: row.createdAt,
+        actions: [],
+      })
+    }
+    return items
+  } finally {
+    await watch.stop()
+  }
 }
 
 type PiSnapshot = AgentEventStream['snapshot']

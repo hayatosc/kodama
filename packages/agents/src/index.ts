@@ -9,7 +9,6 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
-import type { OwnerReply } from './owner-intake.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'
@@ -141,30 +140,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return { ...this.#systemCall(), source: 'operator' }
   }
 
-  /** Admit a sequenced owner reply or cancel through the existing conversation machinery. */
-  async ownerReply(agentId: string, input: OwnerReply) {
-    const agent = await this.#agent(agentId, input.action === 'cancel' ? 'read' : 'chat')
-    using result = await agent.ownerReply(input)
-    const { requestId, submissionId, state } = result
-    return { requestId, submissionId, state }
-  }
-
-  /** Read receipt references and the next agent-wide reply sequence; no implicit receipt or read. */
-  async ownerDeliveries(agentId: string) {
-    const agent = await this.#agent(agentId, 'read')
-    using result = await agent.ownerDeliveries()
-    return { deliveries: Array.from(result.deliveries), nextSequence: result.nextSequence }
-  }
-
-  /** The UI Worker reports its own receipt, independently of browser display and inbox read. */
-  async reportOwnerDelivery(agentId: string, input: { id: string; state: 'accepted' | 'failed' }) {
-    const agent = await this.#agent(agentId, 'read')
-    using result = await agent.reportOwnerDelivery(input)
-    const { id, source, sourceId, state, createdAt, updatedAt } = result
-    return { id, source, sourceId, state, createdAt, updatedAt }
-  }
-
-  /** Return existing execution/contact waits and delivery failures with available owner actions. */
+  /** Return existing execution/contact waits and available actions. */
   async attention(agentId: string) {
     const agent = await this.#agent(agentId, 'read')
     using result = await agent.attention()

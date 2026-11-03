@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { withHarness } from '../../testing/harness.ts'
 import { openLocalDb } from '../local-db/local.ts'
 import { acceptContact, reserveContact } from '../local-db/contacts.ts'
-import { attentionOf } from './attention.ts'
+import { attentionOf } from './views.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())

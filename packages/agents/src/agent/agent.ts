@@ -161,20 +161,9 @@ import {
   runExtraction,
   scheduleExtraction,
 } from './memory.ts'
-import { snapshotOf, submissionOf } from './runtime/views.ts'
+import { snapshotOf, submissionOf, attentionOf } from './runtime/views.ts'
 import { currentRunInputs } from './runtime/inputs.ts'
-import type { OwnerReply, OwnerProvenance, OwnerReplyResult } from '../owner-intake.ts'
-import { OwnerReplySchema, DeliveryReportSchema } from '../validation.ts'
-import {
-  reserveOwnerReply,
-  acceptOwnerReply,
-  ownerReplyReceipts,
-  ownerReplyReceipt,
-  queueOwnerDelivery,
-  ownerDeliveryPage,
-  reportOwnerDelivery,
-} from './local-db/owner-intake.ts'
-import { attentionOf } from './runtime/attention.ts'
+
 import {
   armScheduling,
   dispatchSchedules,
@@ -210,7 +199,6 @@ export class Agent extends DurableObject<AgentEnv> {
   #harness: Promise<Harness>
   /** Alarm updates and admissions that depend on them run one at a time. */
   readonly #serial = serialQueue()
-  readonly #ownerSerial = serialQueue()
   /** Tasks the recovery alarm already watches. */
   readonly #watching = new Set<TaskId>()
   /** The pruning pass in progress; concurrent calls share it. */
@@ -272,14 +260,14 @@ export class Agent extends DurableObject<AgentEnv> {
             inputs?.some((entry) =>
               [
                 'pi.user',
-                'kodama.owner-message',
+                'kodama.operator-message',
                 'kodama.agent-message',
                 'kodama.scheduled-message',
               ].includes(entry.kind),
             )
           ) {
             const owner = inputs.some(
-              (entry) => entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message',
+              (entry) => entry.kind === 'pi.user' || entry.kind === 'kodama.operator-message',
             )
             const peer = inputs.some((entry) => entry.kind === 'kodama.agent-message')
             return {
@@ -772,16 +760,7 @@ export class Agent extends DurableObject<AgentEnv> {
     const submission = await this.#serial(async () => {
       const requestId = draft.requestId
       if (requestId !== undefined) {
-        const owner = ownerReplyReceipt(await this.#local, requestId)
-        if (
-          owner &&
-          (draft.type !== 'input' ||
-            draft.entry?.kind !== 'kodama.owner-message' ||
-            !draft.entry.data)
-        ) {
-          throw new TypeError('owner_reply_request_id_reserved')
-        }
-        // Pi replays only by request ID; authenticated intake fences its identity separately.
+        // Pi's durable request index is the single admission/deduplication authority.
         const existing = await harness.commit(
           (tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestId),
           context,
@@ -838,7 +817,6 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async onSendMessage(
     request: SendMessageRequest,
     origin?: AgentOrigin,
-    owner?: OwnerProvenance,
   ): Promise<number> {
     const message = parseMessage(request)
     if (origin) {
@@ -868,7 +846,7 @@ export class Agent extends DurableObject<AgentEnv> {
               },
             }
           : {
-              entry: { kind: 'kodama.owner-message', ...(owner ? { data: { ...owner } } : {}) },
+              entry: { kind: 'kodama.operator-message' },
             }),
       },
       origin ? 'agent' : 'user',
@@ -891,84 +869,7 @@ export class Agent extends DurableObject<AgentEnv> {
     return sendEvents(await this.#harness, message.requestId, () => this.sendMessage(message))
   }
 
-  /** Authenticated host intake; replay identity is fenced before touching the conversation. */
-  async ownerReply(request: OwnerReply): Promise<OwnerReplyResult> {
-    const input = parseInput(OwnerReplySchema, request)
-    return this.#ownerSerial(async () => {
-      const db = await this.#local
-      const { receipt, replay } = await this.#serial(async () => {
-        if (
-          !ownerReplyReceipt(db, input.requestId) &&
-          (await submissionOf(await this.#harness, input.requestId))
-        ) {
-          throw new TypeError('owner_reply_request_id_reserved')
-        }
-        return reserveOwnerReply(db, input, Date.now())
-      })
-      if (receipt.state === 'accepted' || (replay && input.action === 'cancel'))
-        return {
-          requestId: input.requestId,
-          submissionId: receipt.submissionId,
-          state: receipt.state,
-        }
-      if (input.action === 'cancel') {
-        await this.cancel()
-        acceptOwnerReply(db, input.requestId, null)
-        return { requestId: input.requestId, submissionId: null, state: 'accepted' }
-      }
-      if (input.content === undefined) throw new TypeError('Missing reply content')
-      const submissionId = await this.onSendMessage(
-        { requestId: input.requestId, content: input.content, whenBusy: input.action },
-        undefined,
-        {
-          conversationId: String(ROOT_CONVERSATION_ID),
-          requestId: input.requestId,
-          externalMessageId: input.externalMessageId,
-          sequence: input.sequence,
-        },
-      )
-      acceptOwnerReply(db, input.requestId, submissionId)
-      return { requestId: input.requestId, submissionId, state: 'accepted' }
-    })
-  }
-
-  /** Reconcile settled sources into the receipt outbox; polling itself never acknowledges receipt. */
-  async ownerDeliveries() {
-    return this.#ownerSerial(async () => {
-      const db = await this.#local
-      const harness = await this.#harness
-      for (const row of ownerReplyReceipts(db)) {
-        const submission = await submissionOf(harness, row.requestId)
-        if (submission?.status === 'done' || submission?.status === 'unanswered')
-          queueOwnerDelivery(db, 'submission', row.requestId, Date.now())
-      }
-      let before: number | undefined
-      do {
-        const page = listNotifications(
-          db,
-          { limit: 100, ...(before === undefined ? {} : { before }) },
-          Date.now(),
-        )
-        for (const notice of page.notifications)
-          queueOwnerDelivery(db, 'notification', String(notice.seq), notice.createdAt)
-        before = page.nextBefore
-      } while (before !== undefined)
-      return {
-        deliveries: ownerDeliveryPage(db),
-        nextSequence: (ownerReplyReceipts(db).at(-1)?.sequence ?? 0) + 1,
-      }
-    })
-  }
-
-  /** Record UI Worker receipt, not browser display or inbox read. */
-  async reportOwnerDelivery(request: { id: string; state: 'accepted' | 'failed' }) {
-    const input = parseInput(DeliveryReportSchema, request)
-    return this.#ownerSerial(async () =>
-      reportOwnerDelivery(await this.#local, input.id, input.state, Date.now()),
-    )
-  }
-
-  /** Project current waits and receipt failures without changing execution or notifying. */
+  /** Project existing execution and contact waits without changing execution or notifying. */
   async attention() {
     return attentionOf(await this.#harness, await this.#local)
   }
