@@ -1,7 +1,7 @@
 /** Durable unsafe-call accounting and same-run failure refusal for MCP. @module */
 import { and, desc, eq, ne, lt, or } from 'drizzle-orm'
 import { mcpCalls } from '../../../drizzle/durable-object/schema.ts'
-import type { LocalDb } from './local.ts'
+import type { LocalDb } from '../../agent/local-db/local.ts'
 
 /** Recovery never replays a remote call whose response was not committed. */
 export function interruptMcpCalls(db: LocalDb, now = Date.now()) {

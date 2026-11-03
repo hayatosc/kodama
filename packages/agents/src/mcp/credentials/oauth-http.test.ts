@@ -1,10 +1,6 @@
 /** OAuth discovery fixtures cover issuer pinning, fallback and confidential client authentication. @module */
 import { afterEach, expect, it, vi } from 'vitest'
-import {
-  discoverMcpOAuth,
-  mcpClientAuthentication,
-  registerMcpOAuthClient,
-} from './mcp-oauth-http.ts'
+import { discoverMcpOAuth, mcpClientAuthentication, registerMcpOAuthClient } from './oauth-http.ts'
 
 const issuer = 'https://identity.example.com/tenant'
 const endpoint = 'https://mcp.example.com/service'

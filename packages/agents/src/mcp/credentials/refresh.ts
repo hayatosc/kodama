@@ -3,12 +3,16 @@
  * @module
  */
 import { and, eq, isNull } from 'drizzle-orm'
-import { credentials, credentialGrants, mcpAssignments } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../control-plane/db.ts'
-import { auditStatement } from '../control-plane/audit.ts'
-import { encryptCredential, credentialFingerprint } from './encryption.ts'
-import { mcpAgentGrant, mcpClientSecret, mcpToken, eraseMcpSecret } from './mcp-vault.ts'
-import { exchangeMcpToken, mcpClientAuthentication } from './mcp-oauth-http.ts'
+import {
+  credentials,
+  credentialGrants,
+  mcpAssignments,
+} from '../../../drizzle/management/schema.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { encryptCredential, credentialFingerprint } from '../../credentials/encryption.ts'
+import { mcpAgentGrant, mcpClientSecret, mcpToken, eraseMcpSecret } from './vault.ts'
+import { exchangeMcpToken, mcpClientAuthentication } from './oauth-http.ts'
 
 async function waitForRefresh(signal: AbortSignal) {
   signal.throwIfAborted()

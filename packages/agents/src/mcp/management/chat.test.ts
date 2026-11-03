@@ -4,12 +4,12 @@ import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mcpAssignments, mcpProposals, mcpRequests } from '../../../drizzle/management/schema.ts'
 import { management, newAgentId } from '../../testing/management.ts'
-import { createAgentModels } from '../models.ts'
-import { rememberMcpIntent } from '../mcp-intents.ts'
-import { putMcpBearer } from '../../credentials/mcp-vault.ts'
-import { MCP_PROTOCOL } from '../../tools/mcp/transport.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
+import { rememberMcpIntent } from '../storage/intents.ts'
+import { putMcpBearer } from '../credentials/vault.ts'
+import { MCP_PROTOCOL } from '../tools/transport.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import { chatMcp, completeMcpRegistration, readMcpChatStatus } from './mcp-chat.ts'
+import { chatMcp, completeMcpRegistration, readMcpChatStatus } from './chat.ts'
 
 async function fixture() {
   const agentId = await newAgentId()

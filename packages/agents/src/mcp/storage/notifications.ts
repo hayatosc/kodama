@@ -9,9 +9,9 @@ import {
   mcpAssignments,
   mcpServers,
   mcpTools,
-} from '../../drizzle/management/schema.ts'
-import type { CompletionNotice } from '../extensions.ts'
-import type { ManagementDb } from './db.ts'
+} from '../../../drizzle/management/schema.ts'
+import type { CompletionNotice } from '../../extensions.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
 
 /** Mark a notification-only catalog change; no network discovery or tool publication follows. */
 export async function markMcpStale(db: ManagementDb, serverId: string, revision: number) {

@@ -1,15 +1,15 @@
 /** Bind chat management to host-admitted conversation inputs, without a separate intake ledger. @module */
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
-import type { AgentEnv } from '../env.ts'
-import { managementDb } from '../control-plane/db.ts'
-import { createAgentModels } from '../control-plane/models.ts'
-import { requireMcpAgent, rememberMcpIntent } from '../control-plane/mcp-intents.ts'
-import { chatMcp, readMcpChatStatus } from '../control-plane/workflows/mcp-chat.ts'
-import { pushDesired } from '../control-plane/workflows/agents.ts'
-import { parseMcpInstruction } from '../tools/mcp/registration.ts'
-import type { McpRegistrationCall } from '../tools/mcp/registration.ts'
-import { currentRunInputs, operatorInput } from './runtime/inputs.ts'
+import type { AgentEnv } from '../../env.ts'
+import { managementDb } from '../../control-plane/db.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
+import { requireMcpAgent, rememberMcpIntent } from '../storage/intents.ts'
+import { chatMcp, readMcpChatStatus } from '../management/chat.ts'
+import { pushDesired } from '../../control-plane/workflows/agents.ts'
+import { parseMcpInstruction } from '../tools/registration.ts'
+import type { McpRegistrationCall } from '../tools/registration.ts'
+import { currentRunInputs, operatorInput } from '../../agent/runtime/inputs.ts'
 
 /** Legacy pi.user, peer, schedule, completion and mixed inputs never authorize management. */
 export function createMcpRegistrationCall(

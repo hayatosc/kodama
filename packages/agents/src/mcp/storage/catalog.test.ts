@@ -1,9 +1,9 @@
 /** Installation-wide catalog and atomic mutation fences against local management D1. @module */
 import { eq, exists } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { auditLog, mcpServers } from '../../drizzle/management/schema.ts'
-import { uuidv7 } from '../lib/uuid.ts'
-import { management } from '../testing/management.ts'
+import { auditLog, mcpServers } from '../../../drizzle/management/schema.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { management } from '../../testing/management.ts'
 import {
   listMcpCatalog,
   mcpCatalogTools,
@@ -11,7 +11,7 @@ import {
   mcpServer,
   registerMcpCatalog,
   resolveMcpName,
-} from './mcp.ts'
+} from './catalog.ts'
 
 describe('MCP installation catalog', () => {
   it('reuses an endpoint without identity provisioning or implicit enablement', async () => {

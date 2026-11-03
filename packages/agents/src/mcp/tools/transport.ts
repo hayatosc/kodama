@@ -1,8 +1,8 @@
 /** Bounded Streamable HTTP sessions. No request, including reads, is implicitly replayed.
  * @module
  */
-import { normalizeUrl } from '../web/url.ts'
-import { array, decodeUtf8, parseJson, readBody, record, sseData } from '../web/stream.ts'
+import { normalizeUrl } from '../../tools/web/url.ts'
+import { array, decodeUtf8, parseJson, readBody, record, sseData } from '../../tools/web/stream.ts'
 
 /** The only negotiated transport revision supported by this client. */
 export const MCP_PROTOCOL = '2025-11-25'

@@ -8,7 +8,7 @@ import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-dura
 import type { Context } from '@earendil-works/chord/context'
 import type { McpToolSelection } from '../../protocol.ts'
 import { inspectMcpSchema, validateMcpValue } from './definitions.ts'
-import { record } from '../web/stream.ts'
+import { record } from '../../tools/web/stream.ts'
 
 /** Host-owned lifecycle operation; tool arguments cannot select a server, credential or endpoint. */
 export type McpCall = (

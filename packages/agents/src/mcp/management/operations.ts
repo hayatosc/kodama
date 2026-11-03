@@ -13,17 +13,17 @@ import {
   listMcpCatalog,
   mcpServer,
   registerMcpCatalog,
-} from '../mcp.ts'
-import { assignMcp, discoverMcp, notifyMcpAssignments } from './mcp.ts'
-import { mcpEndpoint } from '../../tools/mcp/transport.ts'
-import { mcpUiOrigin } from '../../credentials/mcp-oauth-http.ts'
-import { putMcpBearer } from '../../credentials/mcp-vault.ts'
-import { disconnectMcp } from '../../credentials/mcp-refresh.ts'
-import { auditStatement } from '../audit.ts'
-import { parseSettings } from '../config.ts'
-import { versionRow, writeVersionStatements } from '../versions.ts'
-import { pushDesired } from './agents.ts'
-import type { ManagementCall } from './agents.ts'
+} from '../storage/catalog.ts'
+import { assignMcp, discoverMcp, notifyMcpAssignments } from './servers.ts'
+import { mcpEndpoint } from '../tools/transport.ts'
+import { mcpUiOrigin } from '../credentials/oauth-http.ts'
+import { putMcpBearer } from '../credentials/vault.ts'
+import { disconnectMcp } from '../credentials/refresh.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { parseSettings } from '../../control-plane/config.ts'
+import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'
+import { pushDesired } from '../../control-plane/workflows/agents.ts'
+import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 
 const id = v.pipe(v.string(), v.uuid())

@@ -9,13 +9,10 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
-import { notifyMcpAssignments } from './control-plane/workflows/mcp.ts'
-import { manageMcp } from './control-plane/workflows/mcp-management.ts'
-import {
-  completeMcpRegistration,
-  recoverMcpRegistrations,
-} from './control-plane/workflows/mcp-chat.ts'
-import { manageMcpOAuth, recoverMcpOAuth } from './credentials/mcp-management.ts'
+import { notifyMcpAssignments } from './mcp/management/servers.ts'
+import { manageMcp } from './mcp/management/operations.ts'
+import { completeMcpRegistration, recoverMcpRegistrations } from './mcp/management/chat.ts'
+import { manageMcpOAuth, recoverMcpOAuth } from './mcp/credentials/management.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'

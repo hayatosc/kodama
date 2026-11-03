@@ -2,7 +2,7 @@
  * Unsupported keywords are rejected, never silently stripped or fetched.
  * @module
  */
-import { array, record } from '../web/stream.ts'
+import { array, record } from '../../tools/web/stream.ts'
 
 const keywords = new Set([
   'type',

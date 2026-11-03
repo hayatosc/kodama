@@ -4,18 +4,18 @@
  */
 import { and, eq, gt } from 'drizzle-orm'
 import * as v from 'valibot'
-import { mcpOAuthTransactions, mcpOAuthClients } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpServer } from '../control-plane/mcp.ts'
-import { auditStatement } from '../control-plane/audit.ts'
-import { uuidv7 } from '../lib/uuid.ts'
+import { mcpOAuthTransactions, mcpOAuthClients } from '../../../drizzle/management/schema.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { mcpServer } from '../storage/catalog.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import {
   eraseMcpSecret,
   mcpSecret,
   mcpSecretInsert,
   mcpClientSecret,
   mcpClientSecretPayload,
-} from './mcp-vault.ts'
+} from './vault.ts'
 import {
   discoverMcpOAuth,
   exchangeMcpToken,
@@ -23,7 +23,7 @@ import {
   mcpClientDocument,
   mcpClientSchema,
   registerMcpOAuthClient,
-} from './mcp-oauth-http.ts'
+} from './oauth-http.ts'
 
 function randomSecret() {
   return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))

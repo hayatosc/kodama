@@ -4,13 +4,17 @@
  */
 import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
-import { credentials, credentialGrants, agents } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpServer } from '../control-plane/mcp.ts'
-import { auditStatement } from '../control-plane/audit.ts'
-import { uuidv7 } from '../lib/uuid.ts'
-import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
-import { mcpClientSchema } from './mcp-oauth-http.ts'
+import { credentials, credentialGrants, agents } from '../../../drizzle/management/schema.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { mcpServer } from '../storage/catalog.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import {
+  credentialFingerprint,
+  decryptCredential,
+  encryptCredential,
+} from '../../credentials/encryption.ts'
+import { mcpClientSchema } from './oauth-http.ts'
 
 const token = v.pipe(v.string(), v.minLength(1), v.maxLength(16_384))
 const binding = {

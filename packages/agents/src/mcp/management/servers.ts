@@ -2,9 +2,9 @@
  * Discovery never assigns tools. Each assignment is an explicit operator-selected immutable version.
  * @module
  */
-import { mcpNoticeRecipients, mcpRevocationRecipients } from '../mcp-notifications.ts'
-import { consumeMcpIntent, mcpIntentAudit } from '../mcp-intents.ts'
-import type { McpIntent } from '../mcp-intents.ts'
+import { mcpNoticeRecipients, mcpRevocationRecipients } from '../storage/notifications.ts'
+import { consumeMcpIntent, mcpIntentAudit } from '../storage/intents.ts'
+import type { McpIntent } from '../storage/intents.ts'
 import { mcpProposals } from '../../../drizzle/management/schema.ts'
 import { and, eq, exists } from 'drizzle-orm'
 import {
@@ -16,16 +16,16 @@ import {
   mcpServers,
   mcpTools,
 } from '../../../drizzle/management/schema.ts'
-import { authorizeMcp } from '../../credentials/mcp-refresh.ts'
-import { mcpToken } from '../../credentials/mcp-vault.ts'
-import { inspectMcpTool, mcpDigest } from '../../tools/mcp/definitions.ts'
-import { closeMcpSession, listMcpTools, openMcpSession } from '../../tools/mcp/transport.ts'
-import { mcpCatalogTools, mcpCommit, mcpServer } from '../mcp.ts'
-import { auditStatement } from '../audit.ts'
-import { parseSettings } from '../config.ts'
-import { versionRow, writeVersionStatements } from '../versions.ts'
-import { pushDesired } from './agents.ts'
-import type { ManagementCall } from './agents.ts'
+import { authorizeMcp } from '../credentials/refresh.ts'
+import { mcpToken } from '../credentials/vault.ts'
+import { inspectMcpTool, mcpDigest } from '../tools/definitions.ts'
+import { closeMcpSession, listMcpTools, openMcpSession } from '../tools/transport.ts'
+import { mcpCatalogTools, mcpCommit, mcpServer } from '../storage/catalog.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { parseSettings } from '../../control-plane/config.ts'
+import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'
+import { pushDesired } from '../../control-plane/workflows/agents.ts'
+import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 
 /** Reconciliation and mutations project invalid selections into the existing durable inbox. */

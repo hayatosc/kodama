@@ -5,22 +5,22 @@ import {
   mcpRequests,
   mcpOAuthTransactions,
 } from '../../../drizzle/management/schema.ts'
-import type { ManagementCall } from './agents.ts'
+import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
 import {
   mcpCatalogTools,
   mcpCommit,
   mcpServer,
   registerMcpCatalog,
   resolveMcpName,
-} from '../mcp.ts'
+} from '../storage/catalog.ts'
 import { record } from '../../tools/web/stream.ts'
-import { consumeMcpIntent, requireMcpAgent } from '../mcp-intents.ts'
-import type { McpEvidence, McpIntent } from '../mcp-intents.ts'
-import { mcpToken } from '../../credentials/mcp-vault.ts'
+import { consumeMcpIntent, requireMcpAgent } from '../storage/intents.ts'
+import type { McpEvidence, McpIntent } from '../storage/intents.ts'
+import { mcpToken } from '../credentials/vault.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import type { McpRegistrationInput } from '../../tools/mcp/registration.ts'
-import { assignMcp, discoverMcp } from './mcp.ts'
-import { mcpConnectLink } from './mcp-management.ts'
+import type { McpRegistrationInput } from '../tools/registration.ts'
+import { assignMcp, discoverMcp } from './servers.ts'
+import { mcpConnectLink } from './operations.ts'
 
 /** A request is scoped to its source agent and conversation, not merely its identifier. */
 export async function mcpChatRequest(

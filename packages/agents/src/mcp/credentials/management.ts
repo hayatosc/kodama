@@ -1,13 +1,17 @@
 /** Secret-safe OAuth management facade for the future authenticated UI and local CLI. @module */
 import { and, eq, inArray, lt } from 'drizzle-orm'
 import * as v from 'valibot'
-import { credentials, mcpOAuthTransactions, mcpRequests } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../control-plane/db.ts'
-import { mcpServer } from '../control-plane/mcp.ts'
-import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './mcp-oauth.ts'
-import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './mcp-oauth-http.ts'
-import { mcpEndpoint } from '../tools/mcp/transport.ts'
-import { eraseMcpSecret, mcpSecretInsert } from './mcp-vault.ts'
+import {
+  credentials,
+  mcpOAuthTransactions,
+  mcpRequests,
+} from '../../../drizzle/management/schema.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { mcpServer } from '../storage/catalog.ts'
+import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './oauth.ts'
+import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './oauth-http.ts'
+import { mcpEndpoint } from '../tools/transport.ts'
+import { eraseMcpSecret, mcpSecretInsert } from './vault.ts'
 
 const id = v.pipe(v.string(), v.uuid())
 const nonce = v.pipe(v.string(), v.minLength(32), v.maxLength(256))

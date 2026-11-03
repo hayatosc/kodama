@@ -3,7 +3,7 @@
  * @module
  */
 import * as v from 'valibot'
-import { versionRow } from './versions.ts'
+import { versionRow } from '../../control-plane/versions.ts'
 import { and, eq } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import {
@@ -16,13 +16,13 @@ import {
   mcpServers,
   mcpTools,
   mcpRequests,
-} from '../../drizzle/management/schema.ts'
-import type { McpToolSelection } from '../protocol.ts'
-import type { ManagementDb } from './db.ts'
-import { auditStatement } from './audit.ts'
-import { uuidv7 } from '../lib/uuid.ts'
-import { consumeMcpIntent, mcpIntentAudit } from './mcp-intents.ts'
-import type { McpIntent } from './mcp-intents.ts'
+} from '../../../drizzle/management/schema.ts'
+import type { McpToolSelection } from '../../protocol.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { auditStatement } from '../../control-plane/audit.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { consumeMcpIntent, mcpIntentAudit } from './intents.ts'
+import type { McpIntent } from './intents.ts'
 
 /** Fail the whole batch if authorization changed, or this operation was already committed. */
 export function mcpCommit(db: ManagementDb, operationId: string, predicate?: SQL) {
