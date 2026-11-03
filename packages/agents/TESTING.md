@@ -1,0 +1,55 @@
+# Test execution
+
+`nr check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
+The Vitest projects use different runtimes rather than different levels of coverage:
+
+- `vitest.node.config.ts` lists portable unit tests and native CLI tests. They do not load
+  Worker bindings or apply D1 migrations. The same list excludes these files from workerd,
+  so a test file runs in exactly one project. Node files remain sequential because native
+  OAuth callback tests use the fixed loopback port 1455.
+- `vitest.worker.config.ts` runs the remaining tests with real Workers bindings. File
+  isolation, D1 migrations, object SQLite, R2, alarms, eviction and RPC remain enabled.
+  Unlisted test files default to this project; review their runtime dependencies before
+  adding them to the portable list. `src/lib/*.test.ts` covers the portable helper layer.
+
+## Runtime review
+
+The review covered every test file's imports, cases, timers, fixtures and runtime dependencies.
+Tests moved to Node retain their existing assertions and mocks. Production code is unchanged.
+
+| Test concern                                                           | Runtime | Reason                                                                            |
+| ---------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| CLI command/request conversion and stream parsing                      | Node    | Standard JavaScript, Fetch, streams and FormData                                  |
+| Native CLI and OAuth callback listener                                 | Node    | Local filesystem, processes or actual loopback HTTP                               |
+| Cron and schedule normalization                                        | Node    | The application imports the shared Temporal ponyfill, not workerd-native Temporal |
+| Envelope crypto, refresh HTTP, validation and pure helpers             | Node    | Standard Web Crypto, mocked Fetch and pure functions                              |
+| Memory evidence construction and skill validation                      | Node    | No storage access; storage imports are type-only                                  |
+| Search/provider HTTP fixtures, URL and search-result normalization     | Node    | Standard Fetch with mocked external services                                      |
+| Agent, control-plane, credential-vault and memory workflows            | workerd | Real D1, object SQLite, R2 or Durable Object behavior                             |
+| Schema/migration comparisons                                           | workerd | Execute the generated migrations against the real storage adapters                |
+| Provider registration regression in `src/control-plane/models.test.ts` | workerd | Explicitly checks statically bundled OAuth registration in Workers                |
+| HTML extraction and fetch                                              | workerd | Cloudflare HTMLRewriter; do not replace it with a Node DOM implementation         |
+| Code execution                                                         | workerd | Real Dynamic Workers, compilation and binding/network isolation                   |
+| Mixed pure/storage test files                                          | workerd | Preserve their integration cases rather than weakening them to move the file      |
+
+The Workers filesystem cannot read Vitest's host-side transformed-module cache. Keep
+`fsModuleCache: false` for workerd: enabling it fails before collection with a missing
+`node_modules/.vitest-cache/...` file. Prebundling dependencies was also tested but did not
+improve the measured representative run, so it is not enabled.
+
+## Targeted runs and measurement
+
+From the workspace root:
+
+```sh
+nr --filter @kodama/agents test --project node
+nr --filter @kodama/agents test --project workerd
+nr --filter @kodama/agents test src/agent/contact.test.ts
+nr --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
+```
+
+Use the JSON report's per-file and per-case durations to find expensive fixtures. Compare
+full-suite wall time on the same machine and keep the test/pass/skip counts constant.
+Record CI measurements separately: local wall time is not a prediction of runner time.
+Do not gain speed by disabling isolation, omitting tests, weakening storage coverage or
+raising timeouts to hide failures.
