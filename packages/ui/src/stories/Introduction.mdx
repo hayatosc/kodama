@@ -1,0 +1,35 @@
+import { Meta } from '@storybook/addon-docs/blocks'
+
+<Meta title="Introduction" />
+
+# Kodama UI
+
+Kodama is a place to live with long-running agents. The UI shows each agent as a small bird
+living in its own birdhouse, so you can tell at a glance who did what while you were away.
+The screen stays quiet and black and white; color is reserved for the birds and for status.
+
+This Storybook holds the UI as mockups. Everything here renders from fixed mock data and makes
+no network requests, so each part can be reviewed on its own before it is wired to the agents.
+
+## How to read it
+
+- **Foundations** shows the design tokens: colors, text styles, spacing, corner radius, and
+  shadows. Each item says which class to write and where it belongs.
+- **Theme** is in the toolbar. Light is the default and dark is equal, so check both.
+- **Accessibility** findings appear in the a11y panel below each story.
+- **Docs** pages explain each group of stories in more detail.
+
+## What comes next
+
+The mockups are built in small, reviewable steps. Each step adds a new section here.
+
+- Step 1, **Foundation** (this one): tokens, fonts, and the Storybook setup.
+- Step 2, **Primitives**: buttons, status badges, switches, tabs, selects, and dialogs.
+- Step 3, **AgentAvatar**: the bird and its birdhouse, in every pose.
+- Step 4, **Conversation parts**: messages, tool calls, and the composer.
+- Step 5, **Panel parts**: the agent list, activity feed, settings, and profile panel.
+- Step 6, **Screens**: the full workspace and the phone layout.
+- Step 7, **Live screen**: the workspace replaying a stream of agent events.
+
+The design itself lives in `design/` at the repository root. `design/README.md` is the brand
+book, and `design/sveltekit.md` explains how it maps to this code.

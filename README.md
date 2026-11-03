@@ -33,7 +33,7 @@ packages/
       extraction/         Entry reads, record evidence, and permission-checked writes
     src/protocol.ts       Transport data types (safe to import as types in a UI)
     src/testing/          Shared test helpers; tests sit next to their modules as *.test.ts
-  ui/                     Planned: web UI and its server Worker
+  ui/                     Web UI (SvelteKit); for now Storybook mockups only
 ```
 
 ## Documentation
@@ -42,7 +42,7 @@ packages/
   testing, and deployment.
 - [docs/memory.md](docs/memory.md): long-term memory, the memory agent, pruning and the archive,
   skills, and shared memory.
-- [design/README.md](design/README.md): the UI design system for the planned `packages/ui`:
+- [design/README.md](design/README.md): the UI design system for `packages/ui`:
   tokens, components with live previews, the agent avatar, and the SvelteKit implementation guide.
 
 ## Development

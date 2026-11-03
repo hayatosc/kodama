@@ -5,3 +5,5 @@ allowBuilds:
   esbuild: true
   protobufjs: false
   workerd: true
+overrides:
+  '@sveltejs/vite-plugin-svelte': npm:@rsvelte/vite-plugin-svelte@0.5.3
