@@ -57,7 +57,7 @@ describe('agent settings schema', () => {
       [{ ...valid, schemaVersion: 2 }, 'schemaVersion must be 1'],
       [{ ...valid, thinkingLevel: 'extreme' }, 'thinkingLevel'],
       [{ ...valid, model: { provider: 'openai', modelId: 'missing' } }, 'Unknown model'],
-      [{ ...valid, tools: ['unknown_tool'] }, 'Unknown tool: unknown_tool'],
+      [{ ...valid, tools: ['unknown_tool'] }, 'Unknown tool or duplicate MCP selection'],
       [{ ...valid, tools: ['current_time', 'current_time'] }, 'unique'],
       [{ ...valid, memoryPolicy: { extract: true } }, 'memoryPolicy'],
       [{ ...valid, budget: { dailyUsd: 5, onExceed: 'refuse' } }, 'schemaVersion'],

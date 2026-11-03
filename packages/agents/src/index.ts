@@ -9,6 +9,10 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
+import { notifyMcpAssignments } from './mcp/registration/servers.ts'
+import { manageMcp } from './mcp/registration/operations.ts'
+import { completeMcpRegistration, recoverMcpRegistrations } from './mcp/registration/chat.ts'
+import { manageMcpOAuth, recoverMcpOAuth } from './mcp/authorization/operations.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
 import * as credentialFlows from './credentials/management.ts'
 import { assignCredential } from './credentials/assignments.ts'
@@ -21,7 +25,6 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
-  ManagementActor,
   AgentStatus,
   AgentSummary,
   ConfigVersion,
@@ -43,8 +46,6 @@ import type { AgentUse } from './control-plane/lifecycle.ts'
 import { admitAgent } from './control-plane/registry.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './control-plane/models.ts'
-import type { PrincipalRow } from './control-plane/db.ts'
-import { principalOf } from './control-plane/principals.ts'
 import * as flows from './control-plane/workflows/agents.ts'
 import type { ManagementCall } from './control-plane/workflows/agents.ts'
 import { seed } from './control-plane/workflows/seed.ts'
@@ -58,7 +59,6 @@ import {
   RenameAgentSchema,
   NotificationQuerySchema,
   NotificationReadSchema,
-  parseManagementActor,
   parseAgentId,
   parseAgentRef,
   parseInput,
@@ -77,8 +77,8 @@ export { AgentObject as Agent } from './agent-object.ts'
  * Conversation methods admit registered working-agent UUIDs before forwarding to Durable Objects;
  * unknown IDs never create objects, and dedicated agents cannot be addressed through those methods.
  * Management methods validate their input and call the registry flows. The calling Worker
- * authenticates callers and supplies their actor; all management methods except seed resolve that
- * actor to a principal and reject disabled principals. Roles and permissions are issue #7.
+ * authenticates access to this single-operator installation. No user identity is accepted from
+ * callers or model arguments. Direct input provenance is stamped by this host after admission.
  * There is no public HTTP interface.
  */
 export default class AgentService extends WorkerEntrypoint<AgentEnv> {
@@ -97,7 +97,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
         env: this.env,
         db: managementDb(this.env.MANAGEMENT_DB),
         models: createAgentModels(),
-        principal: null,
+        source: 'system',
         now: controller.scheduledTime,
       })
       if (result.behind > 0) console.warn('Agents still behind their configuration', result)
@@ -108,6 +108,13 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
       await aggregateUsage({ ...this.#systemCall(), now: controller.scheduledTime })
     } catch (error) {
       console.error('Usage sweep failed', safeFailure(error))
+    }
+    try {
+      await recoverMcpOAuth(managementDb(this.env.MANAGEMENT_DB))
+      await recoverMcpRegistrations(this.#systemCall(), this.env.CREDENTIAL_KEK_V1)
+      await notifyMcpAssignments(this.#systemCall())
+    } catch {
+      console.error('MCP recovery failed')
     }
     await this.env.AGENTS.getByName(MEMORY_AGENT_NAME).consolidate(controller.scheduledTime)
   }
@@ -128,44 +135,79 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return this.env.AGENTS.getByName(objectName)
   }
 
-  /** The call of the system, before any principal exists. */
+  /** Manage the shared MCP catalog and explicit per-agent selections; this is private RPC only. */
+  async mcpManage(input: unknown) {
+    return manageMcp(this.#call(), this.env.CREDENTIAL_KEK_V1, this.env.KODAMA_UI_ORIGIN, input)
+  }
+
+  /** OAuth facade for a trusted authenticated UI; no tokens, verifiers or client secrets are returned. */
+  async mcpAuth(input: unknown) {
+    const call = this.#call()
+    const result = await manageMcpOAuth(
+      call.db,
+      this.env.CREDENTIAL_KEK_V1,
+      this.env.KODAMA_UI_ORIGIN,
+      input,
+    )
+    if (
+      result &&
+      typeof result === 'object' &&
+      'requestId' in result &&
+      typeof result.requestId === 'string' &&
+      'credentialId' in result &&
+      typeof result.credentialId === 'string'
+    ) {
+      const request = await completeMcpRegistration(
+        call,
+        this.env.CREDENTIAL_KEK_V1,
+        result.requestId,
+        result.credentialId,
+      )
+      await this.env.AGENTS.getByName(request.sourceAgentId).mcpRegistrationNotice(
+        request.requestId,
+      )
+    }
+    return result
+  }
+
+  /** Internal automation is distinguishable in audit without inventing a user identity. */
   #systemCall(): ManagementCall {
     return {
       env: this.env,
       db: managementDb(this.env.MANAGEMENT_DB),
       models: createAgentModels(),
-      principal: null,
+      source: 'system',
       now: Date.now(),
     }
   }
 
-  /**
-   * The call of `actor`, as the principal it names.
-   *
-   * @throws {@link TypeError} When `actor` is malformed.
-   * @throws {@link Error} Starting `forbidden:`, when the principal is disabled.
-   */
-  async #call(actor: unknown): Promise<ManagementCall & { principal: PrincipalRow }> {
-    const call = this.#systemCall()
-    const principal = await principalOf(call.db, parseManagementActor(actor), call.now)
-    return { ...call, principal }
+  /** The private service binding is the authenticated operator boundary. */
+  #call(): ManagementCall {
+    return { ...this.#systemCall(), source: 'operator' }
+  }
+
+  /** Return existing execution/contact waits and available actions. */
+  async attention(agentId: string) {
+    const agent = await this.#agent(agentId, 'read')
+    using result = await agent.attention()
+    return Array.from(result)
   }
 
   /** Read retained management events without exposing credential envelopes or appending read events. */
-  async audit(actor: ManagementActor, request: AuditQuery) {
-    const call = await this.#call(actor)
+  async audit(request: AuditQuery) {
+    const call = this.#call()
     return readAudit(call.db, parseInput(AuditQuerySchema, request))
   }
 
   /** Catalog-priced usage, with subscription references and incomplete measurements separated. */
-  async usage(actor: ManagementActor, request: UsageQuery) {
-    const call = await this.#call(actor)
+  async usage(request: UsageQuery) {
+    const call = this.#call()
     return readUsage(call.db, parseInput(UsageQuerySchema, request), call.now)
   }
 
   /** Lazily obtain the installation identity for authentication without creating agents. */
-  async getInstallationId(actor: ManagementActor): Promise<string> {
-    const call = await this.#call(actor)
+  async getInstallationId(): Promise<string> {
+    const call = this.#call()
     return installationId(call.db, call.now)
   }
 
@@ -174,7 +216,7 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * its version 1, and the first agent. Idempotent.
    */
   async seed(credentials?: CredentialRefs): Promise<SeedResult> {
-    return seed(this.#systemCall(), credentials)
+    return seed(this.#call(), credentials)
   }
 
   /**
@@ -182,8 +224,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the request is invalid or the slug is taken.
    */
-  async createAgent(actor: ManagementActor, request: CreateAgentRequest): Promise<AgentSummary> {
-    const call = await this.#call(actor)
+  async createAgent(request: CreateAgentRequest): Promise<AgentSummary> {
+    const call = this.#call()
     const input = parseInput(CreateAgentSchema, request)
     return flows.createAgent(call, {
       requestId: input.requestId,
@@ -196,10 +238,9 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
 
   /** Registry rows, newest first, with desired and applied versions. */
   async listAgents(
-    actor: ManagementActor,
     filter: { kind?: 'working' | 'dedicated'; status?: AgentStatus } = {},
   ): Promise<AgentSummary[]> {
-    return flows.listAgents(await this.#call(actor), parseInput(ListFilterSchema, filter))
+    return flows.listAgents(this.#call(), parseInput(ListFilterSchema, filter))
   }
 
   /**
@@ -207,8 +248,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the agent is unknown.
    */
-  async getAgent(actor: ManagementActor, agentId: string): Promise<AgentSummary> {
-    return flows.getAgent(await this.#call(actor), parseAgentId(agentId))
+  async getAgent(agentId: string): Promise<AgentSummary> {
+    return flows.getAgent(this.#call(), parseAgentId(agentId))
   }
 
   /**
@@ -216,8 +257,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When nothing matches, or a prefix is ambiguous (with candidates).
    */
-  async resolveAgent(actor: ManagementActor, ref: string): Promise<AgentSummary> {
-    return flows.resolveAgent(await this.#call(actor), parseAgentRef(ref))
+  async resolveAgent(ref: string): Promise<AgentSummary> {
+    return flows.resolveAgent(this.#call(), parseAgentRef(ref))
   }
 
   /**
@@ -225,13 +266,9 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the agent is unknown, the change is invalid, or the slug is taken.
    */
-  async renameAgent(
-    actor: ManagementActor,
-    agentId: string,
-    change: RenameAgentRequest,
-  ): Promise<AgentSummary> {
+  async renameAgent(agentId: string, change: RenameAgentRequest): Promise<AgentSummary> {
     return flows.renameAgent(
-      await this.#call(actor),
+      this.#call(),
       parseAgentId(agentId),
       parseInput(RenameAgentSchema, change),
     )
@@ -242,8 +279,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    *
    * @throws {@link TypeError} When the agent is unknown.
    */
-  async getConfig(actor: ManagementActor, agentId: string): Promise<ConfigVersion> {
-    return flows.getConfig(await this.#call(actor), parseAgentId(agentId))
+  async getConfig(agentId: string): Promise<ConfigVersion> {
+    return flows.getConfig(this.#call(), parseAgentId(agentId))
   }
 
   /**
@@ -253,12 +290,8 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link TypeError} When the agent is unknown or the request is invalid.
    * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
    */
-  async updateConfig(
-    actor: ManagementActor,
-    agentId: string,
-    request: UpdateConfigRequest,
-  ): Promise<ConfigWriteResult> {
-    const call = await this.#call(actor)
+  async updateConfig(agentId: string, request: UpdateConfigRequest): Promise<ConfigWriteResult> {
+    const call = this.#call()
     const input = parseInput(UpdateConfigSchema, request)
     return flows.updateConfig(call, parseAgentId(agentId), {
       requestId: input.requestId,
@@ -270,12 +303,11 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
 
   /** Versions newest first: who changed what, and when. */
   async configHistory(
-    actor: ManagementActor,
     agentId: string,
     page: { before?: number; limit?: number } = {},
   ): Promise<ConfigVersion[]> {
     return flows.configHistory(
-      await this.#call(actor),
+      this.#call(),
       parseAgentId(agentId),
       parseInput(HistoryPageSchema, page),
     )
@@ -288,11 +320,10 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
    * @throws {@link Error} Starting `version_conflict:`, when another version was written first.
    */
   async rollbackConfig(
-    actor: ManagementActor,
     agentId: string,
     request: RollbackConfigRequest,
   ): Promise<ConfigWriteResult> {
-    const call = await this.#call(actor)
+    const call = this.#call()
     const input = parseInput(RollbackConfigSchema, request)
     return flows.rollbackConfig(call, parseAgentId(agentId), {
       requestId: input.requestId,
@@ -303,51 +334,49 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   }
 
   /** Register an encrypted API credential; returns metadata only. */
-  async putCredential(actor: ManagementActor, request: unknown) {
+  async putCredential(request: unknown) {
     return credentialFlows.credentialRpc(async () =>
-      credentialFlows.putCredential(await this.#call(actor), this.env, request),
+      credentialFlows.putCredential(this.#call(), this.env, request),
     )
   }
 
   /** List credential metadata under the common management caller contract. */
-  async listCredentials(actor: ManagementActor) {
-    return credentialFlows.credentialRpc(async () =>
-      credentialFlows.listCredentials(await this.#call(actor)),
-    )
+  async listCredentials() {
+    return credentialFlows.credentialRpc(async () => credentialFlows.listCredentials(this.#call()))
   }
 
   /** Preview affected agents before revoking a credential. */
-  async credentialCoverage(actor: ManagementActor, credentialId: string) {
+  async credentialCoverage(credentialId: string) {
     return credentialFlows.credentialRpc(async () =>
-      credentialFlows.credentialCoverage(await this.#call(actor), credentialId),
+      credentialFlows.credentialCoverage(this.#call(), credentialId),
     )
   }
 
   /** Grant an agent permission to use a credential without selecting it. */
-  async grantCredential(actor: ManagementActor, credentialId: string, agentId: string) {
+  async grantCredential(credentialId: string, agentId: string) {
     return credentialFlows.credentialRpc(async () =>
-      credentialFlows.grantCredential(await this.#call(actor), credentialId, agentId),
+      credentialFlows.grantCredential(this.#call(), credentialId, agentId),
     )
   }
 
   /** Select a credential in one agent or all current agents, writing configuration versions. */
-  async assignCredential(actor: ManagementActor, credentialId: string, target: string) {
+  async assignCredential(credentialId: string, target: string) {
     return credentialFlows.credentialRpc(async () =>
-      assignCredential(await this.#call(actor), credentialId, target),
+      assignCredential(this.#call(), credentialId, target),
     )
   }
 
   /** Remove one agent's permission and selection without revoking other agents' access. */
-  async unassignCredential(actor: ManagementActor, credentialId: string, agentId: string) {
+  async unassignCredential(credentialId: string, agentId: string) {
     return credentialFlows.credentialRpc(async () =>
-      assignCredential(await this.#call(actor), credentialId, agentId, true),
+      assignCredential(this.#call(), credentialId, agentId, true),
     )
   }
 
   /** Disable a credential and clear its envelope with an atomic D1 audit record. */
-  async revokeCredential(actor: ManagementActor, credentialId: string) {
+  async revokeCredential(credentialId: string) {
     return credentialFlows.credentialRpc(async () =>
-      credentialFlows.revokeCredential(await this.#call(actor), credentialId),
+      credentialFlows.revokeCredential(this.#call(), credentialId),
     )
   }
 

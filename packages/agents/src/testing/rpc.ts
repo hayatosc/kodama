@@ -59,6 +59,14 @@ export function rejectionInObject<O extends Rpc.DurableObjectBranded>(
   )
 }
 
+/** Observe RPC thenable rejection immediately, avoiding workerd's rejected-proxy diagnostics. */
+export function rpcRejection(promise: PromiseLike<unknown>): Promise<string> {
+  return Promise.resolve(promise).then(
+    () => 'accepted',
+    (error: unknown) => String(error),
+  )
+}
+
 /** Wait until the submission of `requestId` is done. */
 export async function waitForAnswer(agentId: string, requestId: string) {
   await expect

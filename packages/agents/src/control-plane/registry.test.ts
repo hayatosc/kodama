@@ -120,7 +120,7 @@ describe('discoverAgents', () => {
               labels: agentId === match ? ['last-page-match'] : [],
             }),
             schemaVersion: 1,
-            authorId: null,
+            source: 'system' as const,
             createdAt: start,
           })),
         ),

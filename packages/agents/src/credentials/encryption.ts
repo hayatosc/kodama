@@ -5,12 +5,18 @@
  * @module
  */
 
-/** Identity authenticated by both layers of an envelope, including its owning principal. */
+/** Identity authenticated by both layers of an envelope in this installation. */
 export interface CredentialIdentity {
   credentialId: string
-  kind: 'api_key' | 'oauth_subscription'
+  kind:
+    | 'api_key'
+    | 'oauth_subscription'
+    | 'mcp_bearer'
+    | 'mcp_oauth'
+    | 'mcp_client'
+    | 'mcp_transaction'
+  purpose?: 'model_provider' | 'mcp_server'
   provider: string
-  ownerId: string | null
   revision: number
 }
 
@@ -36,11 +42,10 @@ function aad(identity: CredentialIdentity, purpose: string): Uint8Array<ArrayBuf
       JSON.stringify([
         'kodama-credential-v1',
         purpose,
+        ...(identity.purpose === 'mcp_server' ? ['mcp_server'] : []),
         identity.credentialId,
         identity.kind,
         identity.provider,
-        identity.ownerId === null ? 'installation' : 'principal',
-        identity.ownerId,
         identity.revision,
       ]),
     ),

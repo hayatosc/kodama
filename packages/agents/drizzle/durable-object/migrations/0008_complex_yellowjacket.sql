@@ -1,0 +1,1 @@
+ALTER TABLE `kodama_owner_replies` DROP COLUMN `principal_id`;

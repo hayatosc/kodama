@@ -17,11 +17,12 @@ import type AgentService from '../src/index.ts'
 import { isUuid } from '../src/lib/uuid.ts'
 import { parseAgentRef, parseInput, parseMessage, CreateAgentSchema } from '../src/validation.ts'
 import { selectedCredentialRefs } from '../src/credentials/validation.ts'
-import { CLI_ACTOR, credentialResponse } from './credentials.ts'
+import { credentialResponse } from './credentials.ts'
 
 type Service = Pick<
   AgentService,
   | 'send'
+  | 'attention'
   | 'snapshot'
   | 'cancel'
   | 'uploadArtifact'
@@ -69,7 +70,7 @@ type Management = Pick<
 /** Resolve an existing agent without provisioning unrelated initial agents. */
 async function agentIdOf(management: Management, ref: string): Promise<string> {
   if (isUuid(ref)) return ref
-  return (await management.resolveAgent(CLI_ACTOR, ref)).agentId
+  return (await management.resolveAgent(ref)).agentId
 }
 
 /** Development-only HTTP adapter; service methods deliver through Durable Object RPC. */
@@ -77,7 +78,7 @@ export async function handleCli(
   request: Request,
   token: string,
   service: Service,
-  management: Management,
+  management: Management & Partial<Pick<AgentService, 'mcpManage' | 'mcpAuth'>>,
 ): Promise<Response> {
   if (!token || request.headers.get('authorization') !== `Bearer ${token}`) {
     return new Response('Unauthorized', { status: 401 })
@@ -88,17 +89,29 @@ export async function handleCli(
   )
   if (prefix !== 'cli') return new Response('Not found', { status: 404 })
   try {
+    if (action === 'mcp') {
+      try {
+        const body = await request.text()
+        if (body.length > 65_536) throw new Error('mcp_request_limit')
+        const input: unknown = JSON.parse(body)
+        if (rawAgentRef === 'manage' && management.mcpManage)
+          return Response.json(await management.mcpManage(input))
+        if (rawAgentRef === 'auth' && management.mcpAuth)
+          return Response.json(await management.mcpAuth(input))
+        return new Response('Not found', { status: 404 })
+      } catch {
+        return Response.json({ error: 'mcp_management_failed' }, { status: 400 })
+      }
+    }
     if (action === 'credentials')
       return credentialResponse(request, management, rawAgentRef, credentialId, target)
     if (action === 'seed') {
       const input: unknown = await request.text().then((text) => (text ? JSON.parse(text) : {}))
       return Response.json(
-        await management.seed(
-          selectedCredentialRefs(input, await management.listCredentials(CLI_ACTOR)),
-        ),
+        await management.seed(selectedCredentialRefs(input, await management.listCredentials())),
       )
     }
-    if (action === 'list') return Response.json(await management.listAgents(CLI_ACTOR))
+    if (action === 'list') return Response.json(await management.listAgents())
     if (action === 'create') {
       const body = parseInput(
         v.strictObject({
@@ -110,10 +123,10 @@ export async function handleCli(
       const { credentialIds, ...input } = body
       const credentials = selectedCredentialRefs(
         { credentialIds },
-        await management.listCredentials(CLI_ACTOR),
+        await management.listCredentials(),
       )
       return Response.json(
-        await management.createAgent(CLI_ACTOR, {
+        await management.createAgent({
           requestId: input.requestId,
           displayName: input.displayName,
           ...(credentials ? { credentials } : {}),
@@ -122,14 +135,15 @@ export async function handleCli(
       )
     }
     const agentId = await agentIdOf(management, parseAgentRef(rawAgentRef))
+    if (action === 'attention') return Response.json(await service.attention(agentId))
     if (action === 'tools') {
       const input = parseInput(
         v.object({ requestId: RequestIdSchema, tools: v.array(v.string()) }),
         await request.json(),
       )
-      const current = await management.getConfig(CLI_ACTOR, agentId)
+      const current = await management.getConfig(agentId)
       return Response.json(
-        await management.updateConfig(CLI_ACTOR, agentId, {
+        await management.updateConfig(agentId, {
           requestId: input.requestId,
           expectedVersion: current.version,
           settings: { ...current.settings, tools: input.tools },

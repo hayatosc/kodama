@@ -6,13 +6,11 @@ import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  agentMembers,
   agentConfigVersions,
   agentCredentialRefs,
   credentialGrants,
   auditLog,
   agents,
-  principals,
   systemSettings,
 } from '../../../drizzle/management/schema.ts'
 import { agentService, management } from '../../testing/management.ts'
@@ -29,8 +27,6 @@ import '@earendil-works/pi-ai/api/openai-responses'
 useMockModel()
 afterEach(() => vi.restoreAllMocks())
 
-const actor = { kind: 'user', externalId: 'seed-tester@example.com' } as const
-
 async function firstAgent() {
   const row = await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG)).get()
   if (row === undefined) throw new Error('The seed created no first agent')
@@ -44,7 +40,6 @@ describe('seed', () => {
       // The memory-test helper seeds in beforeAll; exercise a genuinely fresh installation.
       for (const table of [
         auditLog,
-        agentMembers,
         agentCredentialRefs,
         credentialGrants,
         agentConfigVersions,
@@ -55,13 +50,12 @@ describe('seed', () => {
       const refs = await testCredentialRefs()
       if (missing === 'all') refs.primary = {}
       else delete refs.primary[missing]
-      const call = await credentialCall()
+      const call = credentialCall()
       const identity = await management.select().from(systemSettings)
       await expect(
         seed(
           {
             ...call,
-            principal: null,
             env: { ...env, MEMORY_MODEL_PROVIDER: 'xai', MEMORY_MODEL_ID: 'grok-4.3' },
           },
           refs,
@@ -108,16 +102,9 @@ describe('seed', () => {
       status: 'active',
       currentVersion: 1,
       appliedVersion: 1,
-      ownerId: null,
     })
     expect(first.objectName).toBe(first.agentId)
-    // Like any other agent: no principal, membership, or setting of its own.
-    expect(
-      await management.select().from(principals).where(eq(principals.externalId, first.agentId)),
-    ).toEqual([])
-    expect(
-      await management.select().from(agentMembers).where(eq(agentMembers.agentId, first.agentId)),
-    ).toEqual([])
+    expect(first).not.toHaveProperty('ownerId')
     const settings = await management.select().from(systemSettings)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
       { install_id: seeded.installId },
@@ -126,7 +113,7 @@ describe('seed', () => {
       (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
     ).toBe(1)
 
-    const { settings: v1 } = await agentService().getConfig(actor, first.agentId)
+    const { settings: v1 } = await agentService().getConfig(first.agentId)
     expect(v1.systemPrompt).toBe(FIRST_AGENT_PROMPT)
     await exports.default.sendMessage(first.agentId, { requestId: 'hi', content: 'Hello' })
     await waitForAnswer(first.agentId, 'hi')
@@ -135,26 +122,24 @@ describe('seed', () => {
   it('keeps later changes to the first agent when it runs again', async () => {
     await agentService().seed()
     const { agentId } = await firstAgent()
-    const { settings } = await agentService().getConfig(actor, agentId)
-    const desired = (await agentService().getAgent(actor, agentId)).desiredVersion
-    await agentService().updateConfig(actor, agentId, {
+    const { settings } = await agentService().getConfig(agentId)
+    const desired = (await agentService().getAgent(agentId)).desiredVersion
+    await agentService().updateConfig(agentId, {
       requestId: uuidv7(),
       settings: { ...settings, systemPrompt: 'Changed later' },
       expectedVersion: desired,
     })
-    await agentService().renameAgent(actor, agentId, { displayName: 'Renamed' })
+    await agentService().renameAgent(agentId, { displayName: 'Renamed' })
     await agentService().seed()
-    const after = await agentService().getAgent(actor, agentId)
+    const after = await agentService().getAgent(agentId)
     expect(after).toMatchObject({ displayName: 'Renamed', desiredVersion: desired + 1 })
-    expect((await agentService().getConfig(actor, agentId)).settings.systemPrompt).toBe(
-      'Changed later',
-    )
+    expect((await agentService().getConfig(agentId)).settings.systemPrompt).toBe('Changed later')
   })
 
   it('lets the memory agent take its model from its versions', async () => {
     await agentService().seed()
-    const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
+    const current = await agentService().getConfig(MEMORY_AGENT_ID)
+    const result = await agentService().updateConfig(MEMORY_AGENT_ID, {
       requestId: uuidv7(),
       settings: { ...current.settings, model: { provider: 'xai', modelId: 'grok-4.3' } },
       expectedVersion: current.version,
@@ -169,8 +154,8 @@ describe('seed', () => {
 
   it("applies the memory agent's tool policy: a denied tool is blocked in its jobs", async () => {
     await agentService().seed()
-    const current = await agentService().getConfig(actor, MEMORY_AGENT_ID)
-    const result = await agentService().updateConfig(actor, MEMORY_AGENT_ID, {
+    const current = await agentService().getConfig(MEMORY_AGENT_ID)
+    const result = await agentService().updateConfig(MEMORY_AGENT_ID, {
       requestId: uuidv7(),
       settings: { ...current.settings, toolPolicy: { memory_write: 'deny' } },
       expectedVersion: current.version,

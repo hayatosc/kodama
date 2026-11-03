@@ -19,7 +19,7 @@ import { recordRefreshFailure } from './health.ts'
 const LEASE_MS = 30_000
 
 /** Safe identity of the credential actually selected by this invocation. */
-export type CredentialSelection = Pick<typeof credentials.$inferSelect, 'credentialId' | 'kind'>
+export type CredentialSelection = { credentialId: string; kind: 'api_key' | 'oauth_subscription' }
 
 /** Persist selection before a secret is released to model authentication. */
 export type ObserveCredential = (selection: CredentialSelection) => void
@@ -58,7 +58,14 @@ export function createCredentialStore(
       .where(and(eq(credentials.credentialId, id), eq(credentials.provider, provider)))
       .get()
     if (row?.credential.status !== 'active') invalidate()
-    return row?.credential
+    const credential = row?.credential
+    if (
+      !credential ||
+      credential.purpose !== 'model_provider' ||
+      (credential.kind !== 'api_key' && credential.kind !== 'oauth_subscription')
+    )
+      return undefined
+    return { ...credential, kind: credential.kind }
   }
 
   async function unavailable(provider: string, row?: typeof credentials.$inferSelect) {
@@ -119,7 +126,12 @@ export function createCredentialStore(
         )
         .returning()
         .get()
-      if (leased) return leased
+      if (
+        leased &&
+        leased.purpose === 'model_provider' &&
+        (leased.kind === 'api_key' || leased.kind === 'oauth_subscription')
+      )
+        return { ...leased, kind: leased.kind }
       const delay = Math.min(100, deadline - Date.now())
       if (delay <= 0) throw new Error('credential_unavailable: credential is busy')
       await scheduler.wait(delay, { signal })
@@ -229,7 +241,7 @@ export function createCredentialStore(
             auditStatement(db, {
               opId: leaseId,
               at: now(),
-              actorId: null,
+              source: 'system',
               action: 'credential.modify.attempt',
               targetKind: 'system',
               targetId: id,

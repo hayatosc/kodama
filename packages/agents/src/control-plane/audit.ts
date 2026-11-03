@@ -21,10 +21,10 @@ const DetailSchema = v.record(
 export interface AuditEntry {
   opId: string
   at: number
-  /** The acting principal; `null` for the system. */
-  actorId: string | null
+  /** Host-recorded provenance, not an identity or permission. */
+  source: 'operator' | 'system'
   action: string
-  targetKind: 'agent' | 'principal' | 'system'
+  targetKind: 'agent' | 'system'
   targetId: string
   detail?: Record<string, string | number | boolean | null | string[] | undefined>
 }

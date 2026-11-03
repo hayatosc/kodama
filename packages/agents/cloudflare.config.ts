@@ -38,6 +38,8 @@ export const agentConfig = defineWorker({
     ARCHIVE: bindings.r2({ name: 'kodama-archive' }),
     CODE_LOADER: bindings.workerLoader(),
     CREDENTIAL_KEK_V1: bindings.secret(),
+    // Canonical future UI origin; OAuth fails closed until explicitly configured.
+    KODAMA_UI_ORIGIN: bindings.text(''),
     DEFAULT_MODEL_PROVIDER: bindings.text('openai'),
     DEFAULT_MODEL_ID: bindings.text('gpt-6-luna'),
     // The memory agent's initial model, read by the seed; empty values use the default model above.

@@ -1,4 +1,4 @@
-/** Calendar policy regression tests in workerd, including its IANA timezone data. @module */
+/** Calendar policy and IANA timezone regressions through the shared Temporal ponyfill. @module */
 import { describe, expect, it } from 'vitest'
 import { latestAtOrBefore, nextAfter, normalizeSchedule, scheduleDate } from './schedule-spec.ts'
 

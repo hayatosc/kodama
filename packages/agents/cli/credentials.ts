@@ -2,9 +2,6 @@
 import type AgentService from '../src/index.ts'
 import { parseAgentId, parseAgentRef } from '../src/validation.ts'
 
-/** The registered caller shared by all local CLI operations. */
-export const CLI_ACTOR = { kind: 'service', externalId: 'kodama-dev-cli' } as const
-
 type Management = Pick<
   AgentService,
   | 'getInstallationId'
@@ -26,20 +23,18 @@ export async function credentialResponse(
 ): Promise<Response> {
   try {
     if (action === 'installation')
-      return Response.json({ installId: await management.getInstallationId(CLI_ACTOR) })
-    if (action === 'add')
-      return Response.json(await management.putCredential(CLI_ACTOR, await request.json()))
-    if (action === 'list') return Response.json(await management.listCredentials(CLI_ACTOR))
+      return Response.json({ installId: await management.getInstallationId() })
+    if (action === 'add') return Response.json(await management.putCredential(await request.json()))
+    if (action === 'list') return Response.json(await management.listCredentials())
     if (action !== 'assign' && action !== 'unassign' && action !== 'revoke')
       return new Response('Not found', { status: 404 })
     const credentialId = parseAgentId(id)
-    if (action === 'revoke')
-      return Response.json(await management.revokeCredential(CLI_ACTOR, credentialId))
-    const agent = await management.resolveAgent(CLI_ACTOR, parseAgentRef(ref))
+    if (action === 'revoke') return Response.json(await management.revokeCredential(credentialId))
+    const agent = await management.resolveAgent(parseAgentRef(ref))
     return Response.json(
       action === 'assign'
-        ? await management.assignCredential(CLI_ACTOR, credentialId, agent.agentId)
-        : await management.unassignCredential(CLI_ACTOR, credentialId, agent.agentId),
+        ? await management.assignCredential(credentialId, agent.agentId)
+        : await management.unassignCredential(credentialId, agent.agentId),
     )
   } catch {
     return Response.json(

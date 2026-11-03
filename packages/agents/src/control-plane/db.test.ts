@@ -1,8 +1,9 @@
+/** Management D1 constraints and atomic batches for a single-operator installation. @module */
 import { uuidv7 } from '../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { agentConfigVersions, agentMembers, agents } from '../../drizzle/management/schema.ts'
+import { agentConfigVersions, agents } from '../../drizzle/management/schema.ts'
 import { errorText } from '../lib/errors.ts'
 import { managementDb } from './db.ts'
 
@@ -22,7 +23,14 @@ function registryRow(agentId: string) {
 }
 
 function versionRow(agentId: string, version: number) {
-  return { agentId, version, settingsJson: '{}', schemaVersion: 1, createdAt: 0 }
+  return {
+    agentId,
+    version,
+    settingsJson: '{}',
+    schemaVersion: 1,
+    source: 'system' as const,
+    createdAt: 0,
+  }
 }
 
 // The management database keeps references consistent with foreign keys and one batch() per change;
@@ -41,7 +49,7 @@ describe('D1 behavior the management database relies on', () => {
     await expect(
       db.batch([
         db.insert(agents).values(registryRow(agentId)),
-        db.insert(agentMembers).values({ agentId, principalId: uuidv7(), role: 'owner' }),
+        db.insert(agentConfigVersions).values(versionRow(uuidv7(), 1)),
       ]),
     ).rejects.toThrow()
     expect(await db.select().from(agents).where(eq(agents.agentId, agentId)).get()).toBeUndefined()

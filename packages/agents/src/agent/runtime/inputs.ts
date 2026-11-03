@@ -3,6 +3,21 @@ import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { EntryId, EntryRecord, Harness } from '@earendil-works/pi-durable'
 import type { Context } from '@earendil-works/chord/context'
 
+/** Read host-admitted operator text from the existing immutable conversation entry. */
+export function operatorInput(
+  entry: EntryRecord,
+): { content: string; createdAt: number } | undefined {
+  if (entry.kind !== 'kodama.operator-message' || entry.model?.length !== 1) return undefined
+  const message = entry.model[0]
+  if (
+    message?.role !== 'user' ||
+    typeof message.content !== 'string' ||
+    !Number.isFinite(message.timestamp)
+  )
+    return undefined
+  return { content: message.content, createdAt: message.timestamp }
+}
+
 /**
  * Resolve every input of the current run, including steering admitted after it started.
  * Undefined means idle; missing active provenance fails closed rather than implying human input.

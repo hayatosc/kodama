@@ -35,19 +35,11 @@ export async function credentialRpc<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Require the registered caller used by management, without credential-specific roles. */
-export function credentialActor(call: ManagementCall) {
-  if (!call.principal || call.principal.disabledAt !== null)
-    throw new Error('forbidden: a registered active caller is required')
-  return call.principal
-}
-
-const putSchema = v.object({
+const putSchema = v.strictObject({
   kind: v.optional(v.picklist(['api_key', 'oauth_subscription']), 'api_key'),
   requestId: RequestIdSchema,
   provider: v.pipe(v.string(), v.regex(/^[a-z][a-z0-9-]{0,63}$/)),
   secret: v.pipe(v.string(), v.minLength(8), v.maxLength(16384)),
-  ownerScope: v.optional(v.picklist(['installation', 'principal']), 'installation'),
 })
 
 /** Register either credential kind atomically with its audit row; secret parsing errors contain no values. */
@@ -56,12 +48,11 @@ export async function putCredential(
   env: Pick<AgentEnv, 'CREDENTIAL_KEK_V1'>,
   request: unknown,
 ) {
-  const principal = credentialActor(call)
   const parsed = v.safeParse(putSchema, request)
   if (!parsed.success) throw new TypeError('Invalid credential registration')
   const input = parsed.output
   const fingerprint = await credentialFingerprint(input.secret, env.CREDENTIAL_KEK_V1)
-  const opId = `credential.put:${principal.principalId}:${input.requestId}`
+  const opId = `credential.put:${input.requestId}`
   async function replay() {
     const previous = await auditByOpId(call.db, opId)
     if (!previous) return undefined
@@ -69,7 +60,6 @@ export async function putCredential(
     if (
       row.kind !== input.kind ||
       row.provider !== input.provider ||
-      (row.ownerId === null ? 'installation' : 'principal') !== input.ownerScope ||
       row.fingerprint !== fingerprint
     )
       throw new Error('credential_conflict')
@@ -84,7 +74,6 @@ export async function putCredential(
       credentialId,
       kind: input.kind,
       provider: input.provider,
-      ownerId: input.ownerScope === 'principal' ? principal.principalId : null,
       revision: 1,
     },
     input.secret,
@@ -99,7 +88,7 @@ export async function putCredential(
       auditStatement(call.db, {
         opId,
         at: call.now,
-        actorId: principal.principalId,
+        source: call.source,
         action: 'credential.put',
         targetKind: 'system',
         targetId: credentialId,
@@ -124,16 +113,16 @@ export async function putCredential(
 
 /** List metadata only; envelopes are never part of this result. */
 export async function listCredentials(call: ManagementCall) {
-  credentialActor(call)
-  return (await call.db.select().from(credentials)).map(credentialMetadata)
+  return (
+    await call.db.select().from(credentials).where(eq(credentials.purpose, 'model_provider'))
+  ).map(credentialMetadata)
 }
 
 /** Read one credential after authorization, rejecting unknown IDs. */
 export async function credentialRow(call: ManagementCall, id: string) {
-  credentialActor(call)
   if (!UUID_PATTERN.test(id)) throw new TypeError('credentialId must be a lowercase UUID v7')
   const row = await call.db.select().from(credentials).where(eq(credentials.credentialId, id)).get()
-  if (!row) throw new TypeError('Unknown credential')
+  if (!row || row.purpose !== 'model_provider') throw new TypeError('Unknown credential')
   return row
 }
 
@@ -163,7 +152,6 @@ export async function credentialCoverage(call: ManagementCall, credentialId: str
 
 /** Grant permission without changing a version; assignment is a separate atomic operation. */
 export async function grantCredential(call: ManagementCall, credentialId: string, agentId: string) {
-  const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   const agent = await call.db
     .select({ agentId: agents.agentId })
@@ -187,7 +175,7 @@ export async function grantCredential(call: ManagementCall, credentialId: string
         auditStatement(call.db, {
           opId: uuidv7(),
           at: call.now,
-          actorId: principal.principalId,
+          source: call.source,
           action: 'credential.grant',
           targetKind: 'agent',
           targetId: agentId,
@@ -208,7 +196,6 @@ export async function grantCredential(call: ManagementCall, credentialId: string
 
 /** Revoke and clear the envelope atomically with audit; repeated calls preserve the first revocation. */
 export async function revokeCredential(call: ManagementCall, credentialId: string) {
-  const principal = credentialActor(call)
   const row = await credentialRow(call, credentialId)
   const coverage = await credentialCoverage(call, credentialId)
   if (row.status !== 'revoked')
@@ -229,7 +216,7 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
       auditStatement(call.db, {
         opId: `credential.revoke:${credentialId}`,
         at: call.now,
-        actorId: principal.principalId,
+        source: call.source,
         action: 'credential.revoke',
         targetKind: 'system',
         targetId: credentialId,

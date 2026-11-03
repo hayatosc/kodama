@@ -15,8 +15,7 @@ import type { ManagementDb, VersionRow } from './db.ts'
 
 /** Who writes a version, when, and its retry key. */
 export interface VersionWrite {
-  /** The acting principal; `null` for the system. */
-  actorId: string | null
+  source: 'operator' | 'system'
   now: number
   opId: string
 }
@@ -41,7 +40,7 @@ export function writeVersionStatements(
       version,
       settingsJson: JSON.stringify(settings),
       schemaVersion: SETTINGS_SCHEMA_VERSION,
-      authorId: write.actorId,
+      source: write.source,
       comment: detail.comment ?? null,
       createdAt: write.now,
     }),
@@ -52,7 +51,7 @@ export function writeVersionStatements(
     auditStatement(db, {
       opId: write.opId,
       at: write.now,
-      actorId: write.actorId,
+      source: write.source,
       action: detail.rollbackOf === undefined ? 'agent.config' : 'agent.config.rollback',
       targetKind: 'agent',
       targetId: agentId,

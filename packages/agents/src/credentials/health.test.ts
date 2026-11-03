@@ -75,6 +75,6 @@ it.each([
   })
   const events = await db.select().from(auditLog).where(eq(auditLog.targetId, row.credentialId))
   expect(events).toHaveLength(1)
-  expect(events[0]).toMatchObject({ actorId: null, action: 'credential.refresh.failed' })
+  expect(events[0]).toMatchObject({ source: 'system', action: 'credential.refresh.failed' })
   expect(JSON.stringify(events)).not.toContain(message)
 })

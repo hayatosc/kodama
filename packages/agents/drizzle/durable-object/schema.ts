@@ -17,6 +17,21 @@ import {
 import type { ScheduleSpec } from '../../src/agent/schedule-spec.ts'
 import type { CompletionOutcome, ContactResult } from '../../src/extensions.ts'
 
+/** Unsafe MCP calls retain terminal uncertainty and per-run retry refusal across eviction. */
+export const mcpCalls = sqliteTable(
+  'kodama_mcp_calls',
+  {
+    callId: text('call_id').primaryKey(),
+    runId: text('run_id').notNull(),
+    toolId: text('tool_id').notNull(),
+    state: text('state', { enum: ['running', 'succeeded', 'failed', 'outcome_unknown'] }).notNull(),
+    failure: text('failure'),
+    createdAt: integer('created_at').notNull(),
+    completedAt: integer('completed_at'),
+  },
+  (t) => [index('kodama_mcp_calls_run').on(t.runId, t.toolId)],
+)
+
 /** Object-owned metadata; bytes live under an agent-scoped R2 prefix, never in SQLite. */
 export const artifacts = sqliteTable(
   'kodama_artifacts',
@@ -86,7 +101,7 @@ export const notifications = sqliteTable(
   'kodama_notifications',
   {
     seq: integer('seq').primaryKey({ autoIncrement: true }),
-    source: text('source', { enum: ['contact', 'schedule'] }).notNull(),
+    source: text('source', { enum: ['contact', 'schedule', 'mcp'] }).notNull(),
     sourceId: text('source_id').notNull(),
     outcome: text('outcome').$type<CompletionOutcome>().notNull(),
     summary: text('summary').notNull(),

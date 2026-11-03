@@ -19,9 +19,10 @@ import {
   max,
   ne,
   notInArray,
+  notExists,
 } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { pruneRuns } from '../../../drizzle/durable-object/schema.ts'
+import { mcpCalls, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
 import {
   piConversations,
@@ -201,10 +202,14 @@ export function deleteRows(
       ),
     )
     .run()
-  const terminalTasks = pi
-    .select({ id: piTasks.id })
-    .from(piTasks)
-    .where(eq(piTasks.status, 'terminal'))
+  // Live MCP receipts need Pi's committed outcome even after their transcript is archived.
+  const removableTask = and(
+    eq(piTasks.status, 'terminal'),
+    notExists(
+      pi.select({ id: mcpCalls.callId }).from(mcpCalls).where(eq(mcpCalls.callId, piTasks.id)),
+    ),
+  )
+  const terminalTasks = pi.select({ id: piTasks.id }).from(piTasks).where(removableTask)
   const taskDocuments = pi
     .select({ id: piDocuments.id })
     .from(piDocuments)
@@ -213,7 +218,7 @@ export function deleteRows(
   pi.delete(piDocuments)
     .where(and(eq(piDocuments.scopeKind, 'task'), inArray(piDocuments.ownerId, terminalTasks)))
     .run()
-  pi.delete(piTasks).where(eq(piTasks.status, 'terminal')).run()
+  pi.delete(piTasks).where(removableTask).run()
   pi.delete(piRecordIds)
     .where(
       and(

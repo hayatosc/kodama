@@ -2,13 +2,8 @@
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
-import {
-  credentials,
-  principals,
-  usageDaily,
-  usageIngestion,
-} from '../../drizzle/management/schema.ts'
-import { agentService, caller, newAgentId, principalIdOf } from '../testing/management.ts'
+import { credentials, usageDaily, usageIngestion } from '../../drizzle/management/schema.ts'
+import { agentService, newAgentId } from '../testing/management.ts'
 import { testCredentialRefs } from '../testing/credentials.ts'
 import { usageRecord } from '../testing/usage.ts'
 import { managementDb } from './db.ts'
@@ -78,7 +73,7 @@ it('separates completeness and subscription reference amounts and supports all s
     groupBy: 'agent',
     limit: 50,
   } as const
-  const result = await agentService().usage(await caller(), query)
+  const result = await agentService().usage(query)
   expect(result.groups).toHaveLength(1)
   expect(result.groups[0]).toMatchObject({
     attempts: 4,
@@ -107,8 +102,7 @@ it('separates completeness and subscription reference amounts and supports all s
   }
 })
 
-it('rejects invalid ranges and disabled principals without changing usage', async () => {
-  const actor = { kind: 'user', externalId: 'usage-disabled@example.test' } as const
+it('rejects invalid ranges without provisioning identities or changing usage', async () => {
   const query = { from: '2026-10-26', to: '2026-10-28', groupBy: 'day' } as const
   for (const invalid of [
     { ...query, from: '2026-02-30' },
@@ -116,14 +110,9 @@ it('rejects invalid ranges and disabled principals without changing usage', asyn
     { ...query, from: '2024-01-01' },
     { ...query, limit: 201 },
   ]) {
-    await expect(Promise.resolve(agentService().usage(actor, invalid))).rejects.toThrow()
+    await expect(Promise.resolve(agentService().usage(invalid))).rejects.toThrow()
   }
-  await agentService().usage(actor, query)
-  await db
-    .update(principals)
-    .set({ disabledAt: Date.now() })
-    .where(eq(principals.principalId, await principalIdOf(actor)))
-  await expect(Promise.resolve(agentService().usage(actor, query))).rejects.toThrow()
+  await agentService().usage(query)
 })
 
 it('rolls back additions and the checkpoint when a statement in the batch fails', async () => {

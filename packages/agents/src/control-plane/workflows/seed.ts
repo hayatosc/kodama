@@ -60,7 +60,7 @@ export function firstAgentSettings(env: DefaultModelEnv): AgentSettings {
  * or reconfigured since keeps its changes.
  *
  * @remarks
- * The memory agent's rows are inserted only if missing. The system creates the first agent through
+ * The memory agent's rows are inserted only if missing. Seed creates the first agent through
  * `createAgent` with a fixed request ID, so a repeated seed returns it instead of creating another.
  */
 export async function seed(
@@ -69,7 +69,7 @@ export async function seed(
 ): Promise<SeedResult> {
   const { db, env, now } = call
   const existingMemory = await agentRowByObjectName(db, MEMORY_AGENT_NAME)
-  const existingFirst = await auditByOpId(db, 'agent.create:system:seed')
+  const existingFirst = await auditByOpId(db, 'agent.create:installation:seed')
   const initialSettings = parseSettings(call.models, {
     ...memoryAgentSettings(env),
     ...(credentials ? { credentials } : {}),
@@ -101,7 +101,7 @@ export async function seed(
           version: 1,
           settingsJson: JSON.stringify(initialSettings),
           schemaVersion: SETTINGS_SCHEMA_VERSION,
-          authorId: null,
+          source: 'system',
           comment: 'seed',
           createdAt: now,
         }),
@@ -110,7 +110,7 @@ export async function seed(
         auditStatement(db, {
           opId: `system.seed:${installId}`,
           at: now,
-          actorId: null,
+          source: 'system',
           action: 'system.seed',
           targetKind: 'system',
           targetId: installId,
@@ -122,12 +122,16 @@ export async function seed(
         throw error
     }
   }
-  await createAgent(call, {
-    requestId: 'seed',
-    displayName: 'Kodama',
-    slug: FIRST_AGENT_SLUG,
-    settings: firstSettings,
-  })
+  await createAgent(
+    call,
+    {
+      requestId: 'seed',
+      displayName: 'Kodama',
+      slug: FIRST_AGENT_SLUG,
+      settings: firstSettings,
+    },
+    true,
+  )
   // The memory agent keeps its existing object; this applies its desired version once.
   await pushDesired(call, MEMORY_AGENT_ID)
   return { installId, memoryAgentId: MEMORY_AGENT_ID }

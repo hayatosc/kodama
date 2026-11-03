@@ -21,7 +21,6 @@ afterEach(() => vi.restoreAllMocks())
 
 async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
   const agentId = await newAgentId()
-  const { principal } = await credentialCall()
   const primary = uuidv7()
   const alternative = uuidv7()
   for (const [credentialId, secret] of [
@@ -46,7 +45,6 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
         credentialId,
         kind: credentialId === primary ? kind : 'api_key',
         provider: 'openai',
-        ownerId: principal.principalId,
         revision: 1,
       },
       secret,
@@ -83,7 +81,7 @@ async function fixture(kind: 'api_key' | 'oauth_subscription' = 'api_key') {
 it('rejects a warm cached credential immediately after D1 revocation without a journal', async () => {
   const { store, primary } = await fixture()
   expect(await store.read('openai')).toEqual({ type: 'api_key', key: 'sk-primary-test-key' })
-  await revokeCredential(await credentialCall(), primary)
+  await revokeCredential(credentialCall(), primary)
   // This standalone store receives no object invalidation push; live D1 status is authoritative.
   await expect(store.read('openai')).rejects.toThrow('credential_unavailable')
 })
@@ -268,7 +266,7 @@ describe('OAuth resolution', () => {
       })
       const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
       expect(audit).toHaveLength(1)
-      expect(audit[0]).toMatchObject({ actorId: null, action: 'credential.needs_reauth' })
+      expect(audit[0]).toMatchObject({ source: 'system', action: 'credential.needs_reauth' })
       expect(JSON.stringify(audit)).not.toMatch(/secret-provider-detail|refresh-token|access-token/)
     },
   )
@@ -345,7 +343,7 @@ describe('OAuth resolution', () => {
     })
     const audit = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
     expect(audit).toHaveLength(1)
-    expect(audit[0]).toMatchObject({ action: 'credential.refresh.failed', actorId: null })
+    expect(audit[0]).toMatchObject({ action: 'credential.refresh.failed', source: 'system' })
     expect(JSON.parse(audit[0]?.detailJson ?? '{}')).toMatchObject({ category: 'malformed' })
     expect(JSON.stringify(audit)).not.toContain('secret-invalid-json')
   })
@@ -381,7 +379,7 @@ describe('OAuth resolution', () => {
       })
       const failures = await db.select().from(auditLog).where(eq(auditLog.targetId, primary))
       expect(failures).toHaveLength(1)
-      expect(failures[0]).toMatchObject({ action: 'credential.refresh.failed', actorId: null })
+      expect(failures[0]).toMatchObject({ action: 'credential.refresh.failed', source: 'system' })
       expect(JSON.stringify(failures)).not.toContain('secret-provider-detail')
       expect(await store.read('openai')).toMatchObject({ access: 'retried-access' })
       expect(
@@ -544,7 +542,7 @@ it.each(['access', 'refresh'] as const)(
       lastRefreshFailureCategory: 'malformed',
     })
     expect(await db.select().from(auditLog).where(eq(auditLog.targetId, primary))).toMatchObject([
-      { action: 'credential.refresh.failed', actorId: null },
+      { action: 'credential.refresh.failed', source: 'system' },
     ])
   },
 )
@@ -588,7 +586,7 @@ it('does not overwrite revocation during a modification callback', async () => {
   const { store, primary } = await fixture()
   await expect(
     store.modify('openai', async () => {
-      await revokeCredential(await credentialCall(), primary)
+      await revokeCredential(credentialCall(), primary)
       return { type: 'api_key', key: 'sk-must-not-be-written' }
     }),
   ).rejects.toThrow('credential modification failed')
