@@ -297,7 +297,7 @@ export async function startMcpOAuth(
     }),
   ])
   const authorization = new URL(metadata.authorization_endpoint)
-  authorization.search = new URLSearchParams({
+  const parameters = {
     response_type: 'code',
     client_id: client.clientId,
     redirect_uri: redirectUri,
@@ -306,7 +306,8 @@ export async function startMcpOAuth(
     state,
     code_challenge: await digest(verifier),
     code_challenge_method: 'S256',
-  }).toString()
+  }
+  for (const [key, value] of Object.entries(parameters)) authorization.searchParams.set(key, value)
   return {
     transactionId,
     authorizationUrl: authorization.href,

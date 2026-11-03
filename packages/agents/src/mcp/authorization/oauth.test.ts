@@ -22,7 +22,7 @@ const tokenCalls = (calls: Parameters<typeof fetch>[]) =>
     (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith('/token'),
   )
 
-async function setup() {
+async function setup(query = '') {
   const now = Date.now()
   const server = await registerMcpCatalog(
     management,
@@ -44,15 +44,15 @@ async function setup() {
     if (url === 'https://auth.example.com/.well-known/oauth-authorization-server')
       return Response.json({
         issuer,
-        authorization_endpoint: 'https://auth.example.com/authorize',
-        token_endpoint: 'https://auth.example.com/token',
-        revocation_endpoint: 'https://auth.example.com/revoke',
+        authorization_endpoint: `https://auth.example.com/authorize${query}`,
+        token_endpoint: `https://auth.example.com/token${query}`,
+        revocation_endpoint: `https://auth.example.com/revoke${query}`,
         code_challenge_methods_supported: ['S256'],
         response_types_supported: ['code'],
         token_endpoint_auth_methods_supported: ['none'],
         client_id_metadata_document_supported: true,
       })
-    if (url === 'https://auth.example.com/token') {
+    if (url === `https://auth.example.com/token${query}`) {
       expect(options?.redirect).toBe('error')
       return Response.json({
         access_token: 'access-fixture',
@@ -61,7 +61,8 @@ async function setup() {
         expires_in: 3600,
       })
     }
-    if (url === 'https://auth.example.com/revoke') return new Response(null, { status: 200 })
+    if (url === `https://auth.example.com/revoke${query}`)
+      return new Response(null, { status: 200 })
     throw new Error('Unexpected fixture URL')
   })
   vi.stubGlobal('fetch', fetcher)
@@ -74,6 +75,32 @@ afterEach(() => {
 })
 
 describe('MCP OAuth transactions', () => {
+  it('retains endpoint routing queries through authorization, exchange and revocation', async () => {
+    const query = '?tenant=a%2Fb&route=one&route=two&state=untrusted'
+    const { server, fetcher } = await setup(query)
+    const started = await startMcpOAuth(management, kek, origin, server.serverId, browserNonce)
+    const authorization = new URL(started.authorizationUrl)
+    expect(authorization.searchParams.get('tenant')).toBe('a/b')
+    expect(authorization.searchParams.getAll('route')).toEqual(['one', 'two'])
+    expect(authorization.searchParams.getAll('state')).toHaveLength(1)
+    const state = authorization.searchParams.get('state') ?? ''
+    expect(state).not.toBe('untrusted')
+    const completed = await completeMcpOAuth(management, kek, origin, {
+      state,
+      browserNonce,
+      code: 'code',
+      issuer,
+    })
+    if (completed.status !== 'completed') throw new Error('Expected completion')
+    expect(
+      fetcher.mock.calls.some(([url]) => url === `https://auth.example.com/token${query}`),
+    ).toBe(true)
+    await disconnectMcp(management, kek, server.serverId, completed.credentialId)
+    expect(
+      fetcher.mock.calls.some(([url]) => url === `https://auth.example.com/revoke${query}`),
+    ).toBe(true)
+  })
+
   it('completes native PKCE into the existing vault without a UI origin and fences callback channels', async () => {
     const { server, fetcher } = await setup()
     const loopbackRedirectUri = 'http://127.0.0.1:49152/auth/mcp/callback'

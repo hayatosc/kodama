@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as v from 'valibot'
 import { loginMcp } from './mcp-login.ts'
 
-function fixture() {
+function fixture(clientId = 'native-client', scope = 'read') {
   const auth = vi.fn(async (value: unknown) => {
     const input = v.parse(
       v.object({
@@ -24,8 +24,8 @@ function fixture() {
           serverId: 'server',
           issuer: 'https://as.example.com',
           resource: 'https://mcp.example.com/mcp',
-          clientId: 'native-client',
-          scope: 'read',
+          clientId,
+          scope,
           redirectUri: input.loopbackRedirectUri,
         },
       }
@@ -72,6 +72,22 @@ describe('CLI MCP login', () => {
     expect(options.auth).toHaveBeenCalledTimes(2)
     expect(JSON.stringify(options.notify.mock.calls)).not.toContain('single-use-code')
     await expect(fetch(endpoint)).rejects.toThrow()
+  })
+
+  it('escapes remote consent control characters without changing the browser URL', async () => {
+    const options = fixture('native\u001b[2J\u009b31m\nspoof\u202e', 'read\r\t\u2028write')
+    await loginMcp({
+      ...options,
+      async open(url) {
+        expect(url).toMatch(/^https:\/\/as\.example\.com\/authorize\?/u)
+        expect((await fetch(callback(url))).status).toBe(200)
+      },
+    })
+    const display = options.notify.mock.calls.map(([message]) => message).join('\n')
+    expect(display).toContain('Client: native\\u001b[2J\\u009b31m\\u000aspoof\\u202e')
+    expect(display).toContain('Scope: read\\u000d\\u0009\\u2028write')
+    for (const control of ['\u001b', '\u009b', '\r', '\t', '\u202e', '\u2028'])
+      expect(display).not.toContain(control)
   })
 
   it('forwards denial without exchanging a code', async () => {

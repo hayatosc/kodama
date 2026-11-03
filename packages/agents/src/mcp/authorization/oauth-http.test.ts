@@ -1,6 +1,11 @@
 /** OAuth discovery fixtures cover issuer pinning, fallback and confidential client authentication. @module */
 import { afterEach, expect, it, vi } from 'vitest'
-import { discoverMcpOAuth, mcpClientAuthentication, registerMcpOAuthClient } from './oauth-http.ts'
+import {
+  discoverMcpOAuth,
+  mcpClientAuthentication,
+  registerMcpOAuthClient,
+  mcpOAuthEndpoint,
+} from './oauth-http.ts'
 
 const issuer = 'https://identity.example.com/tenant'
 const endpoint = 'https://mcp.example.com/service'
@@ -21,7 +26,8 @@ it('uses challenge metadata and OIDC fallback without leaking credentials or fol
       new Response(null, {
         status: 401,
         headers: {
-          'WWW-Authenticate': 'Bearer resource_metadata="https://mcp.example.com/resource"',
+          'WWW-Authenticate':
+            'Bearer resource_metadata="https://mcp.example.com/resource?tenant=one"',
         },
       }),
     )
@@ -37,6 +43,7 @@ it('uses challenge metadata and OIDC fallback without leaking credentials or fol
       client_id_metadata_document_supported: false,
     },
   })
+  expect(fetcher.mock.calls[1]?.[0]).toBe('https://mcp.example.com/resource?tenant=one')
   expect(fetcher.mock.calls[3]?.[0]).toBe(
     'https://identity.example.com/.well-known/openid-configuration/tenant',
   )
@@ -48,6 +55,7 @@ it('uses challenge metadata and OIDC fallback without leaking credentials or fol
 
 it.each([
   { ...metadata, issuer: 'https://other.example.com/tenant' },
+  { ...metadata, issuer: `${issuer}?tenant=one` },
   { ...metadata, code_challenge_methods_supported: ['plain'] },
 ])('rejects issuer substitution or missing S256 before authorization', async (server) => {
   vi.stubGlobal(
@@ -61,6 +69,16 @@ it.each([
   await expect(discoverMcpOAuth(endpoint, undefined, AbortSignal.timeout(5_000))).rejects.toThrow(
     /^mcp_/u,
   )
+})
+
+it.each([
+  'http://identity.example.com/token?tenant=one',
+  'https://127.0.0.1/token?tenant=one',
+  'https://localhost/token?tenant=one',
+  'https://user:secret@identity.example.com/token?tenant=one',
+  'https://identity.example.com/token?tenant=one#fragment',
+])('rejects unsafe OAuth endpoint %s even with a query', (url) => {
+  expect(() => mcpOAuthEndpoint(url)).toThrow()
 })
 
 it('encodes Basic client credentials and keeps POST secrets out of headers and URLs', () => {
@@ -89,12 +107,13 @@ it('registers a native client with only the exact loopback redirect and no UI me
   )
   vi.stubGlobal('fetch', fetcher)
   await registerMcpOAuthClient(
-    `${issuer}/register`,
+    `${issuer}/register?tenant=a%2Fb`,
     '',
     undefined,
     AbortSignal.timeout(5_000),
     redirectUri,
   )
+  expect(fetcher.mock.calls[0]?.[0]).toBe(`${issuer}/register?tenant=a%2Fb`)
   const body = fetcher.mock.calls[0]?.[1]?.body
   if (typeof body !== 'string') throw new Error('Expected JSON registration')
   expect(JSON.parse(body)).toEqual({

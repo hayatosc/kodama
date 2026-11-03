@@ -66,6 +66,7 @@ export async function discoverMcp(
       : undefined
   }
   let inspected: Awaited<ReturnType<typeof inspectMcpTool>>[]
+  let stale = false
   try {
     const session = await openMcpSession(server.endpoint, authorize, signal)
     try {
@@ -74,6 +75,7 @@ export async function discoverMcp(
       )
     } finally {
       await closeMcpSession(session, authorize)
+      stale = session.stale
     }
   } catch (error) {
     const code =
@@ -152,7 +154,7 @@ export async function discoverMcp(
         catalogVersion: server.catalogVersion + 1,
         inspectedAt: call.now,
         inspectionError: null,
-        stale: false,
+        stale,
         updatedAt: call.now,
         enabled: true,
       })

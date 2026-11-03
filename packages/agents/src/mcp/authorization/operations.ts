@@ -9,7 +9,12 @@ import {
 import type { ManagementDb } from '../../control-plane/db.ts'
 import { mcpServer } from '../registration/catalog.ts'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './oauth.ts'
-import { mcpClientDocument, mcpClientSchema, mcpLoopbackRedirect } from './oauth-http.ts'
+import {
+  mcpClientDocument,
+  mcpClientSchema,
+  mcpLoopbackRedirect,
+  mcpOAuthEndpoint,
+} from './oauth-http.ts'
 import { mcpEndpoint } from '../connection/transport.ts'
 import { eraseMcpSecret, mcpSecretInsert, mcpToken } from './vault.ts'
 
@@ -94,7 +99,7 @@ export async function manageMcpOAuth(
       return mcpClientDocument(origin)
     case 'initial-token': {
       mcpEndpoint(input.issuer)
-      mcpEndpoint(input.registrationEndpoint)
+      mcpOAuthEndpoint(input.registrationEndpoint)
       const envelope = await mcpSecretInsert(
         db,
         kek,

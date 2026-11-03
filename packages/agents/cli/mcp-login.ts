@@ -16,6 +16,13 @@ const startedSchema = v.object({
   }),
 })
 
+function terminalText(value: string): string {
+  return value.replace(
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
+    (character) => `\\u${(character.codePointAt(0) ?? 0).toString(16).padStart(4, '0')}`,
+  )
+}
+
 /** Start the platform browser without a shell; the URL is an argument, never executable text. */
 export async function openMcpBrowser(url: string): Promise<void> {
   if (new URL(url).protocol !== 'https:') throw new Error('Invalid authorization URL')
@@ -170,7 +177,7 @@ export async function loginMcp(options: {
       throw new Error('Invalid MCP authorization response')
     signal.throwIfAborted()
     options.notify(
-      `Server: ${started.consent.serverId}\nIssuer: ${started.consent.issuer}\nResource: ${started.consent.resource}\nClient: ${started.consent.clientId}\nScope: ${started.consent.scope || '(none)'}\nOpen in your browser: ${authorization.href}`,
+      `Server: ${terminalText(started.consent.serverId)}\nIssuer: ${terminalText(started.consent.issuer)}\nResource: ${terminalText(started.consent.resource)}\nClient: ${terminalText(started.consent.clientId)}\nScope: ${terminalText(started.consent.scope || '(none)')}\nOpen in your browser: ${terminalText(authorization.href)}`,
     )
     try {
       await options.open(authorization.href)

@@ -17,14 +17,34 @@ const https = v.pipe(
     }
   }),
 )
+/** Validate a public HTTPS OAuth endpoint while retaining its query component. */
+export function mcpOAuthEndpoint(value: string): string {
+  const url = new URL(value)
+  const address = new URL(value)
+  address.search = ''
+  mcpEndpoint(address.href)
+  return url.href
+}
+
+const endpoint = v.pipe(
+  v.string(),
+  v.check((value) => {
+    try {
+      mcpOAuthEndpoint(value)
+      return true
+    } catch {
+      return false
+    }
+  }),
+)
 const stringList = v.array(v.string())
 const resourceSchema = v.looseObject({ resource: https, authorization_servers: v.array(https) })
 const metadataSchema = v.looseObject({
   issuer: https,
-  authorization_endpoint: https,
-  token_endpoint: https,
-  registration_endpoint: v.optional(https),
-  revocation_endpoint: v.optional(https),
+  authorization_endpoint: endpoint,
+  token_endpoint: endpoint,
+  registration_endpoint: v.optional(endpoint),
+  revocation_endpoint: v.optional(endpoint),
   code_challenge_methods_supported: stringList,
   response_types_supported: stringList,
   grant_types_supported: v.optional(stringList),
@@ -75,7 +95,7 @@ export function mcpClientDocument(origin: string) {
 
 async function metadata(url: string, signal: AbortSignal): Promise<unknown> {
   signal.throwIfAborted()
-  const response = await fetch(mcpEndpoint(url), {
+  const response = await fetch(mcpOAuthEndpoint(url), {
     redirect: 'error',
     signal,
     headers: { Accept: 'application/json' },
@@ -108,7 +128,7 @@ export async function discoverMcpOAuth(
     await challenge.body?.cancel().catch(() => undefined)
     const hint = header?.match(/\bresource_metadata="([^"\r\n]+)"/iu)?.[1]
     const paths = hint
-      ? [mcpEndpoint(hint)]
+      ? [mcpOAuthEndpoint(hint)]
       : [
           `${resourceUrl.origin}/.well-known/oauth-protected-resource${resourceUrl.pathname === '/' ? '' : resourceUrl.pathname}`,
           `${resourceUrl.origin}/.well-known/oauth-protected-resource`,
@@ -221,7 +241,7 @@ export async function exchangeMcpToken(
     const { body, headers } = mcpClientAuthentication(client, secret)
     for (const [key, value] of Object.entries(fields)) body.set(key, value)
     signal.throwIfAborted()
-    const response = await fetch(mcpEndpoint(endpoint), {
+    const response = await fetch(mcpOAuthEndpoint(endpoint), {
       method: 'POST',
       redirect: 'error',
       headers,
@@ -260,7 +280,7 @@ export async function registerMcpOAuthClient(
     const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'application/json' })
     if (initialToken) headers.set('Authorization', `Bearer ${initialToken}`)
     signal.throwIfAborted()
-    const response = await fetch(mcpEndpoint(endpoint), {
+    const response = await fetch(mcpOAuthEndpoint(endpoint), {
       method: 'POST',
       redirect: 'error',
       signal,

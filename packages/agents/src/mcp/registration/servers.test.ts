@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mcpAssignments, mcpTools } from '../../../drizzle/management/schema.ts'
 import { desiredSettings, management, newAgentId } from '../../testing/management.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
-import { guardMcpSelection, registerMcpCatalog } from './catalog.ts'
+import { guardMcpSelection, registerMcpCatalog, mcpServer } from './catalog.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { putMcpBearer } from '../authorization/vault.ts'
 import { disconnectMcp } from '../authorization/refresh.ts'
@@ -13,6 +13,7 @@ import { MCP_PROTOCOL } from '../connection/transport.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { assignMcp, discoverMcp, disableMcp } from './servers.ts'
 import { manageMcp } from './operations.ts'
+import { mcpCatalogNotices } from './notifications.ts'
 
 async function fixture() {
   const agentId = await newAgentId()
@@ -38,6 +39,7 @@ async function fixture() {
   let definitions = [
     { name: 'read', description: 'Read selected records', inputSchema: { type: 'object' } },
   ]
+  let listChanged = false
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) => {
     if (options?.method === 'DELETE') return new Response(null, { status: 204 })
     const body: unknown = JSON.parse(typeof options?.body === 'string' ? options.body : '{}')
@@ -45,14 +47,20 @@ async function fixture() {
       throw new Error('Bad fixture request')
     if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
     if (!('id' in body)) throw new Error('Missing fixture ID')
-    return Response.json({
+    const result = {
       jsonrpc: '2.0',
       id: body.id,
       result:
         body.method === 'initialize'
           ? { protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} } }
           : { tools: definitions },
-    })
+    }
+    if (listChanged && body.method === 'tools/list')
+      return new Response(
+        `data: ${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })}\n\ndata: ${JSON.stringify(result)}\n\n`,
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      )
+    return Response.json(result)
   })
   vi.stubGlobal('fetch', fetcher)
   const discovered = await discoverMcp(
@@ -79,6 +87,9 @@ async function fixture() {
     tool,
     selection,
     fetcher,
+    setListChanged: (value: boolean) => {
+      listChanged = value
+    },
     change: (next: typeof definitions) => {
       definitions = next
     },
@@ -88,6 +99,27 @@ async function fixture() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('MCP assignments', () => {
+  it('preserves discovery list-change notices without rediscovery or changing assignments', async () => {
+    const { call, agentId, selection, server, credential, fetcher, setListChanged } =
+      await fixture()
+    await assignMcp(call, env.CREDENTIAL_KEK_V1, selection)
+    const settings = await desiredSettings(agentId)
+    setListChanged(true)
+    fetcher.mockClear()
+    await discoverMcp(call, env.CREDENTIAL_KEK_V1, server.serverId, credential.credentialId)
+    expect((await mcpServer(management, server.serverId)).stale).toBe(true)
+    expect(await mcpCatalogNotices(management, agentId, server.serverId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ summary: expect.stringContaining('catalog_stale') }),
+      ]),
+    )
+    expect(await desiredSettings(agentId)).toEqual(settings)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    setListChanged(false)
+    await discoverMcp(call, env.CREDENTIAL_KEK_V1, server.serverId, credential.credentialId)
+    expect((await mcpServer(management, server.serverId)).stale).toBe(false)
+  })
+
   it('never admits an MCP envelope into provider credential references', async () => {
     const { agentId, server, credential } = await fixture()
     const settings = await desiredSettings(agentId)
