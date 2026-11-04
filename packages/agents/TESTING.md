@@ -117,6 +117,15 @@ Stop such agents in `afterEach` with `stopAgentObject` from `src/testing/rpc.ts`
 `src/mcp/registration/chat.test.ts` does. A test that passes alone but fails in the full run
 usually depends on state another test or file left behind.
 
+## Test scripts and Vite+
+
+The `test` and `test:coverage` scripts call `vitest` directly rather than `vp test`. `vp run`
+executes a script's `vp` with the CLI that started it, and the `vp` that mise installs carries
+its own copy of Vitest. Test files import `vite-plus/test`, which re-exports the workspace's
+Vitest, so `vp test` from the mise CLI loaded two Vitest instances, and every workerd file failed
+with "Vitest failed to find the current suite". The workspace `vitest` is the same version that
+`vite-plus` bundles (pinned in the pnpm catalog).
+
 ## Targeted runs and measurement
 
 From the workspace root:
