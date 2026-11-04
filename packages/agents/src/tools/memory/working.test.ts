@@ -13,13 +13,16 @@ import { MEMORY_AGENT_NAME, parseMemoryJob } from '../../memory/jobs.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { waitForAnswer, modelResponse } from '../../testing/rpc.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { newAgentId, updateSettings } from '../../testing/management.ts'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { newAgentId, updateSettings, seedOnce } from '../../testing/management.ts'
 import { mockModel, say } from '../../testing/conversation.ts'
 import { record, write } from '../../testing/memory.ts'
 import { isMemoryAgentRequest, requestBody, toolCallResponse } from '../../testing/model.ts'
 import type { ToolCall } from '../../testing/model.ts'
 import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 

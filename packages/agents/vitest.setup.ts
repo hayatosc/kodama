@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { applyD1Migrations, evictDurableObject, runInDurableObject } from 'cloudflare:test'
+import { applyD1Migrations, runInDurableObject } from 'cloudflare:test'
 import type { D1Migration } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { is } from 'drizzle-orm'
@@ -15,6 +15,7 @@ import * as managementSchema from './drizzle/management/schema.ts'
 import * as memorySchema from './drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from './src/memory/jobs.ts'
 import { forgetSeed } from './src/testing/management.ts'
+import { stopAgentObject } from './src/testing/rpc.ts'
 
 declare global {
   namespace Cloudflare {
@@ -39,32 +40,6 @@ async function clearTables(database: D1Database, schema: Record<string, unknown>
   await database.batch([database.prepare('PRAGMA defer_foreign_keys = on'), ...deletes])
 }
 
-/**
- * Delete the storage and alarm of the object every file shares by name, and drop its instance: its
- * job drain lives in memory, and a drain the previous file left waiting would hold every new job.
- * Working agents need no cleanup: tests address them by fresh UUIDs, so no later file opens them.
- */
-async function clearSharedObjects(attempts = 3): Promise<void> {
-  const stub = env.AGENTS.getByName(MEMORY_AGENT_NAME)
-  try {
-    await runInDurableObject(stub, async (_, state) => {
-      await state.storage.deleteAlarm()
-      await state.storage.deleteAll()
-    })
-  } catch (error) {
-    // An object still being reset rejects the call; a new stub reaches the next instance.
-    const reset = error instanceof Error && 'durableObjectReset' in error
-    if (!reset || attempts <= 1) throw error
-    return clearSharedObjects(attempts - 1)
-  }
-  // Eviction waits for in-flight requests and fails while one never ends; abort the instance then.
-  await evictDurableObject(stub).catch(() =>
-    runInDurableObject(stub, (_, state) => state.abort('The test file ended')).catch(
-      () => undefined,
-    ),
-  )
-}
-
 /** Delete every object of the archive bucket. */
 async function clearArchive(): Promise<void> {
   for (let listed = await env.ARCHIVE.list(); ;) {
@@ -74,17 +49,35 @@ async function clearArchive(): Promise<void> {
   }
 }
 
-// Empty D1 first: an alarm that a previous file's working agent left behind then finds no registry
-// row or credential and makes no model call against this file's mocked fetch.
-// `reset()` from cloudflare:test is not used: it leaves SQLite-backed object storage and D1
-// intact. `abortAllDurableObjects()` and `evictAllDurableObjects()` are not used either: memory jobs
-// stopped settling after them.
+/**
+ * Clear the memory agent, the one object every file addresses by the same name: delete its storage
+ * and end its background work, since its job drain lives in memory. Working agents need nothing:
+ * tests address them by fresh UUIDs, and with D1 emptied first an alarm one of them left behind
+ * finds no registry row or credential.
+ */
+async function clearMemoryAgent(attempts = 3): Promise<void> {
+  try {
+    await runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), (_, state) =>
+      state.storage.deleteAll(),
+    )
+  } catch (error) {
+    // An object still being reset rejects the call; a new stub reaches the next instance.
+    const reset = error instanceof Error && 'durableObjectReset' in error
+    if (!reset || attempts <= 1) throw error
+    return clearMemoryAgent(attempts - 1)
+  }
+  await stopAgentObject(MEMORY_AGENT_NAME)
+}
+
+// `reset()` from cloudflare:test is not used: it leaves SQLite-backed object storage and D1 intact.
+// `abortAllDurableObjects()` is not used either: alarms of objects created afterwards stopped
+// firing after it.
 await applyD1Migrations(env.MEMORY_DB, env.TEST_MIGRATIONS)
 await applyD1Migrations(env.MANAGEMENT_DB, env.TEST_MANAGEMENT_MIGRATIONS)
 await clearTables(env.MEMORY_DB, memorySchema)
 await clearTables(env.MANAGEMENT_DB, managementSchema)
 await clearArchive()
-await clearSharedObjects()
+await clearMemoryAgent()
 forgetSeed()
 
 afterAll(() => {

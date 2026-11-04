@@ -5,12 +5,15 @@ import { openLocalDb } from '../../agent/local-db/local.ts'
 import { context, record, renderedAlwaysLoaded } from '../../testing/memory.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
-import { newAgentId } from '../../testing/management.ts'
+import { beforeAll, expect, it } from 'vitest'
+import { newAgentId, seedOnce } from '../../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
 import type { MemoryJobDeps } from './context.ts'
 import { readExtractionEntries } from './entries.ts'
 import { executeJobOperation, extractionReadThrough } from './operations.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 useMockModel()
 

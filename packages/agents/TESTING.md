@@ -8,10 +8,9 @@ The Vitest projects use different runtimes rather than different levels of cover
   so a test file runs in exactly one project. Node files remain sequential because native
   OAuth callback tests use the fixed loopback port 1455.
 - `vitest.worker.config.ts` runs the remaining tests with real Workers bindings. D1
-  migrations, object SQLite, R2, alarms, eviction and RPC remain enabled. Its `workerd`
-  project shares one runtime per Vitest worker between files; `workerd-isolated` gives each
-  of its listed files a runtime of its own (see Shared workerd runtime).
-  Unlisted test files default to the `workerd` project; review their runtime dependencies before
+  migrations, object SQLite, R2, alarms, eviction and RPC remain enabled. Files share one
+  runtime per Vitest worker; see Shared workerd runtime.
+  Unlisted test files default to this project; review their runtime dependencies before
   adding them to the portable list. `src/lib/*.test.ts` covers the portable helper layer.
 
 ## Runtime review
@@ -87,32 +86,36 @@ Locally, `nr check` still runs everything in one process.
 
 ## Shared workerd runtime
 
-The `workerd` project sets `isolate: false`, so each Vitest worker keeps one Miniflare runtime and
-module graph across files instead of rebuilding them per file. Sharing everything took the
-workerd tests from 497 s to 144 s locally, but some files then failed depending on order.
+The workerd project sets `isolate: false`, so each Vitest worker keeps one Miniflare runtime and
+module graph across files instead of rebuilding them per file. Locally this took the workerd
+project from 497 s to about 100 s.
 
 Before every file, `vitest.setup.ts` removes what the previous file left that this one can see:
 
 - every row of both D1 schemas, first, so an alarm a previous file's working agent left behind
   finds no registry row or credential and makes no model call against this file's mocked fetch;
 - every object in the archive bucket;
-- the memory agent's storage and alarm, and its instance: it is the one object every file
-  addresses by the same name, and its job drain lives in memory. Working agents need nothing,
-  because tests address them by fresh UUIDs;
+- the memory agent's storage, alarm and instance: it is the one object every file addresses by
+  the same name, and its job drain lives in memory. Working agents need nothing, because tests
+  address them by fresh UUIDs;
 - the cached seed in `src/testing/management.ts`.
 
 After each file it restores mocks, global stubs and real timers.
 
-`reset()`, `abortAllDurableObjects()` and `evictAllDurableObjects()` from `cloudflare:test` are
-not used: `reset()` leaves SQLite-backed object storage and D1 intact, and memory jobs stopped
-settling after either of the others.
+`reset()` from `cloudflare:test` is not used, because it leaves SQLite-backed object storage and
+D1 intact. `abortAllDurableObjects()` is not used either: alarms of objects created after it
+stopped firing.
 
-Even so, files that wait on background work (alarms, the memory agent's drain, or Pi runs with a
-scripted model) still failed intermittently in the shared runtime, a different one each run,
-because earlier files' alarms and drains keep running beside them. Those files are listed in
-`isolatedTestFiles` and run in the `workerd-isolated` project, which keeps `isolate: true`. Add a
-file there when it passes alone but fails in the full run because of work another file started;
-keep module-level state in tests and test helpers resettable from `vitest.setup.ts`.
+Module-level code runs once per Vitest worker, not once per file. A helper must not register
+hooks when it is imported (`beforeAll(seedOnce)` at the top of `src/testing/memory.ts` seeded
+only the first file that imported it); call such hooks from each test file instead. Keep
+module-level state in tests and helpers resettable from `vitest.setup.ts`, as `forgetSeed()` is.
+
+A test whose agent keeps working after it ends (a turn retried in the background, for example)
+can reach the next test's fetch mock, which shows up more often with the faster shared runtime.
+Stop such agents in `afterEach` with `stopAgentObject` from `src/testing/rpc.ts`, as
+`src/mcp/registration/chat.test.ts` does. A test that passes alone but fails in the full run
+usually depends on state another test or file left behind.
 
 ## Targeted runs and measurement
 
@@ -121,7 +124,6 @@ From the workspace root:
 ```sh
 nr --filter @kodama/agents test --project node
 nr --filter @kodama/agents test --project workerd
-nr --filter @kodama/agents test --project workerd-isolated
 nr --filter @kodama/agents test src/agent/contact.test.ts
 nr --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
 ```

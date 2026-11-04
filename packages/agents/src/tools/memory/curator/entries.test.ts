@@ -5,8 +5,8 @@
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
 import { exports } from 'cloudflare:workers'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { newAgentId } from '../../../testing/management.ts'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { newAgentId, seedOnce } from '../../../testing/management.ts'
 import { db, memoryAgent, activeContents, runScriptedJob } from '../../../testing/memory.ts'
 import { waitForAnswer } from '../../../testing/rpc.ts'
 import {
@@ -17,6 +17,9 @@ import {
   toolResults,
 } from '../../../testing/model.ts'
 import { extractionCheckpoint } from '../../../memory/store/db.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())

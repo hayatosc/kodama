@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { memoryRecords } from '../../../../drizzle/memory/schema.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../../memory/jobs.ts'
@@ -14,6 +14,10 @@ import { context, db, memoryAgent, record, runScriptedJob, write } from '../../.
 import { applyOperation } from '../../../memory/store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../../testing/model.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
+import { seedOnce } from '../../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 import '@earendil-works/pi-ai/api/openai-responses'
 
 afterEach(() => vi.restoreAllMocks())

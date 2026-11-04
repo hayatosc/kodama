@@ -12,6 +12,7 @@ import {
   mcpServers,
 } from '../../../drizzle/management/schema.ts'
 import { management, newAgentId } from '../../testing/management.ts'
+import { stopAgentObject } from '../../testing/rpc.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import { rememberMcpIntent } from './intents.ts'
 import * as serverWorkflows from './servers.ts'
@@ -27,8 +28,12 @@ import {
   recoverMcpRegistrations,
 } from './chat.ts'
 
+/** Agents of the running test; a completion notice starts a model turn that outlives the test. */
+const fixtureAgents: string[] = []
+
 async function fixture() {
   const agentId = await newAgentId()
+  fixtureAgents.push(agentId)
   const call = {
     env,
     db: management,
@@ -71,9 +76,12 @@ async function fixture() {
   return { call, evidence, fetcher }
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  // The fixture fetch rejects model requests, so those turns retry; stop them before the next test
+  // stubs its own fetch.
+  for (const agentId of fixtureAgents.splice(0)) await stopAgentObject(agentId)
 })
 
 it('asks for an unknown endpoint without searching or guessing, and consumes that intent once', async () => {
