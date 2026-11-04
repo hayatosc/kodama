@@ -1,5 +1,6 @@
 /**
- * Vitest configuration: tests run in workerd with the migrations and their snapshots as bindings.
+ * Vitest projects of the tests that run in workerd, with the migrations and their snapshots as
+ * bindings.
  *
  * @module
  */
@@ -31,40 +32,80 @@ function migratedColumns(folder: string): Record<string, string[]> {
   )
 }
 
-export default defineConfig({
-  test: {
-    name: 'workerd',
-    // Real npm compilation is opt-in so the normal suite remains offline.
-    provide: { codeNpmSmoke: process.env.KODAMA_CODE_NPM_SMOKE === '1' },
-    include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
-    exclude: nodeTestFiles,
-    setupFiles: ['vitest.setup.ts'],
-    // Files share one runtime and module graph; vitest.setup.ts empties storage before each file.
-    isolate: false,
-    // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
-    fsModuleCache: false,
-    testTimeout: 15_000,
-    // Real alarms can consume their marker before asynchronous pruning finishes. Allow workerd
-    // integration polls the same bounded progress window used by the explicit RPC polls.
-    expect: { poll: { timeout: 10_000 } },
-  },
-  plugins: [
-    cloudflareTest({
-      experimental: { newConfig: true },
-      miniflare: {
-        bindings: {
-          CREDENTIAL_KEK_V1: 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
-          TEST_MIGRATIONS: migrations,
-          TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/memory/migrations'),
-          TEST_MANAGEMENT_MIGRATIONS: managementMigrations,
-          TEST_MANAGEMENT_MIGRATED_COLUMNS: migratedColumns('drizzle/management/migrations'),
-          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
+/**
+ * Test files that wait on background work: alarms, the memory agent's job drain, or Pi runs with a
+ * scripted model. They keep a runtime of their own, because in the shared runtime a previous
+ * file's alarms and drains still run and disturb them. See TESTING.md — Shared workerd runtime.
+ */
+export const isolatedTestFiles = [
+  'src/agent/dedicated/memory/agent.test.ts',
+  'src/agent/dedicated/memory/runner.test.ts',
+  'src/agent/memory.test.ts',
+  'src/control-plane/workflows/reconcile.test.ts',
+  'src/control-plane/workflows/usage.test.ts',
+  'src/mcp/invocation/execution.test.ts',
+  'src/mcp/registration/chat.test.ts',
+  'src/memory/consolidation.test.ts',
+  'src/memory/prune/prune.test.ts',
+  'src/memory/store/skills.test.ts',
+  'src/tools/artifacts.test.ts',
+  'src/tools/memory/curator/entries.test.ts',
+  'src/tools/memory/curator/records.test.ts',
+  'src/tools/memory/curator/skills.test.ts',
+]
+
+const workerdTestFiles = ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts']
+
+/** A workerd project; without `isolate`, its files share one runtime and module graph. */
+function workerdProject(name: string, isolate: boolean, include: string[], exclude: string[]) {
+  return defineConfig({
+    test: {
+      name,
+      // Real npm compilation is opt-in so the normal suite remains offline.
+      provide: { codeNpmSmoke: process.env.KODAMA_CODE_NPM_SMOKE === '1' },
+      include,
+      exclude,
+      setupFiles: ['vitest.setup.ts'],
+      isolate,
+      // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
+      fsModuleCache: false,
+      testTimeout: 15_000,
+      // Real alarms can consume their marker before asynchronous pruning finishes. Allow workerd
+      // integration polls the same bounded progress window used by the explicit RPC polls.
+      expect: { poll: { timeout: 10_000 } },
+    },
+    plugins: [
+      cloudflareTest({
+        experimental: { newConfig: true },
+        miniflare: {
+          bindings: {
+            CREDENTIAL_KEK_V1: 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
+            TEST_MIGRATIONS: migrations,
+            TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/memory/migrations'),
+            TEST_MANAGEMENT_MIGRATIONS: managementMigrations,
+            TEST_MANAGEMENT_MIGRATED_COLUMNS: migratedColumns('drizzle/management/migrations'),
+            TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
+          },
+          // The test runner renames the Worker; bind its local class rather than the production name.
+          durableObjects: {
+            AGENTS: { className: 'Agent', useSQLite: true },
+          },
         },
-        // The test runner renames the Worker; bind its local class rather than the production name.
-        durableObjects: {
-          AGENTS: { className: 'Agent', useSQLite: true },
-        },
-      },
-    }),
-  ],
-})
+      }),
+    ],
+  })
+}
+
+/** Files that share one runtime per Vitest worker; vitest.setup.ts empties storage between them. */
+export const sharedWorkerdProject = workerdProject('workerd', false, workerdTestFiles, [
+  ...nodeTestFiles,
+  ...isolatedTestFiles,
+])
+
+/** Files that start a runtime of their own, as every workerd file did before. */
+export const isolatedWorkerdProject = workerdProject(
+  'workerd-isolated',
+  true,
+  isolatedTestFiles,
+  nodeTestFiles,
+)

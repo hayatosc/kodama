@@ -4,10 +4,11 @@
  * @module
  */
 import { defineConfig } from 'vitest/config'
+import { isolatedWorkerdProject, sharedWorkerdProject } from './vitest.worker.config.ts'
 
 export default defineConfig({
   test: {
-    projects: ['./vitest.worker.config.ts', './vitest.node.config.ts'],
+    projects: [sharedWorkerdProject, isolatedWorkerdProject, './vitest.node.config.ts'],
     // workerd has no V8 inspector, so both projects use Istanbul instrumentation.
     coverage: {
       provider: 'istanbul',
