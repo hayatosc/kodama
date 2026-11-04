@@ -39,6 +39,8 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
     exclude: nodeTestFiles,
     setupFiles: ['vitest.setup.ts'],
+    // Files share one runtime and module graph; vitest.setup.ts empties storage before each file.
+    isolate: false,
     // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
     fsModuleCache: false,
     testTimeout: 15_000,

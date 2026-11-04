@@ -7,8 +7,9 @@ The Vitest projects use different runtimes rather than different levels of cover
   Worker bindings or apply D1 migrations. The same list excludes these files from workerd,
   so a test file runs in exactly one project. Node files remain sequential because native
   OAuth callback tests use the fixed loopback port 1455.
-- `vitest.worker.config.ts` runs the remaining tests with real Workers bindings. File
-  isolation, D1 migrations, object SQLite, R2, alarms, eviction and RPC remain enabled.
+- `vitest.worker.config.ts` runs the remaining tests with real Workers bindings. D1
+  migrations, object SQLite, R2, alarms, eviction and RPC remain enabled. Files share one
+  runtime per Vitest worker; see Shared workerd runtime.
   Unlisted test files default to this project; review their runtime dependencies before
   adding them to the portable list. `src/lib/*.test.ts` covers the portable helper layer.
 
@@ -80,8 +81,22 @@ That cost is bound by the runner's CPU, not by Vitest's worker count. Locally (4
 full suite took 497 s in one process and 341 s as two concurrent `--shard` processes on the same
 machine. CI therefore runs the tests as four `--shard` jobs on separate runners, beside one job
 for TypeScript, lint, formatting and the build. The `Check and build` job passes only when all of
-them pass, so it remains the single status to require. Isolation, the test list and timeouts are
-unchanged. Locally, `nr check` still runs everything in one process.
+them pass, so it remains the single status to require. The test list and timeouts are unchanged.
+Locally, `nr check` still runs everything in one process.
+
+## Shared workerd runtime
+
+The workerd project sets `isolate: false`, so each Vitest worker keeps one Miniflare runtime and
+module graph across files instead of rebuilding them per file. Locally this alone took the
+workerd project from 497 s to 144 s.
+
+Sharing must not let one file see another's state, so `vitest.setup.ts` runs before every file:
+it aborts all Durable Objects (stopping alarms and background work of the previous file),
+deletes their storage with `reset()`, empties every table of both D1 schemas (`reset()` does not
+reach D1), and forgets the cached seed in `src/testing/management.ts`. After each file it
+restores mocks, global stubs and real timers. Keep new module-level state in tests or test
+helpers resettable the same way; a test that passes alone but fails in the full run usually
+depends on state another file left behind.
 
 ## Targeted runs and measurement
 
@@ -97,5 +112,5 @@ nr --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.j
 Use the JSON report's per-file and per-case durations to find expensive fixtures. Compare
 full-suite wall time on the same machine and keep the test/pass/skip counts constant.
 Record CI measurements separately: local wall time is not a prediction of runner time.
-Do not gain speed by disabling isolation, omitting tests, weakening storage coverage or
+Do not gain speed by sharing state between files, omitting tests, weakening storage coverage or
 raising timeouts to hide failures.

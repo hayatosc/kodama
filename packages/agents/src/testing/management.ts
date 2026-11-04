@@ -21,6 +21,11 @@ export const agentService = () => exports.default
 
 let seeded: Promise<SeedResult> | undefined
 
+/** Forget the seed, after the shared test runtime clears the databases for the next file. */
+export function forgetSeed(): void {
+  seeded = undefined
+}
+
 /** The seed's result; the first call of a test file seeds. */
 export function seedOnce(): Promise<SeedResult> {
   seeded ??= testCredentialRefs().then((refs) => agentService().seed(refs))
