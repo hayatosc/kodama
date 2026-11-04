@@ -24,26 +24,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Set up pnpm and ni
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          run_install: |
-            - args: [--global, '@antfu/ni@30.6.0']
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: package.json
-          cache: pnpm
-      - name: Install dependencies
-        run: ni --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Typecheck
-        run: nr typecheck
+        run: vp run typecheck
       - name: Lint
-        run: nr lint
+        run: vp run lint
       - name: Check formatting
-        run: nr format:check
+        run: vp run format:check
       - name: Build agents
         working-directory: packages/agents
-        run: nr build
+        run: vp run build
 
   test:
     name: Test (${{ matrix.shard }}/4)
@@ -57,20 +47,10 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Set up pnpm and ni
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          run_install: |
-            - args: [--global, '@antfu/ni@30.6.0']
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: package.json
-          cache: pnpm
-      - name: Install dependencies
-        run: ni --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Test
         working-directory: packages/agents
-        run: nr test --shard=${{ matrix.shard }}/4
+        run: vp run test --shard=${{ matrix.shard }}/4
 
   # Keeps a single status for branch protection: it passes only when every job above passed.
   check:

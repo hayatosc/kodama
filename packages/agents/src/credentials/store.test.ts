@@ -1,7 +1,7 @@
 /** Explicit resolution, live revocation, and lease-protected modifications. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import type { AgentSettings } from '../protocol.ts'

@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vite-plus/test'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { db } from '../../testing/memory.ts'
 import { searchHistory } from './history.ts'

@@ -1,5 +1,5 @@
 /** Envelope integrity, identity binding, and fail-closed key handling. @module */
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { decryptCredential, encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
 

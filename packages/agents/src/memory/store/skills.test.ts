@@ -6,7 +6,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { curateSkills, readSkill, setSkillStatus, visibleSkills, writeSkill } from './skills.ts'

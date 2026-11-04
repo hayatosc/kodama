@@ -1,5 +1,5 @@
 /** Log categories never expose exception text or storage bindings. @module */
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { safeFailure } from './errors.ts'
 
 it('omits exception messages and causes from log details', () => {

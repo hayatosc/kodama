@@ -1,7 +1,7 @@
 /** Usage is captured at Pi's result boundary, including compaction's completeSimple. @module */
 import { runInDurableObject, evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { usage } from '../../../drizzle/durable-object/schema.ts'
 import { createCredentialStore } from '../../credentials/store.ts'
 import { newAgentId, desiredSettings } from '../../testing/management.ts'

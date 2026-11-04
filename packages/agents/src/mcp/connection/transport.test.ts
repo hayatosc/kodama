@@ -1,5 +1,5 @@
 /** Streamable HTTP fixture coverage without contacting external services. @module */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   closeMcpSession,
   listMcpTools,

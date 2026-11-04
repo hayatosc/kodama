@@ -6,7 +6,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { MemoryJob } from '../../memory/jobs.ts'

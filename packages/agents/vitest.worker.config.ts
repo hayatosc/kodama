@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite-plus'
 import { nodeTestFiles } from './vitest.node.config.ts'
 
 const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/memory/migrations`)

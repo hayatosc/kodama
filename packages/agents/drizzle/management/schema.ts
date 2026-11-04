@@ -1,5 +1,5 @@
 /**
- * The D1 schema of the management database: one file for the one database. `nr db:generate:management`
+ * The D1 schema of the management database: one file for the one database. `vp run db:generate:management`
  * turns this file into the migrations in ./migrations.
  *
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so

@@ -8,7 +8,7 @@ import { dispatchSchedules, mutateSchedule, rearmScheduling } from './scheduling
 import { recordNotification } from './local-db/notifications.ts'
 import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import {
   scheduledTasks,
   scheduledTaskOccurrences,

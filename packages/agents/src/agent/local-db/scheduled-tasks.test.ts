@@ -1,7 +1,7 @@
 /** Durable scheduling transitions and replay protection in real SQLite. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { notifications, scheduledTaskOccurrences } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import { listNotifications, readNotification, retainNotifications } from './notifications.ts'

@@ -1,6 +1,6 @@
 /** Installation-wide catalog and atomic mutation fences against local management D1. @module */
 import { eq, exists } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { auditLog, mcpServers } from '../../../drizzle/management/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { management } from '../../testing/management.ts'

@@ -1,6 +1,6 @@
 /** Lazy identity is shared without provisioning agents or requiring credentials. @module */
 import { env, exports } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { agents, systemSettings } from '../../drizzle/management/schema.ts'
 import { managementDb } from './db.ts'
 import { installationId } from './installation.ts'

@@ -2,7 +2,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vite-plus/test'
 import { agents, credentialGrants, agentCredentialRefs } from '../../drizzle/management/schema.ts'
 import { Agent } from '../agent/agent.ts'
 import { managementDb } from '../control-plane/db.ts'

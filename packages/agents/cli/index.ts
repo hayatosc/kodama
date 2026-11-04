@@ -24,7 +24,9 @@ async function main(): Promise<void> {
   try {
     args = parseArgs({ allowPositionals: true, options: CLI_OPTIONS })
   } catch {
-    throw new Error('Invalid arguments. See nr agent --help; never pass credentials as arguments.')
+    throw new Error(
+      'Invalid arguments. See vp run agent --help; never pass credentials as arguments.',
+    )
   }
   const command = toCommand(args)
   if (command.action === 'help') {
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
     const identityRequest = commandRequest({ action: 'credentials/installation' }, token)
     const identity = await fetch(identityRequest.url, identityRequest.init)
     if (!identity.ok)
-      throw new Error('Cannot initialize the local installation; start nr dev:agents first.')
+      throw new Error('Cannot initialize the local installation; start vp run dev:agents first.')
     const seed: unknown = await identity.json()
     if (
       typeof seed !== 'object' ||
@@ -148,7 +150,7 @@ async function main(): Promise<void> {
       artifact = { filename: basename(command.path), bytes }
     } catch (error) {
       throw new Error(
-        'Cannot upload file. Choose a readable regular file of at most 10 MiB. See nr agent --help.',
+        'Cannot upload file. Choose a readable regular file of at most 10 MiB. See vp run agent --help.',
         { cause: error },
       )
     }
@@ -163,7 +165,9 @@ async function main(): Promise<void> {
     )
     response = await fetch(url, init)
   } catch (error) {
-    throw new Error('Cannot reach the local Worker. Start nr dev:agents first.', { cause: error })
+    throw new Error('Cannot reach the local Worker. Start vp run dev:agents first.', {
+      cause: error,
+    })
   }
   if (!response.ok) {
     if (
@@ -195,7 +199,7 @@ async function main(): Promise<void> {
     },
     command.events,
   )
-  console.error(`Completed. History: nr agent snapshot ${command.agentRef}`)
+  console.error(`Completed. History: vp run agent snapshot ${command.agentRef}`)
 }
 
 try {

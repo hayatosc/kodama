@@ -1,7 +1,7 @@
 /** Registered callers, write-only registration, and atomic D1 revocation. @module */
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { newAgentId } from '../testing/management.ts'

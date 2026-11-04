@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { commandRequest, LOCAL_WORKER_URL, toCommand } from './command.ts'
 
 const agentId = '0190a8e2-5f1c-7a3b-8c4d-123456789abc'
@@ -255,9 +255,9 @@ describe('toCommand', () => {
   })
 
   it.each([
-    [['deploy'], /Invalid command or arguments; see nr agent --help/],
-    [['notifications'], /Invalid command or arguments; see nr agent --help/],
-    [['notification-read', 'assistant'], /Invalid command or arguments; see nr agent --help/],
+    [['deploy'], /Invalid command or arguments; see vp run agent --help/],
+    [['notifications'], /Invalid command or arguments; see vp run agent --help/],
+    [['notification-read', 'assistant'], /Invalid command or arguments; see vp run agent --help/],
     [['seed', 'assistant'], /Unexpected arguments/],
     [['send', 'assistant'], /Unexpected arguments/],
     [['snapshot', 'Not A Ref!'], TypeError],

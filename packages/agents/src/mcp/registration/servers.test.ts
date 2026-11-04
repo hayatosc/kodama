@@ -1,7 +1,7 @@
 /** MCP catalog and assignment workflows against real local D1, with remote transport fixtures. @module */
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { mcpAssignments, mcpTools } from '../../../drizzle/management/schema.ts'
 import { desiredSettings, management, newAgentId } from '../../testing/management.ts'
 import { createAgentModels } from '../../control-plane/models.ts'

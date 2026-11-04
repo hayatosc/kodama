@@ -1,7 +1,7 @@
 /** The memory agent has a dedicated registry, without working-agent contact capabilities. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { beforeAll, expect, it } from 'vitest'
+import { beforeAll, expect, it } from 'vite-plus/test'
 import { memoryAgent } from '../../../testing/memory.ts'
 import { createMemoryAgentTools } from './config.ts'
 import { seedOnce } from '../../../testing/management.ts'

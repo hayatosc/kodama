@@ -1,5 +1,5 @@
 /** Provider authentication never reads ambient keys and uses only the explicit store. @module */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { createAgentModels } from './models.ts'
 
 afterEach(() => vi.unstubAllEnvs())

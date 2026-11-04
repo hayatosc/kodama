@@ -4,7 +4,7 @@ import { grantTestCredentials, testCredentialRefs } from '../../testing/credenti
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vite-plus/test'
 import {
   agentConfigVersions,
   agentCredentialRefs,

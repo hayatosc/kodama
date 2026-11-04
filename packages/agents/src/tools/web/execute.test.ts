@@ -1,7 +1,7 @@
 /** Real tool execution with mocked web/model traffic, in-memory rate/cooldown state, durable contact and known URLs. @module */
 import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
-import { beforeAll, expect, it, vi } from 'vitest'
+import { beforeAll, expect, it, vi } from 'vite-plus/test'
 import { newAgentId, updateSettings, seedOnce } from '../../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
 import {

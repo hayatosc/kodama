@@ -1,7 +1,7 @@
 /** MCP response receipts remain fenced until the corresponding Pi result is durable. @module */
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { mcpCalls } from '../../../drizzle/durable-object/schema.ts'
 import { newAgentId } from '../../testing/management.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'

@@ -6,7 +6,7 @@
  */
 import { uuidv7 } from '../../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vite-plus/test'
 import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
 import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { db, parameterLimitedDb, record, write } from '../../testing/memory.ts'

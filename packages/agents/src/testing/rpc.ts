@@ -5,7 +5,7 @@
  */
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { afterEach, beforeEach, expect, vi } from 'vitest'
+import { afterEach, beforeEach, expect, vi } from 'vite-plus/test'
 
 /**
  * End an agent object's background work so it cannot reach a later test's mocks: delete its alarm

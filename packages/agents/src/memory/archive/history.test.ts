@@ -4,7 +4,7 @@
  * @module
  */
 import { env } from 'cloudflare:workers'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { searchHistory } from './history.ts'
 import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { mockModel, say } from '../../testing/conversation.ts'

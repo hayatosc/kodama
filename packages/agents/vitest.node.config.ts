@@ -1,5 +1,5 @@
 /** Portable unit tests and native CLI tests, without Worker bindings or database setup. @module */
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite-plus'
 
 /** Reviewed portable tests; unlisted tests default to the real Workers integration project. */
 export const nodeTestFiles = [

@@ -1,5 +1,5 @@
 /** Definition admission, digest pinning, and runtime validation fixtures. @module */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { inspectMcpSchema, inspectMcpTool, mcpDigest, validateMcpValue } from './definitions.ts'
 
 const definition = {

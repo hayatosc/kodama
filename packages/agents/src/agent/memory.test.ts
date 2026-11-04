@@ -1,7 +1,7 @@
 import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { applyOperation } from '../memory/store/records.ts'
 import { extractionCheckpoint } from '../memory/store/db.ts'
 import {

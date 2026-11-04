@@ -8,7 +8,7 @@
 import { uuidv7 } from '../../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { exports } from 'cloudflare:workers'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { and, eq } from 'drizzle-orm'
 import { memoryLedger } from '../../../../drizzle/memory/schema.ts'
 import { memoryJobs, usage } from '../../../../drizzle/durable-object/schema.ts'

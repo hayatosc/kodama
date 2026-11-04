@@ -2,7 +2,7 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { credentialCall } from '../testing/credentials.ts'

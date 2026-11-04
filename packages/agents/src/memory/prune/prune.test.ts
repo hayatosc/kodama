@@ -2,7 +2,7 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { refuseWhenFull, STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
 import { setAlarm } from '../../agent/runtime/alarms.ts'
 import {

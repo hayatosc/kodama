@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { memoryRecords } from '../../../../drizzle/memory/schema.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../../memory/jobs.ts'

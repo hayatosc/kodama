@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { applyOperation } from './store/records.ts'
 import type { Scope } from '../../drizzle/memory/schema.ts'
 import {

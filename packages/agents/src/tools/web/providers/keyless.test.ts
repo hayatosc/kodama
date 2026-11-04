@@ -1,5 +1,5 @@
 /** Anonymous protocol fixtures and cooldown-only rotation; no live quotas. @module */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { cooldown, keylessRequest, keylessResults, keylessSearch } from './keyless.ts'
 import type { KeylessAttempt, KeylessProvider, ProviderState } from './keyless.ts'
 

@@ -31,6 +31,6 @@ export function readLocalToken(path: URL = tokenPath): string {
     if (!token) throw new Error('Empty CLI token')
     return token
   } catch {
-    throw new Error('Start the local Worker first: nr dev:agents')
+    throw new Error('Start the local Worker first: vp run dev:agents')
   }
 }

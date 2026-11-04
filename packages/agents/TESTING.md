@@ -1,6 +1,6 @@
 # Test execution
 
-`nr check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
+`vp run check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
 The Vitest projects use different runtimes rather than different levels of coverage:
 
 - `vitest.node.config.ts` lists portable unit tests and native CLI tests. They do not load
@@ -70,7 +70,7 @@ Workers integration suite; isolation and storage checks were not disabled to red
 
 ## CI sharding
 
-On a GitHub-hosted runner the whole `nr check` took about 7 minutes, of which the tests took
+On a GitHub-hosted runner the whole `vp run check` took about 7 minutes, of which the tests took
 386 seconds. The test bodies take about 173 seconds in total; the rest is per-file setup in the
 workerd project. With isolation, every test file starts its own Miniflare runtime, and the main
 Vitest process serializes and sends the file's whole module graph to it (`transform` is about
@@ -82,7 +82,7 @@ full suite took 497 s in one process and 341 s as two concurrent `--shard` proce
 machine. CI therefore runs the tests as four `--shard` jobs on separate runners, beside one job
 for TypeScript, lint, formatting and the build. The `Check and build` job passes only when all of
 them pass, so it remains the single status to require. The test list and timeouts are unchanged.
-Locally, `nr check` still runs everything in one process.
+Locally, `vp run check` still runs everything in one process.
 
 ## Shared workerd runtime
 
@@ -122,10 +122,10 @@ usually depends on state another test or file left behind.
 From the workspace root:
 
 ```sh
-nr --filter @kodama/agents test --project node
-nr --filter @kodama/agents test --project workerd
-nr --filter @kodama/agents test src/agent/contact.test.ts
-nr --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
+vp run --filter @kodama/agents test --project node
+vp run --filter @kodama/agents test --project workerd
+vp run --filter @kodama/agents test src/agent/contact.test.ts
+vp run --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
 ```
 
 Use the JSON report's per-file and per-case durations to find expensive fixtures. Compare

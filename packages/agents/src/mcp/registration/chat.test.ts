@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers'
 import { Agent } from '../../agent/agent.ts'
 import { eq } from 'drizzle-orm'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import {
   credentials,
   mcpAssignments,

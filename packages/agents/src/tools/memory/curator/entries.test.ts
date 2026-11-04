@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
 import { exports } from 'cloudflare:workers'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { newAgentId, seedOnce } from '../../../testing/management.ts'
 import { db, memoryAgent, activeContents, runScriptedJob } from '../../../testing/memory.ts'
 import { waitForAnswer } from '../../../testing/rpc.ts'

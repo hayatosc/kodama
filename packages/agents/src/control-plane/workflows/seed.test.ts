@@ -4,7 +4,7 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import {
   agentConfigVersions,
   agentCredentialRefs,

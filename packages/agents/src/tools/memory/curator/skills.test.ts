@@ -4,7 +4,7 @@
  * @module
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { db, runScriptedJob } from '../../../testing/memory.ts'
 import { readSkill } from '../../../memory/store/skills.ts'
 import { seedOnce } from '../../../testing/management.ts'

@@ -2,7 +2,7 @@
 import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject } from 'cloudflare:test'
 import { eq } from 'drizzle-orm'
-import { expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vite-plus/test'
 import { mcpRequests } from '../../../drizzle/management/schema.ts'
 import { management, newAgentId, updateSettings } from '../../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
