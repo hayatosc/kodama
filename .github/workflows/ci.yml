@@ -14,7 +14,7 @@ concurrency:
 
 # The workerd test project starts a runtime and sends every module to it per test file. That work
 # is bound by the runner's CPU rather than by Vitest's worker count, so the tests are split across
-# runners instead. See packages/agents/TESTING.md — CI sharding.
+# runners instead. See docs/testing.md — CI sharding.
 jobs:
   static:
     name: Typecheck, lint and build

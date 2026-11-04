@@ -1,6 +1,6 @@
 # MCP client v1
 
-This package implements the agents-side MCP client. It does not expose a public HTTP endpoint,
+`packages/agents` implements the agents-side MCP client; paths below are relative to that package. It does not expose a public HTTP endpoint,
 implement a UI Worker, or connect to external chat systems. All verification uses local fixtures.
 
 ## Authority and catalog
@@ -9,7 +9,7 @@ Kodama is a single-operator installation. `AgentService.mcpManage(input)` is pri
 RPC, available only through a trusted host. The external host authenticates access; the agents Worker
 has no user IDs, principals, memberships, per-agent owners, or catalog creators. Registrations,
 reviewed definitions, and encrypted credentials belong to the installation. Catalog changes can
-invalidate existing selections on any agent. See [Single-operator model](SINGLE_OPERATOR.md).
+invalidate existing selections on any agent. See [Single-operator model](single-operator.md).
 
 Registration and discovery expose **no model tools**. Assignment requires explicit tool IDs, the
 current catalog digest, a server-bound credential, an active working agent, and `readOnly: true`. A catalog

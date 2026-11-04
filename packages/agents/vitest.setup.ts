@@ -1,6 +1,6 @@
 /**
  * Starts every test file from empty storage while the workerd project shares one runtime and
- * module graph between files (`isolate: false`); see TESTING.md — Shared workerd runtime.
+ * module graph between files (`isolate: false`); see docs/testing.md — Shared workerd runtime.
  *
  * @module
  */

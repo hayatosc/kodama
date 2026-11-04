@@ -1,5 +1,7 @@
 # Test execution
 
+This document covers the tests of `packages/agents`; paths are relative to that package.
+
 `vp run check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
 The Vitest projects use different runtimes rather than different levels of coverage:
 

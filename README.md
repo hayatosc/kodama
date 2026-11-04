@@ -42,6 +42,10 @@ packages/
   testing, and deployment.
 - [docs/memory.md](docs/memory.md): long-term memory, the memory agent, pruning and the archive,
   skills, and shared memory.
+- [docs/testing.md](docs/testing.md): how the tests run in Node and workerd, the shared workerd
+  runtime, and CI sharding.
+- [docs/mcp.md](docs/mcp.md): the agents-side MCP client.
+- [docs/single-operator.md](docs/single-operator.md): the single-operator trust boundary.
 - [design/README.md](design/README.md): the UI design system for the planned `packages/ui`:
   tokens, components with live previews, the agent avatar, and the SvelteKit implementation guide.
 
