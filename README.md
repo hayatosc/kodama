@@ -76,7 +76,7 @@ vp run build
 vp run cf:types
 ```
 
-Checks cover TypeScript (`tsc` and its Rust port `tsrs`), type-aware Oxlint, Oxfmt (both through Vite+), and workerd integration tests.
+Checks cover types (`typecheck` with `tsrs`, and `typecheck:compat` with `tsc` for compatibility), type-aware Oxlint, Oxfmt (both through Vite+), and workerd integration tests.
 Tests mock only the external model fetch; RPC, Pi Durable, SQLite, eviction, and
 alarms run in the Workers runtime without a real API key.
 `cf build` produces `.cloudflare/output/v0/` locally without deploying.
