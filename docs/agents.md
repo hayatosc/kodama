@@ -1078,7 +1078,7 @@ so only one process is using its local storage.
 
 | Command                                                    | Effect                                                                    |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `vp run check`                                             | TypeScript, type-aware Oxlint, Oxfmt check, and tests                     |
+| `vp run check`                                             | `tsc` and `tsrs` type checks, type-aware Oxlint, Oxfmt check, and tests   |
 | `vp run test`                                              | workspace tests                                                           |
 | `vp run format`                                            | format the repository                                                     |
 | `vp run build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
