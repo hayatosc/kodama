@@ -67,6 +67,22 @@ This is about a 20% local improvement, not a claimed GitHub-hosted runner result
 project alone ran its 351 tests in 9.41 seconds. Most remaining time belongs to the genuine
 Workers integration suite; isolation and storage checks were not disabled to reduce it.
 
+## CI sharding
+
+On a GitHub-hosted runner the whole `nr check` took about 7 minutes, of which the tests took
+386 seconds. The test bodies take about 173 seconds in total; the rest is per-file setup in the
+workerd project. With isolation, every test file starts its own Miniflare runtime, and the main
+Vitest process serializes and sends the file's whole module graph to it (`transform` is about
+70% of the reported duration). A CPU profile of the main process showed about 5 seconds of
+serialization per workerd file, and the workerd processes compile those modules again per file.
+
+That cost is bound by the runner's CPU, not by Vitest's worker count. Locally (4 cores), the
+full suite took 497 s in one process and 341 s as two concurrent `--shard` processes on the same
+machine. CI therefore runs the tests as four `--shard` jobs on separate runners, beside one job
+for TypeScript, lint, formatting and the build. The `Check and build` job passes only when all of
+them pass, so it remains the single status to require. Isolation, the test list and timeouts are
+unchanged. Locally, `nr check` still runs everything in one process.
+
 ## Targeted runs and measurement
 
 From the workspace root:
