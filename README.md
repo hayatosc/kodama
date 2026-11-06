@@ -76,7 +76,7 @@ vp run build
 vp run cf:types
 ```
 
-Checks cover types (`typecheck` with `tsrs`, and `typecheck:compat` with `tsc` for compatibility), type-aware Oxlint, Oxfmt (both through Vite+), and workerd integration tests.
+Local checks cover types (`typecheck` with `tsrs`; if it fails, `typecheck:compat` checks with `tsc`, which CI runs), type-aware Oxlint, Oxfmt (both through Vite+), and workerd integration tests.
 Tests mock only the external model fetch; RPC, Pi Durable, SQLite, eviction, and
 alarms run in the Workers runtime without a real API key.
 `cf build` produces `.cloudflare/output/v0/` locally without deploying.

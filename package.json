@@ -12,7 +12,7 @@
     "lint": "vp lint --type-aware",
     "format": "vp fmt --write .",
     "format:check": "vp fmt --check .",
-    "check": "pnpm typecheck && pnpm typecheck:compat && pnpm lint && pnpm format:check && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "devDependencies": {
     "tsrs": "0.20.1-ts7.1.0-beta",

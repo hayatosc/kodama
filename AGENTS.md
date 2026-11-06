@@ -50,7 +50,7 @@ mise installs the toolchain pinned in `mise.toml`: Node.js, pnpm 12.14.0, and th
 - Copy `packages/agents/.dev.vars.example` to `packages/agents/.dev.vars` and set a development `CREDENTIAL_KEK_V1` (base64 of 32 random bytes).
 - `vp run dev:agents`: start the local Worker; it exposes RPC, not a browser page.
 - `vp run agent dev seed-credentials < /secure/path/provider-keys.json` registers provider keys into local D1 and assigns both agent kinds; then `vp run agent seed` and `vp run agent send assistant "Hello"`: create the starting rows, then send to the first agent by its slug through the development adapter to Durable Object RPC; see `vp run agent --help` for history and cancellation.
-- `vp run check`: run both type checks, type-aware Oxlint, Oxfmt checks, and tests. `vp run typecheck` checks types with `tsrs`, the Rust port of the TypeScript compiler; `vp run typecheck:compat` checks them with TypeScript's own `tsc` for compatibility. Both must pass.
+- `vp run check`: run the type check (with `tsrs`), type-aware Oxlint, Oxfmt checks, and tests. `vp run typecheck` checks types with `tsrs`, the Rust port of the TypeScript compiler; if it fails, try `vp run typecheck:compat` to check with TypeScript's own `tsc` (which CI runs).
 - `vp run test`: run workspace tests.
 - From `packages/agents`, `vp run test:coverage` runs the tests with Istanbul coverage (text summary and `coverage/` HTML report).
 - `vp run format`: format the repository; review resulting changes.
