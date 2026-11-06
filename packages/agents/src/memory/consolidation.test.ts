@@ -5,7 +5,7 @@
  */
 import { uuidv7 } from '../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { applyOperation } from './store/records.ts'
 import type { Scope } from '../../drizzle/memory/schema.ts'
 import {
@@ -20,6 +20,10 @@ import { activeContents, db, memoryAgent, parameterLimitedDb } from '../testing/
 import { consolidateDaily, LEDGER_RETENTION_MS } from './consolidation.ts'
 import { changedScopes } from './store/maintenance.ts'
 import { searchMemory } from './store/search.ts'
+import { seedOnce } from '../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

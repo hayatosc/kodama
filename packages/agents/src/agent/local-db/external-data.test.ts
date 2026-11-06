@@ -1,7 +1,7 @@
 /** Unconditional known-URL admission and legacy metadata across eviction. @module */
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { newAgentId } from '../../testing/management.ts'
 import { openLocalDb } from './local.ts'
 import {

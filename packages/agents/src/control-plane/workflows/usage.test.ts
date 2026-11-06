@@ -2,7 +2,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { agents, usageDaily } from '../../../drizzle/management/schema.ts'
 import { usage } from '../../../drizzle/durable-object/schema.ts'
 import { credentialCall } from '../../testing/credentials.ts'

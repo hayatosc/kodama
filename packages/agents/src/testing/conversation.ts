@@ -6,7 +6,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { vi } from 'vitest'
+import { vi } from 'vite-plus/test'
 import { createAgentModels } from '../control-plane/models.ts'
 import { piEntries } from '../agent/local-db/pi-tables.ts'
 import {

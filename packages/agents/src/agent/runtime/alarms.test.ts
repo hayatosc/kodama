@@ -1,7 +1,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject, evictDurableObject, runDurableObjectAlarm } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { setAlarm, claimDueAlarms, acknowledgeAlarm, dispatchAlarms } from './alarms.ts'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness } from '@earendil-works/pi-durable'

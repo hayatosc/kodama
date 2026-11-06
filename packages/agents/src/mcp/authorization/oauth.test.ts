@@ -1,5 +1,5 @@
 /** Local OAuth fixtures exercise PKCE, single-use callbacks and purpose isolation, not real servers. @module */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { eq } from 'drizzle-orm'
 import { credentials, mcpOAuthTransactions } from '../../../drizzle/management/schema.ts'
 import { management } from '../../testing/management.ts'

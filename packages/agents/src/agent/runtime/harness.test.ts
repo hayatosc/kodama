@@ -7,7 +7,7 @@
 import { env } from 'cloudflare:workers'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness } from '@earendil-works/pi-durable'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { withHarness } from '../../testing/harness.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 // Load the provider before Durable Object work so Vite's module fetch is outside it.

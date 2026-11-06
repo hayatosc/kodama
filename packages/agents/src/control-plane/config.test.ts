@@ -1,5 +1,5 @@
 import { uuidv7 } from '../lib/uuid.ts'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import { agentSettingsSchema, defaultAgentSettings, parseSettings } from './config.ts'
 import { createAgentModels } from './models.ts'
 import { parseInput } from '../validation.ts'

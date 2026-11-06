@@ -1,7 +1,7 @@
 /** Real RPC subscriptions stream partial assistant output and reconnect to durable state. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vite-plus/test'
 import { newAgentId } from '../../testing/management.ts'
 import { PRUNE_LIMITS_KEY } from '../../memory/prune/runs.ts'
 import { STORAGE_MAINTENANCE_ERROR } from './pruning.ts'

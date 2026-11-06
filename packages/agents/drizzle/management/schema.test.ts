@@ -1,7 +1,7 @@
 /** Fresh management schema parity, defaults and constraints. @module */
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { managementDb } from '../../src/control-plane/db.ts'
 import * as schema from './schema.ts'
 
@@ -58,7 +58,7 @@ it('the newest management migration snapshot has the tables and columns of the D
       [...columns].sort(byCodeUnit),
     ]),
   )
-  // A mismatch means drizzle/management/schema.ts changed without `nr db:generate:management`.
+  // A mismatch means drizzle/management/schema.ts changed without `vp run db:generate:management`.
   expect(migrated).toEqual(declared)
 })
 

@@ -1,7 +1,7 @@
 /** Encrypted persistence and safe outward metadata. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'

@@ -1,5 +1,5 @@
 /** Pinned-workerd charset decoding and inert document extraction fixtures. @module */
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { decodeDocument, extractHtml } from './extract.ts'
 
 it.each([

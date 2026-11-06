@@ -1,6 +1,6 @@
 # MCP client v1
 
-This package implements the agents-side MCP client. It does not expose a public HTTP endpoint,
+`packages/agents` implements the agents-side MCP client; paths below are relative to that package. It does not expose a public HTTP endpoint,
 implement a UI Worker, or connect to external chat systems. All verification uses local fixtures.
 
 ## Authority and catalog
@@ -9,7 +9,7 @@ Kodama is a single-operator installation. `AgentService.mcpManage(input)` is pri
 RPC, available only through a trusted host. The external host authenticates access; the agents Worker
 has no user IDs, principals, memberships, per-agent owners, or catalog creators. Registrations,
 reviewed definitions, and encrypted credentials belong to the installation. Catalog changes can
-invalidate existing selections on any agent. See [Single-operator model](SINGLE_OPERATOR.md).
+invalidate existing selections on any agent. See [Single-operator model](single-operator.md).
 
 Registration and discovery expose **no model tools**. Assignment requires explicit tool IDs, the
 current catalog digest, a server-bound credential, an active working agent, and `readOnly: true`. A catalog
@@ -40,14 +40,14 @@ registration. Unsupported schema definitions remain visible for review but canno
 The existing authenticated development adapter forwards to the same RPC workflows:
 
 ```sh
-nr agent mcp list
-nr agent mcp status SERVER_UUID
-nr agent mcp connect SERVER_UUID
-nr agent mcp auth-status SERVER_UUID
-nr agent mcp add < registration.json
-nr agent mcp discover < discovery.json
-nr agent mcp assign < selection.json
-nr agent mcp unassign < removal.json
+vp run agent mcp list
+vp run agent mcp status SERVER_UUID
+vp run agent mcp connect SERVER_UUID
+vp run agent mcp auth-status SERVER_UUID
+vp run agent mcp add < registration.json
+vp run agent mcp discover < discovery.json
+vp run agent mcp assign < selection.json
+vp run agent mcp unassign < removal.json
 ```
 
 `update`, `bearer`, `client`, `initial-token`, `attach`, and `disconnect` also take a JSON object on
@@ -57,12 +57,12 @@ UI link. Use `login` for the UI-free native flow below.
 
 ### UI-free browser login
 
-Start `nr dev:agents` with the local KEK and authenticated CLI adapter configured, and register the
+Start `vp run dev:agents` with the local KEK and authenticated CLI adapter configured, and register the
 MCP endpoint with `mcp add`. Then run:
 
 ```sh
-nr agent mcp login SERVER_UUID
-nr agent mcp auth-status SERVER_UUID
+vp run agent mcp login SERVER_UUID
+vp run agent mcp auth-status SERVER_UUID
 ```
 
 `login` binds an ephemeral port **only on 127.0.0.1**, prints the issuer/resource/client/scope consent
@@ -80,8 +80,8 @@ client. If DCR is unavailable or disallows loopback redirects, register a native
 and save its configuration through stdin:
 
 ```sh
-nr agent mcp client-loopback < /secure/path/native-client.json
-nr agent mcp login SERVER_UUID --callback-port 49152
+vp run agent mcp client-loopback < /secure/path/native-client.json
+vp run agent mcp login SERVER_UUID --callback-port 49152
 ```
 
 The JSON has `serverId`, `client: { issuer, clientId, method, redirectUri, registration:
@@ -192,7 +192,7 @@ in the existing inbox; scope expansion requires fresh operator consent.
 
 ## Local verification
 
-Run `nr check` at the repository root. Fixtures exercise workerd RPC, D1, object SQLite, encrypted
+Run `vp run check` at the repository root. Fixtures exercise workerd RPC, D1, object SQLite, encrypted
 credentials, eviction, OAuth discovery and exchange, refresh contention, submission provenance and selection,
 revocation, and failure refusal. No real provider keys or external MCP connection are needed. Passing
 these checks does not establish interoperability with a particular production server or browser UI.

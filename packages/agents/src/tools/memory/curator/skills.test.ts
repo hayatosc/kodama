@@ -4,9 +4,13 @@
  * @module
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { db, runScriptedJob } from '../../../testing/memory.ts'
 import { readSkill } from '../../../memory/store/skills.ts'
+import { seedOnce } from '../../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 

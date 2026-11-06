@@ -4,7 +4,7 @@
  * @module
  */
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { agents } from '../../drizzle/management/schema.ts'
 import { management, newAgentId } from '../testing/management.ts'
 import { reportApplied } from './versions.ts'

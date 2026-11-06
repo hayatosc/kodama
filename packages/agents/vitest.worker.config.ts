@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
 import * as v from 'valibot'
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite-plus'
 import { nodeTestFiles } from './vitest.node.config.ts'
 
 const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/memory/migrations`)
@@ -39,6 +39,8 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
     exclude: nodeTestFiles,
     setupFiles: ['vitest.setup.ts'],
+    // Files share one runtime and module graph; vitest.setup.ts empties storage before each file.
+    isolate: false,
     // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
     fsModuleCache: false,
     testTimeout: 15_000,

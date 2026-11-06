@@ -1,5 +1,5 @@
 /** Real loopback HTTP fixtures for CLI OAuth, without a browser or external services. @module */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vite-plus/test'
 import * as v from 'valibot'
 import { loginMcp } from './mcp-login.ts'
 

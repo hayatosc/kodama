@@ -5,7 +5,7 @@
  */
 import { createExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { AgentObject } from '../src/agent-object.ts'
 import AgentService from '../src/index.ts'
 import CliService, { Agent } from './worker.ts'

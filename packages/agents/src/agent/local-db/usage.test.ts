@@ -1,7 +1,7 @@
 /** Terminal idempotency, incomplete measurements and interrupted invocation recovery. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import { usage } from '../../../drizzle/durable-object/schema.ts'
 import { newAgentId } from '../../testing/management.ts'

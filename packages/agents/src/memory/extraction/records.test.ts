@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { recordFor } from './records.ts'
 

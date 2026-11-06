@@ -6,13 +6,17 @@
  */
 import { uuidv7 } from '../../lib/uuid.ts'
 import { and, eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vite-plus/test'
 import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
 import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { db, parameterLimitedDb, record, write } from '../../testing/memory.ts'
 import { readableScopes } from './db.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import { searchMemory } from './search.ts'
+import { seedOnce } from '../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 const NOW = 1_800_000_000_000
 

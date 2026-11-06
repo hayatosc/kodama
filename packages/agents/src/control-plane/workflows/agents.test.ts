@@ -4,7 +4,7 @@ import { grantTestCredentials, testCredentialRefs } from '../../testing/credenti
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vite-plus/test'
 import {
   agentConfigVersions,
   agentCredentialRefs,
@@ -17,6 +17,9 @@ import { write, db } from '../../testing/memory.ts'
 import { agentScope } from '../../memory/store/db.ts'
 import { memoryRecords } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 

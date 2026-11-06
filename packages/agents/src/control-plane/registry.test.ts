@@ -1,7 +1,7 @@
 import { listDurableObjectIds } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from './config.ts'
 import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'

@@ -6,7 +6,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { skills } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
 import { curateSkills, readSkill, setSkillStatus, visibleSkills, writeSkill } from './skills.ts'
@@ -22,7 +22,10 @@ import {
 import { context, db } from '../../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId } from '../../testing/management.ts'
+import { newAgentId, seedOnce } from '../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 const DAY = 24 * 60 * 60 * 1000
 

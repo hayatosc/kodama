@@ -1,6 +1,6 @@
 /** Attention is a read-only projection of real Pi waits and durable peer state. @module */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { withHarness } from '../../testing/harness.ts'
 import { openLocalDb } from '../local-db/local.ts'
 import {

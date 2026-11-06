@@ -155,11 +155,11 @@ contain metadata only. Live D1 status and grant checks remain authoritative for 
 resolution; removing response redaction does not weaken revocation or authorize credential access.
 
 For local development, set a stable development KEK and run
-`nr agent dev seed-credentials < /secure/path/provider-keys.json`.
-Alternatively, register an API key with `nr agent credentials add --provider openai` using piped
-stdin, or run `nr agent credentials login --provider openai` for ChatGPT OAuth. Registration/login
+`vp run agent dev seed-credentials < /secure/path/provider-keys.json`.
+Alternatively, register an API key with `vp run agent credentials add --provider openai` using piped
+stdin, or run `vp run agent credentials login --provider openai` for ChatGPT OAuth. Registration/login
 lazily initialize identity without creating agents. Pass the returned ID to
-`nr agent seed --credential ID` and `nr agent create second --credential ID`; use
+`vp run agent seed --credential ID` and `vp run agent create second --credential ID`; use
 `credentials assign ID AGENT` only when changing an existing selection. The JSON object maps provider
 IDs (`openai`, `anthropic`, `google`, `xai`) to keys. The command reads stdin, uses the authenticated
 localhost-only development adapter, registers encrypted rows, and assigns both agent kinds. Keep

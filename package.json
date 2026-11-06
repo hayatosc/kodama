@@ -6,18 +6,18 @@
     "agent": "pnpm --filter @kodama/agents cli",
     "dev:agents": "pnpm --filter @kodama/agents dev",
     "typecheck": "pnpm -r typecheck",
+    "typecheck:compat": "pnpm -r typecheck:compat",
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r test:coverage",
-    "lint": "oxlint --type-aware",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check .",
+    "lint": "vp lint --type-aware",
+    "format": "vp fmt --write .",
+    "format:check": "vp fmt --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "devDependencies": {
-    "oxfmt": "0.73.0",
-    "oxlint": "1.88.0",
-    "oxlint-tsgolint": "7.0.2004",
-    "typescript": "7.0.2"
+    "tsrs": "0.20.1-ts7.1.0-beta",
+    "typescript": "7.0.2",
+    "vite-plus": "catalog:"
   },
   "engines": {
     "node": ">=22.19.0"

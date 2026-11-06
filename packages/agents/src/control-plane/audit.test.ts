@@ -1,6 +1,6 @@
 /** Audit reads preserve replay history, actor identity and safe, exclusive pagination. @module */
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { auditLog } from '../../drizzle/management/schema.ts'
 import { agentService, caller } from '../testing/management.ts'
 import { uuidv7 } from '../lib/uuid.ts'

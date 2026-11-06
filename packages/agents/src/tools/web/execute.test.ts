@@ -1,8 +1,8 @@
 /** Real tool execution with mocked web/model traffic, in-memory rate/cooldown state, durable contact and known URLs. @module */
 import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
-import { expect, it, vi } from 'vitest'
-import { newAgentId, updateSettings } from '../../testing/management.ts'
+import { beforeAll, expect, it, vi } from 'vite-plus/test'
+import { newAgentId, updateSettings, seedOnce } from '../../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
 import {
   isMemoryAgentRequest,
@@ -31,6 +31,9 @@ import {
   searchProviderState,
   startSearchAttempt,
 } from './execute.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 useMockModel()
 

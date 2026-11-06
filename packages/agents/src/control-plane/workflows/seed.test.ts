@@ -4,7 +4,7 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import {
   agentConfigVersions,
   agentCredentialRefs,
@@ -13,7 +13,7 @@ import {
   agents,
   systemSettings,
 } from '../../../drizzle/management/schema.ts'
-import { agentService, management } from '../../testing/management.ts'
+import { agentService, management, seedOnce } from '../../testing/management.ts'
 import { activeContents, memoryAgent } from '../../testing/memory.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
 import { piEntries } from '../../agent/local-db/pi-tables.ts'
@@ -21,6 +21,9 @@ import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
 import { seed, FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG } from './seed.ts'
 import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 

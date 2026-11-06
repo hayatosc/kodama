@@ -2,7 +2,7 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { artifacts } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../agent/local-db/local.ts'
 import { setAlarm } from '../agent/runtime/alarms.ts'

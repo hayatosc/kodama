@@ -1,5 +1,5 @@
 /** Envelope boundaries never promote external instructions into trusted content. @module */
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { boundedSearch, externalEnvelope } from './search-result.ts'
 
 it('escapes fake system messages and JSON delimiters inside the untrusted payload', () => {

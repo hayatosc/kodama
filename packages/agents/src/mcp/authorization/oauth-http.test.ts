@@ -1,5 +1,5 @@
 /** OAuth discovery fixtures cover issuer pinning, fallback and confidential client authentication. @module */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import {
   discoverMcpOAuth,
   mcpClientAuthentication,

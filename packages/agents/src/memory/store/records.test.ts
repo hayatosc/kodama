@@ -1,7 +1,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { applyOperation } from './records.ts'
 import { memoryDb } from './db.ts'
 import type { NewRecord } from './records.ts'
