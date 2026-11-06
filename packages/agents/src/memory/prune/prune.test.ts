@@ -174,13 +174,18 @@ describe('pruning', () => {
     const agentId = await newAgentId()
     let release = () => {}
     let gated = false
+    let waiting = false
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
     mockModel({
       // Answer 10 reports a context in the background band, so answer 11 starts a compaction.
       usage: (n) => (n === 10 ? BACKGROUND_USAGE : COMPACT_AFTER_TURN_7(n)),
-      gate: () => (gated ? gate : undefined),
+      gate: () => {
+        if (!gated) return undefined
+        waiting = true
+        return gate
+      },
     })
     await compactedAgent(agentId, 'first')
     const firstHead = (await headOf(agentId)) ?? 0
@@ -188,6 +193,9 @@ describe('pruning', () => {
     gated = true
     // The background compaction starts here and waits for the gate; the turn itself completes.
     await say(agentId, 'background', 'Turn 11.')
+    // The turn can answer before the compaction reaches the gate. Pruning must start after that:
+    // racing the compaction's start, it hung in CI until the object's input gate was reset.
+    await expect.poll(() => waiting).toBe(true)
     const stub = env.AGENTS.getByName(agentId)
 
     expect(await stub.prune({ force: true })).toBe('deferred')
