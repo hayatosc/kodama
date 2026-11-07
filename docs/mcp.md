@@ -1,0 +1,198 @@
+# MCP client v1
+
+`packages/agents` implements the agents-side MCP client; paths below are relative to that package. It does not expose a public HTTP endpoint,
+implement a UI Worker, or connect to external chat systems. All verification uses local fixtures.
+
+## Authority and catalog
+
+Kodama is a single-operator installation. `AgentService.mcpManage(input)` is private service-binding
+RPC, available only through a trusted host. The external host authenticates access; the agents Worker
+has no user IDs, principals, memberships, per-agent owners, or catalog creators. Registrations,
+reviewed definitions, and encrypted credentials belong to the installation. Catalog changes can
+invalidate existing selections on any agent. See [Single-operator model](single-operator.md).
+
+Registration and discovery expose **no model tools**. Assignment requires explicit tool IDs, the
+current catalog digest, a server-bound credential, an active working agent, and `readOnly: true`. A catalog
+update never selects additions. Definitions are immutable by digest; names are fixed ASCII
+`mcp_<server short ID>_<tool short ID>`. The registry changes only at the existing safe-apply boundary.
+Live management checks reject revoked credentials, removed selections, changed definitions,
+disabled tools, and disabled registrations before each send, including after refresh.
+
+Management operations:
+
+| Operation           | Input fields besides `operation`                                                    |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| `add`               | `name`, `endpoint`                                                                  |
+| `list`              | none                                                                                |
+| `status`, `connect` | `serverId`                                                                          |
+| `update`            | `serverId`; optional `name`, `endpoint`, `enabled`                                  |
+| `discover`          | `serverId`; optional `credentialId`                                                 |
+| `bearer`            | `serverId`, `secret`                                                                |
+| `assign`            | `serverId`, `credentialId`, `agentId`, `toolIds`, `catalogDigest`, `readOnly: true` |
+| `unassign`          | `serverId`, `agentId`                                                               |
+| `disconnect`        | `serverId`, `credentialId`                                                          |
+
+IDs in these operations are UUIDs, not agent slugs. Inspection errors are recorded separately from
+registration. Unsupported schema definitions remain visible for review but cannot be assigned.
+
+## CLI
+
+The existing authenticated development adapter forwards to the same RPC workflows:
+
+```sh
+vp run agent mcp list
+vp run agent mcp status SERVER_UUID
+vp run agent mcp connect SERVER_UUID
+vp run agent mcp auth-status SERVER_UUID
+vp run agent mcp add < registration.json
+vp run agent mcp discover < discovery.json
+vp run agent mcp assign < selection.json
+vp run agent mcp unassign < removal.json
+```
+
+`update`, `bearer`, `client`, `initial-token`, `attach`, and `disconnect` also take a JSON object on
+stdin. Secret-bearing JSON must come from a secure source, not command-line arguments or repository
+files. The CLI never receives access or refresh tokens from RPC. `connect` still prints the canonical
+UI link. Use `login` for the UI-free native flow below.
+
+### UI-free browser login
+
+Start `vp run dev:agents` with the local KEK and authenticated CLI adapter configured, and register the
+MCP endpoint with `mcp add`. Then run:
+
+```sh
+vp run agent mcp login SERVER_UUID
+vp run agent mcp auth-status SERVER_UUID
+```
+
+`login` binds an ephemeral port **only on 127.0.0.1**, prints the issuer/resource/client/scope consent
+summary, and opens the system browser. If launching fails, open the printed authorization URL
+manually. Keep the terminal running. The AS redirects to
+`http://127.0.0.1:<port>/auth/mcp/callback`; the CLI verifies the exact host, path, state, and single-use
+response, then forwards it over the existing authenticated development adapter. Agents exchange the
+code with PKCE and store tokens in the vault. The terminal receives only credential/status metadata.
+No UI Worker, public tunnel, deploy, or `KODAMA_UI_ORIGIN` is needed. Ctrl-C cancels an unclaimed
+transaction; the listener closes on completion, error, or the ten-minute deadline.
+
+The AS must support native loopback redirects. The CLI uses a preregistered client for the exact
+redirect, or DCR with `application_type: native`; it never substitutes the UI metadata-document
+client. If DCR is unavailable or disallows loopback redirects, register a native client with the AS
+and save its configuration through stdin:
+
+```sh
+vp run agent mcp client-loopback < /secure/path/native-client.json
+vp run agent mcp login SERVER_UUID --callback-port 49152
+```
+
+The JSON has `serverId`, `client: { issuer, clientId, method, redirectUri, registration:
+"preregistered" }`, and an optional `secret`. Its `redirectUri` must be exactly
+`http://127.0.0.1:49152/auth/mcp/callback`; do not use `localhost`, another path, or a wildcard.
+Explicit ports must be 1024–65535; omit the option (or use 0) for an ephemeral DCR port. If the AS
+cannot support this native flow, login stops rather than weakening redirect checks.
+
+Optional login flags are `--issuer URL`, `--scope "space separated scopes"`,
+`--initial-token-id CREDENTIAL_UUID`, and `--request-id CHAT_REQUEST_UUID`. The last option resumes
+only the original chat discovery. Without a chat request, use `mcp discover` with the returned
+credential ID, review the catalog, and explicitly `mcp assign`; consent alone exposes no tools.
+Do not share callback URLs or paste them into chat. Access tokens, refresh tokens, client secrets,
+and PKCE verifiers never pass through this listener or the terminal.
+
+## OAuth host contract
+
+Set the non-secret `KODAMA_UI_ORIGIN` binding in `cloudflare.config.ts` to the actual canonical UI
+origin before enabling the future UI's browser authorization. Its checked-in empty value fails
+closed for that flow; no production origin is assumed. The UI flow's only redirect URI is `${KODAMA_UI_ORIGIN}/auth/mcp/callback`, and the client
+metadata document URL is `${KODAMA_UI_ORIGIN}/oauth/mcp-client.json`.
+
+The future UI Worker must authenticate the installation operator through Access, verifying JWT
+signatures, issuer, audience, and its access policy; protect initiation with origin/CSRF checks; and
+maintain a Secure, HttpOnly, SameSite=Lax browser-binding cookie. It calls
+`AgentService.mcpAuth(input)` over its service binding, without passing a user identity:
+
+- `metadata`: return the fixed public client document.
+- `client`: save `serverId`, `client` (issuer, clientId, method, redirectUri,
+  registration `preregistered`), and optional secret. Methods are `none`, `client_secret_basic`,
+  and `client_secret_post`.
+- `initial-token`: save an operator-supplied DCR `secret`, bound to `serverId`, `issuer`, and `registrationEndpoint`.
+- `begin`: supply `serverId`, server-side `browserNonce`, optional `issuer`, `scope`, `initialTokenId`,
+  and chat `requestId`. The result contains a consent summary and authorization URL, not tokens.
+- `complete`: supply the same browser binding, returned `state`, `code`, optional response `issuer`,
+  or `denied: true`. A transaction can be claimed only once.
+- `attach`: bind an existing server-bound `credentialId` to its original chat `requestId`, then resume only
+  initial discovery. This is also the secure Bearer-input path for chat registration.
+- `status`: supply `serverId`; receive only credential and transaction metadata for that server, never secrets.
+
+The CLI-only counterparts `client-loopback`, `begin-loopback`, and `complete-loopback` retain these
+private-host and vault boundaries. Begin/complete require an exact validated `loopbackRedirectUri`
+and a process-local random `browserNonce`. A native transaction cannot be completed through the UI
+callback, or at another loopback port. The normal UI operations reject loopback overrides.
+
+Discovery supports protected-resource metadata, RFC 8414 and OIDC metadata, exact issuer pinning,
+preregistration, metadata-document clients, and explicit dynamic registration. Authorization Code
+uses PKCE S256 and a ten-minute state transaction. Browser, registration revision,
+issuer, client, resource, scope, and redirect URI are bound to the transaction. The UI must display
+the consent summary before navigating and must never log callback codes or state. Its callback
+must use `Cache-Control: no-store` and `Referrer-Policy: no-referrer` and redirect to a fixed result
+page without external content. These UI routes are intentionally not implemented in this package.
+
+MCP tokens, client secrets, initial registration tokens, and verifiers extend the existing encrypted
+vault under a separate MCP purpose. They never enter provider credential references. Refresh uses
+an exclusive persisted lease and revision checks; concurrent callers wait for its result. Uncertain
+exchange or rotation requires reauthentication rather than replay. Disconnect invalidates locally
+before best-effort AS revocation. The result distinguishes unconfirmed external revocation.
+
+## Chat registration
+
+The default built-in `mcp_registration` tool accepts register/status/connect/discover/assign requests,
+not actor identity, credentials, or approval flags. Ordinary `send` / `sendMessage` (including steer)
+is the only reply admission path. The host resolves the adopted submission IDs to their existing
+conversation entries and parses the original user text and timestamp there; there is no second
+intake receipt table or owner-specific API. Pi's request index deduplicates retries. Root conversation,
+adopted input set and running-task checks remain. Unstamped `pi.user`, peer, schedule, and mixed-origin
+runs cannot authorize mutations. Read-only status can be shown after an MCP completion event.
+
+The deliberately limited, whole-message operator syntax is:
+
+```text
+/mcp register NAME
+/mcp register NAME https://server.example/mcp
+/mcp assign PROPOSAL_UUID TOOL_UUID,TOOL_UUID AGENT_UUID
+```
+
+Names resolve only against the existing catalog. Unknown or ambiguous endpoints must be clarified
+in chat, never searched or invented. The host attempts initial unauthenticated inspection and asks
+for a secure connection when needed. OAuth consent or credential attachment resumes discovery,
+**not assignment**. A host-generated, paged proposal lists endpoint, revision, tool IDs, names,
+external descriptions, and rejected definitions. Its default target is the current agent; a proposal
+may target another active working agent in this installation. Only the exact proposal/tool/agent confirmation
+consumes the short-lived, single-use selection intent. A vague OK does not count, and there is no
+second UI approval after that confirmation.
+
+Progress is durable. Recovery resumes discovery or deduplicated inbox delivery, never code exchange,
+assignment, or a failed tool call. Completion notices have MCP provenance, not direct-operator input provenance.
+
+## Execution limits and external data
+
+Only public HTTPS remote Streamable HTTP with MCP `2025-11-25` is supported. No stdio, redirects,
+long-lived background stream, SSE reconnection, or automatic call replay is used. Every selected tool
+has `replay: 'unsafe'`. Per-object concurrency is two; initialization is bounded to five seconds,
+discovery to ten, and execution to thirty. HTTP bodies are limited to 1 MiB, discovery to 100 tools
+and ten pages, schema nesting to twenty, and model output to 128 KiB. Sessions are ephemeral and
+bound to the exact endpoint; deletion is best effort.
+
+Descriptions, schemas, annotations, results, and links are external data, never permissions. They
+cannot grant web-fetch URLs or alter tool policy. Unsupported image/audio/resource content is
+omitted and marked; validated structured content and text are wrapped in a provenance envelope.
+A list-change notification marks the catalog stale and creates an inbox notice, not a discovery.
+
+A durable call journal records safe classifications, not arguments or outputs. An interrupted call
+becomes `outcome_unknown`. Failure refusal survives model steps and eviction, and only an adopted
+authenticated direct-operator input opens a new retry epoch. Credential failures and catalog changes appear
+in the existing inbox; scope expansion requires fresh operator consent.
+
+## Local verification
+
+Run `vp run check` at the repository root. Fixtures exercise workerd RPC, D1, object SQLite, encrypted
+credentials, eviction, OAuth discovery and exchange, refresh contention, submission provenance and selection,
+revocation, and failure refusal. No real provider keys or external MCP connection are needed. Passing
+these checks does not establish interoperability with a particular production server or browser UI.

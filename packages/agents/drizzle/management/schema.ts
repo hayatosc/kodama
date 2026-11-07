@@ -1,18 +1,20 @@
 /**
- * The D1 schema of the management database: one file for the one database. `nr db:generate:management`
+ * The D1 schema of the management database: one file for the one database. `vp run db:generate:management`
  * turns this file into the migrations in ./migrations.
  *
  * Times are Unix epoch milliseconds; IDs are lowercase UUID text. Ledger rows are never deleted, so
  * an agent ID is never reused, and foreign keys keep SQLite's default `NO ACTION`. Writes use plain
  * inserts, so a constraint violation fails its statement and rolls back the whole `batch()`; only
- * the idempotent seed and the registration of a principal use `ON CONFLICT DO NOTHING`, and
+ * idempotent registrations use `ON CONFLICT DO NOTHING`, and
  * reconciliation upserts its cursor.
  *
  * @see docs/agents.md — Management database
  *
  * @module
  */
+import { eq } from 'drizzle-orm'
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -23,25 +25,72 @@ import {
   unique,
 } from 'drizzle-orm/sqlite-core'
 
-/**
- * Who can act: a person signed in through Access, a service token, or an agent. A principal is
- * registered on its first management RPC call.
- */
-export const PRINCIPAL_KINDS = ['user', 'service', 'agent'] as const
-/** The installation-wide role; roles on one agent are in `agent_members`. */
-export const SYSTEM_ROLES = ['owner'] as const
+/** Management actions originate from the authenticated operator or internal automation, not users. */
+export const MANAGEMENT_SOURCES = ['operator', 'system'] as const
 
-/** People and services that call management RPC. */
-export const principals = sqliteTable('principals', {
-  principalId: text('principal_id').primaryKey(),
-  kind: text('kind', { enum: PRINCIPAL_KINDS }).notNull(),
-  /** The Access email, service token ID, or agent ID, as the calling Worker authenticated it. */
-  externalId: text('external_id').notNull().unique(),
-  displayName: text('display_name').notNull(),
-  systemRole: text('system_role', { enum: SYSTEM_ROLES }),
-  createdAt: integer('created_at').notNull(),
-  disabledAt: integer('disabled_at'),
+/** Short-lived host-recognized instructions; the source identity is not model supplied. */
+export const mcpIntents = sqliteTable('mcp_intents', {
+  intentId: text('intent_id').primaryKey(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  entryId: integer('entry_id').notNull(),
+  submissionId: text('submission_id').notNull(),
+  instructionJson: text('instruction_json').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  consumedAt: integer('consumed_at'),
 })
+
+/** Registration progress survives OAuth without preserving assignment authority. */
+export const mcpRequests = sqliteTable('mcp_requests', {
+  requestId: text('request_id').primaryKey(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  entryId: integer('entry_id').notNull(),
+  submissionId: text('submission_id').notNull(),
+  serverId: text('server_id'),
+  serverRevision: integer('server_revision'),
+  credentialId: text('credential_id'),
+  status: text('status', {
+    enum: [
+      'awaiting_endpoint',
+      'registered_unverified',
+      'awaiting_owner_auth',
+      'ready_for_discovery',
+      'discovered',
+      'failed',
+    ],
+  }).notNull(),
+  name: text('name').notNull(),
+  notifiedAt: integer('notified_at'),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/** Host-generated review proposal: confirmation must name this target and a subset of its tool IDs. */
+export const mcpProposals = sqliteTable('mcp_proposals', {
+  proposalId: text('proposal_id').primaryKey(),
+  requestId: text('request_id').notNull(),
+  sourceAgentId: text('source_agent_id').notNull(),
+  conversationId: text('conversation_id').notNull(),
+  serverId: text('server_id').notNull(),
+  serverRevision: integer('server_revision').notNull(),
+  catalogDigest: text('catalog_digest').notNull(),
+  credentialId: text('credential_id').notNull(),
+  agentId: text('agent_id').notNull(),
+  toolIdsJson: text('tool_ids_json').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+})
+
+/** Atomic MCP authorization fences: a false predicate aborts the entire D1 batch. */
+export const mcpCommits = sqliteTable(
+  'mcp_commits',
+  {
+    operationId: text('operation_id').primaryKey(),
+    authorized: integer('authorized', { mode: 'boolean' }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [check('mcp_commit_authorized', eq(table.authorized, true).inlineParams())],
+)
 
 /** A working agent, or a dedicated agent under a reserved object name. */
 export const AGENT_KINDS = ['working', 'dedicated'] as const
@@ -78,8 +127,6 @@ export const agents = sqliteTable(
     currentVersion: integer('current_version').notNull(),
     /** The newest version the object reported as fully applied; 0 before the first. */
     appliedVersion: integer('applied_version').notNull().default(0),
-    /** NULL for dedicated agents, which the installation owns. */
-    ownerId: text('owner_id').references(() => principals.principalId),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -101,24 +148,141 @@ export const agentConfigVersions = sqliteTable(
     /** The version's `AgentSettings` as JSON. */
     settingsJson: text('settings_json').notNull(),
     schemaVersion: integer('schema_version').notNull(),
-    /** NULL when the system wrote it (the seed). */
-    authorId: text('author_id').references(() => principals.principalId),
+    source: text('source', { enum: MANAGEMENT_SOURCES }).notNull(),
     comment: text('comment'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [primaryKey({ columns: [t.agentId, t.version] })],
 )
 
-/** Encrypted provider secrets; only src/credentials/ may access these rows. */
+/** Installation-wide MCP registrations; registration alone grants no tools to an agent. */
+export const mcpServers = sqliteTable('mcp_servers', {
+  serverId: text('server_id').primaryKey(),
+  shortId: text('short_id').notNull().unique(),
+  name: text('name').notNull(),
+  endpoint: text('endpoint').notNull().unique(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  revision: integer('revision').notNull().default(1),
+  catalogDigest: text('catalog_digest'),
+  catalogVersion: integer('catalog_version').notNull().default(0),
+  inspectedAt: integer('inspected_at'),
+  inspectionError: text('inspection_error'),
+  stale: integer('stale', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+/** Stable tool IDs survive renames of the registration; changed definitions require new approval. */
+export const mcpTools = sqliteTable(
+  'mcp_tools',
+  {
+    toolId: text('tool_id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    remoteName: text('remote_name').notNull(),
+    modelName: text('model_name').notNull().unique(),
+    serverRevision: integer('server_revision').notNull(),
+    digest: text('digest').notNull(),
+    definitionJson: text('definition_json').notNull(),
+    rejection: text('rejection'),
+    present: integer('present', { mode: 'boolean' }).notNull().default(true),
+  },
+  (t) => [unique('mcp_tool_remote_name').on(t.serverId, t.remoteName)],
+)
+
+/** Immutable definitions retained for pinned applied versions, never overwritten by discovery. */
+export const mcpDefinitions = sqliteTable('mcp_definitions', {
+  digest: text('digest').primaryKey(),
+  definitionJson: text('definition_json').notNull(),
+})
+
+/** Live selected-tool index; removing a row rejects sends before a delayed safe apply. */
+export const mcpAssignments = sqliteTable(
+  'mcp_assignments',
+  {
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.agentId),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    toolId: text('tool_id')
+      .notNull()
+      .references(() => mcpTools.toolId),
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => credentials.credentialId),
+    digest: text('digest').notNull(),
+    serverRevision: integer('server_revision').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.agentId, t.toolId] }),
+    index('mcp_assignments_credential').on(t.credentialId),
+  ],
+)
+
+/** One-time browser-bound OAuth exchanges; the verifier is an envelope in the existing vault. */
+export const mcpOAuthTransactions = sqliteTable('mcp_oauth_transactions', {
+  requestId: text('request_id'),
+  transactionId: text('transaction_id').primaryKey(),
+  serverId: text('server_id')
+    .notNull()
+    .references(() => mcpServers.serverId),
+  serverRevision: integer('server_revision').notNull(),
+  stateDigest: text('state_digest').notNull().unique(),
+  browserDigest: text('browser_digest').notNull(),
+  bindingJson: text('binding_json').notNull(),
+  verifierId: text('verifier_id').notNull(),
+  status: text('status', {
+    enum: ['pending', 'exchanging', 'completed', 'denied', 'reauth_required'],
+  }).notNull(),
+  credentialId: text('credential_id'),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+/** Issuer-bound client registration, including failed DCR claims to prevent automatic replay. */
+export const mcpOAuthClients = sqliteTable(
+  'mcp_oauth_clients',
+  {
+    registrationId: text('registration_id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => mcpServers.serverId),
+    issuer: text('issuer').notNull(),
+    redirectUri: text('redirect_uri').notNull(),
+    metadataJson: text('metadata_json'),
+    secretId: text('secret_id'),
+    status: text('status', { enum: ['registering', 'ready', 'reauth_required'] }).notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [unique('mcp_oauth_client_binding').on(t.serverId, t.issuer, t.redirectUri)],
+)
+
+/** Encrypted provider and MCP secrets; only src/credentials/ may access these rows. */
 export const credentials = sqliteTable(
   'credentials',
   {
     credentialId: text('credential_id').primaryKey(),
-    kind: text('kind', { enum: ['api_key', 'oauth_subscription'] }).notNull(),
+    kind: text('kind', {
+      enum: [
+        'api_key',
+        'oauth_subscription',
+        'mcp_bearer',
+        'mcp_oauth',
+        'mcp_client',
+        'mcp_transaction',
+      ],
+    }).notNull(),
+    purpose: text('purpose', { enum: ['model_provider', 'mcp_server'] })
+      .notNull()
+      .default('model_provider'),
     provider: text('provider').notNull(),
-    /** NULL means installation ownership; otherwise the owning principal. */
-    ownerId: text('owner_id').references(() => principals.principalId),
     status: text('status', { enum: ['active', 'revoked', 'needs_reauth'] }).notNull(),
+    mcpAuthState: text('mcp_auth_state', {
+      enum: ['reauth_required', 'scope_required', 'outcome_unknown'],
+    }),
     revision: integer('revision').notNull(),
     ciphertext: text('ciphertext'),
     iv: text('iv'),
@@ -216,27 +380,6 @@ export const agentCredentialRefs = sqliteTable(
   ],
 )
 
-/** Roles on one agent. */
-export const MEMBER_ROLES = ['owner', 'operator', 'user', 'viewer'] as const
-
-/** Who may do what with one agent. */
-export const agentMembers = sqliteTable(
-  'agent_members',
-  {
-    agentId: text('agent_id')
-      .notNull()
-      .references(() => agents.agentId),
-    principalId: text('principal_id')
-      .notNull()
-      .references(() => principals.principalId),
-    role: text('role', { enum: MEMBER_ROLES }).notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.agentId, t.principalId] }),
-    index('agent_members_by_principal').on(t.principalId),
-  ],
-)
-
 /** Keys of `system_settings`. */
 export const SYSTEM_SETTING_KEYS = ['install_id', 'reconcile_cursor', 'usage_sweep_cursor'] as const
 
@@ -250,7 +393,7 @@ export const systemSettings = sqliteTable('system_settings', {
 })
 
 /** What an audit row is about. */
-export const AUDIT_TARGETS = ['agent', 'principal', 'system'] as const
+export const AUDIT_TARGETS = ['agent', 'system'] as const
 
 /** Append-only audit, written in the same batch as the change it records. */
 export const auditLog = sqliteTable(
@@ -260,8 +403,7 @@ export const auditLog = sqliteTable(
     /** The retry key: a resent change fails here, and the retry is answered from the first. */
     opId: text('op_id').notNull().unique(),
     at: integer('at').notNull(),
-    /** NULL for the system (seed, reconciliation). */
-    actorId: text('actor_id').references(() => principals.principalId),
+    source: text('source', { enum: MANAGEMENT_SOURCES }).notNull(),
     action: text('action').notNull(),
     targetKind: text('target_kind', { enum: AUDIT_TARGETS }).notNull(),
     targetId: text('target_id').notNull(),

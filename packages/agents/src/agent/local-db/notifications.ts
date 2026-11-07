@@ -103,10 +103,15 @@ export function listNotifications(db: LocalDb, query: unknown, now: number): Not
           ? schedule?.settledAt === null || schedule?.settledAt === undefined
             ? undefined
             : schedule.settledAt + EXTENSION_RETENTION_MS
-          : contact?.expiresAt
-      const exists = notification.source === 'schedule' ? schedule !== null : contact !== null
+          : notification.source === 'mcp'
+            ? notification.expiresAt
+            : contact?.expiresAt
+      const exists =
+        notification.source === 'mcp' ||
+        (notification.source === 'schedule' ? schedule !== null : contact !== null)
       const available =
-        notification.source === 'schedule' ? schedule?.settledAt != null : contact?.result != null
+        notification.source === 'mcp' ||
+        (notification.source === 'schedule' ? schedule?.settledAt != null : contact?.result != null)
       return {
         ...notification,
         referenceState:

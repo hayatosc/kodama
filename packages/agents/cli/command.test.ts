@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { commandRequest, LOCAL_WORKER_URL, toCommand } from './command.ts'
 
 const agentId = '0190a8e2-5f1c-7a3b-8c4d-123456789abc'
@@ -14,6 +14,45 @@ function command(positionals: string[], values: Parameters<typeof toCommand>[0][
 }
 
 describe('toCommand', () => {
+  it('parses native OAuth options and routes client configuration through authenticated RPC', () => {
+    expect(
+      command(['mcp', 'login', agentId], {
+        'callback-port': '49152',
+        issuer: 'https://as.example.com',
+        scope: 'read',
+      }),
+    ).toMatchObject({
+      action: 'mcp',
+      operation: 'login',
+      serverId: agentId,
+      callbackPort: 49152,
+      issuer: 'https://as.example.com',
+      scope: 'read',
+      stdin: false,
+    })
+    expect(command(['mcp', 'login', agentId])).toMatchObject({ callbackPort: 0 })
+    for (const port of ['-1', '80', '65536', '1.5', 'oops'])
+      expect(() => command(['mcp', 'login', agentId], { 'callback-port': port })).toThrow(
+        'Callback port',
+      )
+    const client = command(['mcp', 'client-loopback'])
+    if (client.action !== 'mcp') throw new Error('Expected MCP')
+    expect(commandRequest(client, 'token', '{}').url).toBe(`${LOCAL_WORKER_URL}/cli/mcp/auth`)
+  })
+  it('routes MCP management and secret input without accepting secrets in argv', () => {
+    expect(command(['mcp', 'list'])).toEqual({ action: 'mcp', operation: 'list', stdin: false })
+    const request = (operation: string, text: string) => {
+      const parsed = command(['mcp', operation])
+      if (parsed.action !== 'mcp') throw new Error('Expected MCP command')
+      return commandRequest(parsed, 'fixture-dev-token', text)
+    }
+    const bearer = request('bearer', JSON.stringify({ serverId: agentId, secret: 'stdin-only' }))
+    expect(bearer.url).toContain('/cli/mcp/manage')
+    const client = request('client', JSON.stringify({ serverId: agentId }))
+    expect(client.url).toContain('/cli/mcp/auth')
+    expect(() => command(['mcp', 'bearer', 'argv-secret'])).toThrow()
+    expect(() => request('assign', '[]')).toThrow('MCP input must be an object')
+  })
   it('parses artifact commands and sends bytes as multipart rather than JSON strings', async () => {
     const upload = command(['artifacts', 'upload', 'assistant', '/tmp/image.png'], {
       'media-type': 'image/png',
@@ -216,9 +255,9 @@ describe('toCommand', () => {
   })
 
   it.each([
-    [['deploy'], /Invalid command or arguments; see nr agent --help/],
-    [['notifications'], /Invalid command or arguments; see nr agent --help/],
-    [['notification-read', 'assistant'], /Invalid command or arguments; see nr agent --help/],
+    [['deploy'], /Invalid command or arguments; see vp run agent --help/],
+    [['notifications'], /Invalid command or arguments; see vp run agent --help/],
+    [['notification-read', 'assistant'], /Invalid command or arguments; see vp run agent --help/],
     [['seed', 'assistant'], /Unexpected arguments/],
     [['send', 'assistant'], /Unexpected arguments/],
     [['snapshot', 'Not A Ref!'], TypeError],

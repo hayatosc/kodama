@@ -38,7 +38,7 @@ export const CONTACT_ALARM_BUDGET_MS = 5_000
 export const MAX_CONTACT_FLIGHTS = 10
 
 function inputHop(entry: EntryRecord): number {
-  if (entry.kind === 'pi.user' || entry.kind === 'kodama.owner-message') return 0
+  if (entry.kind === 'pi.user' || entry.kind === 'kodama.operator-message') return 0
   const data = entry.data
   if (
     entry.kind === 'kodama.scheduled-message' &&
@@ -79,7 +79,7 @@ export async function contactOrigin(harness: Harness, senderAgentId: string): Pr
             for (const entry of page.items) {
               if (
                 entry.kind === 'pi.user' ||
-                entry.kind === 'kodama.owner-message' ||
+                entry.kind === 'kodama.operator-message' ||
                 entry.kind === 'kodama.agent-message' ||
                 entry.kind === 'kodama.scheduled-message'
               )

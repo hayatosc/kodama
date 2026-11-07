@@ -1,7 +1,7 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { agents } from '../../../drizzle/management/schema.ts'
 import { reconcileAgents } from '../../control-plane/workflows/reconcile.ts'
 import { managementDb } from '../../control-plane/db.ts'
@@ -9,7 +9,6 @@ import {
   agentService,
   management,
   newAgentId,
-  caller,
   desiredSettings,
   updateSettings,
 } from '../../testing/management.ts'
@@ -33,7 +32,7 @@ function reconcile() {
     env,
     db: managementDb(env.MANAGEMENT_DB),
     models: createAgentModels(),
-    principal: null,
+    source: 'system',
     now: Date.now(),
   })
 }
@@ -72,7 +71,7 @@ describe('a version written while a turn runs', () => {
       systemPrompt: 'You are the new prompt.',
     })
     expect(written).toMatchObject({ version: 2, apply: { state: 'pending', appliedVersion: 1 } })
-    expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
+    expect(await agentService().getAgent(agentId)).toMatchObject({
       desiredVersion: 2,
       appliedVersion: 1,
       pending: true,
@@ -99,7 +98,7 @@ describe('convergence', () => {
     vi.spyOn(Agent.prototype, 'applyConfig').mockRejectedValueOnce(new Error('push lost'))
     const written = await updateSettings(agentId, { systemPrompt: 'Pulled on open' })
     expect(written.apply.state).toBe('failed')
-    expect(await agentService().getAgent(await caller(), agentId)).toMatchObject({
+    expect(await agentService().getAgent(agentId)).toMatchObject({
       desiredVersion: 2,
       appliedVersion: 1,
       pending: true,

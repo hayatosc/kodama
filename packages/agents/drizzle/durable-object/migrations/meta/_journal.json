@@ -50,6 +50,34 @@
       "when": 1793524310378,
       "tag": "0006_jazzy_doctor_doom",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793609239957,
+      "tag": "0007_cool_psylocke",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793639220546,
+      "tag": "0008_complex_yellowjacket",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793667432580,
+      "tag": "0009_certain_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793667682267,
+      "tag": "0010_chunky_ironclad",
+      "breakpoints": true
     }
   ]
 }

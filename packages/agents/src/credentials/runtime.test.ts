@@ -2,7 +2,7 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { credentialCall } from '../testing/credentials.ts'
@@ -16,7 +16,7 @@ const db = managementDb(env.MANAGEMENT_DB)
 afterEach(() => vi.restoreAllMocks())
 
 it('sends with an expired subscription after one refresh, including after eviction', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const credential = await putCredential(call, env, {
     requestId: 'runtime-refresh',
     provider: 'openai',
@@ -81,7 +81,7 @@ it('sends with an expired subscription after one refresh, including after evicti
 })
 
 it('refuses admission with structured reauthentication facts after refresh rejection', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const credential = await putCredential(call, env, {
     requestId: 'runtime-rejection',
     provider: 'openai',

@@ -1,5 +1,5 @@
 /** Node's real Pi OAuth flow accepts a manual redirect without persisting credentials. @module */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { apiKeyRegistration, loginRegistration } from './local-login.ts'
 
 const installId = '019a0000-0000-7000-8000-000000000001'

@@ -2,7 +2,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vite-plus/test'
 import { piEntries } from './local-db/pi-tables.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'

@@ -56,7 +56,7 @@ export async function mutateSchedule(
   if (
     !live?.run ||
     !inputs?.length ||
-    inputs.some((entry) => entry.kind !== 'kodama.owner-message' && entry.kind !== 'pi.user')
+    inputs.some((entry) => entry.kind !== 'kodama.operator-message' && entry.kind !== 'pi.user')
   )
     throw new Error('schedule_owner_required: current execution must contain only owner input')
   const runId = live.run.taskId

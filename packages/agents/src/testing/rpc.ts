@@ -3,9 +3,22 @@
  *
  * @module
  */
-import { runInDurableObject } from 'cloudflare:test'
-import { exports } from 'cloudflare:workers'
-import { afterEach, beforeEach, expect, vi } from 'vitest'
+import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
+import { env, exports } from 'cloudflare:workers'
+import { afterEach, beforeEach, expect, vi } from 'vite-plus/test'
+
+/**
+ * End an agent object's background work so it cannot reach a later test's mocks: delete its alarm
+ * and drop its instance, aborting it when a request that never ends keeps eviction from finishing.
+ * Its storage stays.
+ */
+export async function stopAgentObject(name: string): Promise<void> {
+  const stub = env.AGENTS.getByName(name)
+  await runInDurableObject(stub, (_, state) => state.storage.deleteAlarm())
+  await evictDurableObject(stub).catch(() =>
+    runInDurableObject(stub, (_, state) => state.abort('The test ended')).catch(() => undefined),
+  )
+}
 
 /** The SSE text of a model answer of `text`. */
 export function modelResponseText(text = 'Hello from Kodama'): string {
@@ -56,6 +69,14 @@ export function rejectionInObject<O extends Rpc.DurableObjectBranded>(
       () => '',
       (error: unknown) => String(error),
     ),
+  )
+}
+
+/** Observe RPC thenable rejection immediately, avoiding workerd's rejected-proxy diagnostics. */
+export function rpcRejection(promise: PromiseLike<unknown>): Promise<string> {
+  return Promise.resolve(promise).then(
+    () => 'accepted',
+    (error: unknown) => String(error),
   )
 }
 

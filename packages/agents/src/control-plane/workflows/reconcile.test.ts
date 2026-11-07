@@ -6,7 +6,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   agentConfigVersions,
   agents,
@@ -31,7 +31,7 @@ function reconcile() {
     env,
     db: managementDb(env.MANAGEMENT_DB),
     models: createAgentModels(),
-    principal: null,
+    source: 'system',
     now: Date.now(),
   })
 }
@@ -72,6 +72,7 @@ describe('reconcileAgents', () => {
         version: 1,
         settingsJson: JSON.stringify(settings),
         schemaVersion: 1,
+        source: 'system',
         createdAt: Date.now(),
       }),
       management.update(agents).set({ currentVersion: 1 }).where(eq(agents.agentId, agentId)),

@@ -1,5 +1,5 @@
 /** Fixed native transports and completion fixtures; never contacts a provider. @module */
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { nativeSearch, requireSearchCredential, searchRoute } from './search.ts'
 import { readResponses } from './providers/openai.ts'
 import { readMessages } from './providers/anthropic.ts'

@@ -4,7 +4,7 @@
  * @module
  */
 
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import designTokens from '../../../../../design/tokens.css?raw'
 import uiTokens from './tokens.css?raw'
 

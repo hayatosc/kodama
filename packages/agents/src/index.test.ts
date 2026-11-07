@@ -8,16 +8,19 @@ import { uuidv7 } from './lib/uuid.ts'
 import { createExecutionContext, createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { agentConfigVersions, agents } from '../drizzle/management/schema.ts'
 import { defaultAgentSettings } from './control-plane/config.ts'
-import { management, newAgentId } from './testing/management.ts'
+import { management, newAgentId, seedOnce } from './testing/management.ts'
 import { memoryAgent, write } from './testing/memory.ts'
 import { textResponse, toolCallResponse, toolResults, requestBody } from './testing/model.ts'
 import AgentService, * as entrypoint from './index.ts'
 import { consolidationDay } from './memory/consolidation.ts'
 import { jobId } from './memory/jobs.ts'
 import type { MemoryJob } from './memory/jobs.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -39,6 +42,7 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
       version: 1,
       settingsJson: JSON.stringify({ ...defaultAgentSettings(env), systemPrompt }),
       schemaVersion: 1,
+      source: 'system',
       createdAt: Date.now(),
     }),
     management.update(agents).set({ currentVersion: 1 }).where(eq(agents.agentId, agentId)),

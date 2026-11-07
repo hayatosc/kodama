@@ -1,8 +1,8 @@
 /** Encrypted persistence and safe outward metadata. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
-import { credentials, principals } from '../../drizzle/management/schema.ts'
+import { expect, it } from 'vite-plus/test'
+import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
@@ -27,13 +27,7 @@ it.each(['api_key', 'oauth_subscription'] as const)(
           })
     const { statement } = await credentialInsert(
       db,
-      {
-        credentialId,
-        kind,
-        provider: 'openai',
-        ownerId: null,
-        revision: 1,
-      },
+      { credentialId, kind, provider: 'openai', revision: 1 },
       secret,
       kek,
       Date.now(),
@@ -79,13 +73,7 @@ it('does not expose an offline secret verifier or a suffix of a short OAuth toke
   for (const key of [kek, btoa('11234567890123456789012345678901')]) {
     const { statement } = await credentialInsert(
       db,
-      {
-        credentialId: uuidv7(),
-        kind: 'oauth_subscription',
-        provider: 'openai',
-        ownerId: null,
-        revision: 1,
-      },
+      { credentialId: uuidv7(), kind: 'oauth_subscription', provider: 'openai', revision: 1 },
       secret,
       key,
       Date.now(),
@@ -138,13 +126,7 @@ it.each(['access', 'refresh'] as const)(
       })
       const insert = credentialInsert(
         db,
-        {
-          credentialId: uuidv7(),
-          kind: 'oauth_subscription',
-          provider: 'openai',
-          ownerId: null,
-          revision: 1,
-        },
+        { credentialId: uuidv7(), kind: 'oauth_subscription', provider: 'openai', revision: 1 },
         secret,
         kek,
         Date.now(),
@@ -159,7 +141,7 @@ it.each(['access', 'refresh'] as const)(
 it('does not expose a suffix of a minimum-length API key', async () => {
   const { statement } = await credentialInsert(
     db,
-    { credentialId: uuidv7(), kind: 'api_key', provider: 'openai', ownerId: null, revision: 1 },
+    { credentialId: uuidv7(), kind: 'api_key', provider: 'openai', revision: 1 },
     '12345678',
     kek,
     Date.now(),
@@ -168,40 +150,26 @@ it('does not expose a suffix of a minimum-length API key', async () => {
   expect(rows[0]?.last4).toBe('')
 })
 
-it.each([false, true])(
-  'derives ownership metadata from owner_id (principal: %s)',
-  async (principal) => {
-    const ownerId = principal ? uuidv7() : null
-    if (ownerId)
-      await db.insert(principals).values({
-        principalId: ownerId,
-        kind: 'user',
-        externalId: ownerId,
-        displayName: 'Owner',
-        createdAt: 1,
-      })
-    const { statement } = await credentialInsert(
-      db,
-      {
-        credentialId: uuidv7(),
-        kind: 'api_key',
-        provider: 'openai',
-        ownerId,
-        revision: 1,
-      },
-      'sk-invalid-owner-key',
-      kek,
-      Date.now(),
-    )
-    const [rows] = await db.batch([statement])
-    const row = rows[0]
-    if (!row) throw new Error('Missing inserted credential')
-    expect(credentialMetadata(row)).toMatchObject({
-      ownerScope: principal ? 'principal' : 'installation',
-      ownerId,
-      lastUsedAt: null,
-    })
-    expect(row).not.toHaveProperty('ownerScope')
-    expect(row?.lastUsedAt).toBeNull()
-  },
-)
+it('returns installation credential metadata without user ownership', async () => {
+  const { statement } = await credentialInsert(
+    db,
+    {
+      credentialId: uuidv7(),
+      kind: 'api_key',
+      provider: 'openai',
+      revision: 1,
+    },
+    'sk-invalid-owner-key',
+    kek,
+    Date.now(),
+  )
+  const [rows] = await db.batch([statement])
+  const row = rows[0]
+  if (!row) throw new Error('Missing inserted credential')
+  expect(credentialMetadata(row)).toMatchObject({
+    lastUsedAt: null,
+  })
+  expect(credentialMetadata(row)).not.toHaveProperty('ownerScope')
+  expect(row).not.toHaveProperty('ownerId')
+  expect(row.lastUsedAt).toBeNull()
+})

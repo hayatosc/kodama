@@ -312,7 +312,7 @@ Normal tests run without npm network requests. To exercise actual registry resol
 workerd, run this from `packages/agents`:
 
 ```sh
-KODAMA_CODE_NPM_SMOKE=1 nr test src/tools/code/execute.test.ts
+KODAMA_CODE_NPM_SMOKE=1 vp run test src/tools/code/execute.test.ts
 ```
 
 ## Management database
@@ -582,7 +582,7 @@ and `web_fetch`; an explicit applied `tools: []` disables optional tools. Option
 extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
 registers it nor permits `sendTo`.
 
-Locally, `nr agent tools assistant current_time contact_agent` replaces the optional tool selection
+Locally, `vp run agent tools assistant current_time contact_agent` replaces the optional tool selection
 through the versioned configuration API, preserving the other settings and credential references.
 Omit tool names to disable all optional tools.
 
@@ -1056,17 +1056,19 @@ rate limits/cooldowns are held in memory and tool execution logs rely on Pi Dura
 with fresh local state when resetting local databases. Current-runtime persistence, durable URL
 provenance checked on every fetch, and interruption recovery remain required.
 
-Use Node.js >=22.19 and pnpm 12.14.0 through the `ni`/`nr` wrappers:
+Install the toolchain pinned in `mise.toml` (Node.js, pnpm 12.14.0, and the Vite+ CLI `vp`) with
+mise, then install dependencies and run scripts through `vp`:
 
 ```sh
-ni
+mise install
+vp install
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
 # Set only CREDENTIAL_KEK_V1 to base64 of 32 random bytes; keep it across restarts.
 # Never store provider API keys in .dev.vars; register them through the CLI below.
-nr dev:agents
+vp run dev:agents
 ```
 
-`nr dev:agents` first applies both D1 databases' Drizzle migrations locally, then runs `cf dev`,
+`vp run dev:agents` first applies both D1 databases' Drizzle migrations locally, then runs `cf dev`,
 which starts the Vite-powered Worker with local D1, R2, and Durable Objects. It exposes RPC, not a
 browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3` persistence root and the binding
 names as local D1 IDs. It requires no Cloudflare account or remote database ID; `cf d1 list --local`
@@ -1074,54 +1076,56 @@ uses a different local resource catalog and is not needed. Repeated starts prese
 and migration failure prevents the Worker from starting. Stop the dev server before restarting it
 so only one process is using its local storage.
 
-| Command                                                | Effect                                                                    |
-| ------------------------------------------------------ | ------------------------------------------------------------------------- |
-| `nr check`                                             | TypeScript, type-aware Oxlint, Oxfmt check, and tests                     |
-| `nr test`                                              | workspace tests                                                           |
-| `nr format`                                            | format the repository                                                     |
-| `nr build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
-| `nr cf:types` (in `packages/agents`)                   | regenerate runtime types                                                  |
-| `nr db:generate:memory` (in `packages/agents`)         | write a D1 migration after `drizzle/memory/schema.ts` changes             |
-| `nr db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes  |
-| `nr db:generate:management` (in `packages/agents`)     | write a management migration after `drizzle/management/schema.ts` changes |
+| Command                                                    | Effect                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `vp run check`                                             | `tsrs` type check, type-aware Oxlint, Oxfmt check, and tests              |
+| `vp run typecheck`                                         | type check with `tsrs`, the Rust port of the TypeScript compiler          |
+| `vp run typecheck:compat`                                  | compatibility type check with TypeScript's `tsc` (used in CI)             |
+| `vp run test`                                              | workspace tests                                                           |
+| `vp run format`                                            | format the repository                                                     |
+| `vp run build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
+| `vp run cf:types` (in `packages/agents`)                   | regenerate runtime types                                                  |
+| `vp run db:generate:memory` (in `packages/agents`)         | write a D1 migration after `drizzle/memory/schema.ts` changes             |
+| `vp run db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes  |
+| `vp run db:generate:management` (in `packages/agents`)     | write a management migration after `drizzle/management/schema.ts` changes |
 
 ### Local agent CLI
 
-With `nr dev:agents` running, send messages from another terminal at the repository root:
+With `vp run dev:agents` running, send messages from another terminal at the repository root:
 
 ```sh
 # Read an explicitly exported environment variable; never pass the key itself as an argument.
-nr agent credentials add --provider openai --key-from-env OPENAI_API_KEY
+vp run agent credentials add --provider openai --key-from-env OPENAI_API_KEY
 # Or read the key from a protected file on stdin:
-nr agent credentials add --provider openai < /secure/path/openai-key
-nr agent credentials list
+vp run agent credentials add --provider openai < /secure/path/openai-key
+vp run agent credentials list
 # Alternatively, run credentials login --provider openai before seed.
 # Use the credentialId returned by registration or login:
-nr agent seed --credential <credential-id>
-nr agent create second --name "Second agent" --credential <credential-id>
-nr agent list
-nr agent send assistant "Hello!"
-nr agent send second "Hello from the second agent!"
-nr agent snapshot second
+vp run agent seed --credential <credential-id>
+vp run agent create second --name "Second agent" --credential <credential-id>
+vp run agent list
+vp run agent send assistant "Hello!"
+vp run agent send second "Hello from the second agent!"
+vp run agent snapshot second
 # Alternative authentication: complete Sign in with ChatGPT in your browser.
-nr agent credentials login --provider openai
+vp run agent credentials login --provider openai
 # Switch existing agents explicitly to the newly returned OAuth credentialId:
-nr agent credentials assign <oauth-credential-id> assistant
-nr agent credentials assign <oauth-credential-id> second
-# For memory, use its UUID from `nr agent list`:
-nr agent credentials assign <oauth-credential-id> <memory-agent-uuid>
+vp run agent credentials assign <oauth-credential-id> assistant
+vp run agent credentials assign <oauth-credential-id> second
+# For memory, use its UUID from `vp run agent list`:
+vp run agent credentials assign <oauth-credential-id> <memory-agent-uuid>
 # Revoke the previous credential only after replacing every reference:
-nr agent credentials revoke <old-credential-id>
-nr agent send assistant "Continue the conversation."
-nr agent snapshot assistant
-nr agent notifications assistant --unread --limit 20
-nr agent notifications assistant --before 42
-nr agent notification-read assistant 41
-nr agent cancel assistant
-nr agent send assistant "Hello!" --request-id my-test-1
-nr agent send assistant "Change direction." --steer
-nr agent send assistant "Hello!" --events
-nr agent --help
+vp run agent credentials revoke <old-credential-id>
+vp run agent send assistant "Continue the conversation."
+vp run agent snapshot assistant
+vp run agent notifications assistant --unread --limit 20
+vp run agent notifications assistant --before 42
+vp run agent notification-read assistant 41
+vp run agent cancel assistant
+vp run agent send assistant "Hello!" --request-id my-test-1
+vp run agent send assistant "Change direction." --steer
+vp run agent send assistant "Hello!" --events
+vp run agent --help
 ```
 
 The CLI works like this:
@@ -1182,8 +1186,8 @@ SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked,
 needed. `vitest.worker.config.ts` reads the generated migrations of both D1 databases for the setup.
 It also passes the columns from the drizzle-kit snapshots, so a test fails when a schema and its
 migrations differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
-entrypoint and token filesystem tests. Both projects run with `nr check` and share the Istanbul
-coverage report from `nr test:coverage`. The entrypoint tests mock token access and HTTP transport,
+entrypoint and token filesystem tests. Both projects run with `vp run check` and share the Istanbul
+coverage report from `vp run test:coverage`. The entrypoint tests mock token access and HTTP transport,
 not argument parsing or stream output; the token tests use temporary directories and remove them.
 
 Tests sit next to the module they test, as `<module>.test.ts` in the same folder. Shared helpers
@@ -1225,24 +1229,24 @@ this allowance to new errors or timeouts; keep rejection assertions and the obje
 | `drizzle/*/schema.test.ts`                   | each schema matches its generated migrations                  |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name every test file
-`<module>.test.ts` after the module it tests, in the same folder; describe the observable behavior it checks, and run `nr check` before submitting.
+`<module>.test.ts` after the module it tests, in the same folder; describe the observable behavior it checks, and run `vp run check` before submitting.
 
 ## Deployment
 
 From `packages/agents`:
 
-1. Log in with `nr cf auth login`.
+1. Log in with `vp run cf auth login`.
 2. Create the D1 databases `kodama-memory` and `kodama-management` and the R2 bucket
    `kodama-archive` that `cloudflare.config.ts` binds.
-3. Find the database IDs with `nr cf d1 list`; the pinned CLI requires IDs, not database or
+3. Find the database IDs with `vp run cf d1 list`; the pinned CLI requires IDs, not database or
    binding names. Apply the migrations with
-   `nr cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
-   `nr cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
-   check that `nr cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
+   `vp run cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
+   `vp run cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
+   check that `vp run cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
 4. Provision `CREDENTIAL_KEK_V1` externally as a base64-encoded random 32-byte key. The Worker
    reads it only; it cannot manage Worker Secrets. See the operational policy in
    [credentials.md](credentials.md); provider keys are never Worker secrets.
-5. Deploy with `nr deploy`.
+5. Deploy with `vp run deploy`.
 6. Through the trusted RPC boundary, register the credential with `putCredential`, then call
    `AgentService.seed({ primary: { openai: credentialId } })`; it is idempotent.
    Supply references for each configured default/memory provider. No owner role is required;

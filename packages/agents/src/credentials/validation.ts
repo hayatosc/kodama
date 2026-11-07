@@ -28,7 +28,7 @@ export function selectedCredentialRefs(
   return { primary }
 }
 
-/** All credential kinds use the same status, provider and grant rules; ownership is metadata. */
+/** Provider references cannot select MCP-purpose envelopes, even under a fabricated provider key. */
 export async function validateCredentialRefs(
   db: ManagementDb,
   settings: AgentSettings,
@@ -48,7 +48,7 @@ export async function validateCredentialRefs(
       throw new TypeError(
         'credential_unavailable: invalid credential reference (Unknown credential)',
       )
-    if (row.status !== 'active' || row.provider !== provider)
+    if (row.purpose !== 'model_provider' || row.status !== 'active' || row.provider !== provider)
       throw new TypeError('credential_unavailable: invalid credential reference')
     if (agentId) {
       const grant = await db

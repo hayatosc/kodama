@@ -3,16 +3,77 @@ import { env, exports } from 'cloudflare:workers'
 import { runInDurableObject } from 'cloudflare:test'
 import { recordNotification } from '../src/agent/local-db/notifications.ts'
 import { openLocalDb } from '../src/agent/local-db/local.ts'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { newAgentId } from '../src/testing/management.ts'
 import { seedOnce } from '../src/testing/management.ts'
-import { CLI_ACTOR } from './credentials.ts'
+import { waitForAnswer } from '../src/testing/rpc.ts'
 import { handleCli } from './handler.ts'
 import { decodeEvents, useMockModel } from '../src/testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
+
+it('uses ordinary sends for replies without a UI delivery ledger', async () => {
+  const post = (path: string, body?: unknown) =>
+    handleCli(
+      new Request(`http://localhost/cli/${path}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+      'test-token',
+      exports.default,
+      exports.default,
+    )
+  const credential = await (
+    await post('credentials/add', {
+      requestId: 'round-trip-key',
+      provider: 'openai',
+      secret: 'round-trip-test-key',
+    })
+  ).json<{ credentialId: string }>()
+  const agent = await (
+    await post('create', {
+      requestId: 'round-trip-create',
+      slug: 'round-trip',
+      displayName: 'Round trip',
+      credentialIds: [credential.credentialId],
+    })
+  ).json<{ agentId: string }>()
+  const input = {
+    requestId: 'round-trip-1',
+    whenBusy: 'followUp',
+    content: 'Hello',
+  }
+  expect((await post('send/round-trip', input)).status).toBe(200)
+  expect((await post('send/round-trip', input)).status).toBe(200)
+  await waitForAnswer(agent.agentId, input.requestId)
+  for (const removed of ['owner-reply', 'deliveries', 'delivery-report'])
+    expect((await post(`${removed}/round-trip`, input)).status).toBe(404)
+  const second = {
+    requestId: 'round-trip-2',
+    whenBusy: 'steer',
+    content: 'Thanks',
+  }
+  expect((await post('send/round-trip', second)).status).toBe(200)
+  await waitForAnswer(agent.agentId, second.requestId)
+  expect((await post('attention/round-trip')).status).toBe(200)
+  expect(
+    (
+      await handleCli(
+        new Request('http://localhost/cli/send/round-trip', {
+          method: 'POST',
+          headers: { authorization: 'Bearer impostor' },
+          body: JSON.stringify(second),
+        }),
+        'test-token',
+        exports.default,
+        exports.default,
+      )
+    ).status,
+  ).toBe(401)
+})
 
 it('creates and addresses an agent by slug before seed', async () => {
   const post = (path: string, body?: unknown) =>
@@ -26,7 +87,9 @@ it('creates and addresses an agent by slug before seed', async () => {
       exports.default,
       exports.default,
     )
-  expect(await (await post('list')).json()).toEqual([])
+  expect(await (await post('list')).json()).not.toContainEqual(
+    expect.objectContaining({ slug: 'assistant' }),
+  )
   const added = await post('credentials/add', {
     requestId: 'create-first-key',
     provider: 'openai',
@@ -150,7 +213,7 @@ it('authenticates inbox reads and exact acknowledgements and validates their req
 
 it('enables and disables optional tools through versioned configuration without losing credentials', async () => {
   const id = await newAgentId()
-  const before = await exports.default.getConfig(CLI_ACTOR, id)
+  const before = await exports.default.getConfig(id)
   for (const tools of [['contact_agent'], []]) {
     const response = await handleCli(
       new Request(`http://localhost/cli/tools/${id}`, {
@@ -163,7 +226,7 @@ it('enables and disables optional tools through versioned configuration without 
       exports.default,
     )
     expect(response.status).toBe(200)
-    const current = await exports.default.getConfig(CLI_ACTOR, id)
+    const current = await exports.default.getConfig(id)
     expect(current.settings.tools).toEqual(tools)
     expect(current.settings.credentials).toEqual(before.settings.credentials)
   }
@@ -232,8 +295,8 @@ it('rejects malformed CLI input before RPC admission', async () => {
   expect(response.status).toBe(400)
 })
 
-it('seeds, and sends to the first agent by its slug', async () => {
-  await seedOnce()
+it('reuses the single installation through authenticated CLI access and resolves its slug', async () => {
+  const initial = await seedOnce()
   const post = (path: string, body?: unknown) =>
     handleCli(
       new Request(`http://localhost/cli/${path}`, {
@@ -246,7 +309,7 @@ it('seeds, and sends to the first agent by its slug', async () => {
       exports.default,
     )
   const seeded = await (await post('seed')).json()
-  expect(seeded).toMatchObject({ installId: expect.any(String) })
+  expect(seeded).toEqual(initial)
   const sent = await post('send/assistant', { requestId: 'by-slug', content: 'Hello' })
   expect(sent.status).toBe(200)
   expect(JSON.stringify(decodeEvents(await sent.text()))).toContain('Hello from Kodama')

@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import * as bundler from '@cloudflare/worker-bundler'
-import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, inject, it, vi } from 'vite-plus/test'
 import { createCodeExecutor, createCodeTool } from './execute.ts'
 import type { ArtifactUpload } from '../../extensions.ts'
 import { MAX_ARTIFACT_BYTES } from '../../extensions.ts'

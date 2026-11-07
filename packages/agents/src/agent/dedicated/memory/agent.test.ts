@@ -12,13 +12,17 @@ import { setAlarm } from '../../runtime/alarms.ts'
 import { openLocalDb } from '../../local-db/local.ts'
 import { JOB_TIME_LIMIT_MS } from './runner.ts'
 import { env, exports } from 'cloudflare:workers'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { Agent } from '../../agent.ts'
 import { AgentObject } from '../../../agent-object.ts'
 import { memoryAgent } from '../../../testing/memory.ts'
 import { rejectionInObject } from '../../../testing/rpc.ts'
 import { MEMORY_AGENT_NAME } from '../../../memory/jobs.ts'
 import { MemoryAgent } from './agent.ts'
+import { seedOnce } from '../../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 afterEach(() => vi.restoreAllMocks())
 

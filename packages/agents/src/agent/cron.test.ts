@@ -1,5 +1,5 @@
-/** Numeric cron grammar and Temporal calendar search in the actual Workers runtime. @module */
-import { describe, expect, it } from 'vitest'
+/** Numeric cron grammar and bounded calendar search through the shared Temporal ponyfill. @module */
+import { describe, expect, it } from 'vite-plus/test'
 import { cronTime, parseCron, validateCronZone } from './cron.ts'
 
 function search(

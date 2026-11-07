@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { checkedSkill, MAX_SKILL_BODY, MAX_SKILL_DESCRIPTION } from './skills.ts'
 import type { SkillWrite } from './skills.ts'
 

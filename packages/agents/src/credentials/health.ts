@@ -47,7 +47,7 @@ export async function recordRefreshFailure(
           seq: literal(null).as('seq'),
           opId: literal(leaseId).as('op_id'),
           at: literal(at).as('at'),
-          actorId: literal(null).as('actor_id'),
+          source: literal('system').as('source'),
           action: literal(
             failure === 'rejected' ? 'credential.needs_reauth' : 'credential.refresh.failed',
           ).as('action'),

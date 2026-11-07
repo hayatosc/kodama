@@ -14,6 +14,8 @@ import { Writable } from 'node:stream'
 import { text } from 'node:stream/consumers'
 import { apiKeyRegistration, loginRegistration } from '../src/credentials/local-login.ts'
 import { CLI_OPTIONS, commandRequest, toCommand, USAGE } from './command.ts'
+import { loginMcp, openMcpBrowser } from './mcp-login.ts'
+import { LOCAL_WORKER_URL } from './command.ts'
 import { readLocalToken } from './token.ts'
 import { printStream } from './stream.ts'
 
@@ -22,7 +24,9 @@ async function main(): Promise<void> {
   try {
     args = parseArgs({ allowPositionals: true, options: CLI_OPTIONS })
   } catch {
-    throw new Error('Invalid arguments. See nr agent --help; never pass credentials as arguments.')
+    throw new Error(
+      'Invalid arguments. See vp run agent --help; never pass credentials as arguments.',
+    )
   }
   const command = toCommand(args)
   if (command.action === 'help') {
@@ -30,10 +34,54 @@ async function main(): Promise<void> {
     return
   }
   const token = readLocalToken()
+  if (command.action === 'mcp' && command.operation === 'login') {
+    if (!command.serverId) throw new Error('MCP server ID is required')
+    const abort = new AbortController()
+    const cancel = () => abort.abort()
+    process.once('SIGINT', cancel)
+    process.once('SIGTERM', cancel)
+    try {
+      const result = await loginMcp({
+        serverId: command.serverId,
+        port: command.callbackPort,
+        issuer: command.issuer,
+        scope: command.scope,
+        requestId: command.requestId,
+        initialTokenId: command.initialTokenId,
+        signal: abort.signal,
+        async auth(input) {
+          const response = await fetch(`${LOCAL_WORKER_URL}/cli/mcp/auth`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(30_000),
+          })
+          if (!response.ok)
+            throw new Error(
+              'MCP authorization failed. Check AS loopback support and client registration, then start a new login.',
+            )
+          return response.json()
+        },
+        open: openMcpBrowser,
+        notify: (message) => console.error(message),
+      })
+      console.log(JSON.stringify(result, null, 2))
+      return
+    } finally {
+      process.off('SIGINT', cancel)
+      process.off('SIGTERM', cancel)
+    }
+  }
   if (command.action === 'send') {
     console.error(`agent=${command.agentRef} requestId=${command.message.requestId}`)
   }
   let credentialJson: string | undefined
+  if (command.action === 'mcp' && command.stdin) {
+    if (process.stdin.isTTY)
+      throw new Error('Pipe MCP request JSON on stdin; secrets must not be arguments')
+    credentialJson = await text(process.stdin)
+    if (credentialJson.length > 65_536) throw new Error('MCP request exceeds 64 KiB')
+  }
   if (command.action === 'credentials/add') {
     if (!command.keyFromEnv && process.stdin.isTTY)
       throw new Error(
@@ -49,7 +97,7 @@ async function main(): Promise<void> {
     const identityRequest = commandRequest({ action: 'credentials/installation' }, token)
     const identity = await fetch(identityRequest.url, identityRequest.init)
     if (!identity.ok)
-      throw new Error('Cannot initialize the local installation; start nr dev:agents first.')
+      throw new Error('Cannot initialize the local installation; start vp run dev:agents first.')
     const seed: unknown = await identity.json()
     if (
       typeof seed !== 'object' ||
@@ -102,7 +150,7 @@ async function main(): Promise<void> {
       artifact = { filename: basename(command.path), bytes }
     } catch (error) {
       throw new Error(
-        'Cannot upload file. Choose a readable regular file of at most 10 MiB. See nr agent --help.',
+        'Cannot upload file. Choose a readable regular file of at most 10 MiB. See vp run agent --help.',
         { cause: error },
       )
     }
@@ -117,10 +165,16 @@ async function main(): Promise<void> {
     )
     response = await fetch(url, init)
   } catch (error) {
-    throw new Error('Cannot reach the local Worker. Start nr dev:agents first.', { cause: error })
+    throw new Error('Cannot reach the local Worker. Start vp run dev:agents first.', {
+      cause: error,
+    })
   }
   if (!response.ok) {
-    if (command.action.startsWith('credentials/') || command.action === 'dev/seed-credentials')
+    if (
+      command.action.startsWith('credentials/') ||
+      command.action === 'dev/seed-credentials' ||
+      command.action === 'mcp'
+    )
       throw new Error(
         `Credential operation failed (${response.status}); check the local Worker, KEK and input.`,
       )
@@ -145,7 +199,7 @@ async function main(): Promise<void> {
     },
     command.events,
   )
-  console.error(`Completed. History: nr agent snapshot ${command.agentRef}`)
+  console.error(`Completed. History: vp run agent snapshot ${command.agentRef}`)
 }
 
 try {

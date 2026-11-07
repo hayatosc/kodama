@@ -42,19 +42,25 @@ packages/
   testing, and deployment.
 - [docs/memory.md](docs/memory.md): long-term memory, the memory agent, pruning and the archive,
   skills, and shared memory.
+- [docs/testing.md](docs/testing.md): how the tests run in Node and workerd, the shared workerd
+  runtime, and CI sharding.
+- [docs/mcp.md](docs/mcp.md): the agents-side MCP client.
+- [docs/single-operator.md](docs/single-operator.md): the single-operator trust boundary.
 - [design/README.md](design/README.md): the UI design system for `packages/ui`:
   tokens, components with live previews, the agent avatar, and the SvelteKit implementation guide.
 
 ## Development
 
-Requires Node.js >=22.19 and pnpm 12.14.0. Commands below use the `ni`/`nr`
-wrappers; `packageManager` pins pnpm for the workspace.
+[mise](https://mise.jdx.dev) installs the pinned toolchain from `mise.toml`: Node.js,
+pnpm 12.14.0, and the Vite+ CLI `vp`. Commands below use `vp install` for dependencies and
+`vp run` for `package.json` scripts.
 
 ```sh
-ni
+mise install
+vp install
 cp packages/agents/.dev.vars.example packages/agents/.dev.vars
 # Set only CREDENTIAL_KEK_V1 (base64 of 32 random bytes); never put provider keys here.
-nr dev:agents
+vp run dev:agents
 ```
 
 `cf dev` starts the Vite-powered Worker. There is no browser page. Production
@@ -64,39 +70,44 @@ The initial model uses `DEFAULT_MODEL_PROVIDER` and `DEFAULT_MODEL_ID` in
 sequence of versions in the management database, changed through `AgentService`.
 
 ```sh
-nr check
+vp run check
 cd packages/agents
-nr build
-nr cf:types
+vp run build
+vp run cf:types
 ```
 
-Checks cover TypeScript, type-aware Oxlint, Oxfmt, and workerd integration tests.
+Local checks cover types (`tsrs` for agents and `rsvelte-check --tsgo` for UI; `typecheck:compat`
+checks agents with `tsc`, which CI runs), type-aware Oxlint, Oxfmt (both through Vite+),
+Svelte formatting through `rsvelte-fmt`, UI unit tests, and workerd integration tests.
 Tests mock only the external model fetch; RPC, Pi Durable, SQLite, eviction, and
 alarms run in the Workers runtime without a real API key.
 `cf build` produces `.cloudflare/output/v0/` locally without deploying.
 Generated runtime types and local state are ignored by Git.
 
+From `packages/ui`, use `vp run storybook` to preview the UI mockups and `vp run build-storybook`
+to build them. See [packages/ui/README.md](packages/ui/README.md) for the UI stages and tooling.
+
 ## Local agent CLI
 
 Set the local encryption key `CREDENTIAL_KEK_V1` in `packages/agents/.dev.vars`, then start
-`nr dev:agents`. Provider credentials belong in the encrypted local credential store, not
+`vp run dev:agents`. Provider credentials belong in the encrypted local credential store, not
 `.dev.vars`. In another terminal, register them through the CLI from the repository root:
 
 ```sh
 # Read the key from a protected source; never pass its value as a command-line argument.
-nr agent credentials add --provider openai < /secure/path/openai-key
+vp run agent credentials add --provider openai < /secure/path/openai-key
 # Or use --key-from-env ENV_NAME with an explicitly supplied, temporary shell variable.
-# Alternatively, login first: nr agent credentials login --provider openai
+# Alternatively, login first: vp run agent credentials login --provider openai
 # Use the ID returned by registration or login:
-nr agent seed --credential <credential-id>
-nr agent create second --name "Second agent" --credential <credential-id>
-nr agent credentials list
-nr agent list
-nr agent send assistant "Hello!"
-nr agent send second "Hello!"
-nr agent send assistant "Continue the conversation."
-nr agent snapshot assistant
-nr agent cancel assistant
+vp run agent seed --credential <credential-id>
+vp run agent create second --name "Second agent" --credential <credential-id>
+vp run agent credentials list
+vp run agent list
+vp run agent send assistant "Hello!"
+vp run agent send second "Hello!"
+vp run agent send assistant "Continue the conversation."
+vp run agent snapshot assistant
+vp run agent cancel assistant
 ```
 
 Login and registration lazily initialize the stable installation ID without creating agents.
@@ -113,10 +124,10 @@ an interrupted stream. Request IDs appear on stderr. To retry a delivery without
 duplicating input, pass the original ID and identical content:
 
 ```sh
-nr agent send assistant "Hello!" --request-id my-test-1
-nr agent send assistant "Change direction." --steer
-nr agent send assistant "Hello!" --events
-nr agent --help
+vp run agent send assistant "Hello!" --request-id my-test-1
+vp run agent send assistant "Change direction." --steer
+vp run agent send assistant "Hello!" --events
+vp run agent --help
 ```
 
 `--events` prints JSON events for debugging. Completed retries display the saved
@@ -190,7 +201,7 @@ configuration are kept, so a held configuration version and new messages apply i
 `Agent.sendTo(targetId, message)` admits the target from the registry and calls its
 `sendMessage` over Durable Object RPC. The opt-in `contact_agent` tool reuses this path, accepts a
 UUID, slug, or unique prefix, and waits up to 30 seconds for the correlated answer before returning
-accepted/pending. Enable it locally with `nr agent tools assistant current_time contact_agent`.
+accepted/pending. Enable it locally with `vp run agent tools assistant current_time contact_agent`.
 Messages identify their sender; a persisted three-hop cap allows multi-stage delegation while
 bounding cycles. The memory agent cannot use it. See [Agent to agent](docs/agents.md#agent-to-agent).
 
@@ -239,11 +250,11 @@ Worker has no public HTTP interface, and `workersDev` is disabled.
 
 ## Deployment
 
-From `packages/agents`, use `nr cf auth login`, create the D1 databases `kodama-memory` and
+From `packages/agents`, use `vp run cf auth login`, create the D1 databases `kodama-memory` and
 `kodama-management` and apply their migrations, provision only the encryption secret
-`CREDENTIAL_KEK_V1`, and deploy with `nr deploy`. Register provider credentials through the
+`CREDENTIAL_KEK_V1`, and deploy with `vp run deploy`. Register provider credentials through the
 trusted management RPC into encrypted D1, then seed and assign credentials to agents. See [docs/agents.md](docs/agents.md#deployment).
-Use `nr cf workers secrets update --help` for the pinned CLI's input options.
+Use `vp run cf workers secrets update --help` for the pinned CLI's input options.
 This repository uses `cf`, `cloudflare.config.ts`, and the Cloudflare Vite plugin;
 Wrangler is only a transitive dependency of Cloudflare's tooling.
 
@@ -291,8 +302,8 @@ settings), never provider API keys:
 CREDENTIAL_KEK_V1=...
 ```
 
-Register API keys with `nr agent credentials add` using piped stdin or an explicitly supplied
-shell environment variable, or use `nr agent credentials login --provider openai` for Sign in
+Register API keys with `vp run agent credentials add` using piped stdin or an explicitly supplied
+shell environment variable, or use `vp run agent credentials login --provider openai` for Sign in
 with ChatGPT. The CLI's `--key-from-env` is an explicit registration input, not Worker environment
 authentication. Assign the returned credential ID before sending; reads return only metadata.
 The CLI writes no auth.json. See [Local agent CLI](docs/agents.md#local-agent-cli) for

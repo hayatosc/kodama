@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { printStream } from './stream.ts'
 
 function stream(events: unknown[]): ReadableStream<Uint8Array> {

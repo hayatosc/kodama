@@ -6,7 +6,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { afterNextMemoryRecordsRead, context, db, write } from '../../testing/memory.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { applyOperation } from '../store/records.ts'
@@ -22,6 +22,10 @@ import {
   SHARED_MEMORY_BUDGET,
   storedMemoryText,
 } from './always-loaded.ts'
+import { seedOnce } from '../../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 afterEach(() => vi.restoreAllMocks())
 

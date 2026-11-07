@@ -1,6 +1,6 @@
 /** Lazy identity is shared without provisioning agents or requiring credentials. @module */
 import { env, exports } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { agents, systemSettings } from '../../drizzle/management/schema.ts'
 import { managementDb } from './db.ts'
 import { installationId } from './installation.ts'
@@ -15,15 +15,14 @@ it('converges on one identity under concurrent first use without seeding agents'
 })
 
 it('allows credential registration before seed and initializes the same identity', async () => {
-  const actor = { kind: 'service' as const, externalId: 'fresh-installation' }
-  await exports.default.putCredential(actor, {
+  await exports.default.putCredential({
     requestId: uuidv7(),
     provider: 'openai',
     secret: 'installation-test-key',
   })
   const db = managementDb(env.MANAGEMENT_DB)
   const rows = await db.select().from(systemSettings)
-  const id = await exports.default.getInstallationId(actor)
+  const id = await exports.default.getInstallationId()
   expect(rows).toEqual([{ key: 'install_id', valueJson: JSON.stringify(id) }])
   expect(await db.select().from(agents)).toEqual([])
 })

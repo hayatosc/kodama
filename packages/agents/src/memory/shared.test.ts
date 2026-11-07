@@ -2,7 +2,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { memoryRecords } from '../../drizzle/memory/schema.ts'
 import type { Scope } from '../../drizzle/memory/schema.ts'
 import { invalidateOverridesOfRequired } from './store/maintenance.ts'
@@ -10,7 +10,10 @@ import { writeShared } from './shared.ts'
 import { context, db, record, renderedAlwaysLoaded, write } from '../testing/memory.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
-import { newAgentId, updateSettings } from '../testing/management.ts'
+import { newAgentId, updateSettings, seedOnce } from '../testing/management.ts'
+
+// The memory agent needs the seeded installation and its credentials.
+beforeAll(seedOnce)
 
 afterEach(() => vi.restoreAllMocks())
 

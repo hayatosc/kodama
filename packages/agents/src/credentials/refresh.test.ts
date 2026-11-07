@@ -1,6 +1,6 @@
 /** ChatGPT token endpoint contracts from RFC 6749 and the bundled Pi OAuth client. @module */
 import type { OAuthCredential } from '@earendil-works/pi-ai'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { REFRESH_REJECTED, refreshChatGPT, refreshDue } from './refresh.ts'
 
 const credential: OAuthCredential = {

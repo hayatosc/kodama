@@ -1,7 +1,7 @@
 /** Refresh health is revision/lease guarded and stores only allowlisted failure categories. @module */
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { auditLog, credentials } from '../../drizzle/management/schema.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { managementDb } from '../control-plane/db.ts'
@@ -75,6 +75,6 @@ it.each([
   })
   const events = await db.select().from(auditLog).where(eq(auditLog.targetId, row.credentialId))
   expect(events).toHaveLength(1)
-  expect(events[0]).toMatchObject({ actorId: null, action: 'credential.refresh.failed' })
+  expect(events[0]).toMatchObject({ source: 'system', action: 'credential.refresh.failed' })
   expect(JSON.stringify(events)).not.toContain(message)
 })

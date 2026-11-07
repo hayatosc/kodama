@@ -5,7 +5,7 @@
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { AgentStatus } from '../../protocol.ts'
 import { STATUS_KEY, statusRefusal } from './restrictions.ts'

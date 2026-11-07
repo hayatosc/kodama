@@ -1,5 +1,5 @@
-/** Calendar policy regression tests in workerd, including its IANA timezone data. @module */
-import { describe, expect, it } from 'vitest'
+/** Calendar policy and IANA timezone regressions through the shared Temporal ponyfill. @module */
+import { describe, expect, it } from 'vite-plus/test'
 import { latestAtOrBefore, nextAfter, normalizeSchedule, scheduleDate } from './schedule-spec.ts'
 
 const now = Date.parse('2026-01-01T00:00:00Z')

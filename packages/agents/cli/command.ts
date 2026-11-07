@@ -29,28 +29,33 @@ export const LOCAL_WORKER_URL = 'http://127.0.0.1:5173'
 
 /** The help text. */
 export const USAGE = `Usage:
-  nr agent dev seed-credentials < /secure/path/provider-keys.json
-  nr agent seed [--credential ID ...]
-  nr agent list
-  nr agent create <slug> --credential ID [--credential ID ...] [--name NAME]
-  nr agent tools <agent> [tool ...]   Replace enabled optional tools; omit names to disable all
-  nr agent credentials add --provider openai [--key-from-env ENV_NAME]
-  nr agent credentials login --provider openai
-  nr agent credentials list
-  nr agent credentials assign <credential-id> <agent>
-  nr agent credentials unassign <credential-id> <agent>
-  nr agent credentials revoke <credential-id>
-  nr agent send <agent> "message" [--request-id ID] [--steer] [--events]
-  nr agent snapshot <agent>
-  nr agent notifications <agent> [--before SEQ] [--limit N] [--unread]
-  nr agent notification-read <agent> <seq>
-  nr agent cancel <agent>
-  nr agent artifacts upload <agent> <path> [--media-type TYPE]
-  nr agent artifacts list <agent> [--cursor ID] [--limit N]
-  nr agent artifacts download <agent> <artifact-id> <new-path>
-  nr agent artifacts delete <agent> <artifact-id>
+  vp run agent dev seed-credentials < /secure/path/provider-keys.json
+  vp run agent seed [--credential ID ...]
+  vp run agent list
+  vp run agent mcp login <server-id> [--callback-port PORT] [--issuer URL] [--scope SCOPES]
+  vp run agent mcp list
+  vp run agent mcp connect|status|auth-status <server-id>
+  vp run agent mcp add|update|discover|assign|unassign|bearer|client|initial-token|attach|disconnect < request.json
+  vp run agent create <slug> --credential ID [--credential ID ...] [--name NAME]
+  vp run agent tools <agent> [tool ...]   Replace enabled optional tools; omit names to disable all
+  vp run agent credentials add --provider openai [--key-from-env ENV_NAME]
+  vp run agent credentials login --provider openai
+  vp run agent credentials list
+  vp run agent credentials assign <credential-id> <agent>
+  vp run agent credentials unassign <credential-id> <agent>
+  vp run agent credentials revoke <credential-id>
+  vp run agent send <agent> "message" [--request-id ID] [--steer] [--events]
+  vp run agent attention <agent>
+  vp run agent snapshot <agent>
+  vp run agent notifications <agent> [--before SEQ] [--limit N] [--unread]
+  vp run agent notification-read <agent> <seq>
+  vp run agent cancel <agent>
+  vp run agent artifacts upload <agent> <path> [--media-type TYPE]
+  vp run agent artifacts list <agent> [--cursor ID] [--limit N]
+  vp run agent artifacts download <agent> <artifact-id> <new-path>
+  vp run agent artifacts delete <agent> <artifact-id>
 
-Start nr dev:agents in another terminal first (localhost:5173).
+Start vp run dev:agents in another terminal first (localhost:5173).
 <agent> is a UUID, a slug, or a unique UUID prefix; the seed creates the
 first agent, slug assistant. Register/login, then seed --credential ID before sending.
 The same agent continues its conversation. --events prints JSON events.
@@ -66,6 +71,17 @@ already initialized installation. Login does not seed or create agents.`
 /** One CLI invocation. */
 export type Command =
   | { action: 'help' }
+  | {
+      action: 'mcp'
+      operation: string
+      serverId?: string
+      stdin: boolean
+      callbackPort?: number
+      issuer?: string
+      scope?: string
+      requestId?: string
+      initialTokenId?: string
+    }
   | { action: 'artifact-upload'; agentRef: string; path: string; mediaType: string }
   | { action: 'artifact-list'; agentRef: string; cursor?: string; limit?: number }
   | { action: 'artifact-download'; agentRef: string; artifactId: string; path: string }
@@ -83,7 +99,7 @@ export type Command =
     }
   | { action: 'credentials/revoke'; credentialId: string }
   | { action: 'dev/seed-credentials' }
-  | { action: 'snapshot' | 'cancel'; agentRef: string }
+  | { action: 'snapshot' | 'cancel' | 'attention'; agentRef: string }
   | { action: 'notifications'; agentRef: string; query: NotificationQuery }
   | { action: 'notification-read'; agentRef: string; request: NotificationRead }
   | { action: 'send'; agentRef: string; message: SendMessageRequest; events: boolean }
@@ -91,6 +107,10 @@ export type Command =
 /** The CLI's options, for `parseArgs` from `node:util`. */
 export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
+  'callback-port': { type: 'string' },
+  issuer: { type: 'string' },
+  scope: { type: 'string' },
+  'initial-token-id': { type: 'string' },
   'request-id': { type: 'string' },
   steer: { type: 'boolean' },
   events: { type: 'boolean' },
@@ -109,6 +129,10 @@ export const CLI_OPTIONS = {
 export interface ParsedArgs {
   values: {
     help?: boolean
+    'callback-port'?: string
+    issuer?: string
+    scope?: string
+    'initial-token-id'?: string
     'request-id'?: string
     steer?: boolean
     events?: boolean
@@ -137,6 +161,62 @@ export function toCommand(
   newRequestId: () => string = uuidv7,
 ): Command {
   if (values.help || positionals.length === 0) return { action: 'help' }
+  if (positionals[0] === 'mcp') {
+    const operation = positionals[1]
+    if (operation === 'login' && positionals.length === 3) {
+      const callbackPort =
+        values['callback-port'] === undefined ? 0 : Number(values['callback-port'])
+      if (
+        !Number.isInteger(callbackPort) ||
+        callbackPort < 0 ||
+        callbackPort > 65_535 ||
+        (callbackPort > 0 && callbackPort < 1024)
+      )
+        throw new Error('Callback port must be 0 or between 1024 and 65535')
+      return {
+        action: 'mcp',
+        operation,
+        serverId: parseAgentId(positionals[2]),
+        stdin: false,
+        callbackPort,
+        issuer: values.issuer,
+        scope: values.scope,
+        requestId: values['request-id'],
+        initialTokenId: values['initial-token-id'],
+      }
+    }
+    if (operation === 'list' && positionals.length === 2)
+      return { action: 'mcp', operation, stdin: false }
+    if (
+      operation &&
+      ['connect', 'status', 'auth-status'].includes(operation) &&
+      positionals.length === 3
+    )
+      return { action: 'mcp', operation, serverId: parseAgentId(positionals[2]), stdin: false }
+    if (
+      operation &&
+      [
+        'add',
+        'update',
+        'discover',
+        'assign',
+        'unassign',
+        'bearer',
+        'client',
+        'client-loopback',
+        'initial-token',
+        'attach',
+        'disconnect',
+      ].includes(operation) &&
+      positionals.length === 2
+    )
+      return { action: 'mcp', operation, stdin: true }
+    throw new Error(
+      'Invalid MCP command; supply structured input on stdin, never secrets as arguments',
+    )
+  }
+  if (positionals[0] === 'attention' && positionals.length === 2)
+    return { action: 'attention', agentRef: parseAgentRef(positionals[1]) }
   const [action, rawAgentRef, content] = positionals
   if (action === 'dev' && rawAgentRef === 'seed-credentials' && positionals.length === 2)
     return { action: 'dev/seed-credentials' }
@@ -194,7 +274,7 @@ export function toCommand(
         agentRef,
         artifactId: parseInput(ExtensionIdSchema, argument),
       }
-    throw new Error('Invalid artifacts command; see nr agent --help')
+    throw new Error('Invalid artifacts command; see vp run agent --help')
   }
   if (action === 'credentials') {
     if (rawAgentRef === 'list' && positionals.length === 2) return { action: 'credentials/list' }
@@ -222,7 +302,7 @@ export function toCommand(
         credentialId: parseAgentId(content),
         agentRef: parseAgentRef(positionals[3]),
       }
-    throw new Error('Invalid credential command; see nr agent --help')
+    throw new Error('Invalid credential command; see vp run agent --help')
   }
   if (action === 'notifications' && positionals.length === 2)
     return {
@@ -241,11 +321,11 @@ export function toCommand(
       request: parseInput(NotificationReadSchema, { seq: Number(content) }),
     }
   if (action !== 'seed' && action !== 'send' && action !== 'snapshot' && action !== 'cancel') {
-    throw new Error('Invalid command or arguments; see nr agent --help')
+    throw new Error('Invalid command or arguments; see vp run agent --help')
   }
   const expected = action === 'send' ? 3 : action === 'seed' ? 1 : 2
   if (positionals.length !== expected) {
-    throw new Error('Unexpected arguments; quote the message and see nr agent --help')
+    throw new Error('Unexpected arguments; quote the message and see vp run agent --help')
   }
   if (action === 'seed')
     return {
@@ -269,6 +349,24 @@ export function commandRequest(
   credentialJson?: string,
   artifact?: { filename: string; bytes: Uint8Array },
 ): { url: string; init: RequestInit } {
+  if (command.action === 'mcp') {
+    const input: unknown = command.stdin ? JSON.parse(credentialJson ?? '') : {}
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('MCP input must be an object')
+    return {
+      url: `${LOCAL_WORKER_URL}/cli/mcp/${['client', 'client-loopback', 'initial-token', 'attach', 'auth-status'].includes(command.operation) ? 'auth' : 'manage'}`,
+      init: {
+        method: 'POST',
+        redirect: 'error',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...input,
+          operation: command.operation === 'auth-status' ? 'status' : command.operation,
+          ...(command.serverId ? { serverId: command.serverId } : {}),
+        }),
+      },
+    }
+  }
   if (command.action === 'artifact-upload') {
     if (!artifact) throw new Error('Missing upload bytes')
     const form = new FormData()

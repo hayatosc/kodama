@@ -3,7 +3,7 @@ import { uuidv7 } from '../../src/lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { openLocalDb } from '../../src/agent/local-db/local.ts'
 import * as schema from './schema.ts'
 
@@ -29,7 +29,7 @@ it('the newest local migration snapshot has the tables and columns of the Drizzl
     ]),
   )
   // A mismatch means drizzle/durable-object/schema.ts changed without
-  // `nr db:generate:durable-object`.
+  // `vp run db:generate:durable-object`.
   expect(migrated).toEqual(declared)
 })
 

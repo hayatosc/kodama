@@ -4,7 +4,6 @@ import type { ManagementEnv } from '../control-plane/workflows/agents.ts'
 import type { AgentEnv } from '../env.ts'
 import type { CredentialRefs, SeedResult } from '../protocol.ts'
 import { managementDb } from '../control-plane/db.ts'
-import { principalOf } from '../control-plane/principals.ts'
 import { createAgentModels } from '../control-plane/models.ts'
 import { putCredential } from './management.ts'
 import { credentialFingerprint } from './encryption.ts'
@@ -31,13 +30,12 @@ export async function seedLocalCredentials(
     throw new TypeError('Expected a nonempty provider-to-key JSON object')
   const db = managementDb(env.MANAGEMENT_DB)
   const now = Date.now()
-  const principal = await principalOf(db, { kind: 'service', externalId: 'kodama-dev-cli' }, now)
   const call = {
     db,
     env,
     now,
     models: createAgentModels(),
-    principal,
+    source: 'operator' as const,
   }
   const primary: Record<string, string> = {}
   for (const [provider, secret] of Object.entries(parsed.output)) {

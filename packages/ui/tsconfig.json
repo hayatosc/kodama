@@ -4,5 +4,5 @@
     "strict": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src", ".storybook", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", ".storybook/**/*.ts", "vite.config.ts", "vitest.config.ts"]
 }

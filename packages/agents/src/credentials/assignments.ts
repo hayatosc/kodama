@@ -8,7 +8,7 @@ import { versionRow, writeVersionStatements } from '../control-plane/versions.ts
 import { auditStatement } from '../control-plane/audit.ts'
 import { parseAgentId } from '../validation.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import { credentialRow, credentialActor } from './management.ts'
+import { credentialRow } from './management.ts'
 import { referenceStatements } from './references.ts'
 
 /** Assign or unassign one credential, for one agent or every current agent, as one D1 transaction. */
@@ -18,7 +18,6 @@ export async function assignCredential(
   target: string,
   remove = false,
 ) {
-  const principal = credentialActor(call)
   const credential = await credentialRow(call, credentialId)
   if (!remove && credential.status !== 'active')
     throw new Error('credential_unavailable: inactive credential')
@@ -41,7 +40,7 @@ export async function assignCredential(
       const statements = writeVersionStatements(
         call.db,
         {
-          actorId: principal.principalId,
+          source: call.source,
           now: call.now,
           opId: uuidv7(),
         },
@@ -57,7 +56,7 @@ export async function assignCredential(
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
-      actorId: principal.principalId,
+      source: call.source,
       action: remove ? 'credential.unassign' : 'credential.assign',
       targetKind: 'system',
       targetId: credentialId,

@@ -50,7 +50,7 @@ function contentText(content: unknown, limit: number | undefined): string {
 
 function roleOf(kind: string): EntryRole {
   switch (kind) {
-    case 'kodama.owner-message':
+    case 'kodama.operator-message':
     case 'pi.user':
       return 'user'
     case 'kodama.agent-message':

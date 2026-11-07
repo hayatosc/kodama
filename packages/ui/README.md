@@ -11,12 +11,14 @@ and has no routes beyond a placeholder page.
 
 Run these from `packages/ui`:
 
-- `nr storybook`: start Storybook on port 6006.
-- `nr build-storybook`: build the static Storybook into `storybook-static/`.
-- `nr typecheck`: run `svelte-kit sync` and `rsvelte-check --tsgo`.
-- `nr test`: run the unit tests, such as the check that the token copy matches `design/`.
+- `vp run storybook`: start Storybook on port 6006.
+- `vp run build-storybook`: build the static Storybook into `storybook-static/`.
+- `vp run typecheck`: run `svelte-kit sync` and `rsvelte-check --tsgo`.
+- `vp run typecheck:compat`: run the same UI check when CI checks agents with `tsc`.
+- `vp run test`: run the unit tests, such as the check that the token copy matches `design/`.
 
-Format from the repository root with `nr format`.
+Format from the repository root with `vp run format`. Vite+ formats non-Svelte files;
+`scripts/format-svelte.ts` passes the same settings from the root `vite.config.ts` to `rsvelte-fmt`.
 
 ## Layout
 
@@ -27,7 +29,7 @@ Format from the repository root with `nr format`.
 - `src/lib/utils.ts`: `cn` and the prop helper types that shadcn-svelte components import.
 - `src/lib/components/ui/`: shadcn-svelte components. `components.json` is written by hand
   because `shadcn-svelte init` asks for a preset interactively. Add components with
-  `pnpm dlx shadcn-svelte@1.7.2 add <name>`, then adapt them to the design and the lint rules
+  `vp dlx shadcn-svelte@1.7.2 add <name>`, then adapt them to the design and the lint rules
   (no `any`, no type assertions).
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
@@ -42,8 +44,8 @@ Svelte 5 compiler and its tooling. It is pre-1.0, so each tool can be swapped ba
 | ------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------- |
 | Compile (Vite, SvelteKit, Storybook) | `@rsvelte/vite-plugin-svelte`, through the `overrides` entry in `pnpm-workspace.yaml` | `@sveltejs/vite-plugin-svelte`         |
 | Type check                           | `rsvelte-check --tsgo`                                                                | `svelte-check --tsgo`                  |
-| Format                               | `rsvelte-fmt` from the repository root (Oxfmt for every other file)                   | Prettier with `prettier-plugin-svelte` |
-| Lint                                 | `@rsvelte/oxlint-plugin` in `.oxlintrc.json`                                          | eslint-plugin-svelte                   |
+| Format                               | `rsvelte-fmt` for `.svelte` files, with Vite+ formatting settings                     | Prettier with `prettier-plugin-svelte` |
+| Lint                                 | `@rsvelte/oxlint-plugin` in the root `vite.config.ts`                                 | eslint-plugin-svelte                   |
 
 The override makes `pnpm peers check` report `@sveltejs/vite-plugin-svelte` 0.5.3 where
 SvelteKit and Storybook ask for 7; that warning is expected.

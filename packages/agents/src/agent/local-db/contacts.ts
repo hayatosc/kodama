@@ -57,6 +57,17 @@ export function reserveContact(
     .get()
 }
 
+/** Pending delivery and result waits, excluding terminal acknowledgement retries before limiting. */
+export function pendingContacts(db: LocalDb) {
+  return db
+    .select()
+    .from(requests)
+    .where(pending)
+    .orderBy(requests.retryAt, requests.id)
+    .limit(100)
+    .all()
+}
+
 /** Pending dispatches plus terminal results whose receiver acknowledgement still needs retry. */
 export function actionableContacts(db: LocalDb, now?: number) {
   return db

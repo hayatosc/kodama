@@ -7,10 +7,7 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
-import { beforeAll, vi } from 'vitest'
-import { seedOnce } from './management.ts'
-
-beforeAll(seedOnce)
+import { vi } from 'vite-plus/test'
 import { drizzle } from 'drizzle-orm/d1'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import { memoryDb, schema } from '../memory/store/db.ts'

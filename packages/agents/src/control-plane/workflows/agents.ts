@@ -6,16 +6,17 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import { and, eq, exists } from 'drizzle-orm'
 import * as v from 'valibot'
 import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai'
-import { agentConfigVersions, agentMembers, agents } from '../../../drizzle/management/schema.ts'
+import { mcpCommit } from '../../mcp/registration/catalog.ts'
+import { agentConfigVersions, agents, mcpAssignments } from '../../../drizzle/management/schema.ts'
 import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
 import { defaultAgentSettings, parseSettings } from '../../control-plane/config.ts'
 import { auditByOpId, auditStatement } from '../audit.ts'
-import type { AgentRow, ManagementDb, PrincipalRow, VersionRow } from '../db.ts'
+import type { AgentRow, ManagementDb, VersionRow } from '../db.ts'
 import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../registry.ts'
 import { reportApplied, versionRow, versionRows, writeVersionStatements } from '../versions.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../../control-plane/config.ts'
@@ -45,14 +46,9 @@ export interface ManagementCall {
   env: ManagementEnv
   db: ManagementDb
   models: Models
-  /** The authorized caller; `null` for the system (the seed and reconciliation). */
-  principal: PrincipalRow | null
+  /** Recorded by the host, never used as a user identity or permission. */
+  source: 'operator' | 'system'
   now: number
-}
-
-/** The acting principal's ID, or `null` for the system. */
-function actorId(call: ManagementCall): string | null {
-  return call.principal?.principalId ?? null
 }
 
 /** A stored version as `AgentService` returns it. */
@@ -60,7 +56,7 @@ function configVersionOf(models: Models, row: VersionRow): ConfigVersion {
   return {
     version: row.version,
     settings: parseSettings(models, JSON.parse(row.settingsJson)),
-    ...(row.authorId === null ? {} : { authorId: row.authorId }),
+    source: row.source,
     ...(row.comment === null ? {} : { comment: row.comment }),
     createdAt: row.createdAt,
   }
@@ -141,7 +137,7 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
     auditStatement(call.db, {
       opId: `agent.activate:${agentId}`,
       at: call.now,
-      actorId: actorId(call),
+      source: call.source,
       action: 'agent.activate',
       targetKind: 'agent',
       targetId: agentId,
@@ -152,8 +148,8 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
 
 /**
  * Create a working agent: a new UUID v7, then the registry row (`provisioning`), version 1, the
- * caller's owner membership, and the audit row in one batch; then initialize the object and
- * activate it. The system (the seed) creates agents with no owner.
+ * audit row in one batch; then initialize the object and activate it.
+ * Every working agent belongs to this single-operator installation.
  *
  * @remarks
  * Reusing `requestId` returns the agent the first attempt created. A stop after the batch leaves the
@@ -167,11 +163,13 @@ export async function createAgent(
     settings?: unknown
     credentials?: unknown
   },
+  seed = false,
 ): Promise<AgentSummary> {
-  const creator = actorId(call)
-  const opId = `agent.create:${creator ?? 'system'}:${request.requestId}`
+  const opId = seed ? 'agent.create:installation:seed' : `agent.create:${request.requestId}`
   const earlier = await auditByOpId(call.db, opId)
-  if (earlier !== undefined) return summaryOf(await finishProvisioning(call, earlier.targetId))
+  if (earlier !== undefined) {
+    return summaryOf(await finishProvisioning(call, earlier.targetId))
+  }
   const initial =
     request.settings === undefined
       ? defaultAgentSettings(call.env)
@@ -180,12 +178,10 @@ export async function createAgent(
     request.credentials === undefined
       ? initial
       : parseSettings(call.models, { ...initial, credentials: request.credentials })
+  if (settings.mcp?.length)
+    throw new TypeError('MCP tools require explicit assignment after agent creation')
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
-  const membership =
-    creator === null
-      ? []
-      : [call.db.insert(agentMembers).values({ agentId, principalId: creator, role: 'owner' })]
   try {
     await call.db.batch([
       call.db.insert(agents).values({
@@ -196,7 +192,6 @@ export async function createAgent(
         slug: request.slug ?? null,
         status: 'provisioning',
         currentVersion: 1,
-        ownerId: creator,
         createdAt: call.now,
         updatedAt: call.now,
       }),
@@ -205,17 +200,16 @@ export async function createAgent(
         version: 1,
         settingsJson: JSON.stringify(settings),
         schemaVersion: SETTINGS_SCHEMA_VERSION,
-        authorId: creator,
+        source: call.source,
         comment: 'create',
         createdAt: call.now,
       }),
-      ...membership,
       ...initialGrantStatements(call.db, agentId, settings),
       ...referenceStatements(call.db, agentId, settings),
       auditStatement(call.db, {
         opId,
         at: call.now,
-        actorId: creator,
+        source: call.source,
         action: 'agent.create',
         targetKind: 'agent',
         targetId: agentId,
@@ -225,7 +219,9 @@ export async function createAgent(
   } catch (error) {
     if (!isConstraintError(error)) throw error
     const replay = await auditByOpId(call.db, opId)
-    if (replay !== undefined) return summaryOf(await finishProvisioning(call, replay.targetId))
+    if (replay !== undefined) {
+      return summaryOf(await finishProvisioning(call, replay.targetId))
+    }
     if (/agents\.slug/.test(errorText(error))) {
       throw new TypeError(`slug is taken: ${request.slug}`)
     }
@@ -283,7 +279,7 @@ export async function renameAgent(
       auditStatement(call.db, {
         opId: `agent.rename:${agentId}:${uuidv7(call.now)}`,
         at: call.now,
-        actorId: actorId(call),
+        source: call.source,
         action: 'agent.rename',
         targetKind: 'agent',
         targetId: agentId,
@@ -336,6 +332,30 @@ async function writeVersion(
   const row = await agentRow(call.db, agentId)
   if (row.currentVersion !== write.expected) throw versionConflict(agentId, write.expected)
   await validateCredentialRefs(call.db, write.settings, agentId)
+  const mcpFences = (write.settings.mcp ?? []).map((selected) => {
+    if (row.kind !== 'working') throw new Error('mcp_agent_unavailable')
+    return mcpCommit(
+      call.db,
+      uuidv7(),
+      exists(
+        call.db
+          .select()
+          .from(mcpAssignments)
+          .innerJoin(agents, eq(agents.agentId, mcpAssignments.agentId))
+          .where(
+            and(
+              eq(agents.kind, 'working'),
+              eq(mcpAssignments.agentId, agentId),
+              eq(mcpAssignments.toolId, selected.toolId),
+              eq(mcpAssignments.serverId, selected.serverId),
+              eq(mcpAssignments.serverRevision, selected.serverRevision),
+              eq(mcpAssignments.digest, selected.digest),
+              eq(mcpAssignments.credentialId, selected.credentialId),
+            ),
+          ),
+      ),
+    )
+  })
   const detail = {
     ...(write.comment === undefined ? {} : { comment: write.comment }),
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
@@ -344,12 +364,13 @@ async function writeVersion(
     await call.db.batch([
       ...writeVersionStatements(
         call.db,
-        { actorId: actorId(call), now: call.now, opId: write.opId },
+        { source: call.source, now: call.now, opId: write.opId },
         agentId,
         write.expected,
         write.settings,
         detail,
       ),
+      ...mcpFences,
       ...referenceStatements(call.db, agentId, write.settings),
     ])
   } catch (error) {

@@ -2,7 +2,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import { contactRequests, notifications } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS, MAX_CONTACT_RESULT_BYTES } from '../../extensions.ts'
 import { uuidv7 } from '../../lib/uuid.ts'

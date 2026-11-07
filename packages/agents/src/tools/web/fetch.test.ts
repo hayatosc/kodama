@@ -1,5 +1,5 @@
 /** Public GET validation and inert extraction using local mocked responses only. @module */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { fetchPage } from './fetch.ts'
 
 afterEach(() => vi.restoreAllMocks())

@@ -1,6 +1,6 @@
 /** Development bootstrap registers encrypted keys and assigns working and memory agents. @module */
 import { env, exports } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { seedLocalCredentials } from './bootstrap.ts'
 import { management, newAgentId } from '../testing/management.ts'
 import { auditLog, agentConfigVersions, credentialGrants } from '../../drizzle/management/schema.ts'

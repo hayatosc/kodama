@@ -6,7 +6,7 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { inArray } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { memoryOps } from '../../../drizzle/memory/schema.ts'
 import { memoryDb } from './db.ts'
 

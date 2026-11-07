@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { isUuid, uuidv7 } from './uuid.ts'
 
 afterEach(() => vi.restoreAllMocks())

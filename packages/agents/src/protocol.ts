@@ -9,6 +9,15 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** A read-only projection of existing execution/contact state, never a delivery ledger. */
+export interface AttentionItem {
+  source: 'execution' | 'contact'
+  id: string
+  reason: string
+  lastProgressAt: number | null
+  actions: 'cancel'[]
+}
+
 /** Shared extension payloads; references never grant cross-agent access. */
 export type {
   AgentNotification,
@@ -35,6 +44,16 @@ export type AgentSendEvent =
 /** JSON payload of each named SSE event. Pi may emit a replacement snapshot after overflow. */
 export type { AgentEvent } from '@earendil-works/pi-durable'
 
+/** An owner-selected immutable MCP definition and its server-bound credential reference. */
+export interface McpToolSelection {
+  serverId: string
+  serverRevision: number
+  toolId: string
+  modelName: string
+  digest: string
+  credentialId: string
+}
+
 /** The part of a configuration version that Pi and the memory copy use. */
 export interface AgentConfig {
   model: { provider: string; modelId: string }
@@ -42,6 +61,8 @@ export interface AgentConfig {
   thinkingLevel: ModelThinkingLevel
   webSearchRoute?: 'auto' | 'keyless'
   tools: string[]
+  /** Only explicitly assigned, digest-pinned remote tools may join the registry. */
+  mcp?: McpToolSelection[]
   /** Shared memory spaces the agent reads, earliest first; defaults to `["global"]`. */
   sharedSpaces: string[]
 }
@@ -87,13 +108,6 @@ export interface AuditQuery {
   targetId?: string
   before?: number
   limit?: number
-}
-
-/** Who calls the management methods of `AgentService`, as the calling Worker authenticated them. */
-export interface ManagementActor {
-  kind: 'user' | 'service' | 'agent'
-  /** The Access email, service token ID, or agent ID; resolved to a principal. */
-  externalId: string
 }
 
 /** Lifecycle states of an agent. */
@@ -160,8 +174,8 @@ export interface RollbackConfigRequest {
 export interface ConfigVersion {
   version: number
   settings: AgentSettings
-  /** The principal that wrote it; missing for the system (the seed). */
-  authorId?: string
+  /** Host-recorded origin; this installation has no user identities or agent owners. */
+  source: 'operator' | 'system'
   comment?: string
   createdAt: number
 }

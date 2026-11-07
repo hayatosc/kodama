@@ -2,7 +2,7 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { eq } from 'drizzle-orm'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { agents, usageDaily } from '../../../drizzle/management/schema.ts'
 import { usage } from '../../../drizzle/durable-object/schema.ts'
 import { credentialCall } from '../../testing/credentials.ts'
@@ -14,7 +14,7 @@ import { ingestUsage, usageCheckpoint } from '../usage.ts'
 import { aggregateUsage } from './usage.ts'
 
 it('repairs a committed but unacknowledged page and includes archived and dedicated agents', async () => {
-  const call = await credentialCall()
+  const call = credentialCall()
   const id = await newAgentId()
   const memoryId = (await seedOnce()).memoryAgentId
   const row = usageRecord({ chargedAgentId: id })

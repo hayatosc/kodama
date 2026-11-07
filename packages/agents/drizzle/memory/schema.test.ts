@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core'
-import { expect, it } from 'vitest'
+import { expect, it } from 'vite-plus/test'
 import { memoryDb } from '../../src/memory/store/db.ts'
 import * as schema from './schema.ts'
 
@@ -25,7 +25,7 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
       [...columns].sort(byCodeUnit),
     ]),
   )
-  // A mismatch means drizzle/memory/schema.ts changed without `nr db:generate:memory`.
+  // A mismatch means drizzle/memory/schema.ts changed without `vp run db:generate:memory`.
   expect(migrated).toEqual(declared)
 })
 

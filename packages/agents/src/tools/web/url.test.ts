@@ -1,5 +1,5 @@
 /** URL normalization and exact-query boundaries without network traffic. @module */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vite-plus/test'
 import {
   LINK_LIMIT,
   containsUrl,
