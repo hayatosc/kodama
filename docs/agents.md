@@ -134,6 +134,9 @@ On every open, the agent prepares the harness before any request sees it:
    agent starts its job drain.
 5. The recovery alarm is reconciled with Pi's tasks.
 
+When pruning reopens the harness, step 5 runs after its exclusive section releases the input
+gate, so queued alarm transactions can finish before recovery waits for the serial queue.
+
 If Pi's storage fails, the object aborts and is recreated on the next request.
 
 ## Dependencies

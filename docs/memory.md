@@ -584,7 +584,11 @@ On start and on the `prune` alarm, an unfinished run continues from its state:
    Otherwise:
    1. Close the harness.
    2. In one `transactionSync`, delete the prunable rows of the run's range and record `deleted`.
-   3. Reopen the harness and refresh the alarms.
+   3. Reopen the harness.
+
+   After the exclusive section returns, refresh recovery and idle alarms through the serial
+   queue. Never wait for that queue inside the input gate: an earlier idle refresh may be
+   awaiting an alarm transaction that cannot finish until the gate is released.
 
    Requests that arrive meanwhile wait for the reopened harness. The section does only local
    SQLite work, so it stays far below the 30-second limit.
