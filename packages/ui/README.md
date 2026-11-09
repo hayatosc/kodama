@@ -28,10 +28,17 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 - `src/lib/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
 - `src/lib/utils.ts`: `cn` and the prop helper types that shadcn-svelte components import.
-- `src/lib/components/ui/`: shadcn-svelte components. `components.json` is written by hand
+- `src/lib/components/ui/`: shadcn-svelte components (Button, Badge, Switch, Tabs,
+  AlertDialog, Popover, Command), restyled to the design. `components.json` is written by hand
   because `shadcn-svelte init` asks for a preset interactively. Add components with
-  `vp dlx shadcn-svelte@1.7.2 add <name>`, then adapt them to the design and the lint rules
-  (no `any`, no type assertions).
+  `vp dlx shadcn-svelte@1.7.2 add <name>`, then restyle them from `design/components/bundle.css`
+  and fit them to the lint rules (no `any`, no type assertions; weights 400 and 600 only).
+  Variant tables and their types live in a `variants.ts` next to the component, because
+  type-aware Oxlint cannot read named exports from `.svelte` files.
+- `src/lib/components/`: the Kodama components built on them: `StatusBadge` and `UnreadCount`,
+  `Kbd`, `Select` (Popover + Command, shadcn-svelte's combobox recipe: a button opens a menu
+  with the search field inside it, which bits-ui's input-based Combobox does not give), and
+  `ConfirmDialog` (AlertDialog). `focusRing` in `src/lib/utils.ts` is the shared focus style.
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
@@ -63,8 +70,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 1. **Foundation** (done): the package, tokens and fonts, the shadcn-svelte setup, Storybook
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
-2. **Primitives** on shadcn-svelte: Button, StatusBadge (with the unread count), Kbd, Switch,
-   Tabs, Select (with search), and Dialog.
+2. **Primitives** (done) on shadcn-svelte: Button, StatusBadge (with the unread count), Kbd,
+   Switch, Tabs, Select (with search), and Dialog.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
    `design/components/bundle.js` and `bundle.css`.
 4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),

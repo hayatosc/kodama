@@ -23,3 +23,10 @@ export type WithoutChildrenOrChild<T> = WithoutChildren<WithoutChild<T>>
 
 /** Props plus a bindable `ref` to the rendered element. */
 export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?: U | null }
+
+/**
+ * The focus ring every control uses: `ring` at 2px with a 2px offset, shown only for keyboard
+ * focus (design/README.md — Focus).
+ */
+export const focusRing =
+  'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'

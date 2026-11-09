@@ -15,6 +15,17 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
+@theme {
+  /* The running dot's blink (design/README.md — Motion): 1.6s, and stopped under reduced motion. */
+  --animate-blink: blink 1.6s ease-in-out infinite;
+
+  @keyframes blink {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
