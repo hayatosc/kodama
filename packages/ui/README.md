@@ -36,9 +36,10 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   Variant tables and their types live in a `variants.ts` next to the component, because
   type-aware Oxlint cannot read named exports from `.svelte` files.
 - `src/lib/components/`: the Kodama components built on them: `StatusBadge` and `UnreadCount`,
-  `Kbd`, `Select` (Popover + Command, shadcn-svelte's combobox recipe: a button opens a menu
-  with the search field inside it, which bits-ui's input-based Combobox does not give), and
-  `ConfirmDialog` (AlertDialog). `focusRing` in `src/lib/utils.ts` is the shared focus style.
+  `Keyboard` (the key hints of `design/components/Kbd`), `Select` (Popover + Command,
+  shadcn-svelte's combobox recipe: a button opens a menu with the search field inside it, which
+  bits-ui's input-based Combobox does not give), and `ConfirmDialog` (AlertDialog). `focusRing`
+  in `src/lib/utils.ts` is the shared focus style.
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
@@ -70,7 +71,7 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 1. **Foundation** (done): the package, tokens and fonts, the shadcn-svelte setup, Storybook
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
-2. **Primitives** (done) on shadcn-svelte: Button, StatusBadge (with the unread count), Kbd,
+2. **Primitives** (done) on shadcn-svelte: Button, StatusBadge (with the unread count), Keyboard,
    Switch, Tabs, Select (with search), and Dialog.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
    `design/components/bundle.js` and `bundle.css`.

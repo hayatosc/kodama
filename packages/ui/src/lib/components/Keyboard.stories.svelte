@@ -1,10 +1,10 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
-  import Kbd from './Kbd.svelte'
+  import Keyboard from './Keyboard.svelte'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Kbd',
-    component: Kbd,
+    title: 'Primitives/Keyboard',
+    component: Keyboard,
     tags: ['autodocs'],
     args: { keys: '⏎', label: '送信' },
     parameters: {
@@ -44,7 +44,7 @@
   <div class="flex items-center gap-3">
     {#each hints as hint, index (hint.keys)}
       {#if index > 0}<span aria-hidden="true" class="h-3 w-px bg-border"></span>{/if}
-      <Kbd keys={hint.keys} label={hint.label} />
+      <Keyboard keys={hint.keys} label={hint.label} />
     {/each}
   </div>
 </Story>
