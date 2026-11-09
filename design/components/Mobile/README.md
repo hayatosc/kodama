@@ -1,10 +1,10 @@
 # Mobile
 
-スマートフォン幅（375px）の画面で、一覧・会話・詳細を 1 画面ずつ切り替える。デスクトップの 3 ペインを縦に積み替えたもので、部品は同じものを使う。
+A phone-width (375px) screen that switches between the list, the conversation, and details one at a time. It is the desktop three panes rearranged vertically, reusing the same components.
 
-- **一覧:** 上に大見出し「Kodama」（`font-display text-[28px] font-semibold`）と検索・新規作成の丸ボタン。中身は Sidebar と同じで、メインの行を最上部に、アバターは 40px。行を押すと会話へ進む。
-- **会話:** 上端は高さ 56px のアプリバー（戻る、32px のアバター、名前と「状態 · 今していること」、詳細ボタン）。本文は Message と ToolCall をそのまま、ユーザーのピルは最大 85%。下端に Composer を左右 12px の余白で置く。
-- **キュー:** スマートフォンには Tab キーがないので、実行中に入力するとシートに「キューに追加」ボタンを出す（Composer の `mobile`）。送信ボタンは割り込み送信。
-- **詳細:** アプリバーの詳細ボタンで、下からシートを出す（角丸 20px、上端につまみ、背景は黒 32% のスクリム）。中身は ProfilePanel のタブ。シートの中の Select はメニューを上に開く。スクリム、×、Esc で閉じる。
-- 入力欄は 16px（iOS のズーム防止）。下端はホームインジケーターの分だけ余白を足す（`env(safe-area-inset-bottom)`）。
-- 1024px 未満は一覧と会話を切り替える 1 ペイン、1024–1279px は一覧＋会話、1280px 以上で 3 ペイン。
+- **List:** a large 「Kodama」 heading at the top (`font-display text-[28px] font-semibold`) plus round search and create buttons. The content matches Sidebar: the main row at the top, avatars 40px. Tapping a row opens the conversation.
+- **Conversation:** a 56px app bar at the top (back, 32px avatar, name and 「状態 · 今していること」 (state · current activity), details button). The body reuses Message and ToolCall as-is; the user's pill is at most 85%. Place the Composer at the bottom with 12px side margins.
+- **Queue:** phones have no Tab key, so typing during a run shows an 「キューに追加」 (Add to queue) button in the sheet (Composer's `mobile`). The send button steers the run.
+- **Details:** the app bar's details button opens a sheet from the bottom (20px radius, grab handle at the top, 32% black scrim). The content is ProfilePanel's tabs. Selects inside the sheet open their menu upward. Close with the scrim, ×, or Esc.
+- The input is 16px (to prevent iOS zoom). Add the home indicator's inset at the bottom (`env(safe-area-inset-bottom)`).
+- Below 1024px is a single pane switching between list and conversation; 1024–1279px is list plus conversation; 1280px and above is three panes.

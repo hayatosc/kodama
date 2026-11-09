@@ -1,8 +1,8 @@
 # Kbd
 
-キーボード操作のヒントに使うキー表示。
+Key hints for keyboard operations.
 
-- **使う側が渡すもの:** キーの文字（`Tab`、`⏎`、`⇧ ⏎`、`Esc`、`⌘ K`）と、隣に置く説明。
-- 形は `min-w-[22px] h-5 px-1.5 border rounded-sm`、下辺だけ 2px、`bg-background font-mono text-[11px]`。
-- 説明は `text-xs text-muted-foreground` で、キーの右に置く。複数並べるときは 1px の区切り線を挟む。
-- Mac では `⌘`、それ以外では `Ctrl` と表示する。
+- **What the caller passes:** the key text (`Tab`, `⏎`, `⇧ ⏎`, `Esc`, `⌘ K`) and the explanation next to it.
+- Shape: `min-w-[22px] h-5 px-1.5 border rounded-sm`, 2px on the bottom edge only, `bg-background font-mono text-[11px]`.
+- The explanation is `text-xs text-muted-foreground`, to the right of the key. When showing several, separate them with a 1px divider.
+- Show `⌘` on Mac and `Ctrl` elsewhere.

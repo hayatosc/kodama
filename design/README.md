@@ -1,95 +1,95 @@
-長く走り続けるエージェントたちと暮らすための場所。Kodama の UI は、エージェント一人ひとりを自分の巣箱に住む小鳥として見せ、「人が見ていない間に誰が何をしたか」を一目で読ませる。画面そのものは白黒で静かに保ち、色は鳥と状態にだけ使う。Tailwind CSS v4 と shadcn の命名規約に従い、トークン名はそのまま `bg-background` `text-muted-foreground` のようなユーティリティになる。
+A place to live alongside agents that keep running for a long time. Kodama's UI shows each agent as a small bird living in its own birdhouse, so you can read at a glance who did what while you were not looking. The screen itself stays quiet in black and white; color is reserved for the birds and for status. Following Tailwind CSS v4 and shadcn naming conventions, token names become utilities directly, such as `bg-background` and `text-muted-foreground`.
 
-## 原則
+## Principles
 
-- **エージェントは巣箱に住む小鳥。** 巣箱はエージェント1体ごとの Durable Object の見立てで、眠っている間（アラーム待ち・一時停止）は巣箱の中、イベントが来ると穴から顔を出して止まり木に出てくる。各エージェントは `agent-*` の色1つを一生持つ（UUID から決め、ユーザーが変えられる）。ポーズと動きが今していることを表す：虫眼鏡で調べる、紙をついばんで書く、手紙をくわえて相手の巣箱へ飛ぶ、伸びをして起きる。一覧やチャットでは、鳥を完全な円のアバターに収める（円はエージェントの色をうっすら混ぜた色）。眠っている間は、円の中を同じ色の巣箱に切り替え（中の鳥は描かない）、z を立ちのぼらせる。詳しくは AgentAvatar。
-- **メインのエージェントは特別枠。** 最初に作られる `assistant` はサイドバー最上部の大きな枠に置き、黒い鳥の `agent-ink` で描く。主ボタンと同じ反転色で、この製品の顔になる。他のエージェントは下の一覧、システム用エージェントはさらに下に灰色で控えめに。
-- **画面は白黒、色は鳥と状態だけ。** 面と文字は `background` `sidebar` `card` `muted` と `foreground` `muted-foreground` で組む。状態の色は `live`（返信あり・リンク）、`running`（実行中）、`destructive`（失敗・破壊的操作）の3つだけ。
-- **主ボタンとユーザーの発話は反転色。** `primary` は `foreground` のエイリアスで、ライトでは黒地に白文字、ダークでは白地に黒文字。エージェントの発話は `muted` の灰色の吹き出し、ユーザーの発話は `primary` の黒いピル。
-- **罫線は細く、影は浮くものだけ。** 面の区切りは `border` の 1px と面のトーン差で表す。`shadow-lg` は Composer・ポップオーバー・メニューにだけ使う。
-- **長時間の経過を前提にする。** すべての行に「いつ」と「状態」を置く。ストリームが切れてもスナップショットで置き換えられる、追記ではなく置換の表示にする。
-- **ライトが既定、ダークも同格。** テーマは `light` が先頭（既定）。どちらのテーマでも本文は 4.5:1、操作部品の枠とフォーカスリングは 3:1 を満たす。
+- **Agents are small birds in birdhouses.** The birdhouse stands for each agent's Durable Object: while asleep (waiting for an alarm, paused) the bird is inside; when an event arrives it peeks out of the hole and steps onto the perch. Each agent keeps one `agent-*` color for life (derived from its UUID; the user can change it). Poses and motion show what it is doing now: inspecting with a magnifier, pecking at paper to write, carrying a letter to another birdhouse, stretching awake. In lists and chat, the bird sits inside a full-circle avatar (the circle mixes in a faint tint of the agent's color). While asleep, the circle switches to a birdhouse of the same color (no bird inside), with z's rising. See AgentAvatar.
+- **The main agent is special.** `assistant`, created first, sits in the large slot at the top of the sidebar and is drawn as the black bird `agent-ink`. It uses the same inverted color as the primary button and becomes the face of the product. Other agents sit in the list below; system agents sit further down in gray, quietly.
+- **The screen is black and white; only birds and status carry color.** Surfaces and text are built from `background` `sidebar` `card` `muted` and `foreground` `muted-foreground`. There are only three status colors: `live` (new reply, link), `running` (in progress), and `destructive` (failure, destructive action).
+- **Primary buttons and the user's speech are inverted.** `primary` is an alias of `foreground`: black with white text in light, white with black text in dark. Agent messages are gray `muted` bubbles; user messages are black `primary` pills.
+- **Lines are thin; shadows are only for things that float.** Surfaces are separated by a 1px `border` and a difference in tone. `shadow-lg` is used only for the Composer, popovers, and menus.
+- **Assume long spans of time.** Every row has a "when" and a "state". The transcript is replaced by snapshots rather than appended to, so it survives a broken stream.
+- **Light is the default; dark is equal.** The theme order starts with `light` (the default). Both themes meet 4.5:1 for body text and 3:1 for control outlines and focus rings.
 
-## 言葉づかい
+## Copy
 
-- UI の文言は日本語、識別子は英語のまま。エージェント名・スラッグ・ツール名・モデル名は `font-mono` か原文表記で、訳さない（`web_search`、`assistant`、`claude-sonnet-5-5`）。
-- 状態は短い名詞で書く：稼働中、実行中、待機中、一時停止、失敗、アーカイブ。英語のライフサイクル値（`active` `paused`）を出すのは詳細パネルだけ。
-- 時刻は相対表記（今、2分前、3日）を一覧に、絶対時刻（`09:00`）をアクティビティに使う。
-- システムの文言（ボタン、エラー、設定）は敬体（です・ます）。エージェントの発話はそのエージェントの口調でよく、常体でもかまわない。どちらも感嘆符と絵文字は使わない。エラーは原因と次の行動を一文ずつ：「認証情報が見つかりません。設定から割り当ててください。」
-- ボタンは動詞で終える：作成、送信、停止、ロールバック。
+- UI copy is Japanese; identifiers stay English. Agent names, slugs, tool names, and model names use `font-mono` or their original spelling and are never translated (`web_search`, `assistant`, `claude-sonnet-5-5`).
+- Write states as short nouns: 稼働中 (active), 実行中 (running), 待機中 (waiting), 一時停止 (paused), 失敗 (failed), アーカイブ (archived). Only the detail panel shows the English lifecycle values (`active`, `paused`).
+- Use relative times (今 (now), 2分前 (2 min ago), 3日 (3 days)) in lists and absolute times (`09:00`) in the activity feed.
+- System copy (buttons, errors, settings) uses polite Japanese (です・ます). An agent's speech may follow that agent's voice, including plain form. Neither uses exclamation marks or emoji. An error states the cause and the next action, one sentence each: 「認証情報が見つかりません。設定から割り当ててください。」 ("Credentials not found. Assign them in settings.")
+- Buttons end with a verb: 作成 (create), 送信 (send), 停止 (stop), ロールバック (roll back).
 
-## 色
+## Color
 
-- 本文は `foreground`、補助情報（時刻、スラッグ、モデル、ツールの要約、プレースホルダー）は `muted-foreground`。どちらも `background` `sidebar` `card` `muted` `accent` の上で読める。
-- 左のエージェント一覧は `sidebar`、会話ペインは `background`、浮く面は `card` か `popover`。選択中の行は `muted`、ホバーは `accent`。
-- 状態色は必ず語かアイコンと組にする。色だけで区別させない。バッジの地は `live-soft` `running-soft` `destructive-soft`、文字はそれぞれ `live` `running` `destructive`。
-- エージェントの色（`agent-orange` `agent-yellow` `agent-green` `agent-teal` `agent-sky` `agent-blue` `agent-violet` `agent-plum` `agent-pink` `agent-red` `agent-brown` の 11 色。色相を一周するように並べ、隣どうしは明るさか色相がはっきり違う）は鳥の頭・背中・羽・尾と、巣箱の屋根の旗にだけ使い、文字や枠には使わない。必ず名前と並べるので、色そのものに意味は持たせない。鳥の顔とお腹は両テーマとも `bird-face`（温かみのある白）で、目は `bird-eye`、ほっぺ `bird-blush`、くちばし `bird-beak` `bird-beak-top`、足 `bird-feet`。
-- 鳥と巣箱は画面の色に合わせる。鳥の色は彩度を抑えたやわらかい色、顔は温かみのある白、くちばしとほっぺはやわらかいコーラル。アバターの中の巣箱はエージェントの色で塗る。`house-*` のグレーは、巣箱を大きく描く場面（全エージェント共通の巣箱）で使い、茶色い木にはしない。鳥の白い顔と巣箱の明るさは必ず変える（鳥が巣箱に溶けないように）。エージェントの色は屋根の旗だけ。手紙が届くと旗がはためく。
-- アバターはライトとダークで完全に同じ見た目にする。鳥・円・巣箱・小道具・状態バッジの色はテーマで変えない（`agent-*` `bird-*` は両テーマ同じ値、円の中の面はライトの値に固定）。どのテーマでも同じ鳥として覚えてもらうため。
-- `agent-ink` はメインのエージェント専用。システム用エージェントは `agent-system` の灰色の鳥。
-- 状態色に緑は使わない。完了は色を付けず `muted-foreground` のまま（成功は静かであるべきで、目を引くのは異常と進行中だけ）。青とオレンジの組は色覚多様性でも区別しやすい。
-- 入力欄・セカンダリボタンの枠は `input`（3:1）。`border` は装飾用の罫線で、操作部品の唯一の輪郭にしない。
+- Body text is `foreground`; supporting information (times, slugs, model names, tool summaries, placeholders) is `muted-foreground`. Both stay readable on `background` `sidebar` `card` `muted` `accent`.
+- The agent list on the left is `sidebar`, the conversation pane is `background`, and floating surfaces are `card` or `popover`. The selected row is `muted`; hover is `accent`.
+- Status colors always pair with a word or an icon. Never distinguish by color alone. Badge backgrounds are `live-soft` `running-soft` `destructive-soft`; their text is `live` `running` `destructive`.
+- Agent colors (`agent-orange` `agent-yellow` `agent-green` `agent-teal` `agent-sky` `agent-blue` `agent-violet` `agent-plum` `agent-pink` `agent-red` `agent-brown`, 11 colors arranged around the hue wheel so neighbors differ clearly in lightness or hue) are used only on the bird's head, back, wings, and tail, and on the flag on the birdhouse roof. Never on text or borders. Because a color always appears next to a name, the color itself carries no meaning. The bird's face and belly are `bird-face` (a warm white) in both themes; eyes are `bird-eye`, cheeks `bird-blush`, beak `bird-beak` `bird-beak-top`, feet `bird-feet`.
+- Birds and birdhouses adapt to the screen's colors. Bird colors are soft and muted; the face is a warm white; the beak and cheeks are a soft coral. The birdhouse inside the avatar is painted in the agent's color. The `house-*` grays are for scenes that draw a large birdhouse (the shared birdhouse for all agents); never use brown wood. The bird's white face and the birdhouse's lightness must always differ (so the bird does not blend into the house). The agent's color is only on the roof flag. The flag flutters when a letter arrives.
+- Avatars look exactly the same in light and dark. The colors of the bird, circle, birdhouse, props, and status badge do not change with the theme (`agent-*` and `bird-*` have the same values in both themes; surfaces inside the circle are fixed to the light values). The same bird should be recognizable in every theme.
+- `agent-ink` is reserved for the main agent. System agents are gray birds in `agent-system`.
+- Never use green for status. Completion stays uncolored in `muted-foreground` (success should be quiet; only anomalies and work in progress draw the eye). The blue and orange pair remains distinguishable with color vision deficiency.
+- Inputs and secondary buttons use `input` for their outline (3:1). `border` is a decorative rule; never make it the only outline of a control.
 
-## タイポグラフィ
+## Typography
 
-- 書体は Gen Interface JP（Inter と Noto Sans JP をもとにした、和欧のバランスを揃えた UI 用書体。SIL OFL 1.1）。本文・UI は `sans`（Gen Interface JP）、ページ見出し・ペイン見出し・メインの名前は `display`（Gen Interface JP Display）。等幅は Geist Mono。
-- フォントは npm の `gen-interface-jp`（unicode-range で分割された WOFF2）から読み込む。使うのは本文の 400・600 と Display の 600 だけ。
-- ウェイトは 400 と 600 の2つだけ。フォントの読み込みを軽くするため、`font-medium`（500）や `font-bold` は使わない。強調は 600、小見出しやメタ情報は 400 のまま色（`muted-foreground`）で下げる。
-- UI の既定は `type-base`（16/24）。一覧の名前、ボタン、ツールの行、ペイン見出し、入力欄はこれ。ボタン・選択中の行・名前は `type-base-semibold`。
-- 会話本文は `type-prose`（16/28）。日本語は行間が詰まると読みにくいので、本文だけ `leading-7` に上げる。
-- 密に並ぶ部品と補足は `type-sm`（14/20）：メニューの項目、設定の行、タブ、記憶の一覧、一覧の 2 行目。時刻・バッジ・小見出しは `type-xs`（12/16）。
-- メインの名前とペインの見出しは `type-lg`、設定や空状態のページ見出しだけ `type-2xl`。
-- ツール引数・結果・設定 JSON は `mono-sm`（14/20）、UUID の先頭8桁やリクエストID・所要時間は `mono-xs`。
+- The typeface is Gen Interface JP (a UI typeface based on Inter and Noto Sans JP, balanced between Japanese and Latin; SIL OFL 1.1). Body and UI use `sans` (Gen Interface JP); page titles, pane headings, and the main agent's name use `display` (Gen Interface JP Display). Monospace is Geist Mono.
+- Fonts load from the npm package `gen-interface-jp` (WOFF2 split by unicode-range). Only body weights 400 and 600 and Display 600 are used.
+- There are only two weights, 400 and 600. To keep font loading light, do not use `font-medium` (500) or `font-bold`. Emphasis is 600; small headings and metadata stay at 400 and step down in color (`muted-foreground`).
+- The UI default is `type-base` (16/24). List names, buttons, tool rows, pane headings, and inputs use it. Buttons, the selected row, and names use `type-base-semibold`.
+- Conversation text layers `leading-7` on `type-base` (16/28). Japanese becomes hard to read when lines are tight, so only Prose (Markdown in the conversation) raises the line height.
+- Dense parts and supporting text use `type-sm` (14/20): menu items, settings rows, tabs, the memory list, the second line of a list row. Times, badges, and small headings use `type-xs` (12/16).
+- The main agent's name and pane headings use `type-lg`; only page titles on settings and empty states use `type-2xl`.
+- Tool arguments and results and configuration JSON use `mono-sm` (14/20). The first 8 characters of a UUID, request IDs, and durations use `mono-xs`.
 
-## 余白とレイアウト
+## Spacing and layout
 
-- 4px 刻み（Tailwind の `--spacing: 0.25rem`）。`spacing-4` は `p-4` と同じ。
-- 画面は3ペイン：左 280px のエージェント一覧（`sidebar`）、中央の会話（列は最大 960px、エージェントの吹き出しは最大 560px で左、ユーザーのピルは右）、右 320px のプロフィールパネル。右ペインは 1280px 未満で畳む。
-- 1024px 未満はスマートフォンの 1 ペイン（Mobile）：一覧と会話を切り替え、詳細は下から出るシートで開く。実行中のキューは Tab の代わりに「キューに追加」ボタン。
-- 吹き出しどうしは `spacing-2`〜`spacing-3`、話者が変わるところは `spacing-4` 以上。Composer は画面下に浮かせる。
-- 一覧の行はアバター 36px・名前・右端のメタ、2行目に最後の出来事。メインの特別枠はアバター 56px。
+- 4px steps (Tailwind's `--spacing: 0.25rem`). `spacing-4` is the same as `p-4`.
+- The screen has three panes: the agent list on the left at 280px (`sidebar`), the conversation in the middle (column at most 960px; agent bubbles at most 560px on the left; the user's pill on the right), and the profile panel on the right at 320px. The right pane collapses below 1280px.
+- Below 1024px is the phone's single pane (Mobile): switch between the list and the conversation, and open details in a sheet from the bottom. While a run is active, use an "Add to queue" button instead of Tab.
+- Bubbles are `spacing-2`–`spacing-3` apart; where the speaker changes, `spacing-4` or more. The Composer floats at the bottom of the screen.
+- A list row has a 36px avatar, the name, and metadata at the right edge; the second line holds the latest event. The main agent's special slot uses a 56px avatar.
 
-## 角丸と影
+## Radius and shadow
 
-- ボタン・入力・ツール呼び出しは `radius-lg`、一覧の行・設定カード・ポップオーバーは `radius-xl`、吹き出しとメインの特別枠は `radius-2xl`、Composer・ユーザーのピル・丸ボタン・話者チップは `radius-full`。
-- 影は `shadow-sm`（ボタン、メインの特別枠）と `shadow-lg`（Composer、話者チップ、浮く面）の2段だけ。
+- Buttons, inputs, and tool calls use `radius-lg`; list rows, settings cards, and popovers use `radius-xl`; bubbles and the main agent's special slot use `radius-2xl`; the Composer, the user's pill, round buttons, and speaker chips use `radius-full`.
+- There are only two shadows: `shadow-sm` (buttons, the main agent's special slot) and `shadow-lg` (the Composer, speaker chips, floating surfaces).
 
-## 状態の見せ方
+## Status
 
-- アバターの顔と右下の小さなバッジ（`running` `live` `destructive`）が第一の表示。一覧の2行目とバッジの語で必ず言葉でも伝える。
-- ドット 8px（アバターのない場所）：塗りの `live` = 稼働中、点滅する `running` = 実行中、中抜きの円 = 待機中、中抜きの角 = 一時停止、`destructive` = 失敗、塗りの `muted-foreground` = アーカイブ・完了。
-- ツール呼び出しは既定で折りたたみ、1行に「名前 · 要約 · 所要時間」。実行中は矢印の代わりに `running` のドット、失敗は名前と時間を `destructive` に。
-- エージェントが手を動かしている間は、短い一文の「考え中ピル」（`muted`）を出す：「research に論文側を頼んでくる。」語り口はそのエージェント自身の一人称・常体でよい。
-- 他のエージェントからのメッセージ（`kodama.agent-message`）は灰色の吹き出しにせず、`border` の枠で囲み、送信元の小さなアバター・名前・UUID 先頭8桁・hop 数を見出しに出す。
+- The avatar's face and the small badge at its lower right (`running` `live` `destructive`) are the primary display. The second line of a list row and the badge's word always convey the same thing in words.
+- An 8px dot (where there is no avatar): filled `live` = 稼働中 (active); blinking `running` = 実行中 (running); hollow circle = 待機中 (waiting); hollow square = 一時停止 (paused); `destructive` = 失敗 (failed); filled `muted-foreground` = アーカイブ (archived) or complete.
+- Tool calls are collapsed by default into one line: "name · summary · duration". While running, a `running` dot replaces the arrow; on failure, the name and time turn `destructive`.
+- While an agent is working, show a short one-sentence "thinking pill" (`muted`): 「research に論文側を頼んでくる。」 ("I'll ask research to check the paper side.") The voice may be that agent's own first person and plain form.
+- Messages from other agents (`kodama.agent-message`) are not gray bubbles. They are outlined with `border`, and the header shows the sender's small avatar, name, first 8 UUID characters, and hop count.
 
-## 動き
+## Motion
 
-- 可愛さは絵柄より振る舞いで出す。眠る・起きる・道具を持つ・手紙を運ぶといった動きを、実際のイベントに一対一で対応させる（対応表は AgentAvatar、画面での通しの見本は WorkspaceLive）。
-- 動きは生き物らしく：跳ぶ前に身をかがめ（予備動作）、跳躍は放物線を描き、着地でつぶれて弾む。小鳥は数回羽ばたいて滑空し、着地前に羽を広げてブレーキをかける。羽と尾は少し遅れてついてくる。点から点へ等速で滑らせない。
-- 動きは状態の変化にだけ使う。アバターのポーズ（作業中の揺れ、ペン、寝息）、`running` のドットの点滅（1.6s）、ストリーミング中のキャレット、折りたたみの矢印回転（150ms）、ホバーの色変化（120ms）。
-- `prefers-reduced-motion: reduce` ではアバターの動きと点滅を止める。ページ遷移やリストの出入りにアニメーションを付けない。
+- Charm comes from behavior rather than illustration. Map movements such as sleeping, waking, holding a tool, and carrying a letter one-to-one to real events (the mapping is in AgentAvatar; the end-to-end screen sample is WorkspaceLive).
+- Motion should feel alive: crouch before a jump (anticipation), follow a parabola in the air, squash and bounce on landing. A small bird flaps a few times and glides, spreading its wings to brake before landing. Wings and tail follow slightly late. Never slide from point to point at constant speed.
+- Use motion only for changes in state: avatar poses (working sway, pen, breathing while asleep), the `running` dot blink (1.6s), the streaming caret, the collapse arrow rotation (150ms), and hover color changes (120ms).
+- Under `prefers-reduced-motion: reduce`, stop avatar motion and blinking. Do not animate page transitions or list entries.
 
-## アイコン
+## Icons
 
-- shadcn と同じ Lucide（`@lucide/svelte`）を 16px・線幅 1.75 で使う。このシステムにアイコンファイルは含めていない（プレビューの SVG は形を示すための仮描き）。
-- 色は親の文字色を継ぐ。補助的なアイコンは `muted-foreground`、ボタン内は文字と同色。
-- 使い分けの例：他エージェント = `arrow-left-right`、アラーム = `clock`、記憶 = `book-open`、設定 = `sliders-horizontal`、ツール展開 = `chevron-right`、送信 = `arrow-up`、停止 = 塗りの `square`。
+- Use Lucide (`@lucide/svelte`), the same as shadcn, at 16px with a 1.75 stroke. This system ships no icon files (the SVGs in the previews are stand-ins that show the shape).
+- Icons inherit the parent's text color. Supporting icons use `muted-foreground`; icons inside buttons match the text.
+- Examples: another agent = `arrow-left-right`, alarm = `clock`, memory = `book-open`, settings = `sliders-horizontal`, expand tool = `chevron-right`, send = `arrow-up`, stop = filled `square`.
 
-## フォーカス
+## Focus
 
-- フォーカスリングは `ring` の 2px 実線、オフセット 2px（Tailwind `focus-visible:ring-2 ring-ring ring-offset-2 ring-offset-background`）。`ring` はどの面の上でも 3:1 以上。
+- The focus ring is a 2px solid `ring` with a 2px offset (Tailwind `focus-visible:ring-2 ring-ring ring-offset-2 ring-offset-background`). `ring` stays at 3:1 or better on every surface.
 
-## プレビューの見方
+## Viewing the previews
 
-- すべてのカードは、ライト（Light）とダーク（Dark）を並べて表示する。同じ部品を左右または上下に置き、テーマごとの見え方を比べられるようにしている。
+- Every card shows Light and Dark side by side. The same component is placed left and right or top and bottom so you can compare how it looks in each theme.
 
-## このフォルダについて
+## About this folder
 
-- Kodama のデザインシステム（claude.ai の Design System アーティファクト）を書き出したもの。デザインを変えるときはアーティファクトを先に直し、ここへ書き出し直す。
-- `tokens.json` がトークンの元。`tokens.css` はそこから生成した CSS 変数・文字スタイル・`@font-face` で、手で直さない。
-- `components/<名前>/preview.html` はブラウザで直接開ける（`tokens.css`、`components/bundle.css`、`components/bundle.js` を読み込む）。ライトとダークを並べて表示し、クリックやキー操作にも反応する。
-- `components/<名前>/README.md` が各部品のガイド、`components/index.d.ts` が受け取る値の型。
-- `components/Cover/preview.html` はこのデザインシステムの表紙の絵で、部品ではない。そのためガイドも型もなく、`bundle.js` 先頭の部品一覧にも入れていない。
-- フォントはファイルを持たず、npm の `gen-interface-jp@0.8.0`（SIL OFL 1.1）から読み込む。`tokens.css` の先頭で jsDelivr の `cdn/400.css`・`cdn/600.css`・`cdn/display-600.css` を `@import` する。アーティファクトからここへ書き出すときは、`tokens.json` の `type.fonts` を空にし、`fonts/` は持ってこない。
-- `images/` はライトモードの Workspace と Mobile を描いた PNG（2 倍の解像度）。
-- 実装の手引きは [sveltekit.md](sveltekit.md)。
+- This is the export of Kodama's design system (a claude.ai Design System artifact). To change the design, edit the artifact first, then export it here again.
+- `tokens.json` is the source of the tokens. `tokens.css` is generated from it (CSS variables, text styles, and `@font-face`); do not edit it by hand.
+- `components/<Name>/preview.html` opens directly in a browser (it loads `tokens.css`, `components/bundle.css`, and `components/bundle.js`). It shows Light and Dark side by side and responds to clicks and key presses.
+- `components/<Name>/README.md` is each component's guide; `components/index.d.ts` holds the types of the values it accepts.
+- `components/Cover/preview.html` is the cover illustration for this design system, not a component. It has no guide or type and is not part of the component list at the top of `bundle.js`.
+- Fonts are not stored here. They load from the npm package `gen-interface-jp@0.8.0` (SIL OFL 1.1). The top of `tokens.css` imports `cdn/400.css`, `cdn/600.css`, and `cdn/display-600.css` from jsDelivr. When exporting from the artifact, empty `type.fonts` in `tokens.json` and do not bring a `fonts/` folder.
+- `images/` holds PNG renders of Workspace and Mobile in light mode (2x resolution).
+- The implementation guide is [sveltekit.md](sveltekit.md).

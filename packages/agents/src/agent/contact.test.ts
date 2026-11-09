@@ -147,6 +147,13 @@ function contactBudgetTimers() {
     new Promise<void>((resolve) => realTimeout(resolve, milliseconds))
 }
 
+/**
+ * How long a test waits for an alarm to finish. This is a liveness guard, not the budget
+ * assertion: the calls count proves the batch shared one budget. Workerd can delay the event
+ * loop under the full-file load beyond a few hundred milliseconds, so leave ample headroom.
+ */
+const CONTACT_LIVENESS_MS = 2_000
+
 describe('model contacts', () => {
   it.each(['uuid', 'slug', 'prefix'])(
     'a model contacts by %s and incorporates the correlated reply',
@@ -854,9 +861,12 @@ describe('durable contact recovery', () => {
         const alarm = dispatch()
         try {
           await started.promise
-          expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(
-            true,
-          )
+          expect(
+            await Promise.race([
+              alarm.then(() => true),
+              pause(CONTACT_LIVENESS_MS).then(() => false),
+            ]),
+          ).toBe(true)
           expect(maintenance).toBe(1)
           if (stage === 'ack') {
             const notice = (await openLocalDb(state.storage)).select().from(notifications).get()
@@ -927,7 +937,9 @@ describe('durable contact recovery', () => {
       await waitForAnswer(sender, 'shared-flight')
       nativeAlarms.mockRestore()
       alarm = contactAlarm(sender)
-      expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(true)
+      expect(
+        await Promise.race([alarm.then(() => true), pause(CONTACT_LIVENESS_MS).then(() => false)]),
+      ).toBe(true)
       expect(calls).toBe(1)
     } finally {
       held.resolve()
@@ -965,7 +977,9 @@ describe('durable contact recovery', () => {
     const alarm = contactAlarm(sender, false, undefined, dispatch)
     try {
       await started.promise
-      expect(await Promise.race([alarm.then(() => true), pause(300).then(() => false)])).toBe(true)
+      expect(
+        await Promise.race([alarm.then(() => true), pause(CONTACT_LIVENESS_MS).then(() => false)]),
+      ).toBe(true)
       expect(calls).toBe(1)
     } finally {
       held.resolve()

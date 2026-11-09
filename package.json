@@ -10,11 +10,14 @@
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "vp lint --type-aware",
-    "format": "vp fmt --write .",
-    "format:check": "vp fmt --check .",
+    "format": "vp fmt --write . && node scripts/format-svelte.ts",
+    "format:check": "vp fmt --check . && node scripts/format-svelte.ts --check",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "devDependencies": {
+    "@rsvelte/fmt": "0.7.25",
+    "@rsvelte/oxlint-plugin": "0.2.6",
+    "@types/node": "^26.6.5",
     "tsrs": "0.20.1-ts7.1.0-beta",
     "typescript": "7.0.2",
     "vite-plus": "catalog:"

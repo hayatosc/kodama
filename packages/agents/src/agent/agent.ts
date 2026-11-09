@@ -256,13 +256,15 @@ export class Agent extends DurableObject<AgentEnv> {
     // subclass has initialized its fields before `#open` calls its hooks.
     this.#harness = ctx.blockConcurrencyWhile(async () => {
       await this.#local
-      return this.#open()
+      const harness = await this.#open()
+      await this.#refreshRecovery(harness)
+      return harness
     })
   }
 
   /**
    * Open and prepare the harness: the root conversation, the configuration and the registry's
-   * desired version, {@link Agent.prepare}, and the recovery alarm.
+   * desired version, and {@link Agent.prepare}. The caller refreshes recovery separately.
    */
   async #open(): Promise<Harness> {
     const local = await this.#local
@@ -327,7 +329,6 @@ export class Agent extends DurableObject<AgentEnv> {
       )
       await this.#catchUp(harness)
       await this.prepare(harness)
-      await this.#refreshRecovery(harness)
     })
   }
 
@@ -758,7 +759,11 @@ export class Agent extends DurableObject<AgentEnv> {
       () => this.#open(),
     )
     this.#harness = section.then((result) => result.harness)
-    return (await section).mutated
+    const { harness, mutated } = await section
+    // A queued idle refresh may be awaiting an alarm transaction held back by the input gate.
+    // Release that gate before waiting for the serial queue again.
+    if (mutated) await this.#refreshRecovery(harness)
+    return mutated
   }
 
   /** Keep the recovery alarm in step with Pi's tasks; runs in the serial queue. */

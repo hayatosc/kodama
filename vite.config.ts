@@ -3,7 +3,17 @@
  *
  * @module
  */
+import svelteRecommended from '@rsvelte/oxlint-plugin/recommended.json' with { type: 'json' }
 import { defineConfig } from 'vite-plus'
+
+const svelteRules = Object.fromEntries(
+  Object.entries(svelteRecommended.rules).map(([name, severity]) => {
+    if (severity !== 'error' && severity !== 'warn' && severity !== 'off') {
+      throw new TypeError(`Unsupported Svelte rule severity: ${severity}`)
+    }
+    return [name, severity] as const
+  }),
+)
 
 export default defineConfig({
   fmt: {
@@ -17,6 +27,7 @@ export default defineConfig({
       '.agents/**',
       '.codex/**',
       '.aws/**',
+      '.mise/**',
       '**/.wrangler/**',
     ],
   },
@@ -27,6 +38,7 @@ export default defineConfig({
     },
     ignorePatterns: ['**/.cloudflare/**', '**/.wrangler/**'],
     rules: {
+      ...svelteRules,
       'no-restricted-imports': [
         'error',
         {
@@ -76,6 +88,7 @@ export default defineConfig({
       typeCheck: true,
     },
     jsPlugins: [
+      '@rsvelte/oxlint-plugin',
       {
         name: 'vite-plus',
         specifier: 'vite-plus/oxlint-plugin',

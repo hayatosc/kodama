@@ -1,11 +1,11 @@
 # Button
 
-操作を起こすボタンで、主操作は反転色の primary、それ以外は secondary か ghost を使う。
+A button that starts an action. The primary action uses the inverted primary style; everything else uses secondary or ghost.
 
-- **使う側が渡すもの:** `variant`（primary / secondary / ghost / destructive）、`size`（default 36px / sm 32px / icon 36px / round 36px）、ラベルかアイコン。アイコンだけのボタンには `aria-label` を必ず付ける。
-- 1 つの面に primary は 1 つまで。会話ペインでは Composer の送信・停止ボタンがそれにあたる。
-- destructive は `destructive-soft` 地に `destructive` 文字。アーカイブや削除は確認ダイアログを挟む。
-- ラベルは動詞で終える（作成、送信、停止）。
+- **What the caller passes:** `variant` (primary / secondary / ghost / destructive), `size` (default 36px / sm 32px / icon 36px / round 36px), and a label or icon. Icon-only buttons must have an `aria-label`.
+- At most one primary per surface. In the conversation pane, the Composer's send and stop buttons are it.
+- destructive uses `destructive` text on a `destructive-soft` background. Archive and delete go through a confirmation dialog.
+- Labels end with a verb (作成, 送信, 停止 — create, send, stop).
 
 ```svelte
 <Button>新しいエージェント</Button>          <!-- bg-primary text-primary-foreground shadow-sm rounded-lg h-8 px-3 -->
@@ -14,5 +14,5 @@
 <Button size="round" aria-label="送信"><ArrowUp /></Button> <!-- rounded-full size-8 -->
 ```
 
-- **丸ボタン（`circle`）:** `size-8 rounded-full border bg-background`。サイドバー上端の検索・新規作成、右ペインの共有に使う。
-- **チップ（`chip`）:** `h-7 rounded-full px-2 text-xs text-muted-foreground`、ホバーで `bg-accent text-foreground`。Composer の添付など、面に溶け込ませたい小さな操作に使う。アイコンだけのときは `w-8`。
+- **Round button (`circle`):** `size-8 rounded-full border bg-background`. Used for search and create at the top of the sidebar and share in the right pane.
+- **Chip (`chip`):** `h-7 rounded-full px-2 text-xs text-muted-foreground`; on hover `bg-accent text-foreground`. For small actions that should blend into the surface, such as attachments in the Composer. Icon-only chips use `w-8`.

@@ -33,7 +33,7 @@ packages/
       extraction/         Entry reads, record evidence, and permission-checked writes
     src/protocol.ts       Transport data types (safe to import as types in a UI)
     src/testing/          Shared test helpers; tests sit next to their modules as *.test.ts
-  ui/                     Planned: web UI and its server Worker
+  ui/                     Web UI (SvelteKit); for now Storybook mockups only
 ```
 
 ## Documentation
@@ -46,7 +46,7 @@ packages/
   runtime, and CI sharding.
 - [docs/mcp.md](docs/mcp.md): the agents-side MCP client.
 - [docs/single-operator.md](docs/single-operator.md): the single-operator trust boundary.
-- [design/README.md](design/README.md): the UI design system for the planned `packages/ui`:
+- [design/README.md](design/README.md): the UI design system for `packages/ui`:
   tokens, components with live previews, the agent avatar, and the SvelteKit implementation guide.
 
 ## Development
@@ -76,11 +76,16 @@ vp run build
 vp run cf:types
 ```
 
-Local checks cover types (`typecheck` with `tsrs`; if it fails, `typecheck:compat` checks with `tsc`, which CI runs), type-aware Oxlint, Oxfmt (both through Vite+), and workerd integration tests.
+Local checks cover types (`tsrs` for agents and `rsvelte-check --tsgo` for UI; `typecheck:compat`
+checks agents with `tsc`, which CI runs), type-aware Oxlint, Oxfmt (both through Vite+),
+Svelte formatting through `rsvelte-fmt`, UI unit tests, and workerd integration tests.
 Tests mock only the external model fetch; RPC, Pi Durable, SQLite, eviction, and
 alarms run in the Workers runtime without a real API key.
 `cf build` produces `.cloudflare/output/v0/` locally without deploying.
 Generated runtime types and local state are ignored by Git.
+
+From `packages/ui`, use `vp run storybook` to preview the UI mockups and `vp run build-storybook`
+to build them. See [packages/ui/README.md](packages/ui/README.md) for the UI stages and tooling.
 
 ## Local agent CLI
 

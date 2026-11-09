@@ -58,7 +58,7 @@ export interface ButtonProps {
 
 export interface StatusBadgeProps {
   status: RunState
-  /** Defaults to the Japanese word for the status (稼働中, 実行中, …). */
+  /** Defaults to the status word shown in the UI. */
   label?: string
   /** Dot only, for sidebar rows. */
   dotOnly?: boolean
@@ -105,7 +105,7 @@ export interface ComposerProps {
   onqueue: (text: string) => void
   onremove: (index: number) => void
   oncancel: () => void
-  /** Phones have no Tab key: the sheet shows a 「キューに追加」 button instead of the hint. */
+  /** Phones have no Tab key: the sheet shows an "Add to queue" button instead of the hint. */
   mobile?: boolean
 }
 
@@ -156,7 +156,7 @@ export interface ToolCallProps {
   /** JSON arguments, shown highlighted when open. */
   args?: unknown
   result?: string
-  /** e.g. "5 件" or "2.4 KB", shown in the result header. */
+  /** e.g. "5 items" or "2.4 KB", shown in the result header. */
   resultSize?: string
   error?: string
   open?: boolean
@@ -168,7 +168,7 @@ export interface TabsProps {
 }
 
 export interface MemoryItem {
-  kind: '事実' | '好み' | '手順'
+  kind: '事実' | '好み' | '手順' // fact | preference | procedure
   text: string
   source: string
   at: string

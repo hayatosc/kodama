@@ -34,6 +34,12 @@ jobs:
       - name: Build agents
         working-directory: packages/agents
         run: vp run build
+      - name: Test UI
+        working-directory: packages/ui
+        run: vp run test
+      - name: Build Storybook
+        working-directory: packages/ui
+        run: vp run build-storybook
 
   test:
     name: Test (${{ matrix.shard }}/4)

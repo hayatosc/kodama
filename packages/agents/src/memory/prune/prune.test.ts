@@ -193,8 +193,7 @@ describe('pruning', () => {
     gated = true
     // The background compaction starts here and waits for the gate; the turn itself completes.
     await say(agentId, 'background', 'Turn 11.')
-    // The turn can answer before the compaction reaches the gate. Pruning must start after that:
-    // racing the compaction's start, it hung in CI until the object's input gate was reset.
+    // Wait for the summary request so pruning must defer rather than race compaction startup.
     await expect.poll(() => waiting).toBe(true)
     const stub = env.AGENTS.getByName(agentId)
 
@@ -211,6 +210,13 @@ describe('pruning', () => {
     // The deferred run is carried on; the second head is pruned by the next run.
     expect(await stub.prune()).toBe('pruned')
     expect((await storedEntryIds(agentId)).every((id) => id >= firstHead)).toBe(true)
+    const maintenance = await runInDurableObject(stub, (_i, state) => ({
+      recovery: state.storage.kv.get('kodama:alarm:recovery'),
+      extract: state.storage.kv.get('kodama:alarm:extract'),
+    }))
+    expect(maintenance.recovery).toBeUndefined()
+    expect(maintenance.extract).toBeGreaterThan(Date.now())
+    await say(agentId, 'after-prune', 'Continue after pruning.')
   })
 
   it('resumes a run that stopped after it was prepared', async () => {

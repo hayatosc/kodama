@@ -1,6 +1,7 @@
 node_modules/
 .wrangler/
 .cloudflare/
+.mise/
 dist/
 .dev.vars
 .dev.vars.*
