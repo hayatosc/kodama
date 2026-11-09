@@ -1,9 +1,9 @@
 # ActivityFeed
 
-人が見ていない間にエージェントがしたことを、時刻付きの縦の年表で見せる。
+A vertical timeline with times, showing what agents did while nobody was watching.
 
-- **使う側が渡すもの:** 出来事の配列（時刻、種類、太字にする主語、補足）。種類はアラーム、cron、他エージェントとのやり取り、記憶の抽出、設定の適用、失敗、run の開始・終了。
-- 3 列: 右寄せの時刻（`font-mono text-xs text-muted-foreground`）、ノード（ドットか 16px のアイコン）、本文（主語は `font-semibold text-foreground`、補足は `text-muted-foreground`）。
-- ノードを縦の 1px の `border` 線でつなぐ。進行中の出来事は running のドット、失敗は destructive のドットと主語。
-- 新しい順に上から。今日は `09:00`、それより前は「昨日」「10/28」。
-- 右ペインでは幅を詰め、時刻列を 44px にする。
+- **What the caller passes:** an array of events (time, kind, the subject to bold, supporting text). Kinds are alarms, cron, exchanges with other agents, memory extraction, configuration application, failures, and run start/end.
+- Three columns: a right-aligned time (`font-mono text-xs text-muted-foreground`), a node (a dot or a 16px icon), and the body (the subject is `font-semibold text-foreground`; supporting text is `text-muted-foreground`).
+- Connect nodes with a vertical 1px `border` line. An in-progress event uses the running dot; a failure uses the destructive dot and subject.
+- Newest first, from the top. Today shows `09:00`; earlier shows 「昨日」 (Yesterday) or 「10/28」.
+- In the right pane, narrow the width and make the time column 44px.

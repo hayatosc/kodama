@@ -9,7 +9,7 @@
       docs: {
         description: {
           component:
-            'Spacing, corner radius, and shadow. All three use Tailwind’s default scale unchanged, so `p-4` is 16px and `rounded-lg` is 8px exactly as the design specifies. Source: `design/README.md`, sections 余白とレイアウト and 角丸と影.',
+            'Spacing, corner radius, and shadow. All three use Tailwind’s default scale unchanged, so `p-4` is 16px and `rounded-lg` is 8px exactly as the design specifies. Source: `design/README.md`, sections Spacing and layout and Radius and shadow.',
         },
       },
     },

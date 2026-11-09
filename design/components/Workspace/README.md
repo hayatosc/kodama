@@ -1,8 +1,8 @@
 # Workspace
 
-Sidebar・会話・ProfilePanel を並べた画面全体で、ライトとダークの同じ画面を上下に並べた見本。
+The whole screen with Sidebar, conversation, and ProfilePanel, shown as the same screen in light and dark stacked vertically.
 
-- **使う側が渡すもの:** ルートの `+layout.svelte` が Sidebar と ProfilePanel を持ち、`/`（メイン）と `agents/[slug]` のページが中央の会話を描く。
-- 列は `grid-cols-[280px_1fr_320px]`。1280px 未満で右ペインを畳み、中央ペイン右上の詳細ボタン（`info`）で開く。1024px 未満はスマートフォンの 1 ペイン（Mobile）に切り替える。
-- 中央ペインには見出しバーを置かない。誰と話しているかはサイドバーの選択中の行と右ペインが示し、会話の面を広く取る。
-- Composer は中央ペインの下端に浮かせ、会話はその下までスクロールする。
+- **What the caller passes:** the root `+layout.svelte` holds Sidebar and ProfilePanel; the `/` (main) and `agents/[slug]` pages draw the center conversation.
+- Columns are `grid-cols-[280px_1fr_320px]`. Below 1280px the right pane collapses and opens from the details button (`info`) at the upper right of the center pane. Below 1024px it switches to the phone's single pane (Mobile).
+- The center pane has no header bar. The selected row in the sidebar and the right pane show who you are talking to, leaving the conversation surface wide.
+- The Composer floats at the bottom of the center pane; the conversation scrolls beneath it.

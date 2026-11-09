@@ -1,10 +1,10 @@
 # Dialog
 
-元に戻しにくい操作の前に出す確認ダイアログ。
+A confirmation dialog shown before an action that is hard to undo.
 
-- **使う側が渡すもの:** 題（「〜しますか？」）、何が起きるかの説明、確定ボタンのラベル（動詞）、キャンセルと確定のハンドラ。
-- 背景は黒 32% のスクリム。箱は `w-[400px] p-6 bg-popover border rounded-xl shadow-lg`。
-- 題は `font-display text-lg font-semibold`。説明は `text-base text-muted-foreground` で、失うもの・残るもの・戻せるかを書く。
-- ボタンは右寄せで、キャンセル（secondary）→ 確定の順。破壊的な確定は `bg-destructive` の塗り（ダークでは文字を黒に）。
-- `role="alertdialog"`。開いたらキャンセルにフォーカス、Esc とスクリムのクリックでキャンセル。
-- 実装は shadcn-svelte の AlertDialog（bits-ui）。
+- **What the caller passes:** a title (「〜しますか？」, "Do you want to …?"), an explanation of what will happen, the confirm button label (a verb), and cancel and confirm handlers.
+- The backdrop is a 32% black scrim. The box is `w-[400px] p-6 bg-popover border rounded-xl shadow-lg`.
+- The title is `font-display text-lg font-semibold`. The explanation is `text-base text-muted-foreground` and states what is lost, what remains, and whether it can be undone.
+- Buttons are right-aligned, cancel (secondary) then confirm. A destructive confirm is filled `bg-destructive` (black text in dark).
+- `role="alertdialog"`. Focus cancel on open; Esc and a scrim click cancel.
+- The implementation is shadcn-svelte's AlertDialog (bits-ui).

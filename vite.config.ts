@@ -27,6 +27,7 @@ export default defineConfig({
       '.agents/**',
       '.codex/**',
       '.aws/**',
+      '.mise/**',
       '**/.wrangler/**',
     ],
   },

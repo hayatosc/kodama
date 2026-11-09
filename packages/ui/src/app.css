@@ -1,5 +1,9 @@
-/* Kodama UI — Tailwind CSS v4 wired to the design tokens (design/sveltekit.md — トークンのつなぎ方). */
-@import 'tailwindcss';
+/* Kodama UI — Tailwind CSS v4 wired to the design tokens (design/sveltekit.md — Wiring the tokens). */
+/* kiso.css replaces Tailwind Preflight as the reset. All layered imports stay below utilities. */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'kiso.css' layer(base);
 @import 'tw-animate-css';
 @import 'gen-interface-jp/400.css';
 @import 'gen-interface-jp/600.css';
@@ -54,6 +58,11 @@
 }
 
 @layer base {
+  /* kiso gives form controls a 1px border; Kodama controls opt into borders with utilities. */
+  :where(button, input, select, textarea, ::file-selector-button) {
+    border-width: 0;
+  }
+
   * {
     @apply border-border;
   }

@@ -41,6 +41,10 @@ export default defineConfig({
     setupFiles: ['vitest.setup.ts'],
     // Files share one runtime and module graph; vitest.setup.ts empties storage before each file.
     isolate: false,
+    // Each workerd worker keeps a full Miniflare runtime and module graph. Using every core can
+    // exhaust memory and take the host down before the suite finishes, so leave half the cores
+    // for the host and bound the workers.
+    maxWorkers: 4,
     // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
     fsModuleCache: false,
     testTimeout: 15_000,

@@ -1,11 +1,11 @@
 # Sidebar
 
-左ペインのエージェント一覧で、メインのエージェントを最上部の特別枠に置き、他のエージェントを顔と最後の出来事で並べる。
+The agent list in the left pane: the main agent in the special slot at the top, and the other agents listed with their faces and latest events.
 
-- **使う側が渡すもの:** `main`（メインのエージェント）、`agents`（他の working agent。`AgentSummary` に最後の出来事の要約・時刻・未読数・アバター設定を足したもの）、`system`（専用エージェント）、選択中の `slug`。
-- **メインの行:** 一覧の最上部に置き、別のカードには載せない。ほかの行と同じく面の上に直接置き、アバター 56px、「メイン」の小見出し、名前（`font-display text-lg font-semibold`）、状態の語＋今していること。ホバーで `bg-accent`、選択中は `bg-muted`。
-- **一覧の行:** アバター 36px、名前（`font-semibold`）、右端に相対時刻か未読数（`bg-live` の丸いカウント）、2 行目に `text-sm text-muted-foreground` で最後の出来事。選択中 `bg-muted`、ホバー `bg-accent`、`rounded-xl`。
-- システム用エージェント（`kind = 'dedicated'`）は「システム」見出しの下に、灰色のアバターと `font-mono` の名前で。
-- 並び順は手動ピン留め → 実行中 → 最終活動の新しい順。
-- **操作:** 行をクリックで選択（`aria-current`）。
-- 上端は右寄せの丸ボタン（検索、新規作成）、下端は自分のアカウント。幅 280px、背景 `bg-sidebar`。
+- **What the caller passes:** `main` (the main agent), `agents` (other working agents; `AgentSummary` plus the latest event summary, time, unread count, and avatar settings), `system` (dedicated agents), and the selected `slug`.
+- **Main row:** at the very top of the list, not on a separate card. Like the other rows it sits directly on the surface: a 56px avatar, the small heading 「メイン」 (Main), the name (`font-display text-lg font-semibold`), and the state word plus what it is doing now. Hover is `bg-accent`; selected is `bg-muted`.
+- **List rows:** 36px avatar, name (`font-semibold`), and at the right edge a relative time or unread count (a round `bg-live` counter). The second line is the latest event in `text-sm text-muted-foreground`. Selected `bg-muted`, hover `bg-accent`, `rounded-xl`.
+- System agents (`kind = 'dedicated'`) sit under a 「システム」 (System) heading with gray avatars and `font-mono` names.
+- Order: manual pins → running → most recent activity.
+- **Actions:** click a row to select it (`aria-current`).
+- The top has right-aligned round buttons (search, create); the bottom is the user's account. 280px wide, `bg-sidebar`.

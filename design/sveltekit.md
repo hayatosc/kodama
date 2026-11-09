@@ -1,23 +1,26 @@
-# SvelteKit での実装
+# Implementing in SvelteKit
 
-## スタック
+## Stack
 
-- SvelteKit 3（Svelte 5 の runes）+ `@sveltejs/adapter-cloudflare`。UI Worker は D1 を束ねず、`AgentService` にだけサービスバインディングで話す。
-- データの読み書きは **Async Svelte と Remote Functions** で行う。`load` 関数・`+page.server.ts`・form actions・自前の `+server.ts` の API は作らない。コンポーネントの中で `await` し、待ち時間は `<svelte:boundary>` の `pending` で見せる。
-- 設定は `vite.config.ts` に置く（SvelteKit 3 では `svelte.config.js` を使わない）。ライブラリの別名は `$lib` ではなく `#lib`（標準の subpath imports）。
-- Tailwind CSS v4（`@tailwindcss/vite`）。設定ファイルは作らず、`app.css` の `@theme inline` でトークンをユーティリティにつなぐ。
-- shadcn-svelte（bits-ui ベース）を土台にし、Button・Badge・Dialog・DropdownMenu・Tooltip・Collapsible・ScrollArea はそれを使う。AgentAvatar・Sidebar・Message・ToolCall・Composer・ProfilePanel・ActivityFeed は Kodama 固有として自作する。
-- アイコンは `@lucide/svelte`。
-- 書体は npm の `gen-interface-jp`（`import 'gen-interface-jp/400.css'`、`600.css`、`display-600.css` の3つだけ読み込む。unicode-range の分割 WOFF2 なので必要な文字だけ届く）。等幅は Geist Mono（400 と 600）。
+- SvelteKit 3 (Svelte 5 runes) + `@sveltejs/adapter-cloudflare`. The UI Worker binds no D1 database and talks only to `AgentService` through a service binding.
+- Read and write data with **Async Svelte and Remote Functions**. Do not create `load` functions, `+page.server.ts`, form actions, or your own `+server.ts` APIs. `await` inside components and show pending states with `<svelte:boundary>`'s `pending`.
+- Put configuration in `vite.config.ts` (SvelteKit 3 does not use `svelte.config.js`). Alias libraries through `#lib`, not `$lib` (standard subpath imports).
+- Tailwind CSS v4 (`@tailwindcss/vite`) with `kiso.css` as the reset instead of Tailwind Preflight. Do not create a configuration file; connect tokens to utilities with `@theme inline` in `app.css`.
+- Build on shadcn-svelte (bits-ui) for Button, Badge, Dialog, DropdownMenu, Tooltip, Collapsible, and ScrollArea. Build AgentAvatar, Sidebar, Message, ToolCall, Composer, ProfilePanel, and ActivityFeed yourself as Kodama-specific components.
+- Icons are `@lucide/svelte`.
+- Load the typeface from the npm package `gen-interface-jp` (only three imports: `import 'gen-interface-jp/400.css'`, `600.css`, and `display-600.css`; the WOFF2 files are split by unicode-range, so only the needed characters arrive). Monospace is Geist Mono (400 and 600).
 
-## トークンのつなぎ方
+## Wiring the tokens
 
-`tokens.css`（このシステムが生成する CSS 変数）を読み込み、Tailwind に名前を渡す。
+Load `kiso.css` as the reset, `tokens.css` (the CSS variables this system generates), and Tailwind's theme and utilities, then hand the names to Tailwind. Importing `tailwindcss` as a whole would also bring Preflight, which kiso replaces.
 
 ```css
 /* src/app.css */
-@import 'tailwindcss';
-@import './lib/styles/tokens.css';
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'kiso.css' layer(base);
+@import './lib/styles/tokens.css' layer(base);
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
@@ -66,11 +69,11 @@
 }
 ```
 
-`--font-sans` と `--font-mono` は tokens.css がレイヤー外で宣言するので、Tailwind の既定より優先される。角丸・余白・文字サイズは Tailwind の既定スケール（`rounded-lg` = 8px、`p-4` = 16px、`text-base` = 16/24、`text-sm` = 14/20）がそのままトークンと一致するので上書きしない。`<html data-theme="light">` を既定にし（OS 設定に合わせるなら `prefers-color-scheme` で初期値を決め）、切り替えは `data-theme` を書き換える。
+`kiso.css` gives the UI Japanese-aware defaults (`text-autospace`, `line-break: strict`, `text-spacing-trim`) through zero-specificity `:where()` selectors. Importing it into the base layer keeps those defaults below utilities, and importing `tokens.css` after it lets the tokens override its root values. Its root `line-height: 1.5` matches `type-base` (16/24); conversation text still adds `leading-7`. kiso gives form controls a 1px border; the base layer resets it to 0 so controls opt into borders with utilities (the design's primary and ghost buttons are borderless). `tokens.css` declares `--font-sans` and `--font-mono` in the base layer, so they override Tailwind's theme defaults. Radius, spacing, and type sizes already match the tokens in Tailwind's default scale (`rounded-lg` = 8px, `p-4` = 16px, `text-base` = 16/24, `text-sm` = 14/20), so do not override them. Make `<html data-theme="light">` the default (derive the initial value from `prefers-color-scheme` if you want to follow the OS), and switch themes by rewriting `data-theme`.
 
-## 有効にする
+## Enabling the flags
 
-Remote Functions はまだ experimental で、Async Svelte と一緒にフラグで有効にする。
+Remote Functions are still experimental and are enabled with a flag, along with Async Svelte.
 
 ```ts
 // vite.config.ts
@@ -89,25 +92,25 @@ export default defineConfig({
 })
 ```
 
-## ルートの形
+## Route shape
 
 ```text
 src/routes/
-  +layout.svelte                 3ペインの殻（Sidebar / children / 右ペイン）。一覧は await listAgents()
-  agents.remote.ts               一覧・作成・名前の変更
-  agents/[slug]/+page.svelte     会話（Message, ToolCall, Composer）
-  agents/[slug]/agent.remote.ts  snapshot・購読・送信・停止・設定
-  agents/[slug]/settings/        設定バージョン、ロールバック
-  settings/                      認証情報、モデル、メンバー
-src/hooks.server.ts              ユーザー認証。locals にユーザーを置く
+  +layout.svelte                 three-pane shell (Sidebar / children / right pane); the list awaits listAgents()
+  agents.remote.ts               list, create, rename
+  agents/[slug]/+page.svelte     conversation (Message, ToolCall, Composer)
+  agents/[slug]/agent.remote.ts  snapshot, subscription, send, stop, settings
+  agents/[slug]/settings/        configuration versions, rollback
+  settings/                      credentials, models, members
+src/hooks.server.ts              user authentication; puts the user on locals
 ```
 
-- `*.remote.ts` は `server` フォルダの中に置けない。ルートの隣に置き、ページから直接 import する。
-- スキーマ（`AgentRef`、`SendInput`）は `*.remote.ts` から export できないので、`#lib/schemas.ts` に置く（valibot。Standard Schema なのでそのまま渡せる）。
+- `*.remote.ts` cannot live in the `server` folder. Put it next to the route and import it directly from the page.
+- Schemas (`AgentRef`, `SendInput`) cannot be exported from `*.remote.ts`, so put them in `#lib/schemas.ts` (valibot; it implements Standard Schema, so it can be passed as-is).
 
 ## Remote Functions
 
-すべての関数は `getRequestEvent()` で認証済みのユーザーを確かめてから `AgentService` を呼ぶ。エージェント ID の認可もここで行う（UI Worker が守る private RPC の境界）。
+Every function checks the authenticated user with `getRequestEvent()` before calling `AgentService`. Agent ID authorization also happens here (the private RPC boundary the UI Worker protects).
 
 ```ts
 // src/routes/agents/[slug]/agent.remote.ts
@@ -168,15 +171,15 @@ export const cancelRun = command(AgentRef, async (slug) => {
 })
 ```
 
-- 会話の RPC（`snapshot` `subscribe` `sendMessage` `cancel`）はエージェントの UUID しか受け付けない。ルートの slug は、サインインしたユーザーを actor にした `resolveAgent` で UUID に引き直す。dedicated なエージェントは 404 にする。
-- 送る値は `SendMessageRequest`（`requestId`、`content`、`whenBusy: 'steer' | 'followUp'`）。Enter は実行中なら `steer` で今の run に割り込む。Tab とスマートフォンのキューボタンはまだ送らず、ページのキューに入れる。run が終わったら先頭から 1 件ずつ `sendMessage` で送る（受け付けたメッセージを 1 件だけ取り下げる RPC はないので、取り消せるのは送る前だけ）。同じ送信をやり直すときは同じ `requestId` を使う。
-- `subscribe()` は SSE のバイト列（`ReadableStream<Uint8Array>`）を返すので、`#lib/sse` の `readEvents` でイベントに分ける。`message_update` は差分（`changes`）しか運ばず、live query は読み手が遅れると最新の値だけを残して途中を捨てる。そのためイベントはサーバー側（`watchAgent` の中）で `applyEvent` にかけて会話の状態にまとめ、状態ごと流す。途中の値が捨てられても文字は欠けない。
-- 読むのは `query`、Composer の送信は `form`（`<form {...sendMessage}>`、Enter は `sendMessage.enhance` の中で `whenBusy` を入れて `submit()`）、停止のようにフォームでない操作は `command`。`cancel()` は今の run を止め、受け付け済みの入力も取り下げる。
-- 変更のあとは関係する query の `refresh()` を呼ぶ（single-flight mutation）。結果が同じ応答で返り、往復が 1 回で済む。
-- 送信中は `sendMessage.pending`、入力欄の検証エラーは `sendMessage.fields.content.issues()`。
-- 一覧の最後の出来事のように、行ごとに同じ問い合わせが並ぶものは `query.batch` でまとめる。
+- The conversation RPCs (`snapshot` `subscribe` `sendMessage` `cancel`) accept only an agent UUID. Resolve the route slug to a UUID through `resolveAgent` with the signed-in user as the actor. Dedicated agents return 404.
+- The payload is `SendMessageRequest` (`requestId`, `content`, `whenBusy: 'steer' | 'followUp'`). Enter uses `steer` while a run is active and interrupts the current run. Tab and the phone's queue button do not send yet; they add to the page's queue. When the run ends, send the queue one message at a time from the front with `sendMessage` (there is no RPC to withdraw a single accepted message, so a message can only be cancelled before it is sent). Reuse the same `requestId` when retrying the same send.
+- `subscribe()` returns SSE bytes (`ReadableStream<Uint8Array>`), so split them into events with `readEvents` from `#lib/sse`. `message_update` carries only changes (`changes`), and a live query keeps only the latest value when the reader falls behind, dropping intermediate ones. Therefore fold events into conversation state on the server (inside `watchAgent`) with `applyEvent` and stream the whole state. Dropped intermediate values never lose characters.
+- Reads use `query`; Composer sends use `form` (`<form {...sendMessage}>`; Enter sets `whenBusy` inside `sendMessage.enhance` and calls `submit()`); operations that are not forms, such as stop, use `command`. `cancel()` stops the current run and also withdraws accepted input.
+- After a mutation, call `refresh()` on the related queries (single-flight mutation). The result comes back in the same response, saving a round trip.
+- While sending, use `sendMessage.pending`; for input validation errors, use `sendMessage.fields.content.issues()`.
+- When the same query repeats per row, such as the latest event in a list, batch them with `query.batch`.
 
-## ページでの使い方
+## Using them on a page
 
 ```svelte
 <!-- src/routes/agents/[slug]/+page.svelte -->
@@ -197,55 +200,55 @@ export const cancelRun = command(AgentRef, async (slug) => {
 </svelte:boundary>
 ```
 
-- 初回表示は SSR で描く。`watchAgent` は SSR では最初の値（snapshot をまとめた状態）だけ返し、ブラウザで購読を続ける。`for await` も `$effect` も書かない。ページが使わなくなった live query は SvelteKit が切断し、サーバー側の購読も止まる。
-- 接続が切れたら `watchAgent(slug).connected` が false になる。見出しの状態を「再接続中」にし、`reconnect()` で戻す。
-- 待ち時間の表示は、ページ全体ではなく `<svelte:boundary>` ごとに出す（一覧・会話・右ペインを別々に）。
+- The first render is SSR. `watchAgent` returns only the first value (the state assembled from the snapshot) during SSR and keeps the subscription in the browser. Do not write `for await` or `$effect`. SvelteKit disconnects a live query the page no longer uses, which stops the server-side subscription.
+- When the connection drops, `watchAgent(slug).connected` becomes false. Set the header state to "reconnecting" and restore it with `reconnect()`.
+- Show pending states per `<svelte:boundary>` (list, conversation, right pane), not for the whole page.
 
-## メインのエージェント
+## The main agent
 
-- メインは「最初に作られた working agent」（seed の `assistant`）とし、設定で別のエージェントに付け替えられるようにする。`agents.remote.ts` の `listAgents` が `main` と `others` に分けて返す。
-- `/` はメインの会話に直接入る。他のエージェントは `/agents/[slug]`。
+- The main agent is "the first working agent created" (the seed's `assistant`), and settings can reassign the role to another agent. `listAgents` in `agents.remote.ts` returns `main` and `others` separately.
+- `/` goes straight to the main agent's conversation. Other agents are at `/agents/[slug]`.
 
-## ストリームの扱い
+## Handling the stream
 
-- `subscribe()` は最初に `snapshot` を送り、その後 `message_update` `tool_execution_*` `submission` `run_end` が続く。**snapshot はいつ来ても状態を丸ごと置き換える**（追記しない）。`applyEvent`（`watchAgent` の中でサーバー側が使う）は snapshot を受けたら state をそのまま差し替え、`message_update` の差分は生成中のメッセージにつなぐ。
-- 再接続時はイベント再送がないので、新しい snapshot を待って置き換える。
-- 送信は `accepted` → `snapshot` → run のイベント → `submission` で閉じる。切断しても入力は取り消されないので、同じ `requestId` で再送すれば受領を取り直せる。
+- `subscribe()` sends a `snapshot` first, then `message_update`, `tool_execution_*`, `submission`, and `run_end`. **A snapshot always replaces the whole state, whenever it arrives** (never append). `applyEvent` (used server-side inside `watchAgent`) swaps in the state as-is when it receives a snapshot, and connects `message_update` deltas to the message being generated.
+- On reconnect, events are not replayed, so wait for a new snapshot and replace.
+- A send closes with `accepted` → `snapshot` → run events → `submission`. A disconnect does not cancel the input, so resending with the same `requestId` regains the receipt.
 
-## Markdown のストリーミング描画
+## Streaming Markdown
 
-エージェントの返答は、Vercel の [Streamdown](https://github.com/vercel/streamdown) を Svelte に移した `Streamdown.svelte`（`#lib/components/streamdown/`）で描く。届いた途中の Markdown をそのまま渡しても崩れずに描けるようにするのが目的。
+Agent replies are rendered by `Streamdown.svelte` (`#lib/components/streamdown/`), a Svelte port of Vercel's [Streamdown](https://github.com/vercel/streamdown). The goal is to render partial Markdown without breaking it.
 
 ```svelte
 <Streamdown source={message.text} streaming={message.streaming} />
 ```
 
-- **受け取るもの:** Markdown の全文（`source`）と、生成中かどうか（`streaming`）。`message_update` の差分はサーバー側の `applyEvent` が本文につなぎ、Streamdown には毎回全文を渡す。snapshot が来たら本文ごと差し替える。
-- **閉じていない記法を補う:** 生成中は描く前に `remend` で、閉じていない `**` `_` `` ` `` リンク・コードフェンスを一時的に閉じる。`**強調` の途中で記号がむき出しになったり、コードブロックが本文を飲み込んだりしない。
-- **ブロックに分けて描く:** 全文をトップレベルのブロック（段落、リスト、表、コードブロック）に分け、`{#each blocks as block (block.key)}` で描く。各ブロックは内容の文字列でメモ化するので、生成中に描き直すのは最後のブロックだけ。
-- **安全に描く:** remark（`remark-gfm`、`remark-math`）→ rehype → `rehype-harden` の順に通し、リンクと画像は許可した接頭辞（`https://` など）だけ残す。モデルの出力を `{@html}` に流さず、hast のノードを Svelte の要素として描く。
-- **部品の差し替え:** タグごとに Kodama の部品へ割り当てる（見た目は Prose）。コードブロックはコピーボタンつきの CodeBlock で、Shiki による色分けは言語ごとに遅延読み込みし、フェンスが閉じてから適用する（生成中は等幅の素の文字で、ちらつかせない）。数式は KaTeX、Mermaid は「図にする」ボタンで描く。どれも使われたときに初めて読み込む。
-- **日本語:** `**強調**の` のように強調の直後に文字が続くと CommonMark では強調にならないので、Streamdown の `cjk` と同じく `remark-cjk-friendly` を入れる。
-- **キャレット:** 生成中は最後のブロックの末尾に点滅するキャレットを置き、`streaming` が false になったら消す。`prefers-reduced-motion` では点滅させない。
+- **What it receives:** the full Markdown (`source`) and whether it is streaming (`streaming`). `applyEvent` on the server connects `message_update` deltas to the body, and Streamdown always receives the full text. A snapshot replaces the body along with everything else.
+- **Close unclosed syntax:** while streaming, `remend` temporarily closes unclosed `**`, `_`, backticks, links, and code fences before rendering. This keeps a half-typed `**bold` from showing bare symbols or a code block from swallowing the body.
+- **Render by block:** split the text into top-level blocks (paragraphs, lists, tables, code blocks) and render with `{#each blocks as block (block.key)}`. Each block is memoized by its content string, so during streaming only the last block is redrawn.
+- **Render safely:** pass through remark (`remark-gfm`, `remark-math`) → rehype → `rehype-harden`, keeping only links and images with allowed prefixes (such as `https://`). Never send model output into `{@html}`; render hast nodes as Svelte elements.
+- **Replace elements:** map each tag to a Kodama component (the look is Prose). Code blocks use CodeBlock with a copy button; Shiki highlighting is loaded lazily per language and applied after the fence closes (while streaming, use plain monospace text so nothing flickers). Math uses KaTeX; Mermaid renders through a "render diagram" button. All of them load only when used.
+- **Japanese:** CommonMark does not treat `**強調**の` as emphasis when a character follows the closing marker, so include `remark-cjk-friendly`, the same as Streamdown's `cjk`.
+- **Caret:** while streaming, place a blinking caret at the end of the last block and remove it when `streaming` is false. Do not blink under `prefers-reduced-motion`.
 
-## コンポーネントの対応
+## Component mapping
 
-| このシステム    | Svelte                                                                    | 土台                                                                                                                        |
-| --------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Button          | `#lib/components/ui/button`                                               | shadcn-svelte Button（variant を primary / secondary / ghost / destructive に）                                             |
-| AgentAvatar     | `AgentAvatar.svelte`（鳥、眠っている間は巣箱）                            | 自作（インライン SVG。鳥と巣箱は bundle.js の `bird()` `house()` `avatar()`、動きは bundle.css の `kd-p-*` をそのまま移す） |
-| StatusBadge     | `StatusBadge.svelte`                                                      | shadcn-svelte Badge                                                                                                         |
-| Sidebar         | `AgentSidebar.svelte`                                                     | shadcn-svelte Sidebar                                                                                                       |
-| Message         | `Message.svelte`（user / assistant / thinking / peer）                    | 自作                                                                                                                        |
-| ToolCall        | `ToolCall.svelte`                                                         | bits-ui Collapsible                                                                                                         |
-| Tabs            | `#lib/components/ui/tabs`                                                 | shadcn-svelte Tabs                                                                                                          |
-| Select          | `#lib/components/ui/combobox`（検索つき）                                 | shadcn-svelte Combobox（bits-ui Combobox）                                                                                  |
-| Switch          | `#lib/components/ui/switch`                                               | shadcn-svelte Switch                                                                                                        |
-| SettingsList    | `SettingsList.svelte`                                                     | 自作                                                                                                                        |
-| Prose           | `Streamdown.svelte`（途中の Markdown も崩さず描く。見た目は Prose）       | 自作（Streamdown の Svelte 版。remend、remark / rehype、rehype-harden、Shiki、KaTeX）                                       |
-| Dialog          | `#lib/components/ui/alert-dialog`                                         | shadcn-svelte AlertDialog                                                                                                   |
-| Kbd             | `Kbd.svelte`                                                              | 自作                                                                                                                        |
-| Composer        | `Composer.svelte`（キューのシートつき。`mobile` で Tab の代わりにボタン） | 自作（Textarea）                                                                                                            |
-| ProfilePanel    | `ProfilePanel.svelte`                                                     | shadcn-svelte Tabs + Select                                                                                                 |
-| ActivityFeed    | `ActivityFeed.svelte`                                                     | 自作                                                                                                                        |
-| Mobile のシート | `#lib/components/ui/drawer`                                               | shadcn-svelte Drawer（vaul-svelte）                                                                                         |
+| This system  | Svelte                                                                               | Base                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Button       | `#lib/components/ui/button`                                                          | shadcn-svelte Button (variants primary / secondary / ghost / destructive)                                                               |
+| AgentAvatar  | `AgentAvatar.svelte` (bird; a birdhouse while asleep)                                | Custom (inline SVG; bird and birdhouse from `bird()` `house()` `avatar()` in bundle.js; motion moved as-is from `kd-p-*` in bundle.css) |
+| StatusBadge  | `StatusBadge.svelte`                                                                 | shadcn-svelte Badge                                                                                                                     |
+| Sidebar      | `AgentSidebar.svelte`                                                                | shadcn-svelte Sidebar                                                                                                                   |
+| Message      | `Message.svelte` (user / assistant / thinking / peer)                                | Custom                                                                                                                                  |
+| ToolCall     | `ToolCall.svelte`                                                                    | bits-ui Collapsible                                                                                                                     |
+| Tabs         | `#lib/components/ui/tabs`                                                            | shadcn-svelte Tabs                                                                                                                      |
+| Select       | `#lib/components/ui/combobox` (with search)                                          | shadcn-svelte Combobox (bits-ui Combobox)                                                                                               |
+| Switch       | `#lib/components/ui/switch`                                                          | shadcn-svelte Switch                                                                                                                    |
+| SettingsList | `SettingsList.svelte`                                                                | Custom                                                                                                                                  |
+| Prose        | `Streamdown.svelte` (renders partial Markdown without breaking it; looks like Prose) | Custom (Svelte port of Streamdown; remend, remark / rehype, rehype-harden, Shiki, KaTeX)                                                |
+| Dialog       | `#lib/components/ui/alert-dialog`                                                    | shadcn-svelte AlertDialog                                                                                                               |
+| Kbd          | `Kbd.svelte`                                                                         | Custom                                                                                                                                  |
+| Composer     | `Composer.svelte` (with a queue sheet; `mobile` swaps Tab for a button)              | Custom (Textarea)                                                                                                                       |
+| ProfilePanel | `ProfilePanel.svelte`                                                                | shadcn-svelte Tabs + Select                                                                                                             |
+| ActivityFeed | `ActivityFeed.svelte`                                                                | Custom                                                                                                                                  |
+| Mobile sheet | `#lib/components/ui/drawer`                                                          | shadcn-svelte Drawer (vaul-svelte)                                                                                                      |

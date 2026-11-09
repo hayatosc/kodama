@@ -156,13 +156,6 @@
   font-weight: 600;
 }
 
-.type-prose {
-  font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 28px;
-  font-weight: 400;
-}
-
 .type-sm {
   font-family: var(--font-sans);
   font-size: 14px;

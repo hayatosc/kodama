@@ -1,9 +1,9 @@
 # ProfilePanel
 
-右ペインのエージェントのプロフィールで、誰か・何で動いているか・何をしてきたかを縦に並べる。
+The agent's profile in the right pane: who it is, what runs it, and what it has done, stacked vertically.
 
-- **使う側が渡すもの:** エージェント（名前、アバター、状態）、ルーティン（cron とアラームの一覧）、設定（プロバイダー、モデル）、アクティビティ。
-- 上から：大きなアバター（72px）と名前と状態バッジ、タブ（詳細 / 記憶 / ツール）、セクション見出し（`text-xs text-muted-foreground`）、設定カード（`border rounded-xl`、行の高さ 40px、右端に検索つきの小さなセレクト）。
-- タブの選択中は `bg-muted rounded-md`。セレクトは枠なしでホバー時だけ `bg-accent`。
-- アクティビティは ActivityFeed のコンパクト版（時刻列 44px）。
-- 幅 320px、`border-l`。1280px 未満では畳み、中央ペイン右上の詳細ボタン（`info`）で開く。1024px 未満は Mobile の詳細シートになる。
+- **What the caller passes:** the agent (name, avatar, state), routines (cron and alarms), settings (provider, model), and activity.
+- Top to bottom: a large avatar (72px) with the name and status badge; tabs (Details / Memory / Tools); section headings (`text-xs text-muted-foreground`); settings cards (`border rounded-xl`, 40px rows, a small searchable select at the right edge).
+- The selected tab is `bg-muted rounded-md`. Selects have no outline and show `bg-accent` only on hover.
+- Activity is a compact ActivityFeed (44px time column).
+- 320px wide with `border-l`. Below 1280px it collapses and opens from the details button (`info`) at the upper right of the center pane. Below 1024px it becomes Mobile's details sheet.

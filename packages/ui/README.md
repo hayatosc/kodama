@@ -22,8 +22,9 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 
 ## Layout
 
-- `src/app.css`: Tailwind, the fonts from npm (`gen-interface-jp`, `@fontsource/geist-mono`),
-  and the token-to-utility mapping (`@theme inline`).
+- `src/app.css`: kiso.css (the reset, in place of Tailwind Preflight), Tailwind's theme and utilities,
+  the fonts from npm (`gen-interface-jp`, `@fontsource/geist-mono`), and the token-to-utility mapping
+  (`@theme inline`).
 - `src/lib/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
 - `src/lib/utils.ts`: `cn` and the prop helper types that shadcn-svelte components import.

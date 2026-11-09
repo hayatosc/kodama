@@ -9,7 +9,7 @@
       docs: {
         description: {
           component:
-            'The text styles, from page titles down to UUID prefixes. Text is set in Gen Interface JP (Display for headings) and Geist Mono, with only two weights, 400 and 600. The samples are real Japanese UI copy, because the product speaks Japanese and line height is tuned for it. Source: `design/README.md`, section タイポグラフィ.',
+            'The text styles, from page titles down to UUID prefixes. Text is set in Gen Interface JP (Display for headings) and Geist Mono, with only two weights, 400 and 600. The samples are real Japanese UI copy, because the product speaks Japanese and line height is tuned for it. Conversation text adds a taller leading on top of type-base; see the Sentence story. Source: `design/README.md`, section Typography.',
         },
       },
     },
@@ -42,13 +42,6 @@
       spec: '16/24 · 600',
       use: 'Button labels, the selected row, names.',
       sample: '新しいエージェント',
-    },
-    {
-      name: 'type-prose',
-      spec: '16/28 · 400',
-      use: 'Conversation text. The taller line keeps Japanese readable.',
-      sample:
-        '昨日の夜に届いた論文を読んで、要点を三つにまとめました。research にも論文側の確認を頼んであります。',
     },
     {
       name: 'type-sm',
@@ -104,4 +97,25 @@
       <dd class={style.name}>{style.sample}</dd>
     {/each}
   </dl>
+</Story>
+
+<Story
+  name="Sentence"
+  parameters={{
+    docs: {
+      description: {
+        story:
+          'Conversation text keeps type-base’s 16px and 400 weight but adds `leading-7` (28px). Japanese needs the taller line to stay readable, so the Prose component owns this adjustment instead of a separate type token. The sample is one sentence, so you can see where it wraps.',
+      },
+    },
+  }}
+>
+  <div class="flex max-w-2xl flex-col gap-0.5">
+    <code class="mono-xs">type-base leading-7</code>
+    <span class="text-xs text-muted-foreground">16/28 · 400</span>
+    <p class="type-base leading-7 mt-2">
+      昨日の夜に届いた論文を読んで要点を三つにまとめ、research
+      にも論文側の確認を頼んでおきましたが、図の解釈だけは明日の朝に回すことにしました。
+    </p>
+  </div>
 </Story>

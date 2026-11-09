@@ -1,41 +1,41 @@
 # AgentAvatar
 
-エージェントの顔で、自分の巣箱に住む小鳥を丸いアバターに収める。円の中に鳥を一羽まるごと、足の先まで余白をとって置き、円はエージェントの色をうっすら混ぜた色。色で誰かを見分け、ポーズと動きで今何をしているかを見せる。眠っている間と一時停止中は、円の中を同じ色の巣箱に切り替える。
+The agent's face: a small bird living in its own birdhouse, held in a round avatar. The whole bird sits inside the circle with padding down to the tips of its feet; the circle mixes in a faint tint of the agent's color. Color identifies who; pose and motion show what it is doing now. While asleep or paused, the circle switches to a birdhouse of the same color.
 
-- **使う側が渡すもの:** `color`（orange / yellow / green / teal / sky / blue / violet / plum / pink / red / brown の 11 色、メインは ink、システム用は system。UUID から決め、ユーザーが変えられる）、`pose`、必要なら `prop`（`lens` `pen` `letter`）と `mark`（`?` `!`）、`size`（20 / 36 / 56 / 72）。ポーズはイベントのストリームから求め、コンポーネント自身は状態を持たない。
-- 鳥は右を向いたフィンチで、斜めはわずか（ほぼ正面寄りの 3/4）。頭と体がひと続きの丸い形で、頭・背中・羽・二股の尾が `agent-*`、顔とお腹は `bird-face`（温かみのある白）。目は縦長の小さな丸に光の点で、くちばしをはさんで左右に置く。くちばしは短いくさび形（上 `bird-beak-top`、下 `bird-beak`、合わせ目 `bird-bill-line`）。ほっぺは左右に分かれた 2 つの楕円（`bird-blush`）。足は 3 本指の細い線（`bird-feet`）で見せる。
-- 黒い縁取りは使わない。体の縁はその色を白に寄せた 0.4 の細線、羽には同じ色を濃くした 2 本の羽の線。28px 以下では羽の線・目の光・くちばしの合わせ目・ほっぺを省き、足を少し太くする。
-- 円の中の大きさはポーズで変える：ふだんは 0.93、羽を上げる `happy` `live` `stretch` は 0.84、`listen`（体を手元へ傾ける）は 0.85、`tilt` は 0.80。どれも羽や尾が円に切られないように。
-- 鳥は円の直径のおよそ 7 割に収め、上と左右に余白を残す。鳥の描かれている範囲（尾の先から顔の右端まで）の中心を円の中心に合わせる。尾が左に伸びるぶん、体は円の中心よりやや右に置く。眠っているときの巣箱も同じくらいの大きさにして、切り替えても大きさが変わって見えないようにする。
-- 円は `color-mix(in oklab, var(--agent-*) 18%, var(--background))`。アバターは必ず完全な円で、鳥や巣箱の形をはみ出させない（右下のバッジだけが円の外に出る）。
-- 円の中の巣箱は、壁がエージェントの色、側面・屋根・柱はその色を黒に寄せた濃い色（`color-mix`）。中の鳥は描かず、穴は暗いまま。眠っている間は穴から白い「z」が立ちのぼる（鳥と巣箱で大きさが入れ替わって見えないようにするため）。
-- **ライトとダークで完全に同じ見た目。** 円・鳥・巣箱・小道具・バッジの色はテーマで変えない。円の中の面（`background` `foreground` など）はライトの値に固定し、バッジのリングだけが置かれた面の色に合わせる。
-- **原則:** 動きは必ず実際のイベントに対応させる。意味のないランダムな動きは入れない（例外は呼吸とまばたき）。
+- **What the caller passes:** `color` (11 colors: orange / yellow / green / teal / sky / blue / violet / plum / pink / red / brown; the main agent is ink, the system agent is system. Derived from the UUID and changeable by the user), `pose`, and when needed `prop` (`lens` `pen` `letter`) and `mark` (`?` `!`), `size` (20 / 36 / 56 / 72). Poses are derived from the event stream; the component holds no state itself.
+- The bird is a finch facing right, at a slight angle (nearly frontal three-quarters). Head and body form one continuous round shape; head, back, wings, and forked tail are `agent-*`; face and belly are `bird-face` (a warm white). The eyes are small vertical ovals with a highlight, placed on either side of the beak. The beak is a short wedge (upper `bird-beak-top`, lower `bird-beak`, seam `bird-bill-line`). The cheeks are two ovals split left and right (`bird-blush`). The feet are thin three-toed lines (`bird-feet`).
+- No black outlines. The body edge is a 0.4 line of the color mixed toward white; the wings have two darker lines of the same color. At 28px and below, omit the wing lines, eye highlights, beak seam, and cheeks, and make the feet slightly thicker.
+- The size inside the circle changes with the pose: normally 0.93; `happy` `live` `stretch`, which raise the wings, 0.84; `listen` (leaning toward the hands), 0.85; `tilt`, 0.80. None may clip the wings or tail against the circle.
+- Keep the bird at about 70% of the circle's diameter, leaving margin at the top and sides. Center the drawn extent of the bird (from tail tip to the right edge of the face) on the circle's center. Because the tail extends left, place the body slightly right of center. Make the sleeping birdhouse about the same size so switching does not change the apparent size.
+- The circle is `color-mix(in oklab, var(--agent-*) 18%, var(--background))`. The avatar is always a perfect circle and never lets the bird or birdhouse overflow (only the badge at the lower right leaves the circle).
+- The birdhouse inside the circle has walls in the agent's color; the side, roof, and post are darker mixes toward black (`color-mix`). No bird is drawn inside; the hole stays dark. While asleep, a white "z" rises from the hole (so the bird and birdhouse do not appear to swap sizes).
+- **Exactly the same in light and dark.** The colors of the circle, bird, birdhouse, props, and badge do not change with the theme. Surfaces inside the circle (`background`, `foreground`, etc.) are fixed to the light values; only the badge ring follows the surface it sits on.
+- **Principle:** motion always corresponds to a real event. No meaningless random motion (the exceptions are breathing and blinking).
 
-| イベント                                 | pose              | 表示               | 動き                                                                 |
-| ---------------------------------------- | ----------------- | ------------------ | -------------------------------------------------------------------- |
-| 待機                                     | `idle`            | 鳥                 | ゆっくり呼吸し、ときどき 2 回まばたき、尾が揺れる                    |
-| ユーザーが入力中                         | `listen`          | 鳥                 | 体ごと手元（入力欄）へ傾ける。入力欄の上から覗く                     |
-| `tool_execution_start`                   | `work`            | 鳥＋`lens`（自動） | 虫眼鏡をのぞき込んで左右を見る                                       |
-| `message_update`                         | `write`           | 鳥＋`pen`（自動）  | くちばしでくわえたペンを胸の前の紙に走らせ、紙に行が書き足されていく |
-| `contact_agent`                          | `idle` + `letter` | 鳥                 | 手紙をくわえ、身をかがめてから相手の巣箱へ飛ぶ                       |
-| `tool_execution_end` / `submission` done | `happy`           | 鳥                 | 羽を上げ、つぶれて弾む小さなジャンプ（一度だけ）。羽はゆっくり振る   |
-| 返事が届いた・未読あり                   | `live`            | 鳥＋青のバッジ     | にっこり目で羽を上げて振る                                           |
-| `submission` unanswered                  | `tilt`            | 鳥＋`?`            | 首をかしげる                                                         |
-| cancel                                   | `surprised`       | 鳥＋`!`            | 目を見開いて跳ねる（一度だけ）                                       |
-| アラーム発火・再開                       | `stretch`         | 鳥                 | 羽を上げて伸びをし、体を左右に振る（一度だけ）                       |
-| 認証情報がない                           | `worried`         | 鳥＋赤のバッジ     | 眉を寄せ、そわそわする                                               |
-| 失敗                                     | `error`           | 鳥＋赤のバッジ     | ×目                                                                  |
-| アラーム待ち                             | `sleep`           | 同じ色の巣箱＋z    | 穴から「z」が順に立ちのぼって消える                                  |
-| lifecycle paused                         | `paused`          | 灰色の巣箱         | 動かない                                                             |
+| Event                                    | pose              | Display                   | Motion                                                                                    |
+| ---------------------------------------- | ----------------- | ------------------------- | ----------------------------------------------------------------------------------------- |
+| Idle                                     | `idle`            | Bird                      | Breathes slowly, blinks twice occasionally, tail sways                                    |
+| User is typing                           | `listen`          | Bird                      | Tilts its whole body toward the hands (the input). Peers over the input field             |
+| `tool_execution_start`                   | `work`            | Bird + `lens` (automatic) | Looks through the magnifier, left and right                                               |
+| `message_update`                         | `write`           | Bird + `pen` (automatic)  | Runs the pen held in its beak across the paper at its chest; lines are added to the paper |
+| `contact_agent`                          | `idle` + `letter` | Bird                      | Holds a letter, crouches, then flies to the other birdhouse                               |
+| `tool_execution_end` / `submission` done | `happy`           | Bird                      | Raises its wings and does a small squash-and-bounce jump (once). Wings wave slowly        |
+| Reply arrived / unread                   | `live`            | Bird + blue badge         | Smiling eyes, raises and waves its wings                                                  |
+| `submission` unanswered                  | `tilt`            | Bird + `?`                | Tilts its head                                                                            |
+| cancel                                   | `surprised`       | Bird + `!`                | Opens its eyes wide and hops (once)                                                       |
+| Alarm fires / resumes                    | `stretch`         | Bird                      | Raises its wings and stretches, swaying side to side (once)                               |
+| No credentials                           | `worried`         | Bird + red badge          | Knits its brows, fidgets                                                                  |
+| Failure                                  | `error`           | Bird + red badge          | × eyes                                                                                    |
+| Waiting for an alarm                     | `sleep`           | Same-color birdhouse + z  | "z"s rise from the hole in sequence and fade                                              |
+| lifecycle paused                         | `paused`          | Gray birdhouse            | Still                                                                                     |
 
-- （画面の中で動かす場合）巣箱から出るとき：穴の奥で目を開けて一瞬びくっとし、顔を出して左右を見回し、身をかがめてから止まり木へ放物線で跳ぶ。着地でつぶれて弾み、羽をパタパタさせる。戻るときはその逆で、頭から穴へ入る。
-- 手紙を届けるとき：数回羽ばたいては滑空する小鳥の飛び方で相手の巣箱の屋根へ降り、羽を広げてブレーキをかける。屋根に降りると巣箱が揺れ、旗がはためき、相手が起きて出てきて手紙を受け取る。
-- 小道具を持っている間は右下のバッジを出さない。20px では小道具と記号を外し、顔だけで伝える。
-- `prefers-reduced-motion: reduce` では動きを止め、ポーズの切り替えと一覧の 2 行目の文字だけで伝える。
-- SVG は `components/bundle.js` の `bird()`（鳥の中心が原点、足の先が y = 18.5）、`house()`（viewBox `10 10 100 112`、穴の中心 58,62、止まり木の上面 y = 77.5）、`avatar()`。動きは `components/bundle.css` の `kd-p-*`。Svelte では `AgentAvatar.svelte` と `Birdhouse.svelte` に移し、巣箱の出入りや飛行は Web Animations API（`element.animate`）で書く。
+- (When animated on screen) Leaving the birdhouse: opens its eyes in the back of the hole with a small start, peeks out and looks around, crouches, then jumps to the perch on a parabola. It squashes and bounces on landing and flaps. The reverse when returning: it enters the hole head first.
+- Delivering a letter: flies like a small bird, flapping a few times and gliding, lands on the other birdhouse's roof, and spreads its wings to brake. On landing the birdhouse shakes and the flag flutters; the recipient wakes, comes out, and takes the letter.
+- While holding a prop, do not show the badge at the lower right. At 20px, drop the prop and mark and communicate with the face alone.
+- Under `prefers-reduced-motion: reduce`, stop motion and convey the state with the pose switch and the second line of the list row.
+- The SVGs are `bird()` (origin at the bird's center; feet at y = 18.5), `house()` (viewBox `10 10 100 112`; hole center 58,62; perch top y = 77.5), and `avatar()` in `components/bundle.js`. Motion is `kd-p-*` in `components/bundle.css`. In Svelte, move them to `AgentAvatar.svelte` and `Birdhouse.svelte`, and write entering, leaving, and flight with the Web Animations API (`element.animate`).
 
 ```svelte
 <AgentAvatar color="violet" pose="write" size={36} />
-<AgentAvatar color="teal" pose="sleep" size={36} />  <!-- 同じ色の巣箱で眠っている -->
+<AgentAvatar color="teal" pose="sleep" size={36} />  <!-- sleeping in a same-color birdhouse -->
 ```

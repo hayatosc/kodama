@@ -90,7 +90,10 @@ Locally, `vp run check` still runs everything in one process.
 
 The workerd project sets `isolate: false`, so each Vitest worker keeps one Miniflare runtime and
 module graph across files instead of rebuilding them per file. Locally this took the workerd
-project from 497 s to about 100 s.
+project from 497 s to about 100 s. The project caps `maxWorkers` at 4: each worker holds a full
+runtime and module graph, and using every core can exhaust memory on a developer machine and take
+the test process down. Four workers leave half of an eight-core machine for the host; raise the cap
+only after measuring memory on the target machine.
 
 Before every file, `vitest.setup.ts` removes what the previous file left that this one can see:
 

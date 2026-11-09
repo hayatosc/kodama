@@ -1,7 +1,7 @@
 # WorkspaceLive
 
-Workspace と同じ画面で、ボタンからイベントを起こし、鳥の振る舞いを通しで確かめるための見本。ライトとダークの同じ画面を上下に並べ、上部の共通ボタンで両方を同時に動かす。
+The same screen as Workspace, with buttons that trigger events so you can watch the bird's behavior end to end. The same screen in light and dark is stacked vertically, and the shared buttons at the top drive both at once.
 
-- **使う側が渡すもの:** 実装では何も渡さない。各ポーズと動きの決まりは AgentAvatar にあり、この画面はそれをサイドバー・考え中ピル・入力欄の縁に置いたときの見え方を示す。
-- 上部の欄には、動きに対応する実際のイベント名（`tool_execution_start`、`kodama.agent-message` など）が流れる。
-- 手紙やしおりが行から行へ飛ぶ動き、メインのエージェントが入力欄から覗く動きは、画面の中でしか見せられないのでここに置いている。
+- **What the caller passes:** nothing in the implementation. Each pose and motion rule lives in AgentAvatar; this screen shows how they look in the sidebar, in the thinking pill, and at the edge of the input.
+- The top bar streams the real event names that correspond to the motions (`tool_execution_start`, `kodama.agent-message`, and so on).
+- Motions that can only be shown on screen, such as a letter or bookmark flying from row to row or the main agent peeking over the input, live here.
