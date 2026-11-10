@@ -73,8 +73,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    spacing, radius, shadow).
 2. **Primitives** (done) on shadcn-svelte: Button, StatusBadge (with the unread count), Keyboard,
    Switch, Tabs, Select (with search), and Dialog.
-3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
-   `design/components/bundle.js` and `bundle.css`.
+3. **AgentAvatar** (done): the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported
+   from `design/components/bundle.js` and `bundle.css` into `src/lib/components/avatar/`.
 4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),
    ToolCall, and Composer with its queue.
 5. **Panel parts**: Sidebar, ActivityFeed, SettingsList, and ProfilePanel.
