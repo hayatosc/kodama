@@ -38,8 +38,11 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 - `src/lib/components/`: the Kodama components built on them: `StatusBadge` and `UnreadCount`,
   `Keyboard` (the key hints of `design/components/Kbd`), `Select` (Popover + Command,
   shadcn-svelte's combobox recipe: a button opens a menu with the search field inside it, which
-  bits-ui's input-based Combobox does not give), and `ConfirmDialog` (AlertDialog). `focusRing`
-  in `src/lib/utils.ts` is the shared focus style.
+  bits-ui's input-based Combobox does not give), and `ConfirmDialog` (AlertDialog). The data
+  the components share (agent states, select options, sidebar rows, activity, memories, tools)
+  is typed in `src/lib/components/types.ts`, so TypeScript modules such as the story mock data
+  (`src/stories/mock.ts`) can import it. `focusRing` in `src/lib/utils.ts` is the shared focus
+  style.
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
