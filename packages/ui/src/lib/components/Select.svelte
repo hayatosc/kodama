@@ -1,20 +1,9 @@
-<script lang="ts" module>
-  /** One choice in a Select; `group` puts it under a heading such as 最新 (Latest). */
-  export type SelectOption = {
-    value: string
-    label: string
-    /** A second, muted line under the label. */
-    hint?: string
-    disabled?: boolean
-    group?: string
-  }
-</script>
-
 <script lang="ts">
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import * as Command from '#lib/components/ui/command/index.js'
   import * as Popover from '#lib/components/ui/popover/index.js'
   import { cn, focusRing } from '#lib/utils.js'
+  import type { SelectOption } from './types.js'
 
   let {
     options,

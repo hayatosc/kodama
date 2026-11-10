@@ -1,20 +1,8 @@
-<script lang="ts" module>
-  import type { AgentColor, AgentPose } from '../avatar/avatar.js'
-
-  /** The other agent a peer message came from (`kodama.agent-message`). */
-  export type PeerSender = {
-    slug: string
-    agentId: string
-    /** How many agents the message passed through to get here. */
-    hop: number
-    avatar: { color: AgentColor; pose?: AgentPose }
-  }
-</script>
-
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { AgentAvatar } from '../avatar/index.js'
   import { cn } from '#lib/utils.js'
+  import type { PeerSender } from '../types.js'
   import Prose from './Prose.svelte'
 
   let {

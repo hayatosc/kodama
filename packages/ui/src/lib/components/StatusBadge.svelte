@@ -1,21 +1,6 @@
-<script lang="ts" module>
-  /** An agent's lifecycle or run state, as design/components/index.d.ts names it. */
-  export type RunState = 'live' | 'running' | 'queued' | 'paused' | 'error' | 'done' | 'archived'
-
-  /** The word each state shows when the caller passes no label. */
-  export const RUN_STATE_LABELS: Record<RunState, string> = {
-    live: '稼働中',
-    running: '実行中',
-    queued: '待機中',
-    paused: '一時停止',
-    error: '失敗',
-    done: '完了',
-    archived: 'アーカイブ',
-  }
-</script>
-
 <script lang="ts">
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js'
+  import { RUN_STATE_LABELS, type RunState } from './types.js'
   import { cn } from '#lib/utils.js'
 
   let {

@@ -78,7 +78,9 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 4. **Conversation parts** (done): Message (user, assistant, thinking, peer), Prose (the look of
    Markdown; it styles the elements it is given and never takes HTML), ToolCall, and Composer
    with its queue, in `src/lib/components/conversation/`.
-5. **Panel parts**: Sidebar, ActivityFeed, SettingsList, and ProfilePanel.
+5. **Panel parts** (done): AgentSidebar, ActivityFeed, SettingsList (with SettingsRow and
+   SettingsAction), and ProfilePanel, in `src/lib/components/panel/`. Sidebar rows are buttons
+   until the routes exist; they become links when the UI connects.
 6. **Screens**: Workspace (three panes) and Mobile (list, conversation, sheet).
 7. **Live screen**: WorkspaceLive, which replays an event sequence.
 

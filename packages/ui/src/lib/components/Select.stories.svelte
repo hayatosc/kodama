@@ -1,7 +1,8 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { fn } from 'storybook/test'
-  import Select, { type SelectOption } from './Select.svelte'
+  import Select from './Select.svelte'
+  import type { SelectOption } from './types.js'
 
   const providers: SelectOption[] = [
     { value: 'anthropic', label: 'Anthropic' },

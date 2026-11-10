@@ -1,6 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
-  import StatusBadge, { RUN_STATE_LABELS, type RunState } from './StatusBadge.svelte'
+  import StatusBadge from './StatusBadge.svelte'
+  import { RUN_STATE_LABELS, type RunState } from './types.js'
   import UnreadCount from './UnreadCount.svelte'
 
   const states: RunState[] = ['live', 'running', 'queued', 'paused', 'error', 'done', 'archived']
