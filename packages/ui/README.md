@@ -75,8 +75,9 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    Switch, Tabs, Select (with search), and Dialog.
 3. **AgentAvatar** (done): the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported
    from `design/components/bundle.js` and `bundle.css` into `src/lib/components/avatar/`.
-4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),
-   ToolCall, and Composer with its queue.
+4. **Conversation parts** (done): Message (user, assistant, thinking, peer), Prose (the look of
+   Markdown; it styles the elements it is given and never takes HTML), ToolCall, and Composer
+   with its queue, in `src/lib/components/conversation/`.
 5. **Panel parts**: Sidebar, ActivityFeed, SettingsList, and ProfilePanel.
 6. **Screens**: Workspace (three panes) and Mobile (list, conversation, sheet).
 7. **Live screen**: WorkspaceLive, which replays an event sequence.
