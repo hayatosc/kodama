@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { AgentColor, AgentPose } from './avatar/avatar.js'
+import type { AgentColor, AgentPose, AgentProp } from './avatar/avatar.js'
 
 /** An agent's lifecycle or run state, as design/components/index.d.ts names it. */
 export type RunState = 'live' | 'running' | 'queued' | 'paused' | 'error' | 'done' | 'archived'
@@ -47,7 +47,8 @@ export type SidebarAgent = {
   slug: string
   kind: 'working' | 'dedicated'
   status: RunState
-  avatar: { color: AgentColor; pose: AgentPose }
+  /** The face in the list; `prop` and `mark` show what it holds or wonders right now. */
+  avatar: { color: AgentColor; pose: AgentPose; prop?: AgentProp | null; mark?: string }
   /** One line about the latest event. */
   latest: string
   /** ISO-8601 time of the latest event. */

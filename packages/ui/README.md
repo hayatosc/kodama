@@ -89,7 +89,11 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    `src/lib/components/screens/` and `conversation/ConversationPane.svelte`. The sheet is a
    bits-ui Dialog rather than vaul-svelte's Drawer: the design closes it with the scrim, ×, or
    Esc and asks for no dragging, so no new dependency is needed.
-7. **Live screen**: WorkspaceLive, which replays an event sequence.
+7. **Live screen** (done): WorkspaceLive, in `src/stories/screens/`, drives the workspace with
+   buttons that play one agent event each (a type, a tool call, a reply, a peer message, an
+   alarm, a memory extraction, a pause) or the whole sequence. Birds fly between houses with
+   the Web Animations API, and reduced motion shortens every move. It is a story, not a
+   component, because the live screen will take its events from `AgentService`.
 
 Streaming Markdown (Streamdown) and the connection to `AgentService` come after the mockups:
 routes, Remote Functions, authentication, and `adapter-cloudflare`.

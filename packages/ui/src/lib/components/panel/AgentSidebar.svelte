@@ -69,11 +69,14 @@
       type="button"
       class={rowClass}
       aria-current={agent.slug === currentSlug ? 'page' : undefined}
+      data-agent={agent.slug}
       onclick={() => onselect?.(agent.slug)}
     >
       <AgentAvatar
         color={dedicated ? 'system' : agent.avatar.color}
         pose={agent.avatar.pose}
+        prop={agent.avatar.prop}
+        mark={agent.avatar.mark}
         size={mobile ? 40 : 36}
         badge={!dedicated}
       />
@@ -85,7 +88,7 @@
           {#if agent.unread > 0}
             <UnreadCount count={agent.unread} />
           {:else}
-            <span class="text-xs text-muted-foreground"
+            <span class="text-xs text-muted-foreground" data-meta
               >{relativeTime(new Date(agent.latestAt), now)}</span
             >
           {/if}
@@ -120,9 +123,16 @@
     type="button"
     class={cn(rowClass, 'mb-1')}
     aria-current={main.slug === currentSlug ? 'page' : undefined}
+    data-agent={main.slug}
     onclick={() => onselect?.(main.slug)}
   >
-    <AgentAvatar color={main.avatar.color} pose={main.avatar.pose} size={56} />
+    <AgentAvatar
+      color={main.avatar.color}
+      pose={main.avatar.pose}
+      prop={main.avatar.prop}
+      mark={main.avatar.mark}
+      size={56}
+    />
     <span class="min-w-0 flex-1">
       <span class="block text-xs text-muted-foreground">メイン</span>
       <span class="type-lg block truncate">{main.slug}</span>
