@@ -36,7 +36,7 @@
       pose: { control: 'select', options: POSES },
       prop: { control: 'select', options: [undefined, null, 'lens', 'pen', 'letter'] },
       mark: { control: 'inline-radio', options: [undefined, '?', '!'] },
-      size: { control: 'inline-radio', options: [20, 36, 56, 72] },
+      size: { control: 'inline-radio', options: [20, 32, 36, 40, 56, 72] },
       badge: { control: 'boolean' },
     },
     parameters: {

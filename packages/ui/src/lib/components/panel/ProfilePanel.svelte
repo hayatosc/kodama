@@ -1,6 +1,7 @@
 <script lang="ts">
   import SearchIcon from '@lucide/svelte/icons/search'
   import ShareIcon from '@lucide/svelte/icons/share'
+  import XIcon from '@lucide/svelte/icons/x'
   import Select from '../Select.svelte'
   import StatusBadge from '../StatusBadge.svelte'
   import { AgentAvatar, type AgentColor, type AgentPose } from '../avatar/index.js'
@@ -28,6 +29,8 @@
     tab = $bindable('details'),
     now = new Date(),
     onshare,
+    sheet = false,
+    onclose,
     class: className,
   }: {
     agent: { slug: string; status: RunState; avatar: { color: AgentColor; pose: AgentPose } }
@@ -45,6 +48,10 @@
     tab?: 'details' | 'memory' | 'tools'
     now?: Date
     onshare?: () => void
+    /** Inside the phone's bottom sheet: full width, a row header, and menus opening upward. */
+    sheet?: boolean
+    /** Shows × in the sheet's header. */
+    onclose?: () => void
     class?: string
   } = $props()
 
@@ -64,21 +71,37 @@
 
 <aside
   class={cn(
-    'flex w-[320px] flex-col gap-4 border-l border-border bg-background p-4 [--badge-ring:var(--background)]',
+    'flex flex-col gap-4 bg-background p-4 [--badge-ring:var(--background)]',
+    sheet ? 'w-full' : 'w-[320px] border-l border-border',
     className,
   )}
   aria-label="エージェントの詳細"
 >
-  <div class="flex justify-end">
-    <Button size="circle" aria-label="共有" onclick={onshare}
-      ><ShareIcon strokeWidth={1.75} /></Button
-    >
-  </div>
-  <div class="flex flex-col items-center gap-2 pt-4">
-    <AgentAvatar color={agent.avatar.color} pose={agent.avatar.pose} size={72} />
-    <h2 class="type-lg">{agent.slug}</h2>
-    <StatusBadge status={agent.status} />
-  </div>
+  {#if sheet}
+    <div class="flex items-center gap-3">
+      <AgentAvatar color={agent.avatar.color} pose={agent.avatar.pose} size={56} />
+      <div class="flex min-w-0 flex-1 flex-col items-start gap-1">
+        <h2 class="type-lg truncate">{agent.slug}</h2>
+        <StatusBadge status={agent.status} />
+      </div>
+      {#if onclose}
+        <Button variant="ghost" size="icon" aria-label="閉じる" onclick={onclose}>
+          <XIcon strokeWidth={1.75} />
+        </Button>
+      {/if}
+    </div>
+  {:else}
+    <div class="flex justify-end">
+      <Button size="circle" aria-label="共有" onclick={onshare}
+        ><ShareIcon strokeWidth={1.75} /></Button
+      >
+    </div>
+    <div class="flex flex-col items-center gap-2 pt-4">
+      <AgentAvatar color={agent.avatar.color} pose={agent.avatar.pose} size={72} />
+      <h2 class="type-lg">{agent.slug}</h2>
+      <StatusBadge status={agent.status} />
+    </div>
+  {/if}
 
   <Tabs.Root bind:value={tab}>
     <Tabs.List aria-label="エージェントの情報">
@@ -98,10 +121,25 @@
       </SettingsList>
       <SettingsList title="設定">
         <SettingsRow label="プロバイダー">
-          <Select options={providers} bind:value={provider} variant="inline" label="プロバイダー" />
+          <Select
+            options={providers}
+            bind:value={provider}
+            variant="inline"
+            label="プロバイダー"
+            side={sheet ? 'top' : 'bottom'}
+            align="end"
+          />
         </SettingsRow>
         <SettingsRow label="モデル">
-          <Select options={models} bind:value={model} variant="inline" mono label="モデル" />
+          <Select
+            options={models}
+            bind:value={model}
+            variant="inline"
+            mono
+            label="モデル"
+            side={sheet ? 'top' : 'bottom'}
+            align="end"
+          />
         </SettingsRow>
       </SettingsList>
       <section class="flex flex-col gap-2" aria-label="アクティビティ">

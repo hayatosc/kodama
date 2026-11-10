@@ -15,6 +15,8 @@
     placeholder = '選択してください',
     searchPlaceholder = '検索',
     label,
+    side = 'bottom',
+    align = 'start',
     class: className,
   }: {
     options: SelectOption[]
@@ -33,6 +35,10 @@
      * still contains the visible value (WCAG 2.5.3).
      */
     label?: string
+    /** Where the menu opens: `top` inside a bottom sheet, so it stays on screen. */
+    side?: 'top' | 'bottom'
+    /** `end` lines the menu up with the trigger's right edge, for triggers at a row's end. */
+    align?: 'start' | 'end'
     class?: string
   } = $props()
 
@@ -78,7 +84,7 @@
       aria-hidden="true"
     />
   </Popover.Trigger>
-  <Popover.Content>
+  <Popover.Content {side} {align}>
     <Command.Root>
       {#if searchable}
         <Command.Input placeholder={searchPlaceholder} />

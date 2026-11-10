@@ -84,7 +84,11 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 5. **Panel parts** (done): AgentSidebar, ActivityFeed, SettingsList (with SettingsRow and
    SettingsAction), and ProfilePanel, in `src/lib/components/panel/`. Sidebar rows are buttons
    until the routes exist; they become links when the UI connects.
-6. **Screens**: Workspace (three panes) and Mobile (list, conversation, sheet).
+6. **Screens** (done): Workspace (three panes; below 1280px the right pane folds behind the
+   details button) and Mobile (list, conversation, and the details sheet), from
+   `src/lib/components/screens/` and `conversation/ConversationPane.svelte`. The sheet is a
+   bits-ui Dialog rather than vaul-svelte's Drawer: the design closes it with the scrim, ×, or
+   Esc and asks for no dragging, so no new dependency is needed.
 7. **Live screen**: WorkspaceLive, which replays an event sequence.
 
 Streaming Markdown (Streamdown) and the connection to `AgentService` come after the mockups:

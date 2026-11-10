@@ -30,7 +30,8 @@
     prop?: AgentProp | null
     /** `?` or `!`, above the head. */
     mark?: string
-    size?: 20 | 36 | 56 | 72
+    /** 72 profile, 56 main row, 40 phone list, 36 list rows, 32 phone app bar, 20 inline. */
+    size?: 20 | 32 | 36 | 40 | 56 | 72
     /** The lower-right status badge; hidden at 20px and while the bird holds something. */
     badge?: boolean
     /** The accessible name, such as the agent's slug; without it the avatar is decorative. */

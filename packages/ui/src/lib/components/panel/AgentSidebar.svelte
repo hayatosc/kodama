@@ -20,6 +20,7 @@
     onsearch,
     oncreate,
     onsettings,
+    mobile = false,
     class: className,
   }: {
     /** The main agent, in the large row at the top. */
@@ -37,6 +38,8 @@
     onsearch?: () => void
     oncreate?: () => void
     onsettings?: () => void
+    /** The phone's list screen: a Kodama heading, 40px avatars, full width, no account row. */
+    mobile?: boolean
     class?: string
   } = $props()
 
@@ -71,7 +74,7 @@
       <AgentAvatar
         color={dedicated ? 'system' : agent.avatar.color}
         pose={agent.avatar.pose}
-        size={36}
+        size={mobile ? 40 : 36}
         badge={!dedicated}
       />
       <span class="min-w-0 flex-1">
@@ -94,10 +97,17 @@
 {/snippet}
 
 <nav
-  class={cn('flex h-full w-[280px] flex-col gap-0.5 bg-sidebar p-3', className)}
+  class={cn(
+    'flex h-full flex-col gap-0.5 p-3',
+    mobile ? 'w-full bg-background' : 'w-[280px] bg-sidebar',
+    className,
+  )}
   aria-label="エージェント"
 >
-  <div class="flex justify-end gap-2 pb-2">
+  <div class="flex items-center justify-end gap-2 pb-2">
+    {#if mobile}
+      <h1 class="mr-auto pl-2 font-display text-[28px] leading-9 font-semibold">Kodama</h1>
+    {/if}
     <Button size="circle" aria-label="検索" onclick={onsearch}
       ><SearchIcon strokeWidth={1.75} /></Button
     >
@@ -138,14 +148,16 @@
     </ul>
   {/if}
 
-  <div class="mt-auto flex items-center gap-3 px-1 pt-2">
-    <span
-      class="grid size-8 place-items-center rounded-full bg-accent text-xs font-semibold text-muted-foreground"
-      aria-hidden="true">{user.name.slice(0, 1).toUpperCase()}</span
-    >
-    <span class="flex-1 truncate font-semibold">{user.name}</span>
-    <Button variant="ghost" size="icon" aria-label="設定" onclick={onsettings}>
-      <SlidersHorizontalIcon strokeWidth={1.75} />
-    </Button>
-  </div>
+  {#if !mobile}
+    <div class="mt-auto flex items-center gap-3 px-1 pt-2">
+      <span
+        class="grid size-8 place-items-center rounded-full bg-accent text-xs font-semibold text-muted-foreground"
+        aria-hidden="true">{user.name.slice(0, 1).toUpperCase()}</span
+      >
+      <span class="flex-1 truncate font-semibold">{user.name}</span>
+      <Button variant="ghost" size="icon" aria-label="設定" onclick={onsettings}>
+        <SlidersHorizontalIcon strokeWidth={1.75} />
+      </Button>
+    </div>
+  {/if}
 </nav>

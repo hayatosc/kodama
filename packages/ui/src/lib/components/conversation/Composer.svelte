@@ -1,6 +1,6 @@
 <script lang="ts">
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
-  import PaperclipIcon from '@lucide/svelte/icons/paperclip'
+  import PlusIcon from '@lucide/svelte/icons/plus'
   import SquareIcon from '@lucide/svelte/icons/square'
   import XIcon from '@lucide/svelte/icons/x'
   import { Button } from '../ui/button/index.js'
@@ -134,7 +134,7 @@
     )}
   >
     <Button variant="ghost" size="round" class="text-muted-foreground" aria-label="添付">
-      <PaperclipIcon strokeWidth={1.75} />
+      <PlusIcon strokeWidth={1.75} />
     </Button>
     <textarea
       bind:value
