@@ -13,7 +13,7 @@
 <!-- One key combination: an outer <kbd> around a <kbd> per key, as the HTML spec nests them. -->
 <kbd
   bind:this={ref}
-  data-slot="kbd-group"
+  data-slot="keyboard-key-group"
   class={cn('inline-flex items-center gap-1 font-normal', className)}
   {...restProps}
 >

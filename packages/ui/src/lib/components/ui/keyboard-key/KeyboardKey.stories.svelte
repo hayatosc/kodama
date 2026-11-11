@@ -1,18 +1,18 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Button } from '../button/index.js'
-  import * as Kbd from './index.js'
-  import KbdRoot from './kbd.svelte'
+  import * as KeyboardKey from './index.js'
+  import KeyboardKeyRoot from './keyboard-key.svelte'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Kbd',
-    component: KbdRoot,
+    title: 'Primitives/KeyboardKey',
+    component: KeyboardKeyRoot,
     tags: ['autodocs'],
     parameters: {
       docs: {
         description: {
           component:
-            'A key in a native `<kbd>`. **Kbd.Group** wraps the keys of one combination in an outer `<kbd>`, as the HTML spec nests them. Show ⌘ on the Mac and Ctrl elsewhere. Source: `design/components/Kbd`.',
+            'A key in a native `<kbd>`. **KeyboardKey.Group** wraps the keys of one combination in an outer `<kbd>`, as the HTML spec nests them. Show ⌘ on the Mac and Ctrl elsewhere. Source: `design/components/Kbd`.',
         },
       },
     },
@@ -35,15 +35,15 @@
   }}
 >
   <div class="flex flex-col items-start gap-3">
-    <Kbd.Group>
-      <Kbd.Root>⌘</Kbd.Root>
-      <Kbd.Root>K</Kbd.Root>
-    </Kbd.Group>
-    <Kbd.Group>
-      <Kbd.Root>Ctrl</Kbd.Root>
-      <Kbd.Root>Shift</Kbd.Root>
-      <Kbd.Root>P</Kbd.Root>
-    </Kbd.Group>
+    <KeyboardKey.Group>
+      <KeyboardKey.Root>⌘</KeyboardKey.Root>
+      <KeyboardKey.Root>K</KeyboardKey.Root>
+    </KeyboardKey.Group>
+    <KeyboardKey.Group>
+      <KeyboardKey.Root>Ctrl</KeyboardKey.Root>
+      <KeyboardKey.Root>Shift</KeyboardKey.Root>
+      <KeyboardKey.Root>P</KeyboardKey.Root>
+    </KeyboardKey.Group>
   </div>
 </Story>
 
@@ -55,7 +55,10 @@
   }}
 >
   <p class="text-sm">
-    <Kbd.Group><Kbd.Root>⌘</Kbd.Root><Kbd.Root>K</Kbd.Root></Kbd.Group> でコマンドパレットを開きます。
+    <KeyboardKey.Group
+      ><KeyboardKey.Root>⌘</KeyboardKey.Root><KeyboardKey.Root>K</KeyboardKey.Root
+      ></KeyboardKey.Group
+    > でコマンドパレットを開きます。
   </p>
 </Story>
 
@@ -75,7 +78,7 @@
     {#each hints as hint, index (hint.key)}
       {#if index > 0}<span aria-hidden="true" class="h-3 w-px bg-border"></span>{/if}
       <span class="inline-flex items-center gap-1.5">
-        <Kbd.Root>{hint.key}</Kbd.Root>
+        <KeyboardKey.Root>{hint.key}</KeyboardKey.Root>
         <span class="text-xs text-muted-foreground">{hint.label}</span>
       </span>
     {/each}
@@ -95,6 +98,9 @@
   }}
 >
   <Button variant="secondary" aria-keyshortcuts="Meta+S">
-    保存<Kbd.Group><Kbd.Root>⌘</Kbd.Root><Kbd.Root>S</Kbd.Root></Kbd.Group>
+    保存<KeyboardKey.Group
+      ><KeyboardKey.Root>⌘</KeyboardKey.Root><KeyboardKey.Root>S</KeyboardKey.Root
+      ></KeyboardKey.Group
+    >
   </Button>
 </Story>

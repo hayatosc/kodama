@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Button } from '../button/index.js'
-  import * as Kbd from '../kbd/index.js'
+  import * as KeyboardKey from '../keyboard-key/index.js'
   import { Switch } from '../switch/index.js'
   import DialogContent from './dialog-content.svelte'
   import * as Dialog from './index.js'
@@ -57,9 +57,9 @@
           <div class="flex items-center justify-between gap-4">
             <dt>{shortcut.label}</dt>
             <dd>
-              <Kbd.Group>
-                {#each shortcut.keys as key (key)}<Kbd.Root>{key}</Kbd.Root>{/each}
-              </Kbd.Group>
+              <KeyboardKey.Group>
+                {#each shortcut.keys as key (key)}<KeyboardKey.Root>{key}</KeyboardKey.Root>{/each}
+              </KeyboardKey.Group>
             </dd>
           </div>
         {/each}

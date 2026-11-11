@@ -34,7 +34,7 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   `design/components/bundle.css`. Where the platform has the element, they are built on it, as
   modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
   commands, Popover on the Popover API with anchor positioning, Select on the customizable
-  `<select>`, Switch on a checkbox with the `switch` attribute, and Kbd on `<kbd>`. Tabs and
+  `<select>`, Switch on a checkbox with the `switch` attribute, and KeyboardKey on `<kbd>`. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
   and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
   shown in the Combobox stories. Variant tables and their types live in a `variants.ts` next to
@@ -78,7 +78,7 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 1. **Foundation** (done): the package, tokens and fonts, the shadcn-svelte setup, Storybook
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
-2. **Primitives** (done): Button, Badge, Kbd, Switch, Tabs, Select, Combobox (Popover with
+2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
    Command), Dialog, and AlertDialog, general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
