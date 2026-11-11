@@ -262,3 +262,179 @@
     opacity: 0;
   }
 }
+
+/*
+ * Checkbox and radio (checkbox guide, brand-consistent-forms): native inputs with
+ * appearance: none, 16px, a 1px border in the input color (3:1 against the page). The check, the
+ * dash, and the dot are masks painted in the foreground, which turn CanvasText in forced colors
+ * mode. Checked fills with primary, so the state is a shape and a fill, not a color alone.
+ */
+:where([data-slot='checkbox'], [data-slot='radio-group-item']) {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  inline-size: 16px;
+  block-size: 16px;
+  margin: 0;
+  border: 1px solid var(--input);
+  background-color: var(--background);
+  cursor: pointer;
+}
+
+:where([data-slot='checkbox']) {
+  border-radius: var(--radius-sm);
+}
+
+:where([data-slot='radio-group-item']) {
+  border-radius: var(--radius-full);
+}
+
+:where([data-slot='checkbox'], [data-slot='radio-group-item'])::before {
+  content: '';
+  inline-size: 10px;
+  block-size: 10px;
+  background-color: var(--primary-foreground);
+  mask: var(--control-mark) center / contain no-repeat;
+  scale: 0;
+}
+
+:where([data-slot='radio-group-item'])::before {
+  inline-size: 6px;
+  block-size: 6px;
+  --control-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5'/%3E%3C/svg%3E");
+}
+
+:where([data-slot='checkbox']):checked {
+  --control-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+
+:where([data-slot='checkbox']):indeterminate {
+  --control-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round'%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
+}
+
+:where([data-slot='checkbox'], [data-slot='radio-group-item']):is(:checked, :indeterminate) {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+:where([data-slot='checkbox'], [data-slot='radio-group-item']):is(
+    :checked,
+    :indeterminate
+  )::before {
+  scale: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-slot='checkbox'], [data-slot='radio-group-item'])::before {
+    transition: scale 120ms ease-out;
+  }
+}
+
+:where([data-slot='checkbox'], [data-slot='radio-group-item']):is(
+  :user-invalid,
+  [aria-invalid='true']
+) {
+  border-color: var(--destructive);
+}
+
+:where([data-slot='checkbox'], [data-slot='radio-group-item']):disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+@media (forced-colors: active) {
+  :where([data-slot='checkbox'], [data-slot='radio-group-item'])::before {
+    background-color: CanvasText;
+  }
+}
+
+/*
+ * The slider (slider guide): a native range input with a 4px track that fills with primary up to
+ * the thumb, and a 16px thumb with a primary ring. --slider-progress comes from the component.
+ * The 24px box (40px on touch screens) is the interaction area. WebKit and Firefox pseudo-elements
+ * stay in separate rules, since a browser drops a rule with one it does not know.
+ */
+:where([data-slot='slider']) {
+  appearance: none;
+  inline-size: 100%;
+  block-size: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  :where([data-slot='slider']) {
+    block-size: 40px;
+  }
+}
+
+:where([data-slot='slider']):disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+:where([data-slot='slider'])::-webkit-slider-runnable-track {
+  block-size: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    var(--primary) var(--slider-progress, 50%),
+    var(--input) var(--slider-progress, 50%)
+  );
+}
+
+:where([data-slot='slider']):dir(rtl)::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to left,
+    var(--primary) var(--slider-progress, 50%),
+    var(--input) var(--slider-progress, 50%)
+  );
+}
+
+:where([data-slot='slider'])::-webkit-slider-thumb {
+  appearance: none;
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: -6px;
+  border: 2px solid var(--primary);
+  border-radius: var(--radius-full);
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+}
+
+:where([data-slot='slider'])::-moz-range-track {
+  block-size: 4px;
+  border-radius: var(--radius-full);
+  background: var(--input);
+}
+
+:where([data-slot='slider'])::-moz-range-progress {
+  block-size: 4px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+}
+
+:where([data-slot='slider'])::-moz-range-thumb {
+  box-sizing: border-box;
+  inline-size: 16px;
+  block-size: 16px;
+  border: 2px solid var(--primary);
+  border-radius: var(--radius-full);
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Forced colors mode removes the gradient fill, so the track is drawn in the text color there. */
+@media (forced-colors: active) {
+  :where([data-slot='slider'])::-webkit-slider-runnable-track {
+    background: CanvasText;
+  }
+
+  :where([data-slot='slider'])::-moz-range-track {
+    background: CanvasText;
+  }
+}

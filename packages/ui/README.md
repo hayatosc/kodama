@@ -34,7 +34,9 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   `design/components/bundle.css`. Where the platform has the element, they are built on it, as
   modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
   commands, Popover on the Popover API with anchor positioning, Select on the customizable
-  `<select>`, Switch on a checkbox with the `switch` attribute, and KeyboardKey on `<kbd>`. Tabs and
+  `<select>`, Switch on a checkbox with the `switch` attribute, KeyboardKey on `<kbd>`, and Input,
+  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls. Field links a
+  control to its label, description, and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
   and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
   shown in the Combobox stories. Variant tables and their types live in a `variants.ts` next to
@@ -43,7 +45,10 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
   restyle, where no native element fits.
 - `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
-  dialog and popover transitions and backdrop, popover placement, and the select's menu.
+  dialog and popover transitions and backdrop, popover placement, the select's menu, and the
+  checkbox, radio, and slider drawn on their native inputs.
+- `src/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
+  only after the user has interacted, and is announced as well as seen.
 - `src/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
   transition) or `closedby` (closing on a backdrop click).
 - `src/lib/components/`: Kodama's own components, built on the primitives, from the next stages.
@@ -79,7 +84,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
 2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
-   Command), Dialog, and AlertDialog, general-purpose and shaped like shadcn-svelte's, with stories
+   Command), Dialog, AlertDialog, and the form parts (Label, Input, Textarea, Field, InputGroup,
+   Checkbox, RadioGroup, Slider), general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.

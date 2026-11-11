@@ -1,11 +1,15 @@
 <script lang="ts">
   import { cn, focusRing, type WithElementRef } from '#lib/utils.js'
+  import { fieldControlAttributes, getFieldState } from '../field/context.js'
   import type { HTMLInputAttributes } from 'svelte/elements'
 
   let {
     ref = $bindable(null),
     checked = $bindable(false),
     class: className,
+    id,
+    'aria-describedby': describedBy,
+    'aria-invalid': invalid,
     ...restProps
   }: WithElementRef<Omit<HTMLInputAttributes, 'type' | 'role'>, HTMLInputElement> = $props()
 
@@ -14,6 +18,15 @@
    * missing, `role="switch"` gives the same semantics and the styles below give the same look.
    */
   const nativeSwitch = { switch: true }
+
+  const field = getFieldState()
+  const attributes = $derived(
+    fieldControlAttributes(field, {
+      id,
+      'aria-describedby': describedBy,
+      'aria-invalid': invalid,
+    }),
+  )
 </script>
 
 <!--
@@ -29,6 +42,7 @@
     bind:checked
     type="checkbox"
     role="switch"
+    {...attributes}
     class={cn(
       'peer absolute inset-0 m-0 size-full cursor-pointer appearance-none rounded-full border border-transparent',
       'bg-input transition-colors duration-150 checked:bg-primary',
