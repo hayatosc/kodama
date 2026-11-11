@@ -8,4 +8,5 @@ import Content from './popover-content.svelte'
 import Trigger from './popover-trigger.svelte'
 import Root from './popover.svelte'
 
+/** The parts of a popover, used as `Popover.Root`, `Popover.Trigger`, and `Popover.Content`. */
 export { Root, Trigger, Content }

@@ -14,4 +14,8 @@ import Title from './dialog-title.svelte'
 import Trigger from './dialog-trigger.svelte'
 import Root from './dialog.svelte'
 
+/**
+ * The parts of a modal dialog, used as `Dialog.Root`, `Dialog.Content`, …. Root owns `open`;
+ * Trigger and Close open and close it with invoker commands.
+ */
 export { Root, Trigger, Content, Header, Footer, Title, Description, Close }

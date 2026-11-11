@@ -11,4 +11,8 @@ import Item from './select-item.svelte'
 import Separator from './select-separator.svelte'
 import Root from './select.svelte'
 
+/**
+ * The parts of a native select: Root is the `<select>`, Item an `<option>`, Group an
+ * `<optgroup>`, Separator an `<hr>`.
+ */
 export { Root, Item, Group, Separator }

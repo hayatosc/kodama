@@ -13,6 +13,7 @@
     closedby = 'any',
     showCloseButton = true,
     closeLabel = '閉じる',
+    onclose,
     children,
     ...restProps
   }: WithElementRef<Omit<HTMLDialogAttributes, 'open' | 'id' | 'closedby'>, HTMLDialogElement> & {
@@ -33,10 +34,18 @@
     dialog.open = false
   }
 
-  /** Opens the dialog as a modal, or closes it with its exit transition, when `open` changes. */
+  /**
+   * Opens the dialog as a modal, or closes it with its exit transition, when `open` changes.
+   * Reopening while a fallback exit is still playing removes `data-closing`, which cancels the
+   * pending close (see closeDialog).
+   */
   const followOpen: Attachment<HTMLDialogElement> = (element) => {
-    if (dialog.open && !element.open) element.showModal()
-    else if (!dialog.open && element.open) closeDialog(element).catch(() => element.close())
+    if (dialog.open) {
+      element.removeAttribute('data-closing')
+      if (!element.open) element.showModal()
+      return
+    }
+    if (element.open) closeDialog(element).catch(() => element.close())
   }
 
   /**
@@ -95,7 +104,10 @@
     showCloseButton && '[&>[data-slot=dialog-header]]:pr-8',
     className,
   )}
-  onclose={close}
+  onclose={(event) => {
+    close()
+    onclose?.(event)
+  }}
   {@attach followOpen}
   {@attach followBrowser}
   {...restProps}

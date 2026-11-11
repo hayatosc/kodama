@@ -92,12 +92,12 @@
     docs: {
       description: {
         story:
-          'A shortcut inside the button it triggers. `aria-keyshortcuts` tells assistive technology about the shortcut.',
+          'The shortcut for an action shown inside its button. The keys only show the shortcut; the page that has the shortcut handles the keys, and then also sets `aria-keyshortcuts` on the button.',
       },
     },
   }}
 >
-  <Button variant="secondary" aria-keyshortcuts="Meta+S">
+  <Button variant="secondary">
     保存<KeyboardKey.Group
       ><KeyboardKey.Root>⌘</KeyboardKey.Root><KeyboardKey.Root>S</KeyboardKey.Root
       ></KeyboardKey.Group

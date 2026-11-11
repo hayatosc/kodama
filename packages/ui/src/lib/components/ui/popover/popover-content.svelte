@@ -8,6 +8,7 @@
     ref = $bindable(null),
     class: className,
     align = 'start',
+    ontoggle: onToggleProp,
     children,
     ...restProps
   }: WithElementRef<Omit<HTMLAttributes<HTMLDivElement>, 'id' | 'popover'>> & {
@@ -41,6 +42,7 @@
   function ontoggle(event: ToggleEvent & { currentTarget: HTMLDivElement }): void {
     popover.open = event.newState === 'open'
     if (popover.open) event.currentTarget.querySelector<HTMLElement>('[data-autofocus]')?.focus()
+    onToggleProp?.(event)
   }
 </script>
 

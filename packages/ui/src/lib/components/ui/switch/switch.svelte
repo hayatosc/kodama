@@ -7,10 +7,7 @@
     checked = $bindable(false),
     class: className,
     ...restProps
-  }: WithElementRef<
-    Omit<HTMLInputAttributes, 'type' | 'role' | 'value'>,
-    HTMLInputElement
-  > = $props()
+  }: WithElementRef<Omit<HTMLInputAttributes, 'type' | 'role'>, HTMLInputElement> = $props()
 
   /**
    * The native switch attribute, which Svelte's attribute types do not list yet. Where it is
