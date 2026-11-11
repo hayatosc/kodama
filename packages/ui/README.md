@@ -72,9 +72,10 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   interest invokers are missing. Baseline features get none.
 - `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
   Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
-- `src/stories/`: stories that belong to no component (Foundations, compositions such as the
-  Combobox, and later whole screens).
-  A component's stories sit next to it as `<Name>.stories.svelte`.
+- Stories sit in the folder of what they show, as `<Name>.stories.svelte`: a component's next to
+  it, the Foundations stories (colors, type, layout) next to `src/shared/styles/tokens.css`, and
+  the Combobox, a composition of Popover and Command, in `src/shared/ui/command/`.
+  `src/app/Introduction.mdx` is Storybook's opening page.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
 ## Svelte tooling (rsvelte)

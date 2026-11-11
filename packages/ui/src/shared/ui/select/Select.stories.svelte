@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { fn } from 'storybook/test'
-  import { regions } from '../../../stories/prefectures.js'
+  import { regions } from '../command/prefectures.js'
   import * as Select from './index.js'
   import SelectRoot from './select.svelte'
 
