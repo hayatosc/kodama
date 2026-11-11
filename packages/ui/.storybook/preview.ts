@@ -22,7 +22,9 @@ const preview: Preview = {
     layout: 'centered',
     a11y: { test: 'error' },
     options: {
-      storySort: { order: ['Introduction', 'Foundations', 'Primitives', 'Kodama', 'Screens'] },
+      storySort: {
+        order: ['Introduction', 'Foundations', 'Primitives', 'Patterns', 'Kodama', 'Screens'],
+      },
     },
   },
 }

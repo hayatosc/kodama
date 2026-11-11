@@ -66,7 +66,8 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 - `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
   Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
 - `src/lib/components/`: Kodama's own components, built on the primitives, from the next stages.
-- `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
+- `src/stories/`: stories that belong to no component (Foundations, compositions such as the
+  Combobox, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
@@ -103,7 +104,9 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    Separator, Callout, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
    overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Drawer, Toast),
    general-purpose and shaped like shadcn-svelte's, with stories
-   that show each one's uses rather than one screen's. Native elements come first (see Layout);
+   that show each one's uses rather than one screen's. Storybook lists the parts fit for any use
+   under **Primitives** and those made for one use (AlertDialog, Drawer, Combobox, Toast,
+   Callout, Empty) under **Patterns**; each Default story shows the part on its own. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from

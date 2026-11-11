@@ -8,7 +8,7 @@
   import * as Empty from './index.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Empty',
+    title: 'Patterns/Empty',
     component: EmptyRoot,
     tags: ['autodocs'],
     parameters: {

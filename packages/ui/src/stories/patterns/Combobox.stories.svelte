@@ -6,7 +6,7 @@
   import { regions } from '../prefectures.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Combobox',
+    title: 'Patterns/Combobox',
     tags: ['autodocs'],
     parameters: {
       docs: {

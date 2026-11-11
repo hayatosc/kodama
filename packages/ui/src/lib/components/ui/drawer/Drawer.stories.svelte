@@ -7,7 +7,7 @@
   import DrawerContent from './drawer-content.svelte'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Drawer',
+    title: 'Patterns/Drawer',
     component: DrawerContent,
     tags: ['autodocs'],
     args: { side: 'right' },

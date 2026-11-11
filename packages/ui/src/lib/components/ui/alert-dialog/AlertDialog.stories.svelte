@@ -5,7 +5,7 @@
   import * as AlertDialog from './index.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/AlertDialog',
+    title: 'Patterns/AlertDialog',
     component: AlertDialogContent,
     tags: ['autodocs'],
     parameters: {

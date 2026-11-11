@@ -6,7 +6,7 @@
   import { Toaster, toast } from './index.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Toast',
+    title: 'Patterns/Toast',
     component: Toaster,
     tags: ['autodocs'],
     parameters: {

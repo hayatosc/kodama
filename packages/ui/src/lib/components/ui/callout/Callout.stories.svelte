@@ -8,7 +8,7 @@
   import * as Callout from './index.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Callout',
+    title: 'Patterns/Callout',
     component: CalloutRoot,
     tags: ['autodocs'],
     args: { variant: 'neutral' },
