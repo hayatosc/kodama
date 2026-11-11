@@ -35,8 +35,8 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
   commands, Popover on the Popover API with anchor positioning, Select on the customizable
   `<select>`, Switch on a checkbox with the `switch` attribute, KeyboardKey on `<kbd>`, and Input,
-  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls, Accordion and
-  Collapsible on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
+  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls, Accordion
+  on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
   Card on `<article>`, Separator on `<hr>`, Toggle and ToggleGroup on `aria-pressed` buttons,
   DropdownMenu on an invoker-command popover with native focusgroup, Tooltip on interest invokers
   (`interestfor`) and a hint popover, Sheet on the same modal `<dialog>` as Dialog, and Toast on
@@ -99,7 +99,7 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    spacing, radius, shadow).
 2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
    Command), Dialog, AlertDialog, the form parts (Label, Input, Textarea, Field, InputGroup,
-   Checkbox, RadioGroup, Slider), and the display parts (Accordion, Collapsible, Card,
+   Checkbox, RadioGroup, Slider), and the display parts (Accordion, Card,
    Separator, Alert, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
    overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Sheet, Toast),
    general-purpose and shaped like shadcn-svelte's, with stories
