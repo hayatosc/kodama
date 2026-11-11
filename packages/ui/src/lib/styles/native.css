@@ -278,6 +278,15 @@
 }
 
 /*
+ * Chromium and Safari draw their own clear button in a search field. An input group places its
+ * own controls in addons, so the browser's button would only add a second, off-design one.
+ * The WebKit pseudo-element stands in its own rule, since other browsers drop a rule with it.
+ */
+:where([data-slot='input-group-input'])::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/*
  * The customizable select (branded-select-styling, animated-select-picker). Where
  * appearance: base-select is missing, the select keeps its trigger styles and opens the
  * system menu. Every rule that names ::picker(select) stands alone, because browsers without it
