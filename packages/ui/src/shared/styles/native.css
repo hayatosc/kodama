@@ -327,7 +327,8 @@
     gap: 8px;
     min-block-size: 36px;
     padding: 6px 8px;
-    border-radius: var(--radius-md);
+    /* The menu's 12px radius minus its 4px padding, so the corners nest. */
+    border-radius: var(--radius-lg);
     font-size: 14px;
     line-height: 20px;
     color: var(--foreground);

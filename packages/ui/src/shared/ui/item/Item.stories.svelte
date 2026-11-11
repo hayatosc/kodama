@@ -39,7 +39,7 @@
   {#snippet template(args)}
     <Item.Root {...args} class="w-96">
       <Item.Content>
-        <Item.Title>項目</Item.Title>
+        <Item.Title>朝の要約</Item.Title>
       </Item.Content>
     </Item.Root>
   {/snippet}
@@ -51,7 +51,7 @@
       <Item.Media><BellIcon strokeWidth={1.75} aria-hidden="true" /></Item.Media>
       <Item.Content>
         <Item.Title>朝の要約</Item.Title>
-        <Item.Description>毎日 7:00 に、前日の会話をまとめます。</Item.Description>
+        <Item.Description>毎日 7:00 に、前日の会話をまとめます</Item.Description>
       </Item.Content>
       <Item.Actions><Switch aria-label="朝の要約" checked /></Item.Actions>
     </Item.Root>
@@ -101,14 +101,14 @@
     <Item.Root variant="outline">
       <Item.Content>
         <Item.Title>Anthropic <Badge variant="live">接続済み</Badge></Item.Title>
-        <Item.Description>キーは暗号化して保存されています。</Item.Description>
+        <Item.Description>キーは暗号化して保存されています</Item.Description>
       </Item.Content>
       <Item.Actions><Button variant="secondary" size="sm">管理</Button></Item.Actions>
     </Item.Root>
     <Item.Root variant="outline">
       <Item.Content>
         <Item.Title>OpenAI</Item.Title>
-        <Item.Description>まだ接続していません。</Item.Description>
+        <Item.Description>まだ接続していません</Item.Description>
       </Item.Content>
       <Item.Actions><Button size="sm">接続</Button></Item.Actions>
     </Item.Root>

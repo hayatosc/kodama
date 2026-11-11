@@ -32,8 +32,8 @@
 <Story name="Default">
   {#snippet template(args)}
     <Callout.Root {...args} class="w-96">
-      <Callout.Title>お知らせ</Callout.Title>
-      <Callout.Description>ここにお知らせの内容が入ります。</Callout.Description>
+      <Callout.Title>メンテナンスのお知らせ</Callout.Title>
+      <Callout.Description>11 月 15 日 2:00〜4:00 は返信できません</Callout.Description>
     </Callout.Root>
   {/snippet}
 </Story>
@@ -44,7 +44,7 @@
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>メンテナンスのお知らせ</Callout.Title>
       <Callout.Description
-        >11 月 15 日 2:00〜4:00 は、エージェントが返信できません。</Callout.Description
+        >11 月 15 日 2:00〜4:00 は、エージェントが返信できません</Callout.Description
       >
     </Callout.Root>
   {/snippet}
@@ -66,18 +66,17 @@
     <Callout.Root variant="live">
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>新しいモデルを使えます</Callout.Title>
-      <Callout.Description>設定のモデルから選べます。</Callout.Description>
+      <Callout.Description>設定のモデルから選べます</Callout.Description>
     </Callout.Root>
     <Callout.Root variant="running">
       <TriangleAlertIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>利用上限に近づいています</Callout.Title>
-      <Callout.Description>今月の上限の 90% を使いました。</Callout.Description>
+      <Callout.Description>今月の上限の 90% を使いました</Callout.Description>
     </Callout.Root>
     <Callout.Root variant="destructive">
       <CircleAlertIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>API キーが無効です</Callout.Title>
-      <Callout.Description>プロバイダーの設定で、新しいキーを登録してください。</Callout.Description
-      >
+      <Callout.Description>プロバイダーの設定で、新しいキーを登録してください</Callout.Description>
     </Callout.Root>
   </div>
 </Story>
@@ -88,7 +87,7 @@
   parameters={{ docs: { description: { story: 'A description without a title.' } } }}
 >
   <Callout.Root class="w-96">
-    <Callout.Description>この会話は 30 日後に自動で整理されます。</Callout.Description>
+    <Callout.Description>この会話は 30 日後に自動で整理されます</Callout.Description>
   </Callout.Root>
 </Story>
 

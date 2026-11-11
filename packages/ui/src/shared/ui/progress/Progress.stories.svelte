@@ -21,7 +21,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Progress {...args} aria-label="進捗" class="w-72" />
+    <Progress {...args} aria-label="アップロード" class="w-72" />
   {/snippet}
 </Story>
 

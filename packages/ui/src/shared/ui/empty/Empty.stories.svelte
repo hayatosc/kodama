@@ -24,7 +24,7 @@
 
 <Story name="Default" asChild>
   <Empty.Root class="w-96">
-    <Empty.Title>まだ何もありません</Empty.Title>
+    <Empty.Title>会話はまだありません</Empty.Title>
   </Empty.Root>
 </Story>
 
@@ -51,7 +51,7 @@
   <Empty.Root class="w-96">
     <Empty.Media><SearchXIcon strokeWidth={1.75} aria-hidden="true" /></Empty.Media>
     <Empty.Title>「請求書」に一致する会話はありません</Empty.Title>
-    <Empty.Description>別の言葉で探すか、絞り込みを外してください。</Empty.Description>
+    <Empty.Description>別の言葉で探すか、絞り込みを外してください</Empty.Description>
     <Empty.Content><Button variant="secondary" size="sm">絞り込みを外す</Button></Empty.Content>
   </Empty.Root>
 </Story>

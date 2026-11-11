@@ -28,7 +28,7 @@
   let agentName = $state('')
   let submitted = $state(false)
   const nameError = $derived(
-    submitted && agentName.trim() === '' ? '名前を入力してください。' : undefined,
+    submitted && agentName.trim() === '' ? '名前を入力してください' : undefined,
   )
   let plan = $state('pro')
 
@@ -42,7 +42,7 @@
   <Field.Root class="w-72">
     <Field.Label>エージェントの名前</Field.Label>
     <Input name="agent-name" />
-    <Field.Description>一覧と会話の見出しに表示されます。</Field.Description>
+    <Field.Description>一覧と会話の見出しに表示されます</Field.Description>
   </Field.Root>
 </Story>
 
@@ -96,13 +96,13 @@
       <Checkbox name="terms" />
       <Field.Content>
         <Field.Label>利用規約に同意する</Field.Label>
-        <Field.Description>同意すると、アカウントを作成できます。</Field.Description>
+        <Field.Description>同意すると、アカウントを作成できます</Field.Description>
       </Field.Content>
     </Field.Root>
     <Field.Root orientation="horizontal">
       <Field.Content>
         <Field.Label>デバイス間で同期</Field.Label>
-        <Field.Description>ほかのデバイスでも同じ設定を使います。</Field.Description>
+        <Field.Description>ほかのデバイスでも同じ設定を使います</Field.Description>
       </Field.Content>
       <Switch name="sync" checked />
     </Field.Root>

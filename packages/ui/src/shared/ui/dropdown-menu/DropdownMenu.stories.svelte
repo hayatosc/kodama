@@ -38,11 +38,11 @@
 
 <Story name="Default" asChild>
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger>開く</DropdownMenu.Trigger>
+    <DropdownMenu.Trigger>操作</DropdownMenu.Trigger>
     <DropdownMenu.Content>
-      <DropdownMenu.Item>項目 1</DropdownMenu.Item>
-      <DropdownMenu.Item>項目 2</DropdownMenu.Item>
-      <DropdownMenu.Item>項目 3</DropdownMenu.Item>
+      <DropdownMenu.Item>編集</DropdownMenu.Item>
+      <DropdownMenu.Item>複製</DropdownMenu.Item>
+      <DropdownMenu.Item>削除</DropdownMenu.Item>
     </DropdownMenu.Content>
   </DropdownMenu.Root>
 </Story>

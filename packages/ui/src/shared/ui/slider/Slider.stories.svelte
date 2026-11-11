@@ -58,7 +58,7 @@
       bind:value={temperature}
       aria-valuetext={temperature.toFixed(1)}
     />
-    <Field.Description>高いほど返答に幅が出ます。</Field.Description>
+    <Field.Description>高いほど返答に幅が出ます</Field.Description>
   </Field.Root>
 </Story>
 

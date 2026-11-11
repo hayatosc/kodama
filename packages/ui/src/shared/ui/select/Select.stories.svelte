@@ -202,6 +202,6 @@
       <Select.Item value="jp">日本</Select.Item>
       <Select.Item value="us">アメリカ合衆国</Select.Item>
     </Select.Root>
-    <p id="select-country-error" class="text-xs text-destructive">国または地域を選んでください。</p>
+    <p id="select-country-error" class="text-xs text-destructive">国または地域を選んでください</p>
   </div>
 </Story>

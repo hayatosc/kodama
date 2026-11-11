@@ -23,7 +23,7 @@
 
 <Story name="Default" asChild>
   <Card.Root class="w-80">
-    <Card.Content>カードの内容</Card.Content>
+    <Card.Content>今週の会話は 128 件です</Card.Content>
   </Card.Root>
 </Story>
 
@@ -35,7 +35,7 @@
     </Card.Header>
     <Card.Content>
       <p class="text-2xl font-semibold tabular-nums">128,400 トークン</p>
-      <p class="text-muted-foreground">先週より 12% 少なくなっています。</p>
+      <p class="text-muted-foreground">先週より 12% 少なくなっています</p>
     </Card.Content>
     <Card.Footer>
       <Button variant="secondary" size="sm">詳細を見る</Button>

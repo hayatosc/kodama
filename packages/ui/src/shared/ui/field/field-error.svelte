@@ -40,7 +40,7 @@
 >
   {#if shown}<CircleAlertIcon
       class="mt-px size-3.5 shrink-0"
-      strokeWidth={2}
+      strokeWidth={1.75}
       aria-hidden="true"
     />{message}{/if}
 </p>

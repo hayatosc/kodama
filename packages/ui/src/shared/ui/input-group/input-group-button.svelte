@@ -17,6 +17,6 @@
   data-slot="input-group-button"
   {variant}
   {size}
-  class={cn('size-7 rounded-md', className)}
+  class={cn('size-7 rounded-sm', className)}
   {...restProps}
 />

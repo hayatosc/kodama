@@ -27,7 +27,7 @@
       <Tabs.Trigger value="password">パスワード</Tabs.Trigger>
     </Tabs.List>
     <Tabs.Content value="account">
-      <p class="text-sm text-muted-foreground">名前とメールアドレスを変更できます。</p>
+      <p class="text-sm text-muted-foreground">名前とメールアドレスを変更できます</p>
     </Tabs.Content>
     <Tabs.Content value="password">
       <p class="text-sm text-muted-foreground">
@@ -55,13 +55,13 @@
       <Tabs.Trigger value="settings">設定</Tabs.Trigger>
     </Tabs.List>
     <Tabs.Content value="overview">
-      <p class="text-sm text-muted-foreground">直近のアクティビティと進み具合です。</p>
+      <p class="text-sm text-muted-foreground">直近のアクティビティと進み具合です</p>
     </Tabs.Content>
     <Tabs.Content value="reports">
-      <p class="text-sm text-muted-foreground">レポートは準備中です。</p>
+      <p class="text-sm text-muted-foreground">レポートは準備中です</p>
     </Tabs.Content>
     <Tabs.Content value="settings">
-      <p class="text-sm text-muted-foreground">プロジェクトの名前と公開範囲です。</p>
+      <p class="text-sm text-muted-foreground">プロジェクトの名前と公開範囲です</p>
     </Tabs.Content>
   </Tabs.Root>
 </Story>
@@ -87,10 +87,10 @@
       </Tabs.Trigger>
     </Tabs.List>
     <Tabs.Content value="profile">
-      <p class="text-sm text-muted-foreground">表示名とアイコンです。</p>
+      <p class="text-sm text-muted-foreground">表示名とアイコンです</p>
     </Tabs.Content>
     <Tabs.Content value="security">
-      <p class="text-sm text-muted-foreground">パスワードと二段階認証です。</p>
+      <p class="text-sm text-muted-foreground">パスワードと二段階認証です</p>
     </Tabs.Content>
   </Tabs.Root>
 </Story>

@@ -16,7 +16,7 @@
 </script>
 
 <!--
-  min-h-9, rounded-md; the highlighted item and the hover use accent. The current value is marked
+  min-h-9, rounded-lg (the list's 12px radius minus its 4px padding); the highlighted item and the hover use accent. The current value is marked
   by a check and a heavier weight, and named for screen readers, since aria-selected here follows
   the highlight rather than the value.
 -->
@@ -24,7 +24,7 @@
   bind:ref
   data-slot="command-item"
   class={cn(
-    'flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none',
+    'flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none select-none',
     'hover:bg-accent data-[selected]:bg-accent',
     'data-[disabled]:pointer-events-none data-[disabled]:text-muted-foreground',
     className,

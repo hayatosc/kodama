@@ -92,7 +92,7 @@
       maxlength={20}
       required
     />
-    <Field.Description>3〜20 文字の英数字とハイフン。</Field.Description>
+    <Field.Description>3〜20 文字の英数字とハイフン</Field.Description>
   </Field.Root>
 </Story>
 
@@ -119,7 +119,7 @@
     <Field.Root class="w-72">
       <Field.Label>識別子</Field.Label>
       <Input {...args} name="slug" />
-      <Field.Description>作成後は変更できません。</Field.Description>
+      <Field.Description>作成後は変更できません</Field.Description>
     </Field.Root>
   {/snippet}
 </Story>

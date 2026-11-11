@@ -61,9 +61,10 @@
   }}
 >
   <div class="flex flex-wrap items-center gap-2">
-    <Badge variant="outline"><BadgeCheckIcon strokeWidth={2} aria-hidden="true" />確認済み</Badge>
+    <Badge variant="outline"><BadgeCheckIcon strokeWidth={1.75} aria-hidden="true" />確認済み</Badge
+    >
     <Badge variant="destructive">
-      <TriangleAlertIcon strokeWidth={2} aria-hidden="true" />期限切れ
+      <TriangleAlertIcon strokeWidth={1.75} aria-hidden="true" />期限切れ
     </Badge>
   </div>
 </Story>

@@ -59,7 +59,7 @@
     <Checkbox name="share" checked />
     <Field.Content>
       <Field.Label>会話を共有する</Field.Label>
-      <Field.Description>同じワークスペースのメンバーが読めるようになります。</Field.Description>
+      <Field.Description>同じワークスペースのメンバーが読めるようになります</Field.Description>
     </Field.Content>
   </Field.Root>
 </Story>

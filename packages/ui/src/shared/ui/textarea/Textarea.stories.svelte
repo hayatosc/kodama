@@ -50,7 +50,7 @@
   </Field.Root>
 </Story>
 
-<Story name="Disabled" args={{ disabled: true, value: '管理者が設定した指示です。' }}>
+<Story name="Disabled" args={{ disabled: true, value: '管理者が設定した指示です' }}>
   {#snippet template(args)}
     <Field.Root class="w-80">
       <Field.Label>共通の指示</Field.Label>

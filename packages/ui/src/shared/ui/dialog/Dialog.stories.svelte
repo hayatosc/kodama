@@ -46,11 +46,11 @@
 
 <Story name="Default" asChild>
   <Dialog.Root>
-    <Dialog.Trigger>開く</Dialog.Trigger>
+    <Dialog.Trigger>バージョン情報</Dialog.Trigger>
     <Dialog.Content>
       <Dialog.Header>
-        <Dialog.Title>タイトル</Dialog.Title>
-        <Dialog.Description>ここにダイアログの内容が入ります。</Dialog.Description>
+        <Dialog.Title>Kodama 0.1.0</Dialog.Title>
+        <Dialog.Description>11 月 10 日に更新しました</Dialog.Description>
       </Dialog.Header>
     </Dialog.Content>
   </Dialog.Root>
@@ -62,7 +62,7 @@
     <Dialog.Content>
       <Dialog.Header>
         <Dialog.Title>キーボードショートカット</Dialog.Title>
-        <Dialog.Description>よく使う操作は、キーボードからも行えます。</Dialog.Description>
+        <Dialog.Description>よく使う操作は、キーボードからも行えます</Dialog.Description>
       </Dialog.Header>
       <dl class="flex flex-col gap-2 text-sm">
         {#each shortcuts as shortcut (shortcut.label)}
@@ -97,7 +97,7 @@
     <Dialog.Content>
       <Dialog.Header>
         <Dialog.Title>通知の設定</Dialog.Title>
-        <Dialog.Description>どの方法で知らせるかを選びます。</Dialog.Description>
+        <Dialog.Description>どの方法で知らせるかを選びます</Dialog.Description>
       </Dialog.Header>
       <div class="flex flex-col">
         <label class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm">

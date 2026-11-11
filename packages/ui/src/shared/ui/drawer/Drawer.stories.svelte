@@ -28,11 +28,11 @@
 <Story name="Default">
   {#snippet template(args)}
     <Drawer.Root>
-      <Drawer.Trigger>開く</Drawer.Trigger>
+      <Drawer.Trigger>通知の設定</Drawer.Trigger>
       <Drawer.Content {...args}>
         <Drawer.Header>
-          <Drawer.Title>タイトル</Drawer.Title>
-          <Drawer.Description>ここにドロワーの内容が入ります。</Drawer.Description>
+          <Drawer.Title>通知の設定</Drawer.Title>
+          <Drawer.Description>通知の受け取り方を選べます</Drawer.Description>
         </Drawer.Header>
       </Drawer.Content>
     </Drawer.Root>
@@ -45,7 +45,7 @@
     <Drawer.Content>
       <Drawer.Header>
         <Drawer.Title>プロフィールを編集</Drawer.Title>
-        <Drawer.Description>変更は保存するまで反映されません。</Drawer.Description>
+        <Drawer.Description>変更は保存するまで反映されません</Drawer.Description>
       </Drawer.Header>
       <Field.Set>
         <Field.Root>

@@ -33,26 +33,26 @@
   const format = new Intl.NumberFormat('ja-JP')
 
   const sample = [
-    { name: '項目 A', value: 1 },
-    { name: '項目 B', value: 2 },
-    { name: '項目 C', value: 3 },
+    { name: 'assistant', value: 412 },
+    { name: 'research', value: 96 },
+    { name: 'scheduler', value: 1_830 },
   ]
 </script>
 
 <Story name="Default" asChild>
   <div class="w-80">
-    <Table.Root label="サンプルの表">
+    <Table.Root label="エージェントごとの実行回数">
       <Table.Header>
         <Table.Row>
-          <Table.Head>名前</Table.Head>
-          <Table.Head class="text-end">値</Table.Head>
+          <Table.Head>エージェント</Table.Head>
+          <Table.Head class="text-end">実行</Table.Head>
         </Table.Row>
       </Table.Header>
       <Table.Body>
         {#each sample as row (row.name)}
           <Table.Row>
             <Table.Cell>{row.name}</Table.Cell>
-            <Table.Cell class="text-end tabular-nums">{row.value}</Table.Cell>
+            <Table.Cell class="text-end tabular-nums">{format.format(row.value)}</Table.Cell>
           </Table.Row>
         {/each}
       </Table.Body>

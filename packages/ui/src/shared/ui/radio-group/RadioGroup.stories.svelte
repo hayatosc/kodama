@@ -58,14 +58,14 @@
         <RadioGroup.Item value="comfortable" />
         <Field.Content>
           <Field.Label>ゆったり</Field.Label>
-          <Field.Description>行の間をあけて読みやすくします。</Field.Description>
+          <Field.Description>行の間をあけて読みやすくします</Field.Description>
         </Field.Content>
       </Field.Root>
       <Field.Root orientation="horizontal">
         <RadioGroup.Item value="compact" />
         <Field.Content>
           <Field.Label>詰める</Field.Label>
-          <Field.Description>一度に多くの行を表示します。</Field.Description>
+          <Field.Description>一度に多くの行を表示します</Field.Description>
         </Field.Content>
       </Field.Root>
     </RadioGroup.Root>

@@ -18,6 +18,9 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 @theme {
+  /* One easing for every transition that names none (unslop — Motion): ease-out. */
+  --default-transition-timing-function: ease-out;
+
   /*
    * The running dot's blink (design/README.md — Motion): 1.6s, three times. Blinking that lasts
    * over five seconds would need a pause control (WCAG 2.2.2), so it stops after 4.8s. Apply it

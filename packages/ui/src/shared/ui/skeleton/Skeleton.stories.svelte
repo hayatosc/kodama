@@ -10,7 +10,7 @@
       docs: {
         description: {
           component:
-            'Placeholder shapes in the layout of content that is still loading, so the page does not jump when it arrives. They are hidden from assistive technology; say once, in a `role="status"` region, that the content is loading. They pulse only without a reduced-motion request.',
+            'Placeholder shapes in the layout of content that is still loading, so the page does not jump when it arrives. They are hidden from assistive technology; say once, in a `role="status"` region, that the content is loading. They stay still; motion is kept for changes in state.',
         },
       },
     },

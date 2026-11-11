@@ -64,7 +64,7 @@
 
 <Story name="Sizes" asChild>
   <div class="flex items-center gap-3">
-    <Avatar.Root class="size-6 text-[10px]">
+    <Avatar.Root class="size-6 text-xs">
       <Avatar.Fallback>HT</Avatar.Fallback>
     </Avatar.Root>
     <Avatar.Root>

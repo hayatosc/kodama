@@ -24,7 +24,7 @@
 
 <Story name="Default" asChild>
   <div>
-    <Button variant="secondary" onclick={() => toast('通知のメッセージ')}>通知を表示</Button>
+    <Button variant="secondary" onclick={() => toast('設定を保存しました')}>保存</Button>
     <Toaster />
   </div>
 </Story>
@@ -36,7 +36,7 @@
       variant="secondary"
       onclick={() =>
         toast('アップロードが完了しました', {
-          description: 'report.pdf を「資料」フォルダに追加しました。',
+          description: 'report.pdf を「資料」フォルダに追加しました',
           variant: 'success',
         })}
     >
@@ -46,7 +46,7 @@
       variant="secondary"
       onclick={() =>
         toast('送信できませんでした', {
-          description: 'ネットワークに接続してから、もう一度お試しください。',
+          description: 'ネットワークに接続してから、もう一度お試しください',
           variant: 'destructive',
         })}
     >
@@ -120,7 +120,7 @@
       <Dialog.Content>
         <Dialog.Header>
           <Dialog.Title>下書きを保存</Dialog.Title>
-          <Dialog.Description>保存すると、閉じたあとに通知が表示されます。</Dialog.Description>
+          <Dialog.Description>保存すると、閉じたあとに通知が表示されます</Dialog.Description>
         </Dialog.Header>
         <Dialog.Footer>
           <Dialog.Close>閉じる</Dialog.Close>
