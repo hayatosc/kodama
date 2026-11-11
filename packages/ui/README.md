@@ -35,8 +35,10 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
   commands, Popover on the Popover API with anchor positioning, Select on the customizable
   `<select>`, Switch on a checkbox with the `switch` attribute, KeyboardKey on `<kbd>`, and Input,
-  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls. Field links a
-  control to its label, description, and error without hand-written ids. Tabs and
+  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls, Accordion and
+  Collapsible on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
+  Card on `<article>`, and Separator on `<hr>`. Field links a control to its label, description,
+  and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
   and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
   shown in the Combobox stories. Variant tables and their types live in a `variants.ts` next to
@@ -45,8 +47,9 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
   restyle, where no native element fits.
 - `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
-  dialog and popover transitions and backdrop, popover placement, the select's menu, and the
-  checkbox, radio, and slider drawn on their native inputs.
+  dialog and popover transitions and backdrop, popover placement, the select's menu, the
+  checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
+  and the progress bar and spinner.
 - `src/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
 - `src/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
@@ -84,8 +87,9 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
 2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
-   Command), Dialog, AlertDialog, and the form parts (Label, Input, Textarea, Field, InputGroup,
-   Checkbox, RadioGroup, Slider), general-purpose and shaped like shadcn-svelte's, with stories
+   Command), Dialog, AlertDialog, the form parts (Label, Input, Textarea, Field, InputGroup,
+   Checkbox, RadioGroup, Slider), and the display parts (Accordion, Collapsible, Card,
+   Separator, Alert, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.

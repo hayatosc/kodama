@@ -438,3 +438,224 @@
     background: CanvasText;
   }
 }
+
+/*
+ * Accordion and Collapsible on <details> (accordion guide). The summary keeps its native button
+ * semantics; the default triangle gives way to a chevron drawn as a mask right before the label,
+ * pointing to the inline end while closed and down while open. The content slides through
+ * ::details-content, only without a reduced-motion request; where interpolate-size is missing
+ * it opens at once.
+ */
+:where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger']) {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+:where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger'])::-webkit-details-marker {
+  display: none;
+}
+
+:where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger'])::before {
+  content: '';
+  flex-shrink: 0;
+  inline-size: 16px;
+  block-size: 16px;
+  background-color: var(--muted-foreground);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  rotate: -90deg;
+}
+
+:where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger']):dir(rtl)::before {
+  rotate: 90deg;
+}
+
+:where(details[open])
+  > :where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger'])::before {
+  rotate: 0deg;
+}
+
+@media (forced-colors: active) {
+  :where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger'])::before {
+    background-color: CanvasText;
+  }
+}
+
+:where([data-slot='accordion-item'], [data-slot='collapsible'])::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+
+:where([data-slot='accordion-item'], [data-slot='collapsible']):not([open])::details-content {
+  block-size: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-slot='accordion-trigger'], [data-slot='collapsible-trigger'])::before {
+    transition: rotate 200ms ease-out;
+  }
+
+  :where([data-slot='accordion-item'], [data-slot='collapsible'])::details-content {
+    transition-property: block-size, content-visibility;
+    transition-duration: 200ms;
+    transition-timing-function: ease-in-out;
+    transition-behavior: allow-discrete;
+  }
+}
+
+/*
+ * Progress on the native <progress> (progress guide): a 6px track in muted with a primary fill.
+ * The indeterminate fill exists only through its animation, which slows down rather than stops
+ * under a reduced-motion request. WebKit and Firefox pseudo-elements stay in separate rules.
+ */
+:where([data-slot='progress']) {
+  --progress-bar-indeterminate-size: 30%;
+  --progress-bar-indeterminate-animation-duration: 1.5s;
+  appearance: none;
+  container-type: inline-size;
+  inline-size: 100%;
+  block-size: 6px;
+  border: 0 solid;
+  border-radius: var(--radius-full);
+  overflow: clip;
+  background: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-slot='progress']) {
+    --progress-bar-indeterminate-animation-duration: 10s;
+  }
+}
+
+:where([data-slot='progress']):indeterminate {
+  --progress-bar-animation: progress-bar-indeterminate
+    var(--progress-bar-indeterminate-animation-duration) infinite linear;
+}
+
+:where([data-slot='progress']):dir(rtl):indeterminate {
+  --progress-bar-animation: progress-bar-indeterminate
+    var(--progress-bar-indeterminate-animation-duration) infinite linear reverse;
+}
+
+:where([data-slot='progress'])::-webkit-progress-bar {
+  background: transparent;
+}
+
+:where([data-slot='progress'])::-webkit-progress-value {
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  transition: inline-size 300ms;
+  animation: var(--progress-bar-animation, none);
+}
+
+:where([data-slot='progress'])::-moz-progress-bar {
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  animation: var(--progress-bar-animation, none);
+}
+
+@keyframes progress-bar-indeterminate {
+  from,
+  to {
+    inline-size: var(--progress-bar-indeterminate-size);
+    margin-right: auto;
+  }
+
+  from {
+    translate: -100%;
+  }
+
+  to {
+    translate: 100cqi;
+  }
+}
+
+@media (forced-colors: active) {
+  :where([data-slot='progress']) {
+    border: 1px solid CanvasText;
+  }
+}
+
+/*
+ * Spinner on an indeterminate <progress> (spinner guide): a ring with a primary arc, drawn by a
+ * conic gradient hollowed out by background-clip: border-area, or by a mask where that is
+ * missing. Under a reduced-motion request it turns slowly instead of stopping, so the work still
+ * reads as ongoing. Forced colors mode keeps it, drawn in system colors.
+ */
+:where([data-slot='spinner']) {
+  --spinner-size: 16px;
+  --spinner-thickness: 2px;
+  --spinner-color: currentColor;
+  --spinner-track: color-mix(in oklab, currentColor 20%, transparent);
+  --spinner-duration: 800ms;
+  appearance: none;
+  flex-shrink: 0;
+  inline-size: var(--spinner-size);
+  block-size: var(--spinner-size);
+  border-radius: 50%;
+  background: conic-gradient(var(--spinner-color) 100deg, transparent 0) var(--spinner-track);
+  animation: spinner-turn var(--spinner-duration) linear infinite;
+}
+
+@supports (background-clip: border-area) {
+  :where([data-slot='spinner']) {
+    border: var(--spinner-thickness) solid transparent;
+    background-origin: border-box;
+    background-clip: border-area;
+  }
+}
+
+@supports not (background-clip: border-area) {
+  :where([data-slot='spinner']) {
+    border: 0;
+    mask-image: radial-gradient(
+      farthest-side,
+      transparent calc(100% - var(--spinner-thickness)),
+      black calc(100% - var(--spinner-thickness))
+    );
+  }
+}
+
+:where([data-slot='spinner'])::-webkit-progress-bar,
+:where([data-slot='spinner'])::-webkit-progress-value {
+  display: none;
+}
+
+:where([data-slot='spinner'])::-moz-progress-bar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-slot='spinner']) {
+    --spinner-duration: 6s;
+  }
+}
+
+@media (forced-colors: active) {
+  :where([data-slot='spinner']) {
+    forced-color-adjust: none;
+    --spinner-color: CanvasText;
+    --spinner-track: Canvas;
+  }
+}
+
+@keyframes spinner-turn {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* Forced colors mode removes the fill's background, so the progress fill is drawn in the text color. */
+@media (forced-colors: active) {
+  :where([data-slot='progress'])::-webkit-progress-value {
+    background: CanvasText;
+  }
+
+  :where([data-slot='progress'])::-moz-progress-bar {
+    background: CanvasText;
+  }
+}
