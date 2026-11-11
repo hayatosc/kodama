@@ -13,7 +13,7 @@
       docs: {
         description: {
           component:
-            'A notification about the result of an action or an event, for information the user can afford to miss. `toast(title, options)` adds one, and the one `Toaster` on the page shows it in a region named 通知, in a manual popover that nothing closes but its own buttons. A toast stays until it is closed unless given a `duration`, which pauses while it has focus or the pointer. It is announced with `ariaNotify` (only its text, with a note when it has an action) and never takes focus; closing a focused toast moves focus to the next toast, or back to where it was. A toast raised while a modal dialog is open waits until the dialog closes. Anything urgent belongs in an Alert or a Dialog, and an action in a toast must also be available elsewhere.',
+            'A notification about the result of an action or an event, for information the user can afford to miss. `toast(title, options)` adds one, and the one `Toaster` on the page shows it in a region named 通知, in a manual popover that nothing closes but its own buttons. A toast stays until it is closed unless given a `duration`, which pauses while it has focus or the pointer. It is announced with `ariaNotify` (only its text, with a note when it has an action) and never takes focus; closing a focused toast moves focus to the next toast, or back to where it was. A toast raised while a modal dialog is open waits until the dialog closes. Anything urgent belongs in a Callout or a Dialog, and an action in a toast must also be available elsewhere.',
         },
       },
     },
@@ -23,6 +23,13 @@
 </script>
 
 <Story name="Default" asChild>
+  <div>
+    <Button variant="secondary" onclick={() => toast('通知のメッセージ')}>通知を表示</Button>
+    <Toaster />
+  </div>
+</Story>
+
+<Story name="Variants" asChild>
   <div class="flex flex-wrap gap-2">
     <Button variant="secondary" onclick={() => toast('設定を保存しました')}>通知</Button>
     <Button

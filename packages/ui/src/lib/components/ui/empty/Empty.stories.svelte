@@ -23,6 +23,12 @@
 </script>
 
 <Story name="Default" asChild>
+  <Empty.Root class="w-96">
+    <Empty.Title>まだ何もありません</Empty.Title>
+  </Empty.Root>
+</Story>
+
+<Story name="With an action" asChild>
   <Empty.Root class="w-96 border border-dashed border-border">
     <Empty.Media><BrainIcon strokeWidth={1.75} aria-hidden="true" /></Empty.Media>
     <Empty.Title>記憶はまだありません</Empty.Title>

@@ -21,6 +21,12 @@
 
 <Story name="Default">
   {#snippet template(args)}
+    <Progress {...args} aria-label="進捗" class="w-72" />
+  {/snippet}
+</Story>
+
+<Story name="With a label">
+  {#snippet template(args)}
     <Field.Root class="w-72">
       <div class="flex items-center justify-between">
         <Field.Label>記憶を整理しています</Field.Label>

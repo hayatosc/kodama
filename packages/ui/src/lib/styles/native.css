@@ -139,7 +139,7 @@
 }
 
 /*
- * A sheet (Dialog pinned to an edge) slides in from its side and back out, but only without a
+ * A drawer (Dialog pinned to an edge) slides in from its side and back out, but only without a
  * reduced-motion request; with one it fades like any dialog. The scale of a centered dialog does
  * not apply.
  */

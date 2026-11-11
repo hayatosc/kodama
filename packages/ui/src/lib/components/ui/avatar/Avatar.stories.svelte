@@ -11,7 +11,7 @@
       docs: {
         description: {
           component:
-            'A person’s picture in a circle, with their initials until it loads or if it fails (the second one here). The **Image**’s `alt` names the avatar the whole time (it is only transparent until loaded); use `alt=""` when the name is already next to it. Without an Image, the **Fallback** text is read. Agents get their own bird avatar in a later stage.',
+            'A person’s picture in a circle, with their initials until it loads or if it fails (see the Fallback story). The **Image**’s `alt` names the avatar the whole time (it is only transparent until loaded); use `alt=""` when the name is already next to it. Without an Image, the **Fallback** text is read. Agents get their own bird avatar in a later stage.',
         },
       },
     },
@@ -23,6 +23,13 @@
 </script>
 
 <Story name="Default" asChild>
+  <Avatar.Root>
+    <Avatar.Image src={picture} alt="田中 葉月" />
+    <Avatar.Fallback>田</Avatar.Fallback>
+  </Avatar.Root>
+</Story>
+
+<Story name="Fallback" asChild>
   <div class="flex items-center gap-3">
     <Avatar.Root>
       <Avatar.Image src={picture} alt="田中 葉月" />

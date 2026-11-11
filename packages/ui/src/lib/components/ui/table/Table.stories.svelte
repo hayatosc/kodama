@@ -31,9 +31,36 @@
   ] as const
 
   const format = new Intl.NumberFormat('ja-JP')
+
+  const sample = [
+    { name: '項目 A', value: 1 },
+    { name: '項目 B', value: 2 },
+    { name: '項目 C', value: 3 },
+  ]
 </script>
 
 <Story name="Default" asChild>
+  <div class="w-80">
+    <Table.Root label="サンプルの表">
+      <Table.Header>
+        <Table.Row>
+          <Table.Head>名前</Table.Head>
+          <Table.Head class="text-end">値</Table.Head>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        {#each sample as row (row.name)}
+          <Table.Row>
+            <Table.Cell>{row.name}</Table.Cell>
+            <Table.Cell class="text-end tabular-nums">{row.value}</Table.Cell>
+          </Table.Row>
+        {/each}
+      </Table.Body>
+    </Table.Root>
+  </div>
+</Story>
+
+<Story name="Usage" asChild>
   <div class="w-[560px]">
     <Table.Root label="エージェントごとの利用状況">
       <Table.Caption>11 月 1 日〜11 月 10 日の利用状況</Table.Caption>

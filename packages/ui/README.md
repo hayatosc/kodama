@@ -39,7 +39,7 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
   Card on `<article>`, Separator on `<hr>`, Toggle and ToggleGroup on `aria-pressed` buttons,
   DropdownMenu on an invoker-command popover with native focusgroup, Tooltip on interest invokers
-  (`interestfor`) and a hint popover, Sheet on the same modal `<dialog>` as Dialog, and Toast on
+  (`interestfor`) and a hint popover, Drawer on the same modal `<dialog>` as Dialog, and Toast on
   a manual popover announced with `ariaNotify`. Field links a control to its label, description,
   and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
@@ -52,7 +52,7 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 - `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
   dialog and popover transitions and backdrop, popover placement, the select's menu, the
   checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
-  the progress bar and spinner, the sheet's slide, and the menu's and tooltip's placement and
+  the progress bar and spinner, the drawer's slide, and the menu's and tooltip's placement and
   check marks.
 - `src/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
@@ -100,8 +100,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
    Command), Dialog, AlertDialog, the form parts (Label, Input, Textarea, Field, InputGroup,
    Checkbox, RadioGroup, Slider), and the display parts (Accordion, Card,
-   Separator, Alert, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
-   overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Sheet, Toast),
+   Separator, Callout, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
+   overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Drawer, Toast),
    general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback

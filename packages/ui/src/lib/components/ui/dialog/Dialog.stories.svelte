@@ -46,6 +46,18 @@
 
 <Story name="Default" asChild>
   <Dialog.Root>
+    <Dialog.Trigger>開く</Dialog.Trigger>
+    <Dialog.Content>
+      <Dialog.Header>
+        <Dialog.Title>タイトル</Dialog.Title>
+        <Dialog.Description>ここにダイアログの内容が入ります。</Dialog.Description>
+      </Dialog.Header>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<Story name="Keyboard shortcuts" asChild>
+  <Dialog.Root>
     <Dialog.Trigger>ショートカットを表示</Dialog.Trigger>
     <Dialog.Content>
       <Dialog.Header>

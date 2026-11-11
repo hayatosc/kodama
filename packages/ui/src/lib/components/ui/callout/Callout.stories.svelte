@@ -4,12 +4,12 @@
   import InfoIcon from '@lucide/svelte/icons/info'
   import LoaderIcon from '@lucide/svelte/icons/loader'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
-  import AlertRoot from './alert.svelte'
-  import * as Alert from './index.js'
+  import CalloutRoot from './callout.svelte'
+  import * as Callout from './index.js'
 
   const { Story } = defineMeta({
-    title: 'Primitives/Alert',
-    component: AlertRoot,
+    title: 'Primitives/Callout',
+    component: CalloutRoot,
     tags: ['autodocs'],
     args: { variant: 'neutral' },
     argTypes: {
@@ -31,13 +31,22 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Alert.Root {...args} class="w-96">
+    <Callout.Root {...args} class="w-96">
+      <Callout.Title>お知らせ</Callout.Title>
+      <Callout.Description>ここにお知らせの内容が入ります。</Callout.Description>
+    </Callout.Root>
+  {/snippet}
+</Story>
+
+<Story name="With an icon">
+  {#snippet template(args)}
+    <Callout.Root {...args} class="w-96">
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
-      <Alert.Title>メンテナンスのお知らせ</Alert.Title>
-      <Alert.Description
-        >11 月 15 日 2:00〜4:00 は、エージェントが返信できません。</Alert.Description
+      <Callout.Title>メンテナンスのお知らせ</Callout.Title>
+      <Callout.Description
+        >11 月 15 日 2:00〜4:00 は、エージェントが返信できません。</Callout.Description
       >
-    </Alert.Root>
+    </Callout.Root>
   {/snippet}
 </Story>
 
@@ -54,32 +63,33 @@
   }}
 >
   <div class="flex w-96 flex-col gap-3">
-    <Alert.Root variant="live">
+    <Callout.Root variant="live">
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
-      <Alert.Title>新しいモデルを使えます</Alert.Title>
-      <Alert.Description>設定のモデルから選べます。</Alert.Description>
-    </Alert.Root>
-    <Alert.Root variant="running">
+      <Callout.Title>新しいモデルを使えます</Callout.Title>
+      <Callout.Description>設定のモデルから選べます。</Callout.Description>
+    </Callout.Root>
+    <Callout.Root variant="running">
       <TriangleAlertIcon strokeWidth={1.75} aria-hidden="true" />
-      <Alert.Title>利用上限に近づいています</Alert.Title>
-      <Alert.Description>今月の上限の 90% を使いました。</Alert.Description>
-    </Alert.Root>
-    <Alert.Root variant="destructive">
+      <Callout.Title>利用上限に近づいています</Callout.Title>
+      <Callout.Description>今月の上限の 90% を使いました。</Callout.Description>
+    </Callout.Root>
+    <Callout.Root variant="destructive">
       <CircleAlertIcon strokeWidth={1.75} aria-hidden="true" />
-      <Alert.Title>API キーが無効です</Alert.Title>
-      <Alert.Description>プロバイダーの設定で、新しいキーを登録してください。</Alert.Description>
-    </Alert.Root>
+      <Callout.Title>API キーが無効です</Callout.Title>
+      <Callout.Description>プロバイダーの設定で、新しいキーを登録してください。</Callout.Description
+      >
+    </Callout.Root>
   </div>
 </Story>
 
 <Story
-  name="Without an icon"
+  name="Description only"
   asChild
-  parameters={{ docs: { description: { story: 'Just the text; the icon column collapses.' } } }}
+  parameters={{ docs: { description: { story: 'A description without a title.' } } }}
 >
-  <Alert.Root class="w-96">
-    <Alert.Description>この会話は 30 日後に自動で整理されます。</Alert.Description>
-  </Alert.Root>
+  <Callout.Root class="w-96">
+    <Callout.Description>この会話は 30 日後に自動で整理されます。</Callout.Description>
+  </Callout.Root>
 </Story>
 
 <Story
@@ -95,9 +105,9 @@
   }}
 >
   <div role="status" class="w-96">
-    <Alert.Root>
+    <Callout.Root>
       <LoaderIcon strokeWidth={1.75} aria-hidden="true" />
-      <Alert.Title>同期しています</Alert.Title>
-    </Alert.Root>
+      <Callout.Title>同期しています</Callout.Title>
+    </Callout.Root>
   </div>
 </Story>

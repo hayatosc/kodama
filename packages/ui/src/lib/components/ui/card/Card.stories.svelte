@@ -23,6 +23,12 @@
 
 <Story name="Default" asChild>
   <Card.Root class="w-80">
+    <Card.Content>カードの内容</Card.Content>
+  </Card.Root>
+</Story>
+
+<Story name="Usage summary" asChild>
+  <Card.Root class="w-80">
     <Card.Header>
       <Card.Title>今週の利用状況</Card.Title>
       <Card.Description>11 月 4 日〜11 月 10 日</Card.Description>

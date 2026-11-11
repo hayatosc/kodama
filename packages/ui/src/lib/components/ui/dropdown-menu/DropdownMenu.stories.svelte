@@ -38,6 +38,17 @@
 
 <Story name="Default" asChild>
   <DropdownMenu.Root>
+    <DropdownMenu.Trigger>開く</DropdownMenu.Trigger>
+    <DropdownMenu.Content>
+      <DropdownMenu.Item>項目 1</DropdownMenu.Item>
+      <DropdownMenu.Item>項目 2</DropdownMenu.Item>
+      <DropdownMenu.Item>項目 3</DropdownMenu.Item>
+    </DropdownMenu.Content>
+  </DropdownMenu.Root>
+</Story>
+
+<Story name="With icons and shortcuts" asChild>
+  <DropdownMenu.Root>
     <DropdownMenu.Trigger>
       操作
       <ChevronDownIcon strokeWidth={1.75} aria-hidden="true" />

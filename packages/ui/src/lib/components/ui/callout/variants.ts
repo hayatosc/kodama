@@ -1,13 +1,13 @@
 /**
- * Alert styles: a bordered box whose tint follows its tone.
+ * Callout styles: a bordered box whose tint follows its tone.
  *
  * @module
  */
 
 import { type VariantProps, tv } from 'tailwind-variants'
 
-/** An alert's box: an icon column and a text column, tinted by tone. */
-export const alertVariants = tv({
+/** An callout's box: an icon column and a text column, tinted by tone. */
+export const calloutVariants = tv({
   base: [
     'grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-xl border px-4 py-3 text-sm',
     'has-[>svg]:grid-cols-[16px_1fr] has-[>svg]:gap-x-3 [&>svg]:mt-0.5 [&>svg]:size-4',
@@ -24,5 +24,5 @@ export const alertVariants = tv({
   defaultVariants: { variant: 'neutral' },
 })
 
-/** One of the alert tones. */
-export type AlertVariant = VariantProps<typeof alertVariants>['variant']
+/** One of the callout tones. */
+export type CalloutVariant = VariantProps<typeof calloutVariants>['variant']

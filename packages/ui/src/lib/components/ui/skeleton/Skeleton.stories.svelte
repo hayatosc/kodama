@@ -18,6 +18,10 @@
 </script>
 
 <Story name="Default" asChild>
+  <Skeleton class="h-4 w-48" />
+</Story>
+
+<Story name="Loading a list" asChild>
   <div class="flex w-80 flex-col gap-4">
     <p role="status" class="sr-only">会話を読み込んでいます</p>
     {#each [0, 1, 2] as row (row)}

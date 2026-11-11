@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cn, type WithElementRef } from '#lib/utils.js'
-  import { alertVariants, type AlertVariant } from './variants.js'
+  import { calloutVariants, type CalloutVariant } from './variants.js'
   import type { HTMLAttributes } from 'svelte/elements'
 
   let {
@@ -9,7 +9,7 @@
     variant = 'neutral',
     children,
     ...restProps
-  }: WithElementRef<HTMLAttributes<HTMLDivElement>> & { variant?: AlertVariant } = $props()
+  }: WithElementRef<HTMLAttributes<HTMLDivElement>> & { variant?: CalloutVariant } = $props()
 </script>
 
 <!--
@@ -19,8 +19,8 @@
 -->
 <div
   bind:this={ref}
-  data-slot="alert"
-  class={cn(alertVariants({ variant }), className)}
+  data-slot="callout"
+  class={cn(calloutVariants({ variant }), className)}
   {...restProps}
 >
   {@render children?.()}

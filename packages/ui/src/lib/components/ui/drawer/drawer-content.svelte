@@ -9,7 +9,7 @@
     class: className,
     ...restProps
   }: ComponentProps<typeof DialogContent> & {
-    /** The edge the sheet slides in from. */
+    /** The edge the drawer slides in from. */
     side?: 'right' | 'left' | 'bottom'
   } = $props()
 </script>

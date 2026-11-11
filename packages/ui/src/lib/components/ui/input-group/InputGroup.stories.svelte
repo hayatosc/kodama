@@ -26,6 +26,13 @@
   let query = $state('記憶の整理')
 </script>
 
+<Story name="Default" asChild>
+  <InputGroup.Root class="w-72">
+    <InputGroup.Addon><SearchIcon strokeWidth={1.75} aria-hidden="true" /></InputGroup.Addon>
+    <InputGroup.Input aria-label="検索" placeholder="検索" />
+  </InputGroup.Root>
+</Story>
+
 <Story
   name="Search"
   asChild

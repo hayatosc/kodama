@@ -38,6 +38,16 @@
 <Story name="Default">
   {#snippet template(args)}
     <Item.Root {...args} class="w-96">
+      <Item.Content>
+        <Item.Title>項目</Item.Title>
+      </Item.Content>
+    </Item.Root>
+  {/snippet}
+</Story>
+
+<Story name="With a switch">
+  {#snippet template(args)}
+    <Item.Root {...args} class="w-96">
       <Item.Media><BellIcon strokeWidth={1.75} aria-hidden="true" /></Item.Media>
       <Item.Content>
         <Item.Title>朝の要約</Item.Title>
