@@ -1,8 +1,8 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
-  import * as Command from '../../lib/components/ui/command/index.js'
-  import * as Popover from '../../lib/components/ui/popover/index.js'
+  import * as Command from '#shared/ui/command/index.js'
+  import * as Popover from '#shared/ui/popover/index.js'
   import { regions } from '../prefectures.js'
 
   const { Story } = defineMeta({

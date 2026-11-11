@@ -22,14 +22,21 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 
 ## Layout
 
-- `src/app.css`: kiso.css (the reset, in place of Tailwind Preflight), Tailwind's theme and utilities,
-  the fonts from npm (`gen-interface-jp`, `@fontsource/geist-mono`), and the token-to-utility mapping
-  (`@theme inline`).
-- `src/lib/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
+The source follows [Feature-Sliced Design](https://feature-sliced.design/): layers from `app`
+down to `shared`, where a layer imports only the layers below it. The layers above `shared`
+(`pages`, `widgets`, `features`, `entities`) come with Kodama's own components in the next
+stages; SvelteKit keeps its own `src/routes/`, `src/app.html`, and `src/app.d.ts`, and a route
+renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` aliases.
+
+- `src/app/styles/index.css`: the app layer's global stylesheet: kiso.css (the reset, in place of
+  Tailwind Preflight), Tailwind's theme and utilities, the fonts from npm (`gen-interface-jp`,
+  `@fontsource/geist-mono`), the shared token and native-element styles, and the
+  token-to-utility mapping (`@theme inline`).
+- `src/shared/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
-- `src/lib/utils.ts`: `cn`, the prop helper types the components import, and `focusRing`, the
-  shared focus style (an outline, so it survives forced colors mode).
-- `src/lib/components/ui/`: the primitives, general-purpose parts in the shape of shadcn-svelte's
+- `src/shared/lib/utils.ts`: `cn`, the prop helper types the components import, and
+  `focusRing`, the shared focus style (an outline, so it survives forced colors mode).
+- `src/shared/ui/`: the UI kit, general-purpose parts in the shape of shadcn-svelte's
   (`Dialog.Root`, `Dialog.Trigger`, `Dialog.Content`, …), restyled from
   `design/components/bundle.css`. Where the platform has the element, they are built on it, as
   modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
@@ -49,23 +56,22 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   `components.json` is written by hand because `shadcn-svelte init` asks for a preset
   interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
   restyle, where no native element fits.
-- `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
+- `src/shared/styles/native.css`: the styles those native elements need beyond utilities: the
   dialog and popover transitions and backdrop, popover placement, the select's menu, the
   checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
   the progress bar and spinner, the drawer's slide, and the menu's and tooltip's placement and
   check marks.
-- `src/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
+- `src/shared/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
-- `src/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
+- `src/shared/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
   transition) or `closedby` (closing on a backdrop click), and `placeWithoutAnchor`, which places
   a popover, menu, or tooltip by its trigger where anchor positioning is missing.
-- `src/lib/hint.ts`: relates a tooltip to its trigger for assistive technology (its name or its
+- `src/shared/lib/hint.ts`: relates a tooltip to its trigger for assistive technology (its name or its
   description), as the interest-triggered-tooltips guide asks.
-- `src/lib/polyfills.ts`: loads the `interestfor` polyfill, the only polyfill, and only where
+- `src/shared/lib/polyfills.ts`: loads the `interestfor` polyfill, the only polyfill, and only where
   interest invokers are missing. Baseline features get none.
 - `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
   Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
-- `src/lib/components/`: Kodama's own components, built on the primitives, from the next stages.
 - `src/stories/`: stories that belong to no component (Foundations, compositions such as the
   Combobox, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#lib": "./src/lib/index.ts",
-    "#lib/*": "./src/lib/*"
+    "#app/*": "./src/app/*",
+    "#shared/*": "./src/shared/*"
   },
   "scripts": {
     "dev": "vp dev",
