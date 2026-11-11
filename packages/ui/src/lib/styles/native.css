@@ -1,0 +1,264 @@
+/*
+ * Styles for the native elements the primitives are built on: <dialog>, [popover], and the
+ * customizable <select>. Each rule follows a modern-web-guidance guide, named above it.
+ * Selectors use data-slot and :where(), so a component's own utility classes always win.
+ */
+
+/* Native controls, scrollbars, and the fallback select menu follow the theme. */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/*
+ * Entry and exit for dialogs and popovers (animate-to-from-top-layer). The closed state is the
+ * base; the open state transitions from @starting-style. `overlay` and discrete `display` keep the
+ * element in the top layer while it fades out. Scale only runs without a reduced-motion request.
+ * [data-closing] plays the exit where `overlay` is missing (see src/lib/top-layer.ts).
+ */
+:where([data-slot='dialog-content'], [data-slot='popover-content']) {
+  opacity: 0;
+  transition-property: opacity, scale, display, overlay;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+:where([data-slot='dialog-content'][open], [data-slot='popover-content']:popover-open):where(
+  :not([data-closing])
+) {
+  opacity: 1;
+}
+
+@starting-style {
+  :where([data-slot='dialog-content'][open], [data-slot='popover-content']:popover-open):where(
+    :not([data-closing])
+  ) {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-slot='dialog-content'], [data-slot='popover-content']) {
+    scale: 0.96;
+  }
+
+  :where([data-slot='dialog-content'][open], [data-slot='popover-content']:popover-open):where(
+    :not([data-closing])
+  ) {
+    scale: 1;
+  }
+
+  @starting-style {
+    :where([data-slot='dialog-content'][open], [data-slot='popover-content']:popover-open):where(
+      :not([data-closing])
+    ) {
+      scale: 0.96;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-slot='dialog-content'], [data-slot='popover-content']) {
+    transition-duration: 100ms;
+  }
+}
+
+/*
+ * The modal's 32% black scrim (design/components/Dialog), faded with the dialog. overflow and
+ * overscroll-behavior keep scrolling over the scrim or inside the dialog from moving the page
+ * behind it (prevent-page-scroll-under-modal-dialog).
+ */
+:where([data-slot='dialog-content']):modal {
+  overscroll-behavior: contain;
+}
+
+:where([data-slot='dialog-content'])::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: transparent;
+  transition-property: background-color, display, overlay;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+:where([data-slot='dialog-content'][open]):where(:not([data-closing]))::backdrop {
+  background-color: rgb(0 0 0 / 0.32);
+}
+
+@starting-style {
+  :where([data-slot='dialog-content'][open]):where(:not([data-closing]))::backdrop {
+    background-color: transparent;
+  }
+}
+
+/*
+ * A popover opens just below its trigger, tethered with anchor positioning, and flips when it
+ * would overflow the viewport (viewport-aware-dropdowns, natural-interactions). Where anchor
+ * positioning is missing, it keeps the browser's centered placement; kiso.css removes the
+ * popover's margin, so it is restored here.
+ */
+@supports (position-area: block-end) {
+  :where([data-slot='popover-content']) {
+    inset: auto;
+    margin-block: 4px;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline;
+    transform-origin: top left;
+  }
+
+  :where([data-slot='popover-content'][data-align='center']) {
+    position-area: block-end;
+    transform-origin: top center;
+  }
+
+  :where([data-slot='popover-content'][data-align='end']) {
+    position-area: block-end span-inline-start;
+    transform-origin: top right;
+  }
+}
+
+@supports not (position-area: block-end) {
+  :where([data-slot='popover-content']) {
+    margin: auto;
+  }
+}
+
+/*
+ * The customizable select (branded-select-styling, animated-select-picker). Where
+ * appearance: base-select is missing, the select keeps its trigger styles and opens the
+ * system menu. Every rule that names ::picker(select) stands alone, because browsers without it
+ * drop the whole rule.
+ */
+@supports (appearance: base-select) {
+  :where([data-slot='select']) {
+    appearance: base-select;
+  }
+
+  /*
+   * The design's chevron-down (lucide, 16px) instead of the browser's arrow, painted through a
+   * mask so it takes the theme's muted color, and the text color in forced colors mode.
+   */
+  :where([data-slot='select'])::picker-icon {
+    content: '';
+    inline-size: 16px;
+    block-size: 16px;
+    background-color: var(--muted-foreground);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+    transition: rotate 150ms ease-out;
+  }
+
+  @media (forced-colors: active) {
+    :where([data-slot='select'])::picker-icon {
+      background-color: CanvasText;
+    }
+  }
+
+  :where([data-slot='select']):open::picker-icon {
+    rotate: 180deg;
+  }
+
+  :where([data-slot='select'] option) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-block-size: 36px;
+    padding: 6px 8px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--foreground);
+    cursor: pointer;
+  }
+
+  /* The current value is marked three ways: a check, a background, and a heavier weight. */
+  :where([data-slot='select'] option):is(:hover, :focus-visible, :checked) {
+    background-color: var(--accent);
+  }
+
+  :where([data-slot='select'] option):checked {
+    font-weight: 600;
+  }
+
+  :where([data-slot='select'] option):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+
+  :where([data-slot='select'] option):disabled {
+    color: var(--muted-foreground);
+    cursor: not-allowed;
+  }
+
+  :where([data-slot='select'] option)::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+  }
+
+  :where([data-slot='select'] optgroup) {
+    padding-block-start: 6px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    color: var(--muted-foreground);
+  }
+
+  :where([data-slot='select'] optgroup) > :where(option) {
+    margin-block-start: 4px;
+  }
+
+  :where([data-slot='select'] hr) {
+    margin: 4px -4px;
+    border: 0;
+    border-block-start: 1px solid var(--border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where([data-slot='select'])::picker-icon {
+    transition: none;
+  }
+}
+
+/*
+ * The menu surface of design/components/Select, faded in from @starting-style. It opens below the
+ * trigger and flips only when it would not fit; the browser's default opens toward whichever side
+ * has more room, which puts it above a trigger in the lower half for no reason.
+ */
+:where([data-slot='select'])::picker(select) {
+  appearance: base-select;
+  position-try-order: normal;
+  min-inline-size: anchor-size(width);
+  max-block-size: 260px;
+  margin-block: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background-color: var(--popover);
+  color: var(--foreground);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  transition-property: opacity, display, overlay;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+:where([data-slot='select']):open::picker(select) {
+  opacity: 1;
+}
+
+@starting-style {
+  :where([data-slot='select']):open::picker(select) {
+    opacity: 0;
+  }
+}

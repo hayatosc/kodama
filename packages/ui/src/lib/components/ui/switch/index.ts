@@ -1,5 +1,5 @@
 /**
- * shadcn-svelte Switch (bits-ui), styled as design/components/Switch.
+ * Switch on a native checkbox with the switch attribute, styled as design/components/Switch.
  *
  * @module
  */

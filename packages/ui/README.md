@@ -27,19 +27,26 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   (`@theme inline`).
 - `src/lib/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
-- `src/lib/utils.ts`: `cn` and the prop helper types that shadcn-svelte components import.
-- `src/lib/components/ui/`: shadcn-svelte components (Button, Badge, Switch, Tabs,
-  AlertDialog, Popover, Command), restyled to the design. `components.json` is written by hand
-  because `shadcn-svelte init` asks for a preset interactively. Add components with
-  `vp dlx shadcn-svelte@1.7.2 add <name>`, then restyle them from `design/components/bundle.css`
-  and fit them to the lint rules (no `any`, no type assertions; weights 400 and 600 only).
-  Variant tables and their types live in a `variants.ts` next to the component, because
-  type-aware Oxlint cannot read named exports from `.svelte` files.
-- `src/lib/components/`: the Kodama components built on them: `StatusBadge` and `UnreadCount`,
-  `Keyboard` (the key hints of `design/components/Kbd`), `Select` (Popover + Command,
-  shadcn-svelte's combobox recipe: a button opens a menu with the search field inside it, which
-  bits-ui's input-based Combobox does not give), and `ConfirmDialog` (AlertDialog). `focusRing`
-  in `src/lib/utils.ts` is the shared focus style.
+- `src/lib/utils.ts`: `cn`, the prop helper types the components import, and `focusRing`, the
+  shared focus style (an outline, so it survives forced colors mode).
+- `src/lib/components/ui/`: the primitives, general-purpose parts in the shape of shadcn-svelte's
+  (`Dialog.Root`, `Dialog.Trigger`, `Dialog.Content`, …), restyled from
+  `design/components/bundle.css`. Where the platform has the element, they are built on it, as
+  modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
+  commands, Popover on the Popover API with anchor positioning, Select on the customizable
+  `<select>`, Switch on a checkbox with the `switch` attribute, and Kbd on `<kbd>`. Tabs and
+  Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
+  and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
+  shown in the Combobox stories. Variant tables and their types live in a `variants.ts` next to
+  the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
+  `components.json` is written by hand because `shadcn-svelte init` asks for a preset
+  interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
+  restyle, where no native element fits.
+- `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
+  dialog and popover transitions and backdrop, popover placement, and the select's menu.
+- `src/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
+  transition) or `closedby` (closing on a backdrop click).
+- `src/lib/components/`: Kodama's own components, built on the primitives, from the next stages.
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
@@ -71,8 +78,11 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 1. **Foundation** (done): the package, tokens and fonts, the shadcn-svelte setup, Storybook
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
-2. **Primitives** (done) on shadcn-svelte: Button, StatusBadge (with the unread count), Keyboard,
-   Switch, Tabs, Select (with search), and Dialog.
+2. **Primitives** (done): Button, Badge, Kbd, Switch, Tabs, Select, Combobox (Popover with
+   Command), Dialog, and AlertDialog, general-purpose and shaped like shadcn-svelte's, with stories
+   that show each one's uses rather than one screen's. Native elements come first (see Layout);
+   Baseline features are used without polyfills, and features short of Baseline get the fallback
+   the guide gives.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
    `design/components/bundle.js` and `bundle.css`.
 4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),

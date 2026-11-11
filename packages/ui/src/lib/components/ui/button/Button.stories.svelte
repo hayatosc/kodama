@@ -1,10 +1,10 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
+  import ArrowRightIcon from '@lucide/svelte/icons/arrow-right'
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
-  import PaperclipIcon from '@lucide/svelte/icons/paperclip'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SearchIcon from '@lucide/svelte/icons/search'
-  import SquareIcon from '@lucide/svelte/icons/square'
+  import SettingsIcon from '@lucide/svelte/icons/settings'
   import { fn } from 'storybook/test'
   import { Button } from './index.js'
 
@@ -18,84 +18,122 @@
         control: 'inline-radio',
         options: ['primary', 'secondary', 'ghost', 'destructive'],
       },
-      size: {
-        control: 'inline-radio',
-        options: ['default', 'sm', 'icon', 'round', 'circle', 'chip'],
-      },
+      size: { control: 'inline-radio', options: ['default', 'sm', 'icon', 'icon-sm'] },
       disabled: { control: 'boolean' },
     },
     parameters: {
       docs: {
         description: {
           component:
-            'A button that starts an action. Use **primary** for the one main action of a surface (it inverts with the theme), and secondary or ghost for everything else. **destructive** marks archive and delete, which always go through a confirmation dialog. Labels end with a verb. Icon-only buttons need an `aria-label`. Source: `design/components/Button`.',
+            'A native `<button>` that starts an action; use a link for navigation. **primary** is the one main action of a surface and inverts with the theme; **secondary** and **ghost** are for everything else; **destructive** marks actions that delete or discard, which an AlertDialog confirms first. Labels end with a verb. Hover changes the fill, a press scales the button down (it dims instead under reduced motion), and keyboard focus draws the outline ring. Source: `design/components/Button`.',
         },
       },
     },
   })
 </script>
 
-<Story name="Primary">新しいエージェント</Story>
-
-<Story name="Secondary" args={{ variant: 'secondary' }}>設定を開く</Story>
-
-<Story name="Ghost" args={{ variant: 'ghost' }}>あとで</Story>
-
-<Story name="Destructive" args={{ variant: 'destructive' }}>アーカイブ</Story>
-
-<Story name="Small" args={{ variant: 'secondary', size: 'sm' }}>ロールバック</Story>
-
-<Story name="Disabled" args={{ disabled: true }}>送信</Story>
+<Story name="Default">ボタン</Story>
 
 <Story
-  name="Shapes"
+  name="Variants"
+  asChild
+  parameters={{
+    docs: {
+      description: {
+        story: 'The four variants. Use one primary per surface.',
+      },
+    },
+  }}
+>
+  <div class="flex flex-wrap items-center gap-3">
+    <Button>保存</Button>
+    <Button variant="secondary">キャンセル</Button>
+    <Button variant="ghost">あとで</Button>
+    <Button variant="destructive">削除</Button>
+  </div>
+</Story>
+
+<Story
+  name="Sizes"
   asChild
   parameters={{
     docs: {
       description: {
         story:
-          'The icon shapes. **icon** and **round** are 36px; **round** is the Composer’s send and stop. **circle** is the 32px outlined button at the top of the sidebar. **chip** blends into the surface, as the Composer’s attach does; it narrows to 32px when it holds only an icon.',
+          '**default** (36px) and **sm** (32px) for text, **icon** and **icon-sm** for a single icon. An icon-only button needs an `aria-label`.',
       },
     },
   }}
 >
-  <div class="flex flex-wrap items-center gap-6">
-    <Button variant="ghost" size="icon" aria-label="検索"><SearchIcon strokeWidth={1.75} /></Button>
-    <Button size="round" aria-label="送信"><ArrowUpIcon strokeWidth={1.75} /></Button>
-    <Button size="round" aria-label="停止">
-      <SquareIcon class="size-3 fill-current" strokeWidth={1.75} />
+  <div class="flex flex-wrap items-center gap-3">
+    <Button variant="secondary">標準</Button>
+    <Button variant="secondary" size="sm">小</Button>
+    <Button variant="secondary" size="icon" aria-label="設定">
+      <SettingsIcon strokeWidth={1.75} aria-hidden="true" />
     </Button>
-    <Button size="circle" aria-label="新しいエージェント"><PlusIcon strokeWidth={1.75} /></Button>
-    <Button size="chip"><PaperclipIcon class="size-3.5" strokeWidth={1.75} />添付</Button>
-    <Button size="chip" aria-label="添付"
-      ><PaperclipIcon class="size-3.5" strokeWidth={1.75} /></Button
+    <Button variant="secondary" size="icon-sm" aria-label="設定">
+      <SettingsIcon strokeWidth={1.75} aria-hidden="true" />
+    </Button>
+  </div>
+</Story>
+
+<Story
+  name="With icon"
+  asChild
+  parameters={{
+    docs: {
+      description: {
+        story:
+          'An icon before the label adds meaning; one after it points onward. Icons next to a label are decorative, so they are hidden from screen readers.',
+      },
+    },
+  }}
+>
+  <div class="flex flex-wrap items-center gap-3">
+    <Button><PlusIcon strokeWidth={1.75} aria-hidden="true" />新規作成</Button>
+    <Button variant="secondary">次へ<ArrowRightIcon strokeWidth={1.75} aria-hidden="true" /></Button
     >
   </div>
 </Story>
 
 <Story
-  name="All variants"
+  name="Icon only"
   asChild
   parameters={{
     docs: {
       description: {
-        story: 'Every variant at both text sizes, then disabled. Disabled is 40% opacity.',
+        story: 'Without a visible label, the `aria-label` names the button.',
       },
     },
   }}
 >
-  <div class="grid grid-cols-[auto_repeat(4,auto)] items-center gap-x-4 gap-y-3">
-    {#each ['default', 'sm'] as const as size (size)}
-      <code class="mono-xs text-muted-foreground">{size}</code>
-      <Button {size}>作成</Button>
-      <Button {size} variant="secondary">設定を開く</Button>
-      <Button {size} variant="ghost">あとで</Button>
-      <Button {size} variant="destructive">削除</Button>
-    {/each}
-    <code class="mono-xs text-muted-foreground">disabled</code>
-    <Button disabled>作成</Button>
-    <Button disabled variant="secondary">設定を開く</Button>
-    <Button disabled variant="ghost">あとで</Button>
-    <Button disabled variant="destructive">削除</Button>
+  <div class="flex flex-wrap items-center gap-3">
+    <Button variant="ghost" size="icon" aria-label="検索">
+      <SearchIcon strokeWidth={1.75} aria-hidden="true" />
+    </Button>
+    <Button variant="secondary" size="icon" aria-label="追加">
+      <PlusIcon strokeWidth={1.75} aria-hidden="true" />
+    </Button>
   </div>
 </Story>
+
+<Story
+  name="Rounded"
+  asChild
+  parameters={{
+    docs: {
+      description: {
+        story: 'Add `rounded-full` for a pill or a circle, such as a send button.',
+      },
+    },
+  }}
+>
+  <div class="flex flex-wrap items-center gap-3">
+    <Button size="icon" class="rounded-full" aria-label="送信">
+      <ArrowUpIcon strokeWidth={1.75} aria-hidden="true" />
+    </Button>
+    <Button variant="secondary" class="rounded-full">はじめる</Button>
+  </div>
+</Story>
+
+<Story name="Disabled" args={{ disabled: true }}>送信</Story>

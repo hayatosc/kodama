@@ -10,11 +10,10 @@
   }: WithElementRef<HTMLAttributes<HTMLDivElement>> = $props()
 </script>
 
-<!-- Buttons are right-aligned: cancel first, then confirm. -->
 <div
   bind:this={ref}
-  data-slot="alert-dialog-footer"
-  class={cn('mt-6 flex justify-end gap-2', className)}
+  data-slot="dialog-header"
+  class={cn('flex flex-col gap-2', className)}
   {...restProps}
 >
   {@render children?.()}

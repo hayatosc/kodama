@@ -1,5 +1,5 @@
 /**
- * shadcn-svelte Badge, styled as the badge of design/components/StatusBadge.
+ * shadcn-svelte Badge, styled from design/components/StatusBadge.
  *
  * @module
  */

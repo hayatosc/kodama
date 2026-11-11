@@ -1,12 +1,11 @@
 /**
- * shadcn-svelte Popover (bits-ui), styled as the menu surface of design/components/Select.
+ * Popover in the shape of shadcn-svelte's, built on the native Popover API.
  *
  * @module
  */
 
 import Content from './popover-content.svelte'
-import Portal from './popover-portal.svelte'
 import Trigger from './popover-trigger.svelte'
 import Root from './popover.svelte'
 
-export { Root, Content, Portal, Trigger }
+export { Root, Trigger, Content }

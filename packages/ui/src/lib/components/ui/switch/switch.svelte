@@ -1,34 +1,52 @@
 <script lang="ts">
-  import { Switch as SwitchPrimitive } from 'bits-ui'
-  import { cn, focusRing, type WithoutChildrenOrChild } from '#lib/utils.js'
+  import { cn, focusRing, type WithElementRef } from '#lib/utils.js'
+  import type { HTMLInputAttributes } from 'svelte/elements'
 
   let {
     ref = $bindable(null),
-    class: className,
     checked = $bindable(false),
+    class: className,
     ...restProps
-  }: WithoutChildrenOrChild<SwitchPrimitive.RootProps> = $props()
+  }: WithElementRef<
+    Omit<HTMLInputAttributes, 'type' | 'role' | 'value'>,
+    HTMLInputElement
+  > = $props()
+
+  /**
+   * The native switch attribute, which Svelte's attribute types do not list yet. Where it is
+   * missing, `role="switch"` gives the same semantics and the styles below give the same look.
+   */
+  const nativeSwitch = { switch: true }
 </script>
 
-<!-- design/components/Switch: 34×20, inverted when on, the 16px knob moves in 150ms. -->
-<SwitchPrimitive.Root
-  bind:ref
-  bind:checked
-  data-slot="switch"
-  class={cn(
-    'peer inline-flex h-5 w-[34px] shrink-0 cursor-pointer items-center rounded-full p-0 transition-colors duration-150',
-    'data-[state=checked]:bg-primary data-[state=unchecked]:bg-input',
-    'data-[disabled]:cursor-default data-[disabled]:opacity-40',
-    focusRing,
-    className,
-  )}
-  {...restProps}
->
-  <SwitchPrimitive.Thumb
-    data-slot="switch-thumb"
+<!--
+  design/components/Switch: 34×20, inverted when on, the 16px knob moves in 150ms.
+  A native checkbox (switch guide): it submits with forms and toggles with Space. The input is the
+  track, and the knob is a sibling span, since inputs cannot hold pseudo-elements everywhere.
+  In forced colors mode, the transparent borders turn into outlines, so the track and the knob's
+  position still show.
+-->
+<span data-slot="switch" class={cn('relative inline-flex h-5 w-[34px] shrink-0', className)}>
+  <input
+    bind:this={ref}
+    bind:checked
+    type="checkbox"
+    role="switch"
     class={cn(
-      'pointer-events-none block size-4 rounded-full shadow-sm transition-transform duration-150',
-      'translate-x-0.5 bg-background data-[state=checked]:translate-x-4 data-[state=checked]:bg-primary-foreground',
+      'peer absolute inset-0 m-0 size-full cursor-pointer appearance-none rounded-full border border-transparent',
+      'bg-input transition-colors duration-150 checked:bg-primary',
+      'disabled:cursor-not-allowed disabled:opacity-40',
+      focusRing,
     )}
+    {...nativeSwitch}
+    {...restProps}
   />
-</SwitchPrimitive.Root>
+  <span
+    aria-hidden="true"
+    class={cn(
+      'pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full border border-transparent bg-background shadow-sm',
+      'peer-checked:translate-x-3.5 peer-checked:bg-primary-foreground peer-disabled:opacity-40',
+      'motion-safe:transition-[translate,background-color] motion-safe:duration-150',
+    )}
+  ></span>
+</span>

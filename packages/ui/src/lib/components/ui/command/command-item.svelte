@@ -15,7 +15,11 @@
   } = $props()
 </script>
 
-<!-- min-h-9, rounded-md; the highlighted item and the hover use accent. -->
+<!--
+  min-h-9, rounded-md; the highlighted item and the hover use accent. The current value is marked
+  by a check and a heavier weight, and named for screen readers, since aria-selected here follows
+  the highlight rather than the value.
+-->
 <CommandPrimitive.Item
   bind:ref
   data-slot="command-item"
@@ -27,8 +31,9 @@
   )}
   {...restProps}
 >
-  <span class="min-w-0 flex-1">{@render children?.()}</span>
+  <span class={cn('min-w-0 flex-1', checked && 'font-semibold')}>{@render children?.()}</span>
   {#if checked}
+    <span class="sr-only">（選択中）</span>
     <CheckIcon class="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
   {/if}
 </CommandPrimitive.Item>

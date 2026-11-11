@@ -26,7 +26,8 @@ export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?:
 
 /**
  * The focus ring every control uses: `ring` at 2px with a 2px offset, shown only for keyboard
- * focus (design/README.md — Focus).
+ * focus (design/README.md — Focus). It is an outline rather than a box-shadow, because forced
+ * colors mode removes box-shadows and would leave no focus indicator.
  */
 export const focusRing =
-  'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'

@@ -1,26 +1,34 @@
 <script lang="ts">
-  import { AlertDialog as AlertDialogPrimitive } from 'bits-ui'
-  import { buttonVariants } from '#lib/components/ui/button/variants.js'
+  import { Button, type ButtonProps } from '#lib/components/ui/button/index.js'
   import { cn } from '#lib/utils.js'
+  import { getDialogState } from '../dialog/context.js'
 
   let {
     ref = $bindable(null),
+    variant = 'primary',
+    onclick,
     class: className,
-    destructive = false,
     ...restProps
-  }: AlertDialogPrimitive.ActionProps & {
-    /** Fills the button with `destructive`, for confirms that delete or archive. */
-    destructive?: boolean
+  }: Omit<ButtonProps, 'variant'> & {
+    /** `destructive` fills the button with the destructive color, for actions that delete. */
+    variant?: 'primary' | 'destructive'
   } = $props()
+
+  const dialog = getDialogState()
+
+  /** Runs the action, then closes the dialog unless the handler called preventDefault(). */
+  function act(event: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement }): void {
+    onclick?.(event)
+    if (!event.defaultPrevented) dialog.open = false
+  }
 </script>
 
-<AlertDialogPrimitive.Action
+<!-- design/components/Dialog: a destructive confirm is filled (black text in dark). -->
+<Button
   bind:ref
   data-slot="alert-dialog-action"
-  class={cn(
-    buttonVariants({ variant: 'primary' }),
-    destructive && 'bg-destructive text-background',
-    className,
-  )}
+  variant="primary"
+  class={cn(variant === 'destructive' && 'bg-destructive text-background', className)}
+  onclick={act}
   {...restProps}
 />
