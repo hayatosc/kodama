@@ -37,7 +37,10 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
   `<select>`, Switch on a checkbox with the `switch` attribute, KeyboardKey on `<kbd>`, and Input,
   Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls, Accordion and
   Collapsible on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
-  Card on `<article>`, and Separator on `<hr>`. Field links a control to its label, description,
+  Card on `<article>`, Separator on `<hr>`, Toggle and ToggleGroup on `aria-pressed` buttons,
+  DropdownMenu on an invoker-command popover with native focusgroup, Tooltip on interest invokers
+  (`interestfor`) and a hint popover, Sheet on the same modal `<dialog>` as Dialog, and Toast on
+  a manual popover announced with `ariaNotify`. Field links a control to its label, description,
   and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
   and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
@@ -49,11 +52,19 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 - `src/lib/styles/native.css`: the styles those native elements need beyond utilities: the
   dialog and popover transitions and backdrop, popover placement, the select's menu, the
   checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
-  and the progress bar and spinner.
+  the progress bar and spinner, the sheet's slide, and the menu's and tooltip's placement and
+  check marks.
 - `src/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
 - `src/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
-  transition) or `closedby` (closing on a backdrop click).
+  transition) or `closedby` (closing on a backdrop click), and `placeWithoutAnchor`, which places
+  a popover, menu, or tooltip by its trigger where anchor positioning is missing.
+- `src/lib/hint.ts`: relates a tooltip to its trigger for assistive technology (its name or its
+  description), as the interest-triggered-tooltips guide asks.
+- `src/lib/polyfills.ts`: loads the `interestfor` polyfill, the only polyfill, and only where
+  interest invokers are missing. Baseline features get none.
+- `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
+  Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
 - `src/lib/components/`: Kodama's own components, built on the primitives, from the next stages.
 - `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
   A component's stories sit next to it as `<Name>.stories.svelte`.
@@ -89,7 +100,9 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
    Command), Dialog, AlertDialog, the form parts (Label, Input, Textarea, Field, InputGroup,
    Checkbox, RadioGroup, Slider), and the display parts (Accordion, Collapsible, Card,
-   Separator, Alert, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), general-purpose and shaped like shadcn-svelte's, with stories
+   Separator, Alert, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
+   overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Sheet, Toast),
+   general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.

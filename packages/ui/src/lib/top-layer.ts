@@ -1,7 +1,8 @@
 /**
  * Helpers for native top-layer elements (`<dialog>` and `[popover]`): closing a dialog after its
- * exit transition, and click-outside closing where `<dialog closedby>` is missing. Both features
- * are not Baseline yet (`overlay` and `closedby`), so these are the fallbacks the platform needs.
+ * exit transition, click-outside closing where `<dialog closedby>` is missing, and placing a
+ * popover by its trigger where anchor positioning is missing. None of these features is Baseline
+ * yet (`overlay`, `closedby`, anchor positioning), so these are the fallbacks the platform needs.
  *
  * @module
  */
@@ -91,4 +92,44 @@ export function closeOnBackdrop(
     dialog.removeEventListener('pointerdown', down)
     dialog.removeEventListener('pointerup', up)
   }
+}
+
+/** Where a popover sits relative to its trigger. */
+export type Placement = 'below-start' | 'below-center' | 'below-end' | 'above-center'
+
+/**
+ * Places an open popover by its trigger with fixed coordinates, for browsers without anchor
+ * positioning (the menu guide's fallback). It flips to the other side and clamps to the viewport
+ * when it would overflow. Where anchor positioning exists it does nothing, and the CSS places it.
+ */
+export function placeWithoutAnchor(
+  popover: HTMLElement,
+  trigger: Element | null,
+  placement: Placement,
+  gap = 4,
+): void {
+  if (CSS.supports('position-area', 'block-end') || !trigger) return
+  const anchor = trigger.getBoundingClientRect()
+  const box = popover.getBoundingClientRect()
+  const margin = 8
+  const below = anchor.bottom + gap
+  const above = anchor.top - gap - box.height
+  const fitsBelow = below + box.height <= innerHeight - margin
+  const fitsAbove = above >= margin
+  const top =
+    placement === 'above-center'
+      ? fitsAbove || !fitsBelow
+        ? above
+        : below
+      : fitsBelow || !fitsAbove
+        ? below
+        : above
+  const left =
+    placement === 'below-start'
+      ? anchor.left
+      : placement === 'below-end'
+        ? anchor.right - box.width
+        : anchor.left + (anchor.width - box.width) / 2
+  popover.style.left = `${Math.min(Math.max(left, margin), innerWidth - box.width - margin)}px`
+  popover.style.top = `${Math.min(Math.max(top, margin), innerHeight - box.height - margin)}px`
 }

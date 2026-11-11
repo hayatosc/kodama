@@ -22,6 +22,7 @@
     "bits-ui": "2.20.2",
     "clsx": "2.1.1",
     "gen-interface-jp": "0.8.0",
+    "interestfor": "1.0.10",
     "kiso.css": "1.2.4",
     "tailwind-merge": "3.7.0",
     "tailwind-variants": "3.3.1"

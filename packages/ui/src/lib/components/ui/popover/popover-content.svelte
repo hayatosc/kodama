@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { placeWithoutAnchor } from '#lib/top-layer.js'
   import { cn, type WithElementRef } from '#lib/utils.js'
   import { getPopoverState } from './context.js'
   import type { Attachment } from 'svelte/attachments'
@@ -36,12 +37,18 @@
   }
 
   /**
-   * Keeps `open` in step with the browser (the trigger, Esc, and a click outside), and moves focus
-   * to the element marked `data-autofocus` when the popover opens.
+   * Keeps `open` in step with the browser (the trigger, Esc, and a click outside). When the popover
+   * opens, it is placed by its trigger where anchor positioning is missing, and focus moves to the
+   * element marked `data-autofocus`.
    */
   function ontoggle(event: ToggleEvent & { currentTarget: HTMLDivElement }): void {
     popover.open = event.newState === 'open'
-    if (popover.open) event.currentTarget.querySelector<HTMLElement>('[data-autofocus]')?.focus()
+    if (!popover.open) {
+      onToggleProp?.(event)
+      return
+    }
+    placeWithoutAnchor(event.currentTarget, popover.trigger, `below-${align}`)
+    event.currentTarget.querySelector<HTMLElement>('[data-autofocus]')?.focus()
     onToggleProp?.(event)
   }
 </script>

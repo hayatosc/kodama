@@ -100,8 +100,8 @@
 /*
  * A popover opens just below its trigger, tethered with anchor positioning, and flips when it
  * would overflow the viewport (viewport-aware-dropdowns, natural-interactions). Where anchor
- * positioning is missing, it keeps the browser's centered placement; kiso.css removes the
- * popover's margin, so it is restored here.
+ * positioning is missing, placeWithoutAnchor (src/lib/top-layer.ts) sets fixed coordinates by the
+ * trigger as it opens, as the menu guide's fallback does. The same holds for menus and tooltips.
  */
 @supports (position-area: block-end) {
   :where([data-slot='popover-content']) {
@@ -127,9 +127,154 @@
 }
 
 @supports not (position-area: block-end) {
-  :where([data-slot='popover-content']) {
-    margin: auto;
+  :where(
+    [data-slot='popover-content'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='tooltip-content']
+  ) {
+    position: fixed;
+    inset: auto;
+    margin: 0;
   }
+}
+
+/*
+ * A sheet (Dialog pinned to an edge) slides in from its side and back out, but only without a
+ * reduced-motion request; with one it fades like any dialog. The scale of a centered dialog does
+ * not apply.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-slot='dialog-content'][data-side]) {
+    scale: 1;
+    transition-property: opacity, translate, display, overlay;
+    transition-duration: 200ms;
+  }
+
+  :where([data-slot='dialog-content'][data-side='right']) {
+    translate: 100% 0;
+  }
+
+  :where([data-slot='dialog-content'][data-side='left']) {
+    translate: -100% 0;
+  }
+
+  :where([data-slot='dialog-content'][data-side='bottom']) {
+    translate: 0 100%;
+  }
+
+  :where([data-slot='dialog-content'][data-side][open]):where(:not([data-closing])) {
+    scale: 1;
+    translate: 0 0;
+  }
+
+  @starting-style {
+    :where([data-slot='dialog-content'][data-side='right'][open]) {
+      translate: 100% 0;
+    }
+
+    :where([data-slot='dialog-content'][data-side='left'][open]) {
+      translate: -100% 0;
+    }
+
+    :where([data-slot='dialog-content'][data-side='bottom'][open]) {
+      translate: 0 100%;
+    }
+  }
+}
+
+/*
+ * A dropdown menu sits below its trigger, its implicit anchor (the invoker command sets it), and
+ * flips when it would overflow (menu guide). Opening and closing fade with a 4px slide under
+ * 150ms, the slide only without a reduced-motion request.
+ */
+@supports (position-area: block-end) {
+  :where([data-slot='dropdown-menu-content']) {
+    inset: auto;
+    margin-block: 4px;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline;
+  }
+}
+
+:where([data-slot='dropdown-menu-content'], [data-slot='tooltip-content']) {
+  opacity: 0;
+  transition-property: opacity, translate, display, overlay;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+  transition-behavior: allow-discrete;
+}
+
+:where([data-slot='dropdown-menu-content'], [data-slot='tooltip-content']):popover-open {
+  opacity: 1;
+  transition-duration: 100ms;
+}
+
+@starting-style {
+  :where([data-slot='dropdown-menu-content'], [data-slot='tooltip-content']):popover-open {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-slot='dropdown-menu-content']) {
+    translate: 0 -4px;
+  }
+
+  :where([data-slot='dropdown-menu-content']):popover-open {
+    translate: 0 0;
+  }
+
+  @starting-style {
+    :where([data-slot='dropdown-menu-content']):popover-open {
+      translate: 0 -4px;
+    }
+  }
+}
+
+/*
+ * The check mark of a checked menu item, drawn in the item's 16px leading slot from aria-checked,
+ * so the mark and the announced state never disagree (menu guide).
+ */
+:where(
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item']
+  )[aria-checked='true']::before {
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+@media (forced-colors: active) {
+  :where(
+      [data-slot='dropdown-menu-checkbox-item'],
+      [data-slot='dropdown-menu-radio-item']
+    )[aria-checked='true']::before {
+    background-color: CanvasText;
+  }
+}
+
+/*
+ * A tooltip sits above its trigger, its implicit anchor (interestfor sets it), and flips below at
+ * the viewport's edge (interest-triggered-tooltips). The interest delays keep a pointer passing
+ * over the trigger from flashing it; the custom properties are what the polyfill reads.
+ */
+@supports (position-area: block-start) {
+  :where([data-slot='tooltip-content']) {
+    inset: auto;
+    margin-block: 6px;
+    position-area: block-start;
+    position-try-fallbacks: flip-block;
+  }
+}
+
+:where([data-slot='tooltip-trigger']) {
+  --interest-delay-start: 0.4s;
+  --interest-delay-end: 0.2s;
+  interest-delay-start: var(--interest-delay-start);
+  interest-delay-end: var(--interest-delay-end);
 }
 
 /*
