@@ -5,6 +5,7 @@
   "type": "module",
   "imports": {
     "#app/*": "./src/app/*",
+    "#entities/*": "./src/entities/*",
     "#shared/*": "./src/shared/*"
   },
   "scripts": {
