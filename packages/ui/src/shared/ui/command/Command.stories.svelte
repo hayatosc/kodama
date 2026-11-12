@@ -1,18 +1,20 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
+  import CommandRoot from './command.svelte'
   import * as Command from './index.js'
   import * as Popover from '../popover/index.js'
   import { regions } from './prefectures.js'
 
   const { Story } = defineMeta({
-    title: 'Patterns/Combobox',
+    title: 'Primitives/Command',
+    component: CommandRoot,
     tags: ['autodocs'],
     parameters: {
       docs: {
         description: {
           component:
-            'Picks one option from a long list by searching it: a composition of **Popover** (the native Popover API) and **Command** (bits-ui), not a component of its own. The trigger opens a popover with the search field focused; typing filters by label, arrow keys move, Enter picks, and Esc or a click outside closes and returns focus to the trigger. The current value has a check and a heavier weight. For a short list, use Select. Source: `design/components/Select`.',
+            'A list the user filters by typing (bits-ui Command): **Input** filters by label, arrow keys move, Enter picks, and **Empty** shows when nothing matches. **Group** adds a muted heading and **Separator** a line between groups. The current value has a check and a heavier weight. Inside a Popover it makes a combobox, shown in the Combobox stories; for a short list, use Select. Source: `design/components/Select`.',
         },
       },
     },
@@ -31,6 +33,20 @@
   let groupedValue = $state('大阪府')
 </script>
 
+<Story name="Default" asChild>
+  <div class="w-[260px] rounded-xl border border-border bg-popover">
+    <Command.Root>
+      <Command.Input placeholder="検索" aria-label="エージェントを検索" />
+      <Command.List>
+        <Command.Empty>一致するものがありません</Command.Empty>
+        {#each ['assistant', 'research', 'scheduler'] as name (name)}
+          <Command.Item value={name}>{name}</Command.Item>
+        {/each}
+      </Command.List>
+    </Command.Root>
+  </div>
+</Story>
+
 {#snippet trigger(valueId: string, value: string)}
   <span id={valueId} class={value ? 'truncate' : 'truncate text-muted-foreground'}>
     {value || '選択してください'}
@@ -38,7 +54,18 @@
   <ChevronDownIcon class="text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
 {/snippet}
 
-<Story name="Default" asChild>
+<Story
+  name="Combobox"
+  asChild
+  parameters={{
+    docs: {
+      description: {
+        story:
+          'Popover and Command together pick one option from a long list. The trigger opens the popover with the search field focused; Esc or a click outside closes it and returns focus to the trigger.',
+      },
+    },
+  }}
+>
   <div class="flex flex-col gap-1.5">
     <span id="combobox-flat-label" class="text-sm font-semibold">都道府県</span>
     <Popover.Root bind:open={flatOpen}>
@@ -70,7 +97,7 @@
 </Story>
 
 <Story
-  name="Groups"
+  name="Combobox with groups"
   asChild
   parameters={{
     docs: {
@@ -120,7 +147,7 @@
 </Story>
 
 <Story
-  name="Disabled"
+  name="Combobox disabled"
   asChild
   parameters={{
     docs: { description: { story: 'A disabled trigger does not open, at 40% opacity.' } },

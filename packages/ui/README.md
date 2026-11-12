@@ -51,7 +51,7 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
   and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
-  shown in the Combobox stories. Variant tables and their types live in a `variants.ts` next to
+  shown in the Command stories. Variant tables and their types live in a `variants.ts` next to
   the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
   `components.json` is written by hand because `shadcn-svelte init` asks for a preset
   interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
@@ -72,9 +72,10 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   interest invokers are missing. Baseline features get none.
 - `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
   Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
-- Stories sit in the folder of what they show, as `<Name>.stories.svelte`: a component's next to
-  it, the Foundations stories (colors, type, layout) next to `src/shared/styles/tokens.css`, and
-  the Combobox, a composition of Popover and Command, in `src/shared/ui/command/`.
+- Stories sit in the folder of what they show, as `<Name>.stories.svelte`, one file per component:
+  its Default story shows the component alone, and compositions such as the combobox (Popover with
+  Command) are stories in the file of the component they build on. The Foundations stories
+  (colors, type, layout) sit next to `src/shared/styles/tokens.css`.
   `src/app/Introduction.mdx` is Storybook's opening page.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
@@ -112,8 +113,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Drawer, Toast),
    general-purpose and shaped like shadcn-svelte's, with stories
    that show each one's uses rather than one screen's. Storybook lists the parts fit for any use
-   under **Primitives** and those made for one use (AlertDialog, Drawer, Combobox, Toast,
-   Callout, Empty) under **Patterns**; each Default story shows the part on its own. Native elements come first (see Layout);
+   under **Primitives** and those made for one use (AlertDialog, Drawer, Toast, Callout,
+   Empty) under **Patterns**; each Default story shows the part on its own. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
