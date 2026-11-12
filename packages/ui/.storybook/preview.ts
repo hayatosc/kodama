@@ -4,7 +4,7 @@
  * @module
  */
 
-import '../src/app.css'
+import '../src/app/styles/index.css'
 import { withThemeByDataAttribute } from '@storybook/addon-themes'
 import type { Preview } from '@storybook/sveltekit'
 
@@ -22,7 +22,9 @@ const preview: Preview = {
     layout: 'centered',
     a11y: { test: 'error' },
     options: {
-      storySort: { order: ['Introduction', 'Foundations', 'Primitives', 'Kodama', 'Screens'] },
+      storySort: {
+        order: ['Introduction', 'Foundations', 'Primitives', 'Patterns', 'Kodama', 'Screens'],
+      },
     },
   },
 }

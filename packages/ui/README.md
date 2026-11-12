@@ -22,18 +22,62 @@ Format from the repository root with `vp run format`. Vite+ formats non-Svelte f
 
 ## Layout
 
-- `src/app.css`: kiso.css (the reset, in place of Tailwind Preflight), Tailwind's theme and utilities,
-  the fonts from npm (`gen-interface-jp`, `@fontsource/geist-mono`), and the token-to-utility mapping
-  (`@theme inline`).
-- `src/lib/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
+The source follows [Feature-Sliced Design](https://feature-sliced.design/): layers from `app`
+down to `shared`, where a layer imports only the layers below it. The layers above `shared`
+(`pages`, `widgets`, `features`, `entities`) come with Kodama's own components in the next
+stages; SvelteKit keeps its own `src/routes/`, `src/app.html`, and `src/app.d.ts`, and a route
+renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` aliases.
+
+- `src/app/styles/index.css`: the app layer's global stylesheet: kiso.css (the reset, in place of
+  Tailwind Preflight), Tailwind's theme and utilities, the fonts from npm (`gen-interface-jp`,
+  `@fontsource/geist-mono`), the shared token and native-element styles, and the
+  token-to-utility mapping (`@theme inline`).
+- `src/shared/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
-- `src/lib/utils.ts`: `cn` and the prop helper types that shadcn-svelte components import.
-- `src/lib/components/ui/`: shadcn-svelte components. `components.json` is written by hand
-  because `shadcn-svelte init` asks for a preset interactively. Add components with
-  `vp dlx shadcn-svelte@1.7.2 add <name>`, then adapt them to the design and the lint rules
-  (no `any`, no type assertions).
-- `src/stories/`: stories that belong to no component (Foundations, and later whole screens).
-  A component's stories sit next to it as `<Name>.stories.svelte`.
+- `src/shared/lib/utils.ts`: `cn`, the prop helper types the components import, and
+  `focusRing`, the shared focus style (an outline, so it survives forced colors mode).
+- `src/shared/ui/`: the UI kit, general-purpose parts in the shape of shadcn-svelte's
+  (`Dialog.Root`, `Dialog.Trigger`, `Dialog.Content`, …), restyled from
+  `design/components/bundle.css`. Where the platform has the element, they are built on it, as
+  modern-web-guidance asks: Dialog and AlertDialog on the modal `<dialog>` opened with invoker
+  commands, Popover on the Popover API with anchor positioning, Select on the customizable
+  `<select>`, Switch on a checkbox with the `switch` attribute, KeyboardKey on `<kbd>`, and Input,
+  Textarea, Label, Checkbox, RadioGroup, and Slider on the native form controls, Accordion
+  on `<details>`, Progress and Spinner on `<progress>`, Table on the table elements,
+  Card on `<article>`, Separator on `<hr>`, Toggle and ToggleGroup on `aria-pressed` buttons,
+  DropdownMenu on an invoker-command popover with native focusgroup, Tooltip on interest invokers
+  (`interestfor`) and a hint popover, Drawer on the same modal `<dialog>` as Dialog, and Toast on
+  a manual popover announced with `ariaNotify`. Field links a control to its label, description,
+  and error without hand-written ids. Tabs and
+  Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
+  and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
+  shown in the Command stories. Variant tables and their types live in a `variants.ts` next to
+  the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
+  `components.json` is written by hand because `shadcn-svelte init` asks for a preset
+  interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
+  restyle, where no native element fits; rename its files to PascalCase after the component
+  (`accordion-item.svelte` becomes `AccordionItem.svelte`), as every component here is named.
+- `src/shared/styles/native.css`: the styles those native elements need beyond utilities: the
+  dialog and popover transitions and backdrop, popover placement, the select's menu, the
+  checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
+  the progress bar and spinner, the drawer's slide, and the menu's and tooltip's placement and
+  check marks.
+- `src/shared/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
+  only after the user has interacted, and is announced as well as seen.
+- `src/shared/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
+  transition) or `closedby` (closing on a backdrop click), and `placeWithoutAnchor`, which places
+  a popover, menu, or tooltip by its trigger where anchor positioning is missing.
+- `src/shared/lib/hint.ts`: relates a tooltip to its trigger for assistive technology (its name or its
+  description), as the interest-triggered-tooltips guide asks.
+- `src/shared/lib/polyfills.ts`: loads the `interestfor` polyfill, the only polyfill, and only where
+  interest invokers are missing. Baseline features get none.
+- `src/ambient.d.ts` and `src/elements.d.ts`: types for platform features the installed DOM and
+  Svelte typings do not list yet (`ariaNotify`, `interestfor`, `focusgroup`).
+- Stories sit in the folder of what they show, as `<Name>.stories.svelte`, one file per component:
+  its Default story shows the component alone, and compositions such as the combobox (Popover with
+  Command) are stories in the file of the component they build on. The Foundations stories
+  (colors, type, layout) sit next to `src/shared/styles/tokens.css`.
+  `src/app/Introduction.mdx` is Storybook's opening page.
 - `.storybook/`: the toolbar switches `data-theme` between light and dark.
 
 ## Svelte tooling (rsvelte)
@@ -63,8 +107,17 @@ The mockups are built in small steps, each reviewed in Storybook before the next
 1. **Foundation** (done): the package, tokens and fonts, the shadcn-svelte setup, Storybook
    with light and dark themes and a11y checks, and the Foundations stories (colors, type,
    spacing, radius, shadow).
-2. **Primitives** on shadcn-svelte: Button, StatusBadge (with the unread count), Kbd, Switch,
-   Tabs, Select (with search), and Dialog.
+2. **Primitives** (done): Button, Badge, KeyboardKey, Switch, Tabs, Select, Combobox (Popover with
+   Command), Dialog, AlertDialog, the form parts (Label, Input, Textarea, Field, InputGroup,
+   Checkbox, RadioGroup, Slider), and the display parts (Accordion, Card,
+   Separator, Callout, Avatar, Table, Item, Empty, Skeleton, Spinner, Progress), the action and
+   overlay parts (ButtonGroup, Toggle, ToggleGroup, Tooltip, DropdownMenu, Drawer, Toast),
+   general-purpose and shaped like shadcn-svelte's, with stories
+   that show each one's uses rather than one screen's. Storybook lists the parts fit for any use
+   under **Primitives** and those made for one use (AlertDialog, Drawer, Toast, Callout,
+   Empty) under **Patterns**; each Default story shows the part on its own. Native elements come first (see Layout);
+   Baseline features are used without polyfills, and features short of Baseline get the fallback
+   the guide gives.
 3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
    `design/components/bundle.js` and `bundle.css`.
 4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),
