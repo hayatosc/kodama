@@ -5,4 +5,4 @@
  */
 
 /** An on/off setting that takes effect at once. */
-export { default as Switch } from './switch.svelte'
+export { default as Switch } from './Switch.svelte'

@@ -5,16 +5,16 @@
  * @module
  */
 
-import CheckboxItem from './dropdown-menu-checkbox-item.svelte'
-import Content from './dropdown-menu-content.svelte'
-import Group from './dropdown-menu-group.svelte'
-import Item from './dropdown-menu-item.svelte'
-import RadioGroup from './dropdown-menu-radio-group.svelte'
-import RadioItem from './dropdown-menu-radio-item.svelte'
-import Separator from './dropdown-menu-separator.svelte'
-import Shortcut from './dropdown-menu-shortcut.svelte'
-import Trigger from './dropdown-menu-trigger.svelte'
-import Root from './dropdown-menu.svelte'
+import CheckboxItem from './DropdownMenuCheckboxItem.svelte'
+import Content from './DropdownMenuContent.svelte'
+import Group from './DropdownMenuGroup.svelte'
+import Item from './DropdownMenuItem.svelte'
+import RadioGroup from './DropdownMenuRadioGroup.svelte'
+import RadioItem from './DropdownMenuRadioItem.svelte'
+import Separator from './DropdownMenuSeparator.svelte'
+import Shortcut from './DropdownMenuShortcut.svelte'
+import Trigger from './DropdownMenuTrigger.svelte'
+import Root from './DropdownMenu.svelte'
 
 /**
  * The parts of a popup menu, used as `DropdownMenu.Root`, `DropdownMenu.Item`, …. Content must

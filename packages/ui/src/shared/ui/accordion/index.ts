@@ -4,10 +4,10 @@
  * @module
  */
 
-import Content from './accordion-content.svelte'
-import Item from './accordion-item.svelte'
-import Trigger from './accordion-trigger.svelte'
-import Root from './accordion.svelte'
+import Content from './AccordionContent.svelte'
+import Item from './AccordionItem.svelte'
+import Trigger from './AccordionTrigger.svelte'
+import Root from './Accordion.svelte'
 
 /**
  * The parts of an accordion: Root groups Items; each Item is a <details> with a Trigger and

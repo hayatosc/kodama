@@ -4,8 +4,8 @@
  * @module
  */
 
-import Item from './radio-group-item.svelte'
-import Root from './radio-group.svelte'
+import Item from './RadioGroupItem.svelte'
+import Root from './RadioGroup.svelte'
 
 /** The parts of a radio group: Root holds the value, and each Item is a native radio. */
 export { Root, Item }

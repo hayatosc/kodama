@@ -3,7 +3,7 @@
   import { Button } from '../button/index.js'
   import * as KeyboardKey from '../keyboard-key/index.js'
   import { Switch } from '../switch/index.js'
-  import DialogContent from './dialog-content.svelte'
+  import DialogContent from './DialogContent.svelte'
   import * as Dialog from './index.js'
 
   const { Story } = defineMeta({

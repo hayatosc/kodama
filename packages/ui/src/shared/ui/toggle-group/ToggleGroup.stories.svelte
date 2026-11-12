@@ -7,7 +7,7 @@
   import TextAlignStartIcon from '@lucide/svelte/icons/text-align-start'
   import UnderlineIcon from '@lucide/svelte/icons/underline'
   import * as ToggleGroup from './index.js'
-  import ToggleGroupRoot from './toggle-group.svelte'
+  import ToggleGroupRoot from './ToggleGroup.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/ToggleGroup',

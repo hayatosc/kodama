@@ -1,5 +1,5 @@
 <script lang="ts">
-  import DialogContent from '../dialog/dialog-content.svelte'
+  import DialogContent from '../dialog/DialogContent.svelte'
   import type { ComponentProps } from 'svelte'
 
   let {

@@ -5,4 +5,4 @@
  */
 
 /** A placeholder shape, hidden from assistive technology. */
-export { default as Skeleton } from './skeleton.svelte'
+export { default as Skeleton } from './Skeleton.svelte'

@@ -5,14 +5,14 @@
  * @module
  */
 
-import Close from '../dialog/dialog-close.svelte'
-import Description from '../dialog/dialog-description.svelte'
-import Footer from '../dialog/dialog-footer.svelte'
-import Header from '../dialog/dialog-header.svelte'
-import Title from '../dialog/dialog-title.svelte'
-import Trigger from '../dialog/dialog-trigger.svelte'
-import Root from '../dialog/dialog.svelte'
-import Content from './drawer-content.svelte'
+import Close from '../dialog/DialogClose.svelte'
+import Description from '../dialog/DialogDescription.svelte'
+import Footer from '../dialog/DialogFooter.svelte'
+import Header from '../dialog/DialogHeader.svelte'
+import Title from '../dialog/DialogTitle.svelte'
+import Trigger from '../dialog/DialogTrigger.svelte'
+import Root from '../dialog/Dialog.svelte'
+import Content from './DrawerContent.svelte'
 
 /** The parts of a drawer, used as `Drawer.Root`, `Drawer.Content`, …, the same as Dialog's. */
 export { Root, Trigger, Content, Header, Footer, Title, Description, Close }

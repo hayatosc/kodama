@@ -5,4 +5,4 @@
  */
 
 /** A native range input. */
-export { default as Slider } from './slider.svelte'
+export { default as Slider } from './Slider.svelte'

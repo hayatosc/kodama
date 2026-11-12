@@ -3,7 +3,7 @@
   import LockIcon from '@lucide/svelte/icons/lock'
   import UserIcon from '@lucide/svelte/icons/user'
   import * as Tabs from './index.js'
-  import TabsRoot from './tabs.svelte'
+  import TabsRoot from './Tabs.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Tabs',

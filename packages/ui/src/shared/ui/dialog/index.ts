@@ -5,14 +5,14 @@
  * @module
  */
 
-import Close from './dialog-close.svelte'
-import Content from './dialog-content.svelte'
-import Description from './dialog-description.svelte'
-import Footer from './dialog-footer.svelte'
-import Header from './dialog-header.svelte'
-import Title from './dialog-title.svelte'
-import Trigger from './dialog-trigger.svelte'
-import Root from './dialog.svelte'
+import Close from './DialogClose.svelte'
+import Content from './DialogContent.svelte'
+import Description from './DialogDescription.svelte'
+import Footer from './DialogFooter.svelte'
+import Header from './DialogHeader.svelte'
+import Title from './DialogTitle.svelte'
+import Trigger from './DialogTrigger.svelte'
+import Root from './Dialog.svelte'
 
 /**
  * The parts of a modal dialog, used as `Dialog.Root`, `Dialog.Content`, …. Root owns `open`;

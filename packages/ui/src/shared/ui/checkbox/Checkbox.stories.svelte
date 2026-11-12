@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import * as Field from '../field/index.js'
-  import Checkbox from './checkbox.svelte'
+  import Checkbox from './Checkbox.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Checkbox',

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cn } from '#shared/lib/utils.js'
-  import DialogContent from '../dialog/dialog-content.svelte'
+  import DialogContent from '../dialog/DialogContent.svelte'
   import type { ComponentProps } from 'svelte'
 
   let {

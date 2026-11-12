@@ -6,7 +6,7 @@
   import * as RadioGroup from '../radio-group/index.js'
   import { Switch } from '../switch/index.js'
   import { Textarea } from '../textarea/index.js'
-  import FieldRoot from './field.svelte'
+  import FieldRoot from './Field.svelte'
   import * as Field from './index.js'
 
   const { Story } = defineMeta({

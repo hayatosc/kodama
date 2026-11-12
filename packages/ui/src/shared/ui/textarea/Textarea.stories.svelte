@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import * as Field from '../field/index.js'
-  import Textarea from './textarea.svelte'
+  import Textarea from './Textarea.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Textarea',

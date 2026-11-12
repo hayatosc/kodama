@@ -2,7 +2,7 @@
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Button } from '../button/index.js'
   import * as KeyboardKey from './index.js'
-  import KeyboardKeyRoot from './keyboard-key.svelte'
+  import KeyboardKeyRoot from './KeyboardKey.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/KeyboardKey',

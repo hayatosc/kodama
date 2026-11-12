@@ -2,7 +2,7 @@
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Checkbox } from '../checkbox/index.js'
   import { Input } from '../input/index.js'
-  import Label from './label.svelte'
+  import Label from './Label.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Label',

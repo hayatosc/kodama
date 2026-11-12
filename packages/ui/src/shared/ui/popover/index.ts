@@ -4,9 +4,9 @@
  * @module
  */
 
-import Content from './popover-content.svelte'
-import Trigger from './popover-trigger.svelte'
-import Root from './popover.svelte'
+import Content from './PopoverContent.svelte'
+import Trigger from './PopoverTrigger.svelte'
+import Root from './Popover.svelte'
 
 /** The parts of a popover, used as `Popover.Root`, `Popover.Trigger`, and `Popover.Content`. */
 export { Root, Trigger, Content }

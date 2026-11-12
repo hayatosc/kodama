@@ -65,7 +65,7 @@ Use strict TypeScript with two-space indentation, single quotes, no semicolons, 
 
 Document with TSDoc: every file opens with a module comment ending in `@module`, and every export has a `/** */` comment that states intent and non-obvious constraints without restating the types. Cite the docs with `@see docs/memory.md — Section`, and use `@param name - text`, `@returns`, `@throws {@link TypeError} When …`, and `@remarks` only where they add something.
 
-Follow existing camelCase functions, PascalCase types/classes, and lowercase hyphenated filenames such as `current-time.ts`. Write comments and repository documentation in English.
+Follow existing camelCase functions, PascalCase types/classes, and lowercase hyphenated filenames such as `current-time.ts`; Svelte components in `packages/ui` are the exception, named in PascalCase after the component they export, such as `AccordionItem.svelte`. Write comments and repository documentation in English.
 
 ## Testing Guidelines
 

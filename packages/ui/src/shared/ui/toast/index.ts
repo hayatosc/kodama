@@ -6,7 +6,7 @@
  */
 
 /** The region that shows toasts; render it once, near the end of the layout. */
-export { default as Toaster } from './toaster.svelte'
+export { default as Toaster } from './Toaster.svelte'
 /** Adds, dismisses, and lists toasts. */
 export {
   dismissToast,

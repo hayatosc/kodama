@@ -4,13 +4,13 @@
  * @module
  */
 
-import Actions from './item-actions.svelte'
-import Content from './item-content.svelte'
-import Description from './item-description.svelte'
-import Group from './item-group.svelte'
-import Media from './item-media.svelte'
-import Title from './item-title.svelte'
-import Root from './item.svelte'
+import Actions from './ItemActions.svelte'
+import Content from './ItemContent.svelte'
+import Description from './ItemDescription.svelte'
+import Group from './ItemGroup.svelte'
+import Media from './ItemMedia.svelte'
+import Title from './ItemTitle.svelte'
+import Root from './Item.svelte'
 
 /** The parts of an item row, used as `Item.Root`, `Item.Title`, …; Group lists items. */
 export { Root, Media, Content, Title, Description, Actions, Group }

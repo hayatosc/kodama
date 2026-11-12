@@ -5,9 +5,9 @@
  * @module
  */
 
-import Fallback from './avatar-fallback.svelte'
-import Image from './avatar-image.svelte'
-import Root from './avatar.svelte'
+import Fallback from './AvatarFallback.svelte'
+import Image from './AvatarImage.svelte'
+import Root from './Avatar.svelte'
 
 /** The parts of an avatar, used as `Avatar.Root`, `Avatar.Image`, and `Avatar.Fallback`. */
 export { Root, Image, Fallback }

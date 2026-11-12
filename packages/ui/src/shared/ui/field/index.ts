@@ -5,14 +5,14 @@
  * @module
  */
 
-import Content from './field-content.svelte'
-import Description from './field-description.svelte'
-import FieldError from './field-error.svelte'
-import Group from './field-group.svelte'
-import Label from './field-label.svelte'
-import Legend from './field-legend.svelte'
-import FieldSet from './field-set.svelte'
-import Root from './field.svelte'
+import Content from './FieldContent.svelte'
+import Description from './FieldDescription.svelte'
+import FieldError from './FieldError.svelte'
+import Group from './FieldGroup.svelte'
+import Label from './FieldLabel.svelte'
+import Legend from './FieldLegend.svelte'
+import FieldSet from './FieldSet.svelte'
+import Root from './Field.svelte'
 
 /**
  * The parts of a form field, used as `Field.Root`, `Field.Label`, …. Controls inside a Root take

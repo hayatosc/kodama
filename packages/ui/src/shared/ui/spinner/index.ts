@@ -5,4 +5,4 @@
  */
 
 /** A ring that turns while work of unknown length runs. */
-export { default as Spinner } from './spinner.svelte'
+export { default as Spinner } from './Spinner.svelte'

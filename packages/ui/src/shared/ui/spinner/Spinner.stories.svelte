@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Button } from '../button/index.js'
-  import Spinner from './spinner.svelte'
+  import Spinner from './Spinner.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Spinner',

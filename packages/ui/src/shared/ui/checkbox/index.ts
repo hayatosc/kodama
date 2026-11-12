@@ -5,4 +5,4 @@
  */
 
 /** A native checkbox, with checked and indeterminate states. */
-export { default as Checkbox } from './checkbox.svelte'
+export { default as Checkbox } from './Checkbox.svelte'

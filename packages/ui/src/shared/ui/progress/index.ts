@@ -5,4 +5,4 @@
  */
 
 /** A progress bar; without a value it is indeterminate. */
-export { default as Progress } from './progress.svelte'
+export { default as Progress } from './Progress.svelte'

@@ -12,7 +12,7 @@
 
 <!--
   The Viewport gives the search field's aria-controls an element to point at. The list does not
-  scroll on its own: the whole Command does (see command.svelte).
+  scroll on its own: the whole Command does (see Command.svelte).
 -->
 <CommandPrimitive.List
   bind:ref

@@ -4,7 +4,7 @@
   import * as Field from '../field/index.js'
   import { Input } from '../input/index.js'
   import * as Drawer from './index.js'
-  import DrawerContent from './drawer-content.svelte'
+  import DrawerContent from './DrawerContent.svelte'
 
   const { Story } = defineMeta({
     title: 'Patterns/Drawer',

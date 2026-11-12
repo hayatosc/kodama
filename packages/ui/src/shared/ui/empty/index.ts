@@ -4,11 +4,11 @@
  * @module
  */
 
-import Content from './empty-content.svelte'
-import Description from './empty-description.svelte'
-import Media from './empty-media.svelte'
-import Title from './empty-title.svelte'
-import Root from './empty.svelte'
+import Content from './EmptyContent.svelte'
+import Description from './EmptyDescription.svelte'
+import Media from './EmptyMedia.svelte'
+import Title from './EmptyTitle.svelte'
+import Root from './Empty.svelte'
 
 /** The parts of an empty state: an icon, a title, a description, and actions. */
 export { Root, Media, Title, Description, Content }

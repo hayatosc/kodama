@@ -7,7 +7,7 @@
   import PencilIcon from '@lucide/svelte/icons/pencil'
   import Share2Icon from '@lucide/svelte/icons/share-2'
   import TrashIcon from '@lucide/svelte/icons/trash'
-  import DropdownMenuContent from './dropdown-menu-content.svelte'
+  import DropdownMenuContent from './DropdownMenuContent.svelte'
   import * as DropdownMenu from './index.js'
 
   const { Story } = defineMeta({

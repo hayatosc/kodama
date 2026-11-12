@@ -4,9 +4,9 @@
  * @module
  */
 
-import Description from './callout-description.svelte'
-import Title from './callout-title.svelte'
-import Root from './callout.svelte'
+import Description from './CalloutDescription.svelte'
+import Title from './CalloutTitle.svelte'
+import Root from './Callout.svelte'
 
 /** The parts of a callout, used as `Callout.Root`, `Callout.Title`, and `Callout.Description`. */
 export { Root, Title, Description }

@@ -2,7 +2,7 @@
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { Badge } from '../badge/index.js'
   import * as Table from './index.js'
-  import TableRoot from './table.svelte'
+  import TableRoot from './Table.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Table',

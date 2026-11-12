@@ -4,13 +4,13 @@
  * @module
  */
 
-import Empty from './command-empty.svelte'
-import Group from './command-group.svelte'
-import Input from './command-input.svelte'
-import Item from './command-item.svelte'
-import List from './command-list.svelte'
-import Separator from './command-separator.svelte'
-import Root from './command.svelte'
+import Empty from './CommandEmpty.svelte'
+import Group from './CommandGroup.svelte'
+import Input from './CommandInput.svelte'
+import Item from './CommandItem.svelte'
+import List from './CommandList.svelte'
+import Separator from './CommandSeparator.svelte'
+import Root from './Command.svelte'
 
 /** The parts of a searchable list, used as `Command.Root`, `Command.Input`, …. */
 export { Root, Empty, Group, Input, Item, List, Separator }

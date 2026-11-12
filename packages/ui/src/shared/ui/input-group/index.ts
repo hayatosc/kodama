@@ -5,11 +5,11 @@
  * @module
  */
 
-import Addon from './input-group-addon.svelte'
-import Button from './input-group-button.svelte'
-import Input from './input-group-input.svelte'
-import Text from './input-group-text.svelte'
-import Root from './input-group.svelte'
+import Addon from './InputGroupAddon.svelte'
+import Button from './InputGroupButton.svelte'
+import Input from './InputGroupInput.svelte'
+import Text from './InputGroupText.svelte'
+import Root from './InputGroup.svelte'
 
 /** The parts of an input group, used as `InputGroup.Root`, `InputGroup.Input`, …. */
 export { Root, Input, Addon, Button, Text }

@@ -7,7 +7,7 @@
   import { Button } from '../button/index.js'
   import { Switch } from '../switch/index.js'
   import * as Item from './index.js'
-  import ItemRoot from './item.svelte'
+  import ItemRoot from './Item.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Item',

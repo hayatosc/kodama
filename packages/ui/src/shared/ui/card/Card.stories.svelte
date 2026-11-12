@@ -3,7 +3,7 @@
   import EllipsisIcon from '@lucide/svelte/icons/ellipsis'
   import { Badge } from '../badge/index.js'
   import { Button } from '../button/index.js'
-  import CardRoot from './card.svelte'
+  import CardRoot from './Card.svelte'
   import * as Card from './index.js'
 
   const { Story } = defineMeta({

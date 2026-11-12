@@ -3,7 +3,7 @@
   import CopyIcon from '@lucide/svelte/icons/copy'
   import SettingsIcon from '@lucide/svelte/icons/settings'
   import * as Tooltip from './index.js'
-  import TooltipContent from './tooltip-content.svelte'
+  import TooltipContent from './TooltipContent.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Tooltip',

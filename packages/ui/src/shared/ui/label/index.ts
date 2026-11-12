@@ -5,4 +5,4 @@
  */
 
 /** A native label that names its Field's control. */
-export { default as Label } from './label.svelte'
+export { default as Label } from './Label.svelte'

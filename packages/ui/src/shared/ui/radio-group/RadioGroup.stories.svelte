@@ -2,7 +2,7 @@
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import * as Field from '../field/index.js'
   import * as RadioGroup from './index.js'
-  import RadioGroupRoot from './radio-group.svelte'
+  import RadioGroupRoot from './RadioGroup.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/RadioGroup',

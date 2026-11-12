@@ -55,7 +55,8 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
   `components.json` is written by hand because `shadcn-svelte init` asks for a preset
   interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
-  restyle, where no native element fits.
+  restyle, where no native element fits; rename its files to PascalCase after the component
+  (`accordion-item.svelte` becomes `AccordionItem.svelte`), as every component here is named.
 - `src/shared/styles/native.css`: the styles those native elements need beyond utilities: the
   dialog and popover transitions and backdrop, popover placement, the select's menu, the
   checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,

@@ -6,10 +6,10 @@
  * @module
  */
 
-import Group from './select-group.svelte'
-import Item from './select-item.svelte'
-import Separator from './select-separator.svelte'
-import Root from './select.svelte'
+import Group from './SelectGroup.svelte'
+import Item from './SelectItem.svelte'
+import Separator from './SelectSeparator.svelte'
+import Root from './Select.svelte'
 
 /**
  * The parts of a native select: Root is the `<select>`, Item an `<option>`, Group an

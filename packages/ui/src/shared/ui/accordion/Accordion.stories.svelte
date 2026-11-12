@@ -1,6 +1,6 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
-  import AccordionRoot from './accordion.svelte'
+  import AccordionRoot from './Accordion.svelte'
   import * as Accordion from './index.js'
 
   const { Story } = defineMeta({

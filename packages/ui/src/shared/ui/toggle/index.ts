@@ -5,6 +5,6 @@
  */
 
 /** A button that is on or off. */
-export { default as Toggle } from './toggle.svelte'
+export { default as Toggle } from './Toggle.svelte'
 /** The toggle's class builder and its look and size names. */
 export { toggleVariants, type ToggleSize, type ToggleVariant } from './variants.js'

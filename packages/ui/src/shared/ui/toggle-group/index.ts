@@ -4,8 +4,8 @@
  * @module
  */
 
-import Item from './toggle-group-item.svelte'
-import Root from './toggle-group.svelte'
+import Item from './ToggleGroupItem.svelte'
+import Root from './ToggleGroup.svelte'
 
 /** The parts of a toggle group: Root holds the pressed value or values, each Item is a toggle. */
 export { Root, Item }

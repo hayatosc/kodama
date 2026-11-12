@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import * as Field from '../field/index.js'
-  import Input from './input.svelte'
+  import Input from './Input.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Input',

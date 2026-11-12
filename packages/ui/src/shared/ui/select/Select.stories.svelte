@@ -3,7 +3,7 @@
   import { fn } from 'storybook/test'
   import { regions } from '../command/prefectures.js'
   import * as Select from './index.js'
-  import SelectRoot from './select.svelte'
+  import SelectRoot from './Select.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/Select',

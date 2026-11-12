@@ -5,4 +5,4 @@
  */
 
 /** A named group of related buttons, each its own Tab stop. */
-export { default as ButtonGroup } from './button-group.svelte'
+export { default as ButtonGroup } from './ButtonGroup.svelte'

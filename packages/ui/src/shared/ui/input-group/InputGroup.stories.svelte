@@ -5,7 +5,7 @@
   import * as Field from '../field/index.js'
   import * as KeyboardKey from '../keyboard-key/index.js'
   import * as InputGroup from './index.js'
-  import InputGroupRoot from './input-group.svelte'
+  import InputGroupRoot from './InputGroup.svelte'
 
   const { Story } = defineMeta({
     title: 'Primitives/InputGroup',

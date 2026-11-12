@@ -5,9 +5,9 @@
  * @module
  */
 
-import Content from './tooltip-content.svelte'
-import Trigger from './tooltip-trigger.svelte'
-import Root from './tooltip.svelte'
+import Content from './TooltipContent.svelte'
+import Trigger from './TooltipTrigger.svelte'
+import Root from './Tooltip.svelte'
 
 /** The parts of a tooltip, used as `Tooltip.Root`, `Tooltip.Trigger`, and `Tooltip.Content`. */
 export { Root, Trigger, Content }

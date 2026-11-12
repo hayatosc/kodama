@@ -1,7 +1,7 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import { fn } from 'storybook/test'
-  import AlertDialogContent from './alert-dialog-content.svelte'
+  import AlertDialogContent from './AlertDialogContent.svelte'
   import * as AlertDialog from './index.js'
 
   const { Story } = defineMeta({

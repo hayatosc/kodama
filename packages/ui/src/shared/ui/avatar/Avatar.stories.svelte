@@ -1,6 +1,6 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
-  import AvatarRoot from './avatar.svelte'
+  import AvatarRoot from './Avatar.svelte'
   import * as Avatar from './index.js'
 
   const { Story } = defineMeta({

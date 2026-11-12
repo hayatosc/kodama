@@ -4,7 +4,7 @@
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SearchXIcon from '@lucide/svelte/icons/search-x'
   import { Button } from '../button/index.js'
-  import EmptyRoot from './empty.svelte'
+  import EmptyRoot from './Empty.svelte'
   import * as Empty from './index.js'
 
   const { Story } = defineMeta({

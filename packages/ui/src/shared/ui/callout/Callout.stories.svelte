@@ -4,7 +4,7 @@
   import InfoIcon from '@lucide/svelte/icons/info'
   import LoaderIcon from '@lucide/svelte/icons/loader'
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert'
-  import CalloutRoot from './callout.svelte'
+  import CalloutRoot from './Callout.svelte'
   import * as Callout from './index.js'
 
   const { Story } = defineMeta({
