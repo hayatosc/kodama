@@ -96,7 +96,7 @@
     docs: {
       description: {
         story:
-          'The 11 working colors follow the hue circle. `ink` is reserved for the main agent and `system` for dedicated agents.',
+          'The 11 working colors follow the hue circle. `ink` is reserved for the main agent and `system` for dedicated agents. Each is shown awake and asleep in its birdhouse, whose darker sides keep the same hue.',
       },
     },
   }}
@@ -105,6 +105,7 @@
     {#each colors as color (color)}
       <li class="flex w-16 flex-col items-center gap-1.5">
         <AgentAvatar {color} size={56} label={color} />
+        <AgentAvatar {color} pose="sleep" size={56} label={`${color} asleep`} />
         <code class="mono-xs text-muted-foreground">{color}</code>
       </li>
     {/each}

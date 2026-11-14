@@ -47,7 +47,11 @@
   const faceClip = $props.id()
 
   const cap = $derived(`var(--agent-${color})`)
-  const dark = $derived(`color-mix(in srgb, ${cap} 80%, #3e3157)`)
+  /**
+   * The shading color: the agent's color with its lightness lowered and its hue and chroma kept,
+   * so a shadow never pulls another hue (such as purple) into the bird.
+   */
+  const dark = $derived(`oklch(from ${cap} calc(l * 0.78) c h)`)
   const edge = $derived(`color-mix(in srgb, ${cap} 22%, #fffcf6)`)
   const lifted = $derived(liftsWings(pose))
   const wing = $derived(pose === 'stretch' ? WING_STRETCHED : lifted ? WING_RAISED : WING_FOLDED)
@@ -78,7 +82,7 @@
     <g class="bod">
       <g class="tail">
         <path d={TAIL} fill={cap} />
-        <path d={TAIL} fill="#453464" opacity=".13" />
+        <path d={TAIL} fill={dark} opacity=".4" />
       </g>
       <path class="feet" d={FEET} />
       {#if lifted}
@@ -91,7 +95,7 @@
       <path class="facewhite" clip-path={`url(#${faceClip})`} d={FACE} />
       <g class="wing">
         <path d={wing} fill={cap} />
-        <path d={wing} fill="#453464" opacity=".10" />
+        <path d={wing} fill={dark} opacity=".3" />
         {#if !lifted}
           <path class="featherlines" d="M-12.1 5.8q-.7 2.1-2 3.2M-8.6 6.2q-1 2.2-2.8 3.3" />
         {/if}

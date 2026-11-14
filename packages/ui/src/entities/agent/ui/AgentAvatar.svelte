@@ -146,7 +146,7 @@
     font: 600 7px var(--font-sans);
     fill: var(--bird-face);
     paint-order: stroke;
-    stroke: color-mix(in oklab, var(--hue) 55%, #000);
+    stroke: oklch(from var(--hue) calc(l * 0.55) c h);
     stroke-width: 1.2px;
     stroke-linejoin: round;
     opacity: 0;

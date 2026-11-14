@@ -85,21 +85,29 @@
     transform-origin: 47.5px 27px;
   }
 
-  /* In the avatar, the walls take the agent's color and the rest darkens toward black. */
+  /*
+   * In the avatar, the walls take the agent's color and the side, roof, and post are darker steps
+   * of it: lightness lowered, hue and chroma kept (the roof eases its chroma a little). Mixing in
+   * black dulled the chroma, so a yellow house turned olive and an orange one brown. The hole is
+   * nearly black, tinted with the same hue.
+   */
   .tint .wood {
     fill: var(--hue);
   }
   .tint .wood-side {
-    fill: color-mix(in oklab, var(--hue) 78%, #000);
+    fill: oklch(from var(--hue) calc(l * 0.84) c h);
   }
   .tint .roof {
-    stroke: color-mix(in oklab, var(--hue) 62%, #000);
+    stroke: oklch(from var(--hue) calc(l * 0.66) calc(c * 0.9) h);
   }
   .tint .roof-side {
-    fill: color-mix(in oklab, var(--hue) 68%, #000);
+    fill: oklch(from var(--hue) calc(l * 0.74) calc(c * 0.95) h);
   }
   .tint .post {
-    fill: color-mix(in oklab, var(--hue) 70%, #000);
+    fill: oklch(from var(--hue) calc(l * 0.78) c h);
+  }
+  .tint .hole {
+    fill: oklch(from var(--hue) 0.26 calc(c * 0.3) h);
   }
   .tint .flag,
   .tint .ground {
