@@ -5,13 +5,15 @@
  * @see docs/agents.md — Tool approvals
  * @module
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lte, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lte, ne, or } from 'drizzle-orm'
 import { deferredCalls } from '../../../drizzle/durable-object/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { LocalDb } from './local.ts'
 
 /** Default expiration window (24 hours) for an unanswered tool approval request. */
 export const DEFERRED_CALL_TTL_MS = 24 * 60 * 60 * 1000
+
+const MCP_MODEL_NAME = /^mcp_[a-f0-9]{20}_[a-f0-9]{20}$/u
 
 /** A deferred tool call row. */
 export type DeferredCallRow = typeof deferredCalls.$inferSelect
@@ -47,12 +49,20 @@ export function invalidateMcpDeferredCalls(
       .where(
         and(
           inArray(deferredCalls.state, ['pending', 'approved']),
-          or(isNotNull(deferredCalls.toolDigest), like(deferredCalls.toolName, 'mcp_%')),
+          or(
+            isNotNull(deferredCalls.toolDigest),
+            and(
+              like(deferredCalls.toolName, 'mcp_%'),
+              ne(deferredCalls.toolName, 'mcp_registration'),
+            ),
+          ),
         ),
       )
       .all()
     const staleIds = candidates
       .filter((row) => {
+        // Legacy MCP rows without a digest use mcp_<20hex>_<20hex>; native mcp_* tools do not.
+        if (row.toolDigest === null && !MCP_MODEL_NAME.test(row.toolName)) return false
         const activeDigest = activeDigests.get(row.toolName)
         return activeDigest === undefined || activeDigest !== row.toolDigest
       })

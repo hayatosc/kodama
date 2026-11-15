@@ -25,6 +25,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { createAgentOptions } from './config.ts'
 import { defaultAgentSettings } from '../control-plane/config.ts'
 import { testCredentialStore } from '../testing/credentials.ts'
+import { invalidateMcpDeferredCalls } from './local-db/deferred.ts'
 import { openLocalDb } from './local-db/local.ts'
 import { classifyToolRisk, stableArgsJson, wrapToolWithPermissions } from './permissions.ts'
 import { setAlarm } from './runtime/alarms.ts'
@@ -690,5 +691,91 @@ describe('tool permissions and deferred approvals', () => {
     await waitForAnswer(id, 'mcp-v2')
     expect(remoteExecutions).toBe(0)
     expect(await exports.default.deferredCalls(id)).toHaveLength(2)
+  })
+
+  it('preserves native mcp_registration approvals across settings pushes while expiring legacy MCP rows', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      memoryPolicy: { remember: false, extract: false },
+      tools: ['mcp_registration'],
+      toolPolicy: { mcp_registration: 'ask' },
+    })
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'mcp_registration',
+          arguments: { operation: 'status' },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Awaiting mcp_registration approval.'))
+
+    await exports.default.sendMessage(id, {
+      requestId: 'req-mcp-reg',
+      content: 'List MCP registrations.',
+    })
+    await waitForAnswer(id, 'req-mcp-reg')
+
+    const pendingReg = (await exports.default.deferredCalls(id))[0]
+    if (!pendingReg) throw new Error('Expected pending mcp_registration approval')
+    expect(pendingReg.toolName).toBe('mcp_registration')
+    expect(pendingReg.state).toBe('pending')
+
+    // Pushing updated settings triggers invalidateMcpDeferredCalls via onApplied.
+    await updateSettings(id, {
+      tools: ['mcp_registration', 'current_time'],
+    })
+
+    const afterPush = await exports.default.deferredCalls(id)
+    expect(afterPush).toHaveLength(1)
+    expect(afterPush[0]?.approvalId).toBe(pendingReg.approvalId)
+    expect(afterPush[0]?.state).toBe('pending')
+
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const now = Date.now()
+      local
+        .insert(deferredCallsTable)
+        .values([
+          {
+            approvalId: '01950000-0000-7000-8000-000000000201',
+            toolName: 'mcp_0123456789abcdef0123_0123456789abcdef0123',
+            toolDigest: null,
+            argumentsJson: '{}',
+            reason: 'Legacy MCP call without digest',
+            sourceTask: 'legacy-mcp-source',
+            state: 'approved',
+            createdAt: now,
+            expiresAt: now + 60_000,
+            decidedAt: now,
+          },
+          {
+            approvalId: '01950000-0000-7000-8000-000000000202',
+            toolName: 'mcp_custom_native_helper',
+            toolDigest: null,
+            argumentsJson: '{}',
+            reason: 'Native helper without digest',
+            sourceTask: 'native-helper-source',
+            state: 'pending',
+            createdAt: now,
+            expiresAt: now + 60_000,
+          },
+        ])
+        .run()
+
+      const expiredCount = invalidateMcpDeferredCalls(local, new Map(), now)
+      expect(expiredCount).toBe(1)
+
+      const rows = local.select().from(deferredCallsTable).all()
+      const regRow = rows.find((row) => row.approvalId === pendingReg.approvalId)
+      expect(regRow?.toolDigest).toBeNull()
+      expect(regRow?.state).toBe('pending')
+      expect(
+        rows.find((row) => row.approvalId === '01950000-0000-7000-8000-000000000201')?.state,
+      ).toBe('expired')
+      expect(
+        rows.find((row) => row.approvalId === '01950000-0000-7000-8000-000000000202')?.state,
+      ).toBe('pending')
+    })
   })
 })
