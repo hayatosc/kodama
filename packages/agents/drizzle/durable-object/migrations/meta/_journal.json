@@ -78,6 +78,20 @@
       "when": 1793667682267,
       "tag": "0010_chunky_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794739650789,
+      "tag": "0011_broad_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794743852120,
+      "tag": "0012_funny_random",
+      "breakpoints": true
     }
   ]
 }

@@ -50,12 +50,32 @@ export function storedMemoryCopy(local: LocalDb) {
   return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
 }
 
-/** Replace the prompt, skills, revisions, and check time together. */
+/** Replace the prompt, skills, tasks, revisions, and check time together. */
 export function saveMemoryCopy(local: LocalDb, row: typeof alwaysLoaded.$inferInsert): void {
   local
     .insert(alwaysLoaded)
     .values(row)
     .onConflictDoUpdate({ target: alwaysLoaded.id, set: row })
+    .run()
+}
+
+/** Update the cached active task index immediately when the agent writes a task checkpoint. */
+export function saveLocalTasks(local: LocalDb, tasksJson: string): void {
+  const existing = storedMemoryCopy(local)
+  if (existing) {
+    local.update(alwaysLoaded).set({ tasksJson }).where(eq(alwaysLoaded.id, 1)).run()
+    return
+  }
+  local
+    .insert(alwaysLoaded)
+    .values({
+      id: 1,
+      text: '',
+      revisionsJson: '{}',
+      skillsJson: '[]',
+      tasksJson,
+      checkedAt: 0,
+    })
     .run()
 }
 

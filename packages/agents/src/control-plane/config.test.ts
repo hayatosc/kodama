@@ -45,7 +45,12 @@ describe('agent settings schema', () => {
       labels: ['research', 'team-a'],
       memoryPolicy: { extract: false, remember: true },
       credentials: { primary: { openai: credentialId } },
-      toolPolicy: { current_time: 'allow', remember: 'deny' },
+      toolPolicy: {
+        current_time: 'allow',
+        remember: 'deny',
+        web_search: 'ask',
+        web_fetch: 'auto',
+      },
       sharedSpaces: Array.from({ length: 8 }, (_, index) => `space-${index}`),
     }
     expect(parseInput(schema, settings)).toEqual(settings)
@@ -68,7 +73,7 @@ describe('agent settings schema', () => {
         { ...valid, credentials: { primary: {}, fallback: { openai: credentialId } } },
         'only primary references',
       ],
-      [{ ...valid, toolPolicy: { current_time: 'ask' } }, 'allow or deny'],
+      [{ ...valid, toolPolicy: { current_time: 'maybe' } }, 'allow, ask, auto, or deny'],
       [{ ...valid, labels: ['Team A'] }, 'Labels'],
       [
         { ...valid, sharedSpaces: Array.from({ length: 9 }, (_, index) => `space-${index}`) },

@@ -13,13 +13,15 @@ export const EXTENSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 export const MAX_CONTACT_RESULT_BYTES = 64 * 1024
 /** Maximum UTF-8 bytes in a notification summary, not a substitute for its result. */
 export const MAX_NOTIFICATION_SUMMARY_BYTES = 2048
+/** Maximum UTF-8 bytes in optional outbox details attached to a summary. */
+export const MAX_OUTBOX_DETAILS_BYTES = 16 * 1024
 
 /** A terminal result, distinct from durable admission or a pending execution. */
 export type CompletionOutcome = 'succeeded' | 'failed' | 'cancelled' | 'unanswered'
 
 /** A result reference is scoped to the owning object and never grants access itself. */
 export interface CompletionReference {
-  source: 'contact' | 'schedule' | 'mcp'
+  source: 'contact' | 'schedule' | 'mcp' | 'outbox' | 'approval'
   sourceId: string
 }
 
@@ -27,7 +29,10 @@ export interface CompletionReference {
 export interface CompletionNotice extends CompletionReference {
   outcome: CompletionOutcome
   summary: string
+  details?: string
   artifactIds: string[]
+  deliveryState?: 'pending' | 'dispatched' | 'suppressed'
+  deliverAfter?: number
 }
 
 /** Public metadata only: internal R2 keys and upload state must not cross the RPC boundary. */

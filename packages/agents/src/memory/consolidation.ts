@@ -9,6 +9,7 @@ import type { MemoryJob } from './jobs.ts'
 import type { MemoryDb } from './store/db.ts'
 import type { Scope } from '../../drizzle/memory/schema.ts'
 import { curateSkills } from './store/skills.ts'
+import { curateTasks } from './store/tasks.ts'
 import {
   changedScopes,
   forgetOldClaims,
@@ -61,6 +62,7 @@ export async function consolidateDaily(deps: DailyConsolidationDeps): Promise<{ 
   await resegmentRecords(db)
   await invalidateOverridesOfRequired(db, runId, now)
   await curateSkills(db, runId, now)
+  await curateTasks(db, runId, now)
   const scopes = await changedScopes(db, now - DAY_MS, await deps.readCursor())
   for (const scope of scopes) {
     await deps.enqueue({ kind: 'consolidate', scope, day: consolidationDay(now) })

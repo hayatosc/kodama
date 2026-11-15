@@ -20,6 +20,7 @@ import { record, write } from '../../testing/memory.ts'
 import { isMemoryAgentRequest, requestBody, toolCallResponse } from '../../testing/model.ts'
 import type { ToolCall } from '../../testing/model.ts'
 import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.ts'
+import { taskWriteTool } from './working.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -190,5 +191,44 @@ describe('working memory tools', () => {
     expect(last).toContain("remember is disabled by the agent's memory policy")
     expect(last).toContain("tool memory_search is denied by the agent's tool policy")
     expect(last).not.toContain('accepted (job ')
+  })
+
+  it('persists task progress via task_write, shows it in subsequent prompt sections, and reads via task_read', async () => {
+    const agentId = await newAgentId()
+    const firstTurn = scriptedTurn([
+      {
+        name: 'task_write',
+        arguments: {
+          slug: 'migrate-db',
+          title: 'Migrate DB',
+          status: 'in_progress',
+          summary: 'Step 1 complete',
+          body: 'Run step 2 after verifying checksums.',
+        },
+      },
+    ])
+    await say(agentId, 'task-step-1', 'Start DB migration')
+    expect(firstTurn.at(-1)).toContain('migrate-db')
+    expect(firstTurn.at(-1)).toContain('- [in_progress] migrate-db — Migrate DB: Step 1 complete')
+
+    const secondTurn = scriptedTurn([{ name: 'task_read', arguments: { slug: 'migrate-db' } }])
+    await say(agentId, 'task-step-2', 'Check migration progress')
+    expect(secondTurn[0]).toContain('- [in_progress] migrate-db — Migrate DB: Step 1 complete')
+    expect(secondTurn.at(-1)).toContain('Run step 2 after verifying checksums.')
+
+    const tool = taskWriteTool(
+      {
+        env,
+        agentId: () => agentId,
+        local: async () => {
+          throw new Error('unused')
+        },
+        sharedSpaces: async () => [],
+      },
+      async () => {
+        throw new Error('unused')
+      },
+    )
+    expect(JSON.stringify(tool.parameters)).not.toContain('"archived"')
   })
 })

@@ -116,7 +116,9 @@ export function toolGuardExtension(refusal: Refusal, settings: AppliedSettings):
               'discover_agents',
               'schedule_task',
               'list_scheduled_tasks',
+              'update_scheduled_task',
               'cancel_scheduled_task',
+              'send_outbox',
             ].includes(call.name) &&
             !applied?.tools.includes(call.name)
           )

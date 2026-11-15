@@ -10,7 +10,13 @@ const date = v.string()
 const bounds = { start_at: v.optional(date), end_at: v.optional(date) }
 /** Public schedule grammar; cron has exactly five numeric fields and an explicit IANA zone. */
 export const ScheduleSchema = v.variant('kind', [
-  v.object({ kind: v.literal('once'), run_at: date }),
+  v.object({
+    kind: v.literal('once'),
+    run_at: v.optional(date),
+    delay_seconds: v.optional(
+      v.pipe(v.number(), v.integer(), v.minValue(60), v.maxValue(31_536_000)),
+    ),
+  }),
   v.object({
     kind: v.literal('interval'),
     every_seconds: v.pipe(v.number(), v.integer(), v.minValue(60), v.maxValue(31_536_000)),
@@ -52,8 +58,18 @@ export function scheduleDate(value: string): number {
 export function normalizeSchedule(input: Schedule, now: number): ScheduleSpec {
   input = v.parse(ScheduleSchema, input)
   let spec: ScheduleSpec
-  if (input.kind === 'once') spec = { kind: 'once', start: scheduleDate(input.run_at) }
-  else {
+  if (input.kind === 'once') {
+    const hasRunAt = input.run_at !== undefined
+    const hasDelay = input.delay_seconds !== undefined
+    if (hasRunAt === hasDelay) {
+      throw new TypeError('schedule_once: provide exactly one of run_at or delay_seconds')
+    }
+    const start =
+      input.run_at !== undefined
+        ? scheduleDate(input.run_at)
+        : now + (input.delay_seconds ?? 0) * 1000
+    spec = { kind: 'once', start }
+  } else {
     const start =
       input.start_at === undefined
         ? now + (input.kind === 'interval' ? input.every_seconds * 1000 : 1)

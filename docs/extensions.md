@@ -17,26 +17,32 @@ transport types. `src/validation.ts` supplies strict binary upload and bounded l
   unanswered. Pending work has no terminal expiry. Retained answer text is limited to 64 KiB of
   UTF-8, with explicit truncation and optional artifact references; those references do not imply
   that a recipient can read another object's files. Completed results default to 30-day retention.
-- **Notifications** are agent-wide, not user-specific. They retain a bounded summary and a result
-  reference rather than copying a complete answer or a file. Summaries are at most 2 KiB of UTF-8;
-  notifications default to 30-day retention. Reads use descending sequence pagination. Marking a
-  notification read does not delete its referenced result. Expired references must be explicit.
+- **Notifications and Outbox** are agent-wide, not user-specific. They retain a bounded summary
+  (at most 2 KiB UTF-8), optional outbox details (at most 16 KiB UTF-8), and a result or artifact
+  reference rather than copying a complete model transcript. Notifications default to 30-day
+  retention. Reads use descending sequence pagination. Marking a notification read does not delete
+  its referenced result. Expired references must be explicit.
+- **Event inbox and deferred approvals** (`kodama_event_inbox`, `kodama_deferred_calls`) live in
+  the owning DO SQLite beside `artifacts`, `contactRequests`, `contactReceipts`, and
+  `notifications`.
 
 Generated schema changes live in `drizzle/durable-object/migrations/`; never hand-edit them.
-`artifacts`, `contactRequests`, `contactReceipts`, and `notifications` are local to the owning DO.
 No new DO class, D1 binding, public HTTP endpoint, or credential fallback is needed.
 
 ## Completion and notification atomicity
 
-`src/agent/local-db/notifications.ts` exports `recordNotification(db, notice, now)`. Producers pass
+`src/agent/local-db/notifications.ts` exports `recordNotification(db, notice, now)` and
+`enqueueOutboxNotification(db, notice, now)`. Producers pass
 an existing SQLite transaction so that terminal state and its notification commit together. The
-first `(source, sourceId)` wins, regardless of later summary or outcome changes. This is a terminal
-completion contract, not a generic mutable event feed. A replay never resets acknowledgement.
+first `(source, sourceId)` wins, regardless of later summary or outcome changes (except when two
+paced outbox alerts coalesce before delivery). A replay never resets acknowledgement.
 
-Source IDs are the sender's contact ID or the scheduled occurrence ID, not a schedule definition
-ID. Notification insertion is not an instruction, does not start a model, and does not confer
-owner authority. The caller derives provenance and content from persisted state, never model
-arguments. Do not persist credentials or raw provider failures in notification summaries.
+Source IDs are the sender's contact ID, the scheduled occurrence ID (on terminal failure/refusal),
+`outbox-<taskId>` for `send_outbox`, or the deferred approval ID, never a schedule definition ID.
+Notification insertion is not an instruction, does not start a model, and does not confer
+owner authority. The caller derives provenance and content from persisted state or explicit
+`send_outbox` parameters, never forged source labels. Do not persist credentials or raw provider
+failures in notification summaries.
 
 Across objects, use stable request identity, durable sender progress, and receiver receipts.
 Persist the result and local notification before acknowledging receipt. Network delivery may
@@ -266,6 +272,26 @@ that evidence is not implemented. Artifact reference arrays are currently empty;
 would not grant cross-agent artifact access. The legacy internal `sendTo` RPC stays admission-only.
 No new public service-binding contact-result API is introduced.
 
+## Outbox
+
+Working agents can enable `send_outbox` (`DEFAULT_AGENT_CONFIG` enables it by default) to separate
+internal background reasoning from operator-facing alerts (`src/tools/outbox.ts`,
+`src/agent/outbox.ts`):
+
+- Autonomous scheduled turns run **silently by default**: completing normally without invoking
+  `send_outbox` records no inbox notification (`silence = no anomaly`). Terminal model failures or
+  pre-admission refusals still emit a bounded `schedule` error notification automatically.
+- Calling `send_outbox({ summary, details?, artifactIds?, urgency? })` validates sizes (2 KiB
+  summary, 16 KiB details, up to 16 artifact IDs) and writes an agent-wide `source: 'outbox'`
+  notification.
+- `urgency: 'immediate'` or a first idle notification dispatches immediately (`deliveryState: 'dispatched'`).
+  Subsequent `normal` outbox calls within 60 seconds enqueue as `'pending'` behind the `outbox`
+  alarm purpose and coalesce into the pending notification (`deliveryState: 'coalesced'`) so
+  bursts do not spam the operator.
+- The `kodama-memory` extension also injects a capped `<recent-outbox>` section (the 5 newest
+  dispatched outbox summaries) into the agent's context so subsequent turns avoid repeating the
+  same alert.
+
 ### C: durable inbox
 
 Own notification list/read/retention operations, the notification RPC/CLI, and scheduled completion
@@ -277,7 +303,8 @@ and schedule failure tests. Do not wake a model, inject owner messages, or add S
 #### Inbox API and retention
 
 `AgentService.notifications(agentId, { before?, unreadOnly?, limit? })` lists the admitted working
-agent's inbox. The object-local method has the same name without `agentId`. Sequences sort in
+agent's inbox (filtering out un-flushed `'pending'` and `'coalesced'` outbox entries so paced alerts
+only appear once flushed or coalesced). The object-local method has the same name without `agentId`. Sequences sort in
 **descending** order; `before` is exclusive. The default limit is 50, bounded to 1–100. A page returns
 `{ notifications, nextBefore? }`; use `nextBefore` unchanged for the next page. Concurrent new
 notifications do not shift an existing page cursor. Unread filtering uses the same sequence order.
@@ -295,12 +322,14 @@ receipt exists but has no terminal result. This is metadata availability, not au
 an artifact or another agent's result. Schedule references identify occurrence receipts, not full
 assistant answers; pruning Pi history does not turn them into retained answer text.
 
-Scheduled execution success, model failure, global cancellation and other unanswered completions
-produce one notification with a fixed, bounded summary. Raw provider errors, instructions and answer
-text are not copied into it. Permanent pre-admission refusal or exhausted confirmed pre-admission
-retries also produce a failure notice. Pending work and retries do not. Cancelling a definition only
-stops future materialization: it does not itself produce a completion notice or cancel an admitted
-execution. Accepted recurring execution failure/cancellation does not stop its future reservations.
+Scheduled model failure, global cancellation, unanswered turns, and permanent or exhausted
+pre-admission refusals produce one `schedule` notification with a fixed, bounded summary. Scheduled
+successes stay silent unless the agent explicitly calls `send_outbox`, and deferred tool approvals
+record a `source: 'approval'` notification referencing `approvalId`. Raw provider errors, instructions
+and answer text are not copied into automatic failure summaries. Pending work and retries do not notify.
+Cancelling a definition only stops future materialization: it does not itself produce a completion
+notice or cancel an admitted execution. Accepted recurring execution failure/cancellation does not
+stop its future reservations.
 
 The first atomic pending-to-terminal transition writes both the occurrence receipt and its notice.
 Later settlement, acceptance repair and stale retries cannot revive terminal receipts. Thirty-day

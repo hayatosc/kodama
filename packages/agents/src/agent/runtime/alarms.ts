@@ -22,6 +22,8 @@ export type AlarmPurpose =
   | 'prune'
   | 'jobs'
   | 'artifacts'
+  | 'outbox'
+  | 'inbox'
 
 const KEY_PREFIX = 'kodama:alarm:'
 const PURPOSES: readonly AlarmPurpose[] = [
@@ -32,6 +34,8 @@ const PURPOSES: readonly AlarmPurpose[] = [
   'jobs',
   'prune',
   'artifacts',
+  'outbox',
+  'inbox',
 ]
 const CLAIM_PREFIX = 'kodama:alarm-claim:'
 const RETRY_MS = 60_000

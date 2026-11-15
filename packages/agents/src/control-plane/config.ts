@@ -33,13 +33,13 @@ const THINKING_LEVELS = [
 ] as const satisfies readonly ModelThinkingLevel[]
 const SYSTEM_PROMPT_MAX_LENGTH = 64_000
 
-/** The configuration of a new agent: the default model and prompt, web tools, the `global` space. */
+/** The configuration of a new agent: the default model and prompt, web tools, outbox, the `global` space. */
 export function defaultAgentConfig(env: DefaultModelEnv): AgentConfig {
   return {
     model: { provider: env.DEFAULT_MODEL_PROVIDER, modelId: env.DEFAULT_MODEL_ID },
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     thinkingLevel: 'off',
-    tools: ['web_search', 'web_fetch', 'mcp_registration'],
+    tools: ['web_search', 'web_fetch', 'mcp_registration', 'send_outbox'],
     sharedSpaces: [...DEFAULT_SHARED_SPACES],
   }
 }
@@ -82,6 +82,7 @@ export function agentSettingsSchema(models: Models) {
                 modelName: v.pipe(v.string(), v.regex(/^mcp_[a-f0-9]{20}_[a-f0-9]{20}$/u)),
                 digest: v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/u)),
                 credentialId,
+                readOnly: v.optional(v.boolean()),
               }),
             ),
             v.maxLength(100),
@@ -146,7 +147,10 @@ export function agentSettingsSchema(models: Models) {
         toolPolicy: v.optional(
           v.record(
             v.pipe(v.string(), v.regex(TOOL_NAME, 'toolPolicy keys must be tool names')),
-            v.picklist(['allow', 'deny'], 'toolPolicy values must be allow or deny'),
+            v.picklist(
+              ['allow', 'ask', 'auto', 'deny'],
+              'toolPolicy values must be allow, ask, auto, or deny',
+            ),
           ),
         ),
       },

@@ -3,7 +3,12 @@ import { env } from 'cloudflare:workers'
 import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { mcpAssignments, mcpTools } from '../../../drizzle/management/schema.ts'
-import { desiredSettings, management, newAgentId } from '../../testing/management.ts'
+import {
+  desiredSettings,
+  management,
+  newAgentId,
+  updateSettings,
+} from '../../testing/management.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import { guardMcpSelection, registerMcpCatalog, mcpServer } from './catalog.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
@@ -142,14 +147,21 @@ describe('MCP assignments', () => {
       manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
         operation: 'assign',
         ...selection,
-        readOnly: false,
+        toolIds: [],
       }),
     ).rejects.toThrow()
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      ...selection,
+      readOnly: false,
+    })
+    expect((await desiredSettings(agentId)).toolPolicy?.[tool.modelName]).toBe('ask')
     await assignMcp(call, env.CREDENTIAL_KEK_V1, selection)
     const settings = await desiredSettings(agentId)
     const selected = settings.mcp?.[0]
     if (!selected) throw new Error('Missing applied selection')
     expect(settings.tools).toContain(tool.modelName)
+    expect(settings.toolPolicy?.[tool.modelName]).toBeUndefined()
     expect(selected.digest).toBe(tool.digest)
     expect(await guardMcpSelection(management, agentId, selected)).toMatchObject({
       remoteName: 'read',
@@ -227,5 +239,66 @@ describe('MCP assignments', () => {
         principalId: uuidv7(),
       }),
     ).rejects.toThrow()
+  })
+
+  it('preserves explicit deny policies across both read-only and read-write reassignments while dropping unselected tools', async () => {
+    const { call, agentId, server, credential, change } = await fixture()
+    change([
+      { name: 'read', description: 'Read records', inputSchema: { type: 'object' } },
+      { name: 'drop_me', description: 'Removed tool', inputSchema: { type: 'object' } },
+    ])
+    const initialDiscovery = await discoverMcp(
+      call,
+      env.CREDENTIAL_KEK_V1,
+      server.serverId,
+      credential.credentialId,
+    )
+    const readTool = initialDiscovery.tools.find((t) => t.remoteName === 'read')
+    const dropTool = initialDiscovery.tools.find((t) => t.remoteName === 'drop_me')
+    if (!readTool || !dropTool) throw new Error('Missing fixture tools')
+
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      serverId: server.serverId,
+      credentialId: credential.credentialId,
+      agentId,
+      toolIds: [readTool.toolId, dropTool.toolId],
+      catalogDigest: initialDiscovery.catalogDigest,
+      readOnly: false,
+    })
+
+    await updateSettings(agentId, {
+      toolPolicy: {
+        [readTool.modelName]: 'deny',
+        [dropTool.modelName]: 'deny',
+      },
+    })
+
+    // Reassign as readOnly: true with only readTool selected: deny on readTool must survive.
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      serverId: server.serverId,
+      credentialId: credential.credentialId,
+      agentId,
+      toolIds: [readTool.toolId],
+      catalogDigest: initialDiscovery.catalogDigest,
+      readOnly: true,
+    })
+    let settings = await desiredSettings(agentId)
+    expect(settings.toolPolicy?.[readTool.modelName]).toBe('deny')
+    expect(settings.toolPolicy?.[dropTool.modelName]).toBeUndefined()
+
+    // Reassign as readOnly: false: explicit deny must not relax to 'ask'.
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      serverId: server.serverId,
+      credentialId: credential.credentialId,
+      agentId,
+      toolIds: [readTool.toolId],
+      catalogDigest: initialDiscovery.catalogDigest,
+      readOnly: false,
+    })
+    settings = await desiredSettings(agentId)
+    expect(settings.toolPolicy?.[readTool.modelName]).toBe('deny')
   })
 })

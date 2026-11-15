@@ -17,6 +17,8 @@ import { createWebSearchTool } from './web/search.ts'
 import type { WebCall } from './web/search.ts'
 import { createWebFetchTool } from './web/fetch.ts'
 import { currentTimeTool } from './current-time.ts'
+import { createOutboxTool } from './outbox.ts'
+import type { OutboxSend } from './outbox.ts'
 import { createScheduleTools } from './scheduled-tasks.ts'
 import type { ScheduleTools } from './scheduled-tasks.ts'
 
@@ -31,6 +33,7 @@ export function createAgentTools(
   code?: CodeCall,
   artifacts?: ArtifactCall,
   mcpRegistration?: McpRegistrationCall,
+  outbox?: OutboxSend,
 ): ToolRegistration[] {
   return [
     currentTimeTool,
@@ -42,6 +45,7 @@ export function createAgentTools(
     createWebSearchTool(web),
     createWebFetchTool(web),
     ...createScheduleTools(schedule),
+    createOutboxTool(outbox),
   ]
 }
 

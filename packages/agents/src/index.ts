@@ -19,9 +19,14 @@ import { assignCredential } from './credentials/assignments.ts'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
+  DeferredCallView,
+  IngestEventRequest,
+  IngestEventResponse,
   NotificationPage,
   NotificationQuery,
   NotificationRead,
+  ResolveDeferredCallRequest,
+  ResolveDeferredCallResponse,
   SendMessageRequest,
   SendMessageResponse,
   SubmissionResponse,
@@ -61,7 +66,9 @@ import {
   NotificationReadSchema,
   parseAgentId,
   parseAgentRef,
+  parseIngestEvent,
   parseInput,
+  parseResolveDeferredCall,
 } from './validation.ts'
 
 /**
@@ -186,11 +193,33 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
     return { ...this.#systemCall(), source: 'operator' }
   }
 
-  /** Return existing execution/contact waits and available actions. */
+  /** Return existing execution, contact, and approval waits and available actions. */
   async attention(agentId: string) {
     const agent = await this.#agent(agentId, 'read')
     using result = await agent.attention()
     return Array.from(result)
+  }
+
+  /** List recent and pending deferred tool call approvals for this agent. */
+  async deferredCalls(agentId: string): Promise<DeferredCallView[]> {
+    const agent = await this.#agent(agentId, 'read')
+    using result = await agent.deferredCalls()
+    return Array.from(result)
+  }
+
+  /** Approve or deny a pending deferred tool call and queue a follow-up resume event. */
+  async resolveDeferredCall(
+    agentId: string,
+    request: ResolveDeferredCallRequest,
+  ): Promise<ResolveDeferredCallResponse> {
+    const input = parseResolveDeferredCall(request)
+    const agent = await this.#agent(agentId, 'chat')
+    using result = await agent.resolveDeferredCall(input)
+    return {
+      approvalId: result.approvalId,
+      state: result.state,
+      ...(result.resumeEventId === undefined ? {} : { resumeEventId: result.resumeEventId }),
+    }
   }
 
   /** Read retained management events without exposing credential envelopes or appending read events. */
@@ -439,6 +468,20 @@ export default class AgentService extends WorkerEntrypoint<AgentEnv> {
   async sendMessage(agentId: string, message: SendMessageRequest): Promise<SendMessageResponse> {
     const submissionId = await (await this.#agent(agentId, 'chat')).sendMessage(message)
     return { agentId, requestId: message.requestId, submissionId }
+  }
+
+  /**
+   * Fast-ack event ingestion into the agent's durable inbox without waiting for model execution.
+   */
+  async ingestEvent(agentId: string, request: IngestEventRequest): Promise<IngestEventResponse> {
+    const input = parseIngestEvent(request)
+    using result = await (await this.#agent(agentId, 'chat')).ingestEvent(input)
+    return {
+      agentId: result.agentId,
+      eventId: result.eventId,
+      requestId: result.requestId,
+      queued: result.queued,
+    }
   }
 
   /** List the admitted working agent's inbox; paused and archived agents remain readable. */

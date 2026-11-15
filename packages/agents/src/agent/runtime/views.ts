@@ -14,6 +14,7 @@ import type {
 } from '../../protocol.ts'
 import type { LocalDb } from '../local-db/local.ts'
 import { pendingContacts } from '../local-db/contacts.ts'
+import { pendingDeferredCalls } from '../local-db/deferred.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -39,7 +40,7 @@ export async function submissionOf(
   return submission === undefined ? undefined : toSubmissionStatus(requestId, submission)
 }
 
-/** Project execution/contact waits; unknown progress timestamps remain null. */
+/** Project execution/contact/approval waits; unknown progress timestamps remain null. */
 export async function attentionOf(harness: Harness, db: LocalDb): Promise<AttentionItem[]> {
   const watch = await watchEvents(harness, ROOT_CONVERSATION_ID, context)
   try {
@@ -67,6 +68,7 @@ export async function attentionOf(harness: Harness, db: LocalDb): Promise<Attent
         actions: ['cancel'],
       })
     }
+    const now = Date.now()
     for (const row of pendingContacts(db)) {
       items.push({
         source: 'contact',
@@ -74,6 +76,16 @@ export async function attentionOf(harness: Harness, db: LocalDb): Promise<Attent
         reason: row.state === 'dispatching' ? 'contact_delivery_wait' : 'contact_result_wait',
         lastProgressAt: row.createdAt,
         actions: [],
+      })
+    }
+    for (const call of pendingDeferredCalls(db, now)) {
+      items.push({
+        source: 'approval',
+        id: call.approvalId,
+        reason: call.reason,
+        lastProgressAt: call.createdAt,
+        actions: ['approve', 'deny'],
+        toolName: call.toolName,
       })
     }
     return items

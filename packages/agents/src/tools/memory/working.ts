@@ -8,11 +8,19 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { Harness, ToolRegistration } from '@earendil-works/pi-durable'
-import { currentRunInputs } from '../../agent/runtime/inputs.ts'
+import { currentRunInputs, operatorInput } from '../../agent/runtime/inputs.ts'
 import { searchHistory } from '../../memory/archive/history.ts'
 import type { HistoryResult } from '../../memory/archive/history.ts'
 import { isSkillName } from '../../memory/skills.ts'
 import { useSkill } from '../../memory/store/skills.ts'
+import { isTaskSlug } from '../../memory/tasks.ts'
+import {
+  listTaskProgress,
+  readTaskProgress,
+  visibleTasks,
+  writeTaskProgress,
+} from '../../memory/store/tasks.ts'
+import { updateLocalTasks } from '../../memory/working/always-loaded.ts'
 import { memoryDb, readableScopes } from '../../memory/store/db.ts'
 import { searchMemory } from '../../memory/store/search.ts'
 import { requestRemember } from '../../memory/working/remember.ts'
@@ -104,7 +112,7 @@ export function rememberTool(
   return defineTool({
     name: 'remember',
     description:
-      'Keep something in long-term memory: a standing instruction or something the user asked you to remember, a decision with its reason, a correction, a lesson from a failure, or a durable fact you had to look up. Not for task progress, guesses, secrets, or one-off requests.',
+      'Keep durable facts, standing instructions, decisions with reasons, corrections, or lessons learned in long-term memory. Use task_write for active multi-step task progress; never store guesses, secrets, or one-off requests.',
     parameters: Type.Object({
       content: Type.String({ minLength: 1, maxLength: 2_000 }),
     }),
@@ -112,8 +120,9 @@ export function rememberTool(
     execute: async ({ content }, _api, context) => {
       const inputs = await currentRunInputs(await harness(), context)
       if (!inputs) throw new Error('Remember requires an active execution')
-      // The last input remains the quota/evidence anchor, not a claim of sole execution ownership.
-      const status = await requestRemember(deps, inputs.at(-1)?.id, content)
+      // Prefer the latest operator input as the quota/evidence anchor so mixed turns keep operator context.
+      const anchor = inputs.findLast((entry) => operatorInput(entry) !== undefined) ?? inputs.at(-1)
+      const status = await requestRemember(deps, anchor?.id, content)
       return {
         output: [{ type: 'text', text: `accepted (job ${status.jobId})` }],
         details: { jobId: status.jobId },
@@ -140,6 +149,123 @@ export function skillReadTool(deps: WorkingMemoryDeps): ToolRegistration {
         : undefined
       if (body === undefined) throw new Error(`No skill named ${name}`)
       return { output: [{ type: 'text', text: body }] }
+    },
+  })
+}
+
+/** `task_write`: creates or updates a durable task progress checkpoint across session resets. */
+export function taskWriteTool(
+  deps: WorkingMemoryDeps,
+  harness: () => Promise<Harness>,
+): ToolRegistration {
+  return defineTool({
+    name: 'task_write',
+    description:
+      'Create or update a durable task progress checkpoint (notes, checklist, blockers, completion) so work survives session resets.',
+    parameters: Type.Object({
+      slug: Type.String({
+        minLength: 1,
+        maxLength: 64,
+        description: 'Lowercase slug (a-z, 0-9, hyphens) identifying the task',
+      }),
+      title: Type.String({ minLength: 1, maxLength: 128 }),
+      status: Type.Union([
+        Type.Literal('in_progress'),
+        Type.Literal('blocked'),
+        Type.Literal('completed'),
+      ]),
+      summary: Type.String({
+        minLength: 1,
+        maxLength: 280,
+        description: 'One-line current state shown in the always-loaded task index',
+      }),
+      body: Type.String({
+        minLength: 1,
+        maxLength: 16_000,
+        description: 'Full progress notes, next steps, and blockers',
+      }),
+      revision: Type.Optional(Type.Integer({ minimum: 1 })),
+    }),
+    replay: 'safe',
+    execute: async ({ slug, title, status, summary, body, revision }, api, context) => {
+      const db = memoryDb(deps.env.MEMORY_DB)
+      const inputs = await currentRunInputs(await harness(), context)
+      const now = deps.now?.() ?? Date.now()
+      const taskId = String(api.taskId)
+      const result = await writeTaskProgress(
+        db,
+        {
+          opId: `task:${deps.agentId()}:${slug}:${taskId}`,
+          jobId: taskId,
+          runId: String(inputs?.at(-1)?.id ?? taskId),
+          actor: deps.agentId(),
+          now,
+        },
+        {
+          agentId: deps.agentId(),
+          slug,
+          title,
+          status,
+          summary,
+          body,
+          ...(revision === undefined ? {} : { revision }),
+        },
+      )
+      if (result.status !== 'applied') {
+        return { output: [{ type: 'text', text: JSON.stringify(result) }] }
+      }
+      const syncLocalTasks = async () => {
+        await updateLocalTasks(deps, await visibleTasks(db, deps.agentId()))
+      }
+      await (deps.serialize ? deps.serialize(syncLocalTasks) : syncLocalTasks())
+      return { output: [{ type: 'text', text: JSON.stringify(result) }] }
+    },
+  })
+}
+
+/** `task_read`: reads full details of one task checkpoint, or lists non-archived checkpoints. */
+export function taskReadTool(deps: WorkingMemoryDeps): ToolRegistration {
+  return defineTool({
+    name: 'task_read',
+    description:
+      'Read full notes of one task checkpoint by slug, or omit slug to list active and completed tasks.',
+    parameters: Type.Object({
+      slug: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    }),
+    replay: 'safe',
+    execute: async ({ slug }) => {
+      const db = memoryDb(deps.env.MEMORY_DB)
+      if (slug !== undefined) {
+        const row = isTaskSlug(slug) ? await readTaskProgress(db, deps.agentId(), slug) : undefined
+        if (!row) throw new Error(`No task checkpoint named ${slug}`)
+        return {
+          output: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                slug: row.slug,
+                title: row.title,
+                status: row.status,
+                revision: row.revision,
+                summary: row.summary,
+                body: row.body,
+                updatedAt: row.updatedAt,
+              }),
+            },
+          ],
+        }
+      }
+      const rows = await listTaskProgress(db, deps.agentId())
+      const text =
+        rows.length === 0
+          ? 'No task checkpoints.'
+          : rows
+              .map(
+                (row) =>
+                  `- [${row.status}] ${row.slug} (rev ${row.revision}): ${row.title} — ${row.summary}`,
+              )
+              .join('\n')
+      return { output: [{ type: 'text', text }] }
     },
   })
 }

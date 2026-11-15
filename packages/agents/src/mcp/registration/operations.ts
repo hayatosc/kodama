@@ -49,7 +49,7 @@ const requestSchema = v.variant('operation', [
     agentId: id,
     toolIds: v.pipe(v.array(id), v.minLength(1), v.maxLength(100)),
     catalogDigest: v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/u)),
-    readOnly: v.literal(true),
+    readOnly: v.optional(v.boolean(), true),
   }),
   v.strictObject({ operation: v.literal('unassign'), serverId: id, agentId: id }),
   v.strictObject({
@@ -170,10 +170,15 @@ export async function unassignMcp(call: ManagementCall, agentId: string, serverI
   const settings = parseSettings(call.models, JSON.parse(previous.settingsJson))
   const removed = (settings.mcp ?? []).filter((tool) => tool.serverId === serverId)
   const names = new Set(removed.map((tool) => tool.modelName))
+  const nextToolPolicy: Record<string, 'allow' | 'ask' | 'auto' | 'deny'> = {}
+  for (const [toolName, policy] of Object.entries(settings.toolPolicy ?? {})) {
+    if (!names.has(toolName)) nextToolPolicy[toolName] = policy
+  }
   const updated = parseSettings(call.models, {
     ...settings,
     mcp: (settings.mcp ?? []).filter((tool) => tool.serverId !== serverId),
     tools: settings.tools.filter((tool) => !names.has(tool)),
+    toolPolicy: Object.keys(nextToolPolicy).length > 0 ? nextToolPolicy : undefined,
   })
   await call.db.batch([
     mcpCommit(

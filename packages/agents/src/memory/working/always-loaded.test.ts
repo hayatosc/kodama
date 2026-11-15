@@ -14,14 +14,18 @@ import { memoryRecords } from '../../../drizzle/memory/schema.ts'
 import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
-  AGENT_MEMORY_BUDGET,
+  AGENT_FACT_BUDGET,
+  AGENT_INSTRUCTION_BUDGET,
   refreshAlwaysLoaded,
   renderAlwaysLoaded,
   refreshAlwaysLoadedIfChanged,
   REVISION_CHECK_INTERVAL_MS,
   SHARED_MEMORY_BUDGET,
   storedMemoryText,
+  updateLocalTasks,
 } from './always-loaded.ts'
+import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
+import { storedMemoryCopy } from '../../agent/local-db/memory.ts'
 import { seedOnce } from '../../testing/management.ts'
 
 // The memory agent needs the seeded installation and its credentials.
@@ -30,6 +34,43 @@ beforeAll(seedOnce)
 afterEach(() => vi.restoreAllMocks())
 
 describe('always-loaded cache revisions', () => {
+  it('marks an empty fallback row stale on updateLocalTasks so onlyIfChanged renders memory immediately', async () => {
+    const agentId = uuidv7()
+    await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: 'Always verify checksums',
+      sourceAgentId: agentId,
+    })
+    const clock = Date.now()
+    const rendered = await runInDurableObject(
+      env.AGENTS.getByName(agentId),
+      async (_instance, state) => {
+        const local = await openLocalDb(state.storage)
+        local.delete(alwaysLoaded).run()
+        const memory = {
+          env,
+          agentId: () => agentId,
+          local: () => Promise.resolve(local),
+          sharedSpaces: () => Promise.resolve([]),
+          now: () => clock,
+        }
+        await updateLocalTasks(memory, [
+          {
+            slug: 'verify-build',
+            title: 'Verify build',
+            status: 'in_progress',
+            summary: 'Step 1',
+          },
+        ])
+        expect(storedMemoryCopy(local)?.checkedAt).toBe(0)
+        await refreshAlwaysLoadedIfChanged(memory)
+        return storedMemoryText(memory)
+      },
+    )
+    expect(rendered).toContain('Always verify checksums')
+  })
+
   it('detects a shared replacement committed between reading content and storing its revision', async () => {
     const agentId = uuidv7()
     const space = uuidv7()
@@ -72,7 +113,7 @@ describe('always-loaded cache revisions', () => {
           })
           expect(result.status).toBe('applied')
         },
-        1,
+        2,
       )
       await refreshAlwaysLoaded(memory)
       const initial = await storedMemoryText(memory)
@@ -93,32 +134,35 @@ describe('always-loaded cache revisions', () => {
 })
 
 describe('always-loaded budgets', () => {
-  /** The lines of one block, and the characters its header reports as used. */
-  function block(text: string, label: string, budget: number) {
+  /** The lines of one static-header block and their serialized character cost. */
+  function block(text: string, label: string) {
     const lines = text.split('\n')
-    const start = lines.findIndex((line) => line.startsWith(`${label} [`))
-    const header = lines[start] ?? ''
+    const start = lines.findIndex((line) => line === label)
+    expect(start).toBeGreaterThan(-1)
     const end = lines.findIndex((line, index) => index > start && !line.startsWith('- '))
     const body = lines.slice(start + 1, end === -1 ? undefined : end)
     const used = body.reduce((sum, line) => sum + line.length + 1, 0)
-    const total = budget.toLocaleString('en-US')
-    expect(header).toBe(
-      `${label} [${Math.round((used / budget) * 100)}% — ${used.toLocaleString('en-US')}/${total} chars]`,
-    )
     return { body, used }
   }
 
-  it('keeps the most important records within 2,200 agent and 1,000 shared characters', async () => {
+  it('keeps instructions and facts in separate static-header budgets alongside shared records', async () => {
     const agentId = uuidv7()
     const space = uuidv7()
     const padded = (label: string) => label.padEnd(100, '.')
-    for (let index = 0; index < 30; index++) {
+    await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: padded('Standing instruction 0'),
+      sourceAgentId: agentId,
+      importance: 0.1,
+    })
+    for (let index = 0; index < 20; index++) {
       await write({
         scope: `agent:${agentId}`,
         kind: 'fact',
         content: padded(`Agent fact ${index}`),
         sourceAgentId: agentId,
-        importance: index / 100,
+        importance: 0.9 + index / 1000,
       })
       if (index < 15) {
         await write({
@@ -133,14 +177,19 @@ describe('always-loaded budgets', () => {
 
     const { text } = await renderAlwaysLoaded(db, agentId, [space])
 
-    expect([AGENT_MEMORY_BUDGET, SHARED_MEMORY_BUDGET]).toEqual([2_200, 1_000])
-    const agent = block(text, 'MEMORY', AGENT_MEMORY_BUDGET)
-    const shared = block(text, 'SHARED', SHARED_MEMORY_BUDGET)
-    // Each line is 103 characters with its newline: 21 fit in 2,200, and 9 in 1,000.
-    expect(agent.used).toBe(21 * 103)
+    expect([AGENT_INSTRUCTION_BUDGET, AGENT_FACT_BUDGET, SHARED_MEMORY_BUDGET]).toEqual([
+      1_200, 1_500, 1_000,
+    ])
+    const instructions = block(text, 'INSTRUCTIONS')
+    const notes = block(text, 'NOTES')
+    const shared = block(text, 'SHARED')
+    // Standing instruction is preserved despite 20 higher-importance facts.
+    expect(instructions.body).toEqual([`- ${padded('Standing instruction 0')}`])
+    // Each line is 103 characters with its newline: 14 fit in 1,500, and 9 in 1,000.
+    expect(notes.used).toBe(14 * 103)
     expect(shared.used).toBe(9 * 103)
-    expect(agent.body[0]).toBe(`- ${padded('Agent fact 29')}`)
-    expect(text).not.toContain('Agent fact 8.')
+    expect(notes.body[0]).toBe(`- ${padded('Agent fact 19')}`)
+    expect(text).not.toContain('Agent fact 5.')
     expect(shared.body[0]).toBe(`- ${padded('Shared fact 14')}`)
     expect(text).not.toContain('Shared fact 5.')
   })
@@ -182,6 +231,6 @@ describe('always-loaded budgets', () => {
     const { text } = await renderAlwaysLoaded(db, agentId, [space])
 
     // The block holds 250 such lines, so overridden rows must not use up its reads.
-    expect(block(text, 'SHARED', SHARED_MEMORY_BUDGET).body).toHaveLength(245)
+    expect(block(text, 'SHARED').body).toHaveLength(245)
   })
 })

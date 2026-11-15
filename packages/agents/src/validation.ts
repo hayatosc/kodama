@@ -9,7 +9,12 @@ import { validate } from 'uuid'
 import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
 import { MAX_ARTIFACT_BYTES } from './extensions.ts'
-import type { RenameAgentRequest, SendMessageRequest } from './protocol.ts'
+import type {
+  IngestEventRequest,
+  RenameAgentRequest,
+  ResolveDeferredCallRequest,
+  SendMessageRequest,
+} from './protocol.ts'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -235,10 +240,41 @@ export const SendMessageRequestSchema = v.object(
       v.check((content) => content.trim().length > 0, contentMessage),
       v.maxLength(MESSAGE_CONTENT_MAX_LENGTH, contentMessage),
     ),
-    whenBusy: v.optional(v.picklist(['followUp', 'steer'], 'whenBusy must be followUp or steer')),
+    whenBusy: v.optional(
+      v.picklist(
+        ['followUp', 'steer', 'interrupt'],
+        'whenBusy must be followUp, steer, or interrupt',
+      ),
+    ),
   },
   'Expected a message with requestId and content',
 ) satisfies v.GenericSchema<unknown, SendMessageRequest>
+
+/** An asynchronous event ingested into the durable agent inbox before processing. */
+export const IngestEventSchema = v.strictObject({
+  requestId: RequestIdSchema,
+  source: v.picklist(['user', 'webhook', 'schedule', 'peer', 'mcp', 'approval']),
+  content: v.pipe(
+    v.string(contentMessage),
+    v.check((content) => content.trim().length > 0, contentMessage),
+    v.maxLength(MESSAGE_CONTENT_MAX_LENGTH, contentMessage),
+  ),
+  sessionMode: v.optional(v.picklist(['resume', 'new'])),
+  whenBusy: v.optional(v.picklist(['followUp', 'steer', 'interrupt'])),
+  metadata: v.optional(
+    v.record(
+      v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
+      v.pipe(v.string(), v.maxLength(1_024)),
+    ),
+  ),
+}) satisfies v.GenericSchema<unknown, IngestEventRequest>
+
+/** Operator approval or denial for a deferred side-effecting tool call. */
+export const ResolveDeferredCallSchema = v.strictObject({
+  approvalId: v.pipe(v.string(), v.regex(UUID_PATTERN, 'approvalId must be a lowercase UUID v7')),
+  decision: v.picklist(['approve', 'deny']),
+  note: v.optional(v.pipe(v.string(), v.maxLength(1_000))),
+}) satisfies v.GenericSchema<unknown, ResolveDeferredCallRequest>
 
 /**
  * Parse a public agent ID.
@@ -274,4 +310,22 @@ export function parseRequestId(value: unknown): string {
  */
 export function parseMessage(value: unknown): SendMessageRequest {
   return parseInput(SendMessageRequestSchema, value)
+}
+
+/**
+ * Parse an asynchronous event for the agent inbox.
+ *
+ * @throws {@link TypeError} When `value` is not a valid event request.
+ */
+export function parseIngestEvent(value: unknown): IngestEventRequest {
+  return parseInput(IngestEventSchema, value)
+}
+
+/**
+ * Parse an operator resolution for a deferred tool call.
+ *
+ * @throws {@link TypeError} When `value` is not a valid resolution request.
+ */
+export function parseResolveDeferredCall(value: unknown): ResolveDeferredCallRequest {
+  return parseInput(ResolveDeferredCallSchema, value)
 }

@@ -182,7 +182,7 @@ describe('remember', () => {
     })
     await waitForAnswer(agentId, 'later')
     expect(bodies.at(-1)).toContain(fact)
-    expect(bodies.at(-1)).toContain('MEMORY [')
+    expect(bodies.at(-1)).toContain('<memory>')
   })
 
   it('returns the same job when the same remember job is delivered twice', async () => {
