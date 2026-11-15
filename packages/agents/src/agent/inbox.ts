@@ -5,25 +5,38 @@
  * @see docs/agents.md — Event inbox
  * @module
  */
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Harness, SubmissionDraft } from '@earendil-works/pi-durable'
 import type { InboxEventSource } from '../protocol.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
-  coalesceInboxBatch,
+  clearInboxBatchReservation,
   nextInboxWake,
-  pendingInboxEvents,
   markInboxAdmitted,
+  reserveInboxBatch,
   retainInbox,
   retryInboxBatch,
   settleInboxEvents,
 } from './local-db/inbox.ts'
 import { setAlarm, setAlarmNoLaterThan } from './runtime/alarms.ts'
-import { isIdle } from './runtime/harness.ts'
 import { submissionOf } from './runtime/views.ts'
-import { latestEntryId } from '../memory/transcript.ts'
 
-const context = BACKGROUND_CONTEXT
+const BUSY_FOR_NEW_SESSION_MESSAGE = 'session_busy_for_new'
+
+/** Construct the sentinel error thrown inside atomic admission when `sessionMode: 'new'` finds Pi busy. */
+export function busyForNewSessionError(): Error {
+  return new Error(BUSY_FOR_NEW_SESSION_MESSAGE)
+}
+
+/** Whether an error indicates `sessionMode: 'new'` deferred because Pi was not idle. */
+export function isBusyForNewSessionError(error: unknown): boolean {
+  return error instanceof Error && error.message === BUSY_FOR_NEW_SESSION_MESSAGE
+}
+
+/** Options controlling atomic preemption and session isolation inside `Agent.admit`. */
+export interface AdmitOptions {
+  interrupt?: boolean
+  sessionMode?: 'resume' | 'new'
+}
 
 /** Arm the `inbox` alarm before admitting work so a crash before dispatch still recovers. */
 export function armInbox(storage: DurableObjectStorage): Promise<void> {
@@ -55,12 +68,13 @@ export async function dispatchInbox(
   admit: (
     draft: SubmissionDraft,
     actorKind: 'user' | 'agent' | 'system',
+    options?: AdmitOptions,
   ) => Promise<{ id: number }>,
 ): Promise<void> {
   for (let round = 0; round < 5; round++) {
     const batch = await serialize(async () => {
       retainInbox(local, Date.now())
-      return coalesceInboxBatch(pendingInboxEvents(local, Date.now()))
+      return reserveInboxBatch(local, Date.now())
     })
     if (!batch) break
     const ids = batch.batch.map((row) => row.id)
@@ -71,23 +85,6 @@ export async function dispatchInbox(
           markInboxAdmitted(local, ids, existing.id, Date.now())
         })
         continue
-      }
-
-      if (batch.whenBusy === 'interrupt' && !(await isIdle(harness))) {
-        const root = await harness.root(context)
-        await root.abort(context)
-      }
-
-      if (batch.sessionMode === 'new') {
-        if (!(await isIdle(harness))) {
-          // Wait until the active session finishes before isolating a fresh session context.
-          await setAlarmNoLaterThan(storage, 'inbox', Date.now() + 5_000)
-          return
-        }
-        if ((await latestEntryId(harness)) !== undefined) {
-          const root = await harness.root(context)
-          await root.reset(undefined, context)
-        }
       }
 
       await prepare(batch.primarySource)
@@ -110,11 +107,22 @@ export async function dispatchInbox(
                 data: { source: batch.primarySource, count: batch.batch.length },
               },
       }
-      const submission = await admit(draft, actorKind)
+      const submission = await admit(draft, actorKind, {
+        interrupt: batch.whenBusy === 'interrupt',
+        sessionMode: batch.sessionMode,
+      })
       await serialize(async () => {
         markInboxAdmitted(local, ids, submission.id, Date.now())
       })
     } catch (error) {
+      if (isBusyForNewSessionError(error)) {
+        await serialize(async () => {
+          clearInboxBatchReservation(local, ids)
+        })
+        // Wait until the active session finishes before isolating a fresh session context.
+        await setAlarmNoLaterThan(storage, 'inbox', Date.now() + 5_000)
+        return
+      }
       await serialize(async () => {
         const accepted = await submissionOf(harness, batch.requestId)
         if (accepted) {

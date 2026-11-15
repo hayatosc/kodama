@@ -60,7 +60,7 @@ export function saveMemoryCopy(local: LocalDb, row: typeof alwaysLoaded.$inferIn
 }
 
 /** Update the cached active task index immediately when the agent writes a task checkpoint. */
-export function saveLocalTasks(local: LocalDb, tasksJson: string, now: number): void {
+export function saveLocalTasks(local: LocalDb, tasksJson: string): void {
   const existing = storedMemoryCopy(local)
   if (existing) {
     local.update(alwaysLoaded).set({ tasksJson }).where(eq(alwaysLoaded.id, 1)).run()
@@ -74,7 +74,7 @@ export function saveLocalTasks(local: LocalDb, tasksJson: string, now: number): 
       revisionsJson: '{}',
       skillsJson: '[]',
       tasksJson,
-      checkedAt: now,
+      checkedAt: 0,
     })
     .run()
 }

@@ -5,7 +5,7 @@
  * @see docs/agents.md — Event inbox
  * @module
  */
-import { and, asc, eq, inArray, lte } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, lte } from 'drizzle-orm'
 import { eventInbox } from '../../../drizzle/durable-object/schema.ts'
 import type { InboxEventSource, SessionMode } from '../../protocol.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
@@ -29,6 +29,16 @@ export interface InboxPayload {
   label?: string
 }
 
+/** A cohesive batch of queued inbox events sharing session mode and trust source. */
+export interface CoalescedInboxBatch {
+  batch: InboxEventRow[]
+  sessionMode: SessionMode
+  whenBusy: 'followUp' | 'steer' | 'interrupt'
+  requestId: string
+  content: string
+  primarySource: InboxEventSource
+}
+
 /** Parse a stored `payloadJson` field safely. */
 export function parseInboxPayload(payloadJson: string): InboxPayload {
   try {
@@ -50,6 +60,48 @@ export function parseInboxPayload(payloadJson: string): InboxPayload {
   return { content: payloadJson }
 }
 
+/** Insert or deduplicate an inbox event inside an existing SQLite transaction. */
+export function enqueueInboxEventInTx(
+  tx: Pick<LocalDb, 'select' | 'insert'>,
+  input: {
+    requestId: string
+    source: InboxEventSource
+    sessionMode: SessionMode
+    whenBusy: 'followUp' | 'steer' | 'interrupt'
+    content: string
+    label?: string
+  },
+  now: number,
+): { row: InboxEventRow; deduplicated: boolean } {
+  const existing = tx
+    .select()
+    .from(eventInbox)
+    .where(eq(eventInbox.requestId, input.requestId))
+    .get()
+  if (existing) return { row: existing, deduplicated: true }
+  const payload: InboxPayload = {
+    content: input.content,
+    ...(input.label === undefined ? {} : { label: input.label }),
+  }
+  const inserted = tx
+    .insert(eventInbox)
+    .values({
+      id: uuidv7(),
+      requestId: input.requestId,
+      source: input.source,
+      sessionMode: input.sessionMode,
+      whenBusy: input.whenBusy,
+      payloadJson: JSON.stringify(payload),
+      state: 'queued',
+      attempts: 0,
+      nextRetryAt: now,
+      createdAt: now,
+    })
+    .returning()
+    .get()
+  return { row: inserted, deduplicated: false }
+}
+
 /**
  * Persist an inbound event immediately without waiting for OAuth, D1, or Pi admission.
  * Deduplicates by `requestId` so duplicate webhook/user deliveries return the existing row.
@@ -66,35 +118,15 @@ export function enqueueInboxEvent(
   },
   now: number,
 ): { row: InboxEventRow; deduplicated: boolean } {
-  return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(eventInbox)
-      .where(eq(eventInbox.requestId, input.requestId))
-      .get()
-    if (existing) return { row: existing, deduplicated: true }
-    const payload: InboxPayload = {
-      content: input.content,
-      ...(input.label === undefined ? {} : { label: input.label }),
-    }
-    const inserted = tx
-      .insert(eventInbox)
-      .values({
-        id: uuidv7(),
-        requestId: input.requestId,
-        source: input.source,
-        sessionMode: input.sessionMode,
-        whenBusy: input.whenBusy,
-        payloadJson: JSON.stringify(payload),
-        state: 'queued',
-        attempts: 0,
-        nextRetryAt: now,
-        createdAt: now,
-      })
-      .returning()
-      .get()
-    return { row: inserted, deduplicated: false }
-  })
+  return db.transaction((tx) => enqueueInboxEventInTx(tx, input, now))
+}
+
+/** Look up an inbox event by caller `requestId` so coalesced callers can resolve Pi status. */
+export function inboxEventByRequest(
+  db: Pick<LocalDb, 'select'>,
+  requestId: string,
+): InboxEventRow | undefined {
+  return db.select().from(eventInbox).where(eq(eventInbox.requestId, requestId)).get()
 }
 
 /** Queued events whose retry window is due, oldest first. */
@@ -108,33 +140,19 @@ export function pendingInboxEvents(db: LocalDb, now: number): InboxEventRow[] {
     .all()
 }
 
-/**
- * Group a contiguous run of queued events that share the same `sessionMode` so a burst of external
- * triggers runs as one prompt instead of N separate turns.
- */
-export function coalesceInboxBatch(rows: readonly InboxEventRow[]):
-  | {
-      batch: InboxEventRow[]
-      sessionMode: SessionMode
-      whenBusy: 'followUp' | 'steer' | 'interrupt'
-      requestId: string
-      content: string
-      primarySource: InboxEventSource
-    }
-  | undefined {
-  const first = rows[0]
+function buildCoalescedBatch(
+  batch: InboxEventRow[],
+  batchRequestId?: string,
+): CoalescedInboxBatch | undefined {
+  const first = batch[0]
   if (!first) return undefined
-  const batch: InboxEventRow[] = [first]
-  for (const row of rows.slice(1)) {
-    if (row.sessionMode !== first.sessionMode) break
-    batch.push(row)
-  }
   const rank = (mode: InboxEventRow['whenBusy']) =>
     mode === 'interrupt' ? 2 : mode === 'steer' ? 1 : 0
   let whenBusy = first.whenBusy
   for (const row of batch) {
     if (rank(row.whenBusy) > rank(whenBusy)) whenBusy = row.whenBusy
   }
+  const requestId = batchRequestId ?? first.requestId
   if (batch.length === 1) {
     const payload = parseInboxPayload(first.payloadJson)
     const prefix =
@@ -145,7 +163,7 @@ export function coalesceInboxBatch(rows: readonly InboxEventRow[]):
       batch,
       sessionMode: first.sessionMode,
       whenBusy,
-      requestId: first.requestId,
+      requestId,
       content: `${prefix}${payload.content}`,
       primarySource: first.source,
     }
@@ -158,10 +176,81 @@ export function coalesceInboxBatch(rows: readonly InboxEventRow[]):
     batch,
     sessionMode: first.sessionMode,
     whenBusy,
-    requestId: first.requestId,
+    requestId,
     content: `[Coalesced ${batch.length} queued events]\n${lines.join('\n')}`,
-    primarySource: batch.some((row) => row.source === 'user') ? 'user' : first.source,
+    primarySource: first.source,
   }
+}
+
+/**
+ * Group a contiguous run of queued events that share both `sessionMode` and `source` so external
+ * events never promote to direct-operator provenance or mix trust origins.
+ */
+export function coalesceInboxBatch(
+  rows: readonly InboxEventRow[],
+): CoalescedInboxBatch | undefined {
+  const first = rows[0]
+  if (!first) return undefined
+  const batch: InboxEventRow[] = [first]
+  for (const row of rows.slice(1)) {
+    if (row.sessionMode !== first.sessionMode || row.source !== first.source) break
+    batch.push(row)
+  }
+  return buildCoalescedBatch(batch)
+}
+
+/**
+ * Atomically claim or resume a durable batch in `eventInbox` before Pi admission so crash recovery
+ * marks only the events that actually belonged to the admitted submission.
+ */
+export function reserveInboxBatch(db: LocalDb, now: number): CoalescedInboxBatch | undefined {
+  return db.transaction((tx) => {
+    const reservedMarker = tx
+      .select({ batchRequestId: eventInbox.batchRequestId })
+      .from(eventInbox)
+      .where(and(eq(eventInbox.state, 'queued'), isNotNull(eventInbox.batchRequestId)))
+      .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
+      .limit(1)
+      .get()?.batchRequestId
+    if (reservedMarker) {
+      const reservedRows = tx
+        .select()
+        .from(eventInbox)
+        .where(and(eq(eventInbox.state, 'queued'), eq(eventInbox.batchRequestId, reservedMarker)))
+        .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
+        .all()
+      if (reservedRows.length > 0) {
+        return buildCoalescedBatch(reservedRows, reservedMarker)
+      }
+    }
+    const due = tx
+      .select()
+      .from(eventInbox)
+      .where(and(eq(eventInbox.state, 'queued'), lte(eventInbox.nextRetryAt, now)))
+      .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
+      .limit(INBOX_BATCH_LIMIT)
+      .all()
+    const batch = coalesceInboxBatch(due)
+    if (!batch) return undefined
+    const ids = batch.batch.map((row) => row.id)
+    tx.update(eventInbox)
+      .set({ batchRequestId: batch.requestId })
+      .where(inArray(eventInbox.id, ids))
+      .run()
+    return {
+      ...batch,
+      batch: batch.batch.map((row) => ({ ...row, batchRequestId: batch.requestId })),
+    }
+  })
+}
+
+/** Release batch reservation before Pi admission when a `sessionMode: 'new'` wake must defer. */
+export function clearInboxBatchReservation(db: LocalDb, ids: readonly string[]): void {
+  if (ids.length === 0) return
+  db.update(eventInbox)
+    .set({ batchRequestId: null })
+    .where(and(inArray(eventInbox.id, [...ids]), eq(eventInbox.state, 'queued')))
+    .run()
 }
 
 /** Mark a batch of inbox items admitted into Pi with the resulting submission ID. */
@@ -178,11 +267,11 @@ export function markInboxAdmitted(
     .run()
 }
 
-/** Mark admitted items settled once Pi reaches a terminal state. */
+/** Mark admitted items settled once Pi reaches a terminal state (or permanent refusal clears batch). */
 export function settleInboxEvents(db: LocalDb, ids: readonly string[], now: number): void {
   if (ids.length === 0) return
   db.update(eventInbox)
-    .set({ state: 'settled', settledAt: now })
+    .set({ state: 'settled', batchRequestId: null, settledAt: now })
     .where(inArray(eventInbox.id, [...ids]))
     .run()
 }
@@ -194,12 +283,13 @@ export function retryInboxBatch(db: LocalDb, rows: readonly InboxEventRow[], now
       const nextAttempts = row.attempts + 1
       if (nextAttempts >= INBOX_MAX_ATTEMPTS) {
         tx.update(eventInbox)
-          .set({ state: 'failed', attempts: nextAttempts, settledAt: now })
+          .set({ state: 'failed', batchRequestId: null, attempts: nextAttempts, settledAt: now })
           .where(eq(eventInbox.id, row.id))
           .run()
       } else {
         tx.update(eventInbox)
           .set({
+            batchRequestId: null,
             attempts: nextAttempts,
             nextRetryAt: now + INBOX_RETRY_DELAY_MS * 2 ** row.attempts,
           })

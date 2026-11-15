@@ -5,7 +5,7 @@
  * @see docs/agents.md — Tool approvals
  * @module
  */
-import { and, asc, desc, eq, gt, lte } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lte, or } from 'drizzle-orm'
 import { deferredCalls } from '../../../drizzle/durable-object/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { LocalDb } from './local.ts'
@@ -28,6 +28,51 @@ export function expireDeferredCalls(db: LocalDb, now: number): number {
 }
 
 /**
+ * Expire pending or approved MCP deferred calls whose tool selection was removed or whose
+ * definition digest changed.
+ */
+export function invalidateMcpDeferredCalls(
+  db: LocalDb,
+  activeDigests: ReadonlyMap<string, string>,
+  now: number,
+): number {
+  return db.transaction((tx) => {
+    const candidates = tx
+      .select({
+        approvalId: deferredCalls.approvalId,
+        toolName: deferredCalls.toolName,
+        toolDigest: deferredCalls.toolDigest,
+      })
+      .from(deferredCalls)
+      .where(
+        and(
+          inArray(deferredCalls.state, ['pending', 'approved']),
+          or(isNotNull(deferredCalls.toolDigest), like(deferredCalls.toolName, 'mcp_%')),
+        ),
+      )
+      .all()
+    const staleIds = candidates
+      .filter((row) => {
+        const activeDigest = activeDigests.get(row.toolName)
+        return activeDigest === undefined || activeDigest !== row.toolDigest
+      })
+      .map((row) => row.approvalId)
+    if (staleIds.length === 0) return 0
+    return tx
+      .update(deferredCalls)
+      .set({ state: 'expired', decidedAt: now })
+      .where(
+        and(
+          inArray(deferredCalls.approvalId, staleIds),
+          inArray(deferredCalls.state, ['pending', 'approved']),
+        ),
+      )
+      .returning({ approvalId: deferredCalls.approvalId })
+      .all().length
+  })
+}
+
+/**
  * Persist a pending deferred tool call atomically; idempotent on `sourceTask` so tool replay
  * returns the same `approvalId`.
  */
@@ -35,6 +80,7 @@ export function createDeferredCall(
   db: LocalDb,
   input: {
     toolName: string
+    toolDigest?: string | null
     argumentsJson: string
     reason: string
     sourceTask: string
@@ -53,6 +99,7 @@ export function createDeferredCall(
       .values({
         approvalId: uuidv7(),
         toolName: input.toolName,
+        toolDigest: input.toolDigest ?? null,
         argumentsJson: input.argumentsJson,
         reason: input.reason,
         sourceTask: input.sourceTask,
@@ -76,14 +123,15 @@ export function getDeferredCall(
 }
 
 /**
- * Consume an approved deferred call matching `(toolName, argumentsJson)` atomically so one
- * approval authorizes exactly one execution.
+ * Consume an approved deferred call matching `(toolName, toolDigest, argumentsJson)` atomically so
+ * one approval authorizes exactly one execution against the reviewed tool definition.
  */
 export function consumeApprovedCall(
   db: LocalDb,
   toolName: string,
   argumentsJson: string,
   now: number,
+  toolDigest: string | null = null,
 ): DeferredCallRow | undefined {
   return db.transaction((tx) => {
     const match = tx
@@ -92,6 +140,9 @@ export function consumeApprovedCall(
       .where(
         and(
           eq(deferredCalls.toolName, toolName),
+          toolDigest !== null
+            ? eq(deferredCalls.toolDigest, toolDigest)
+            : isNull(deferredCalls.toolDigest),
           eq(deferredCalls.argumentsJson, argumentsJson),
           eq(deferredCalls.state, 'approved'),
           gt(deferredCalls.expiresAt, now),
@@ -113,6 +164,40 @@ export function consumeApprovedCall(
   })
 }
 
+/** Record an operator decision inside an existing SQLite transaction. */
+export function decideDeferredCallInTx(
+  tx: Pick<LocalDb, 'select' | 'update'>,
+  approvalId: string,
+  decision: 'approve' | 'deny',
+  note: string | undefined,
+  now: number,
+): { row: DeferredCallRow; alreadyDecided: boolean } {
+  tx.update(deferredCalls)
+    .set({ state: 'expired', decidedAt: now })
+    .where(and(eq(deferredCalls.state, 'pending'), lte(deferredCalls.expiresAt, now)))
+    .run()
+  const row = tx.select().from(deferredCalls).where(eq(deferredCalls.approvalId, approvalId)).get()
+  if (!row) throw new Error('approval_not_found')
+  const targetState = decision === 'approve' ? 'approved' : 'denied'
+  if (row.state === targetState || (row.state === 'consumed' && decision === 'approve')) {
+    return { row, alreadyDecided: true }
+  }
+  if (row.state !== 'pending') {
+    throw new Error(`approval_not_pending:${row.state}`)
+  }
+  const updated = tx
+    .update(deferredCalls)
+    .set({
+      state: targetState,
+      operatorNote: note ?? null,
+      decidedAt: now,
+    })
+    .where(and(eq(deferredCalls.approvalId, approvalId), eq(deferredCalls.state, 'pending')))
+    .returning()
+    .get()
+  return { row: updated, alreadyDecided: false }
+}
+
 /** Record an operator decision (`approve` or `deny`) on a pending deferred call. */
 export function decideDeferredCall(
   db: LocalDb,
@@ -121,36 +206,7 @@ export function decideDeferredCall(
   note: string | undefined,
   now: number,
 ): { row: DeferredCallRow; alreadyDecided: boolean } {
-  return db.transaction((tx) => {
-    tx.update(deferredCalls)
-      .set({ state: 'expired', decidedAt: now })
-      .where(and(eq(deferredCalls.state, 'pending'), lte(deferredCalls.expiresAt, now)))
-      .run()
-    const row = tx
-      .select()
-      .from(deferredCalls)
-      .where(eq(deferredCalls.approvalId, approvalId))
-      .get()
-    if (!row) throw new Error('approval_not_found')
-    const targetState = decision === 'approve' ? 'approved' : 'denied'
-    if (row.state === targetState || (row.state === 'consumed' && decision === 'approve')) {
-      return { row, alreadyDecided: true }
-    }
-    if (row.state !== 'pending') {
-      throw new Error(`approval_not_pending:${row.state}`)
-    }
-    const updated = tx
-      .update(deferredCalls)
-      .set({
-        state: targetState,
-        operatorNote: note ?? null,
-        decidedAt: now,
-      })
-      .where(and(eq(deferredCalls.approvalId, approvalId), eq(deferredCalls.state, 'pending')))
-      .returning()
-      .get()
-    return { row: updated, alreadyDecided: false }
-  })
+  return db.transaction((tx) => decideDeferredCallInTx(tx, approvalId, decision, note, now))
 }
 
 /** Pending non-expired deferred calls for `attention()` projection, oldest first. */

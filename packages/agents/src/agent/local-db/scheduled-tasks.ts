@@ -116,7 +116,7 @@ export function cancelReservation(db: LocalDb, id: string) {
   })
 }
 
-/** Update an active or paused reservation (pause, resume, or revise instruction/schedule). */
+/** Update an active or paused reservation (pause, resume, or revise instruction/schedule/mode). */
 export function updateReservation(
   db: LocalDb,
   id: string,
@@ -125,6 +125,8 @@ export function updateReservation(
     instruction?: string
     rule?: ScheduleSpec
     nextDue?: number | null
+    sessionMode?: 'resume' | 'new'
+    followupHop?: number
   },
 ) {
   return db.transaction((tx) => {
@@ -136,11 +138,26 @@ export function updateReservation(
     let nextState: ScheduledTask['state'] = row.state
     if (patch.action === 'pause') nextState = 'paused'
     if (patch.action === 'resume') nextState = 'active'
+    if (row.category === 'followup' && row.state === 'paused' && nextState === 'active') {
+      const followups =
+        tx
+          .select({ value: count() })
+          .from(tasks)
+          .where(and(eq(tasks.category, 'followup'), eq(tasks.state, 'active')))
+          .get()?.value ?? 0
+      if (followups >= MAX_ACTIVE_FOLLOWUPS) {
+        throw new Error(
+          `schedule_followup_quota: maximum ${MAX_ACTIVE_FOLLOWUPS} active follow-up timers`,
+        )
+      }
+    }
     const updates: Partial<typeof tasks.$inferInsert> = {
       state: nextState,
       ...(patch.instruction === undefined ? {} : { instruction: patch.instruction }),
       ...(patch.rule === undefined ? {} : { rule: patch.rule, cursor: null }),
       ...(patch.nextDue === undefined ? {} : { nextDue: patch.nextDue }),
+      ...(patch.sessionMode === undefined ? {} : { sessionMode: patch.sessionMode }),
+      ...(patch.followupHop === undefined ? {} : { followupHop: patch.followupHop }),
     }
     const updated = tx.update(tasks).set(updates).where(eq(tasks.id, id)).returning().get()
     return { status: 'updated' as const, task: updated }

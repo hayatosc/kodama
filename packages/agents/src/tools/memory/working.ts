@@ -173,7 +173,6 @@ export function taskWriteTool(
         Type.Literal('in_progress'),
         Type.Literal('blocked'),
         Type.Literal('completed'),
-        Type.Literal('archived'),
       ]),
       summary: Type.String({
         minLength: 1,
@@ -215,7 +214,10 @@ export function taskWriteTool(
       if (result.status !== 'applied') {
         return { output: [{ type: 'text', text: JSON.stringify(result) }] }
       }
-      await updateLocalTasks(deps, await visibleTasks(db, deps.agentId()))
+      const syncLocalTasks = async () => {
+        await updateLocalTasks(deps, await visibleTasks(db, deps.agentId()))
+      }
+      await (deps.serialize ? deps.serialize(syncLocalTasks) : syncLocalTasks())
       return { output: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   })

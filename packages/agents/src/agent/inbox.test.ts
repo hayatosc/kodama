@@ -4,12 +4,18 @@
  *
  * @module
  */
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { eventInbox } from '../../drizzle/durable-object/schema.ts'
+import { dispatchInbox } from './inbox.ts'
+import { isKnownUrl } from './local-db/external-data.ts'
+import { enqueueInboxEvent, reserveInboxBatch } from './local-db/inbox.ts'
 import { openLocalDb } from './local-db/local.ts'
 import { setAlarm } from './runtime/alarms.ts'
+import { withHarness } from '../testing/harness.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { requestBody, textResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
@@ -74,12 +80,113 @@ describe('event inbox', () => {
 
     await wakeInbox(id)
     await waitForAnswer(id, 'wh-1')
+    await waitForAnswer(id, 'wh-2')
+    using secondSubmission = await exports.default.submission(id, 'wh-2')
+    expect(secondSubmission?.submission.status).toBe('done')
     expect(fetch).toHaveBeenCalledTimes(1)
 
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       const rows = local.select().from(eventInbox).all()
       expect(rows.every((row) => row.state === 'admitted')).toBe(true)
+    })
+  })
+
+  it('keeps user events and external webhook events in separate batches and trust origins', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, { memoryPolicy: { remember: true, extract: false } })
+
+    await exports.default.ingestEvent(id, {
+      requestId: 'mix-user-1',
+      source: 'user',
+      content: 'Read https://example.org/user-approved',
+    })
+    await exports.default.ingestEvent(id, {
+      requestId: 'mix-webhook-1',
+      source: 'webhook',
+      content: 'Untrusted webhook payload https://example.org/webhook-untrusted',
+    })
+
+    const observedBodies: string[] = []
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      observedBodies.push(requestBody(init))
+      return textResponse(`Handled batch ${observedBodies.length}.`)
+    })
+
+    await wakeInbox(id)
+    await waitForAnswer(id, 'mix-user-1')
+    await waitForAnswer(id, 'mix-webhook-1')
+
+    expect(observedBodies).toHaveLength(2)
+    expect(observedBodies[0]).toContain('https://example.org/user-approved')
+    expect(observedBodies[0]).not.toContain('webhook-untrusted')
+    expect(observedBodies[1]).toContain('https://example.org/webhook-untrusted')
+
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      expect(
+        isKnownUrl(local, String(ROOT_CONVERSATION_ID), 'https://example.org/user-approved'),
+      ).toBe(true)
+      expect(
+        isKnownUrl(local, String(ROOT_CONVERSATION_ID), 'https://example.org/webhook-untrusted'),
+      ).toBe(false)
+    })
+  })
+
+  it('recovers reserved batch membership without absorbing later queued events', async () => {
+    await withHarness({}, async (harness, state) => {
+      const local = await openLocalDb(state.storage)
+      const now = Date.now()
+      enqueueInboxEvent(
+        local,
+        {
+          requestId: 'crash-ev-a',
+          source: 'webhook',
+          sessionMode: 'resume',
+          whenBusy: 'followUp',
+          content: 'Event A',
+        },
+        now,
+      )
+      // Simulate reserving A before Pi accepts A, then crashing before markInboxAdmitted runs.
+      const reserved = reserveInboxBatch(local, now)
+      expect(reserved?.requestId).toBe('crash-ev-a')
+      const root = await harness.root(BACKGROUND_CONTEXT)
+      await root.submit(
+        { type: 'input', requestId: 'crash-ev-a', content: 'Event A' },
+        BACKGROUND_CONTEXT,
+      )
+      // Event B arrives before recovery runs.
+      enqueueInboxEvent(
+        local,
+        {
+          requestId: 'crash-ev-b',
+          source: 'webhook',
+          sessionMode: 'resume',
+          whenBusy: 'followUp',
+          content: 'Event B',
+        },
+        now + 10,
+      )
+
+      const admittedDrafts: string[] = []
+      await dispatchInbox(
+        local,
+        harness,
+        state.storage,
+        (operation) => operation(),
+        async () => {},
+        async (draft) => {
+          if (draft.requestId) admittedDrafts.push(draft.requestId)
+          return root.submit(draft, BACKGROUND_CONTEXT)
+        },
+      )
+
+      expect(admittedDrafts).toEqual(['crash-ev-b'])
+      const rows = local.select().from(eventInbox).all()
+      expect(rows).toHaveLength(2)
+      expect(rows.every((row) => row.state === 'admitted')).toBe(true)
+      expect(rows.find((row) => row.requestId === 'crash-ev-b')?.batchRequestId).toBe('crash-ev-b')
     })
   })
 
@@ -207,6 +314,79 @@ describe('event inbox', () => {
       expect(longStatus?.submission.status).toBe('unanswered')
     } finally {
       slowFinish.resolve(textResponse('Late'))
+    }
+  })
+
+  it('deduplicates concurrent same-requestId interrupt calls without aborting the replacement turn', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, { memoryPolicy: { remember: true, extract: false } })
+
+    const oldStarted = Promise.withResolvers<void>()
+    const oldFinish = Promise.withResolvers<Response>()
+    const replacementStarted = Promise.withResolvers<void>()
+    const replacementFinish = Promise.withResolvers<Response>()
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async (_input, init) => {
+        oldStarted.resolve()
+        if (init?.signal) {
+          const signal = init.signal
+          if (signal.aborted) throw signal.reason
+          return Promise.race([
+            oldFinish.promise,
+            new Promise<Response>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+            }),
+          ])
+        }
+        return oldFinish.promise
+      })
+      .mockImplementationOnce(async (_input, init) => {
+        replacementStarted.resolve()
+        if (init?.signal) {
+          const signal = init.signal
+          if (signal.aborted) throw signal.reason
+          return Promise.race([
+            replacementFinish.promise,
+            new Promise<Response>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+            }),
+          ])
+        }
+        return replacementFinish.promise
+      })
+
+    try {
+      await exports.default.sendMessage(id, {
+        requestId: 'old-slow',
+        content: 'Old slow work.',
+      })
+      await oldStarted.promise
+
+      const [sub1, sub2] = await Promise.all([
+        exports.default.sendMessage(id, {
+          requestId: 'dup-interrupt',
+          whenBusy: 'interrupt',
+          content: 'Replacement request.',
+        }),
+        exports.default.sendMessage(id, {
+          requestId: 'dup-interrupt',
+          whenBusy: 'interrupt',
+          content: 'Replacement request.',
+        }),
+      ])
+      expect(sub1).toStrictEqual(sub2)
+      await replacementStarted.promise
+      replacementFinish.resolve(textResponse('Replacement succeeded.'))
+      await waitForAnswer(id, 'dup-interrupt')
+
+      using dupStatus = await exports.default.submission(id, 'dup-interrupt')
+      expect(dupStatus?.submission.status).toBe('done')
+      using oldStatus = await exports.default.submission(id, 'old-slow')
+      expect(oldStatus?.submission.status).toBe('unanswered')
+    } finally {
+      oldFinish.resolve(textResponse('Late old'))
+      replacementFinish.resolve(textResponse('Late replacement'))
     }
   })
 })

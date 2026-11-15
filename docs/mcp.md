@@ -15,8 +15,8 @@ Registration and discovery expose **no model tools**. Assignment requires explic
 current catalog digest, a server-bound credential, an active working agent, and an optional
 `readOnly` boolean (default `true`; chat proposals stay read-only, while RPC `assign` with
 `readOnly: false` sets `readOnly: false` on each pinned selection and defaults `toolPolicy[modelName]`
-to `'ask'`). A catalog
-update never selects additions. Definitions are immutable by digest; names are fixed ASCII
+to `'ask'`; any explicit `'deny'` policy on tools that remain selected is preserved across
+reassignment. A catalog update never selects additions. Definitions are immutable by digest; names are fixed ASCII
 `mcp_<server short ID>_<tool short ID>`. The registry changes only at the existing safe-apply boundary.
 Live management checks reject revoked credentials, removed selections, changed definitions,
 disabled tools, and disabled registrations before each send, including after refresh.

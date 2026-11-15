@@ -23,6 +23,7 @@ import { openLocalDb } from './local-db/local.ts'
 import { listReservations, insertReservation, claimOccurrence } from './local-db/scheduled-tasks.ts'
 import { isKnownUrl, markContact } from './local-db/external-data.ts'
 import { setAlarm } from './runtime/alarms.ts'
+import { createScheduleTools } from '../tools/scheduled-tasks.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -533,7 +534,11 @@ describe('scheduled dispatch and receipts', () => {
     })
   })
 
-  it('supports pausing, resuming, and editing schedules via update_scheduled_task', async () => {
+  it('supports pausing, resuming, and editing schedules and session_mode via update_scheduled_task', async () => {
+    expect(
+      createScheduleTools().find((tool) => tool.name === 'update_scheduled_task')?.replay,
+    ).toBe('unsafe')
+
     const id = await enabled()
     vi.mocked(fetch).mockImplementationOnce(async () =>
       toolCallResponse({
@@ -546,13 +551,14 @@ describe('scheduled dispatch and receipts', () => {
     )
     await exports.default.sendMessage(id, { requestId: 'create-upd', content: 'Schedule check.' })
     await waitForAnswer(id, 'create-upd')
-    const taskId = (await rows(id)).tasks[0]?.taskId
-    if (!taskId) throw new Error('Missing task')
+    const created = (await rows(id)).tasks[0]
+    if (!created) throw new Error('Missing task')
+    expect(created.sessionMode).toBe('new')
 
     vi.mocked(fetch).mockImplementationOnce(async () =>
       toolCallResponse({
         name: 'update_scheduled_task',
-        arguments: { task_id: taskId, action: 'pause' },
+        arguments: { task_id: created.taskId, action: 'pause' },
       }),
     )
     await exports.default.sendMessage(id, { requestId: 'pause-upd', content: 'Pause it.' })
@@ -562,7 +568,11 @@ describe('scheduled dispatch and receipts', () => {
     vi.mocked(fetch).mockImplementationOnce(async () =>
       toolCallResponse({
         name: 'update_scheduled_task',
-        arguments: { task_id: taskId, action: 'resume', instruction: 'Updated check' },
+        arguments: {
+          task_id: created.taskId,
+          action: 'resume',
+          instruction: 'Updated check',
+        },
       }),
     )
     await exports.default.sendMessage(id, { requestId: 'resume-upd', content: 'Resume and edit.' })
@@ -571,6 +581,19 @@ describe('scheduled dispatch and receipts', () => {
       state: 'active',
       instruction: 'Updated check',
     })
+
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'update_scheduled_task',
+        arguments: { task_id: created.taskId, session_mode: 'resume' },
+      }),
+    )
+    await exports.default.sendMessage(id, {
+      requestId: 'mode-upd',
+      content: 'Switch session mode to resume.',
+    })
+    await waitForAnswer(id, 'mode-upd')
+    expect((await rows(id)).tasks[0]?.sessionMode).toBe('resume')
   })
 
   it('allows autonomous one-time follow-ups up to the hop limit and sends alerts only via send_outbox', async () => {
@@ -602,6 +625,7 @@ describe('scheduled dispatch and receipts', () => {
     expect(followup).toMatchObject({
       category: 'followup',
       followupHop: 1,
+      sessionMode: 'resume',
       state: 'active',
     })
     const inbox = await exports.default.notifications(id)
@@ -614,7 +638,7 @@ describe('scheduled dispatch and receipts', () => {
       },
     ])
 
-    // Hop 5 execution cannot schedule a 6th follow-up.
+    // Hop 5 execution can edit instruction on a follow-up, but cannot schedule or reschedule to hop 6.
     if (!followup) throw new Error('Missing follow-up task')
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
@@ -625,7 +649,18 @@ describe('scheduled dispatch and receipts', () => {
         .where(eq(scheduledTasks.id, followup.taskId))
         .run()
     })
+    let observedCreateReject = ''
+    let observedUpdateReject = ''
     vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'update_scheduled_task',
+          arguments: {
+            task_id: followup.taskId,
+            instruction: 'Updated instruction at hop 5',
+          },
+        }),
+      )
       .mockImplementationOnce(async () =>
         toolCallResponse({
           name: 'schedule_task',
@@ -636,7 +671,17 @@ describe('scheduled dispatch and receipts', () => {
         }),
       )
       .mockImplementationOnce(async (_input, init) => {
-        expect(requestBody(init)).toContain('schedule_followup_limit')
+        observedCreateReject = requestBody(init)
+        return toolCallResponse({
+          name: 'update_scheduled_task',
+          arguments: {
+            task_id: followup.taskId,
+            schedule: { kind: 'once', delay_seconds: 120 },
+          },
+        })
+      })
+      .mockImplementationOnce(async (_input, init) => {
+        observedUpdateReject = requestBody(init)
         return textResponse('Limit reached')
       })
     await wake(id)
@@ -646,7 +691,54 @@ describe('scheduled dispatch and receipts', () => {
           (await rows(id)).tasks.find((t) => t.taskId === followup.taskId)?.latest?.outcome,
       )
       .toBe('done')
-    expect((await rows(id)).tasks).toHaveLength(2)
+    expect(observedCreateReject).toContain('schedule_followup_limit')
+    expect(observedUpdateReject).toContain('schedule_followup_limit')
+    const afterHop5 = (await rows(id)).tasks
+    expect(afterHop5).toHaveLength(2)
+    expect(afterHop5.find((t) => t.taskId === followup.taskId)).toMatchObject({
+      instruction: 'Updated instruction at hop 5',
+      followupHop: 5,
+    })
+  })
+
+  it('advances followupHop when an autonomous run reschedules a follow-up', async () => {
+    const id = await enabled()
+    const task = await due(id)
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'schedule_task',
+        arguments: {
+          schedule: { kind: 'once', delay_seconds: 120 },
+          instruction: 'Follow-up timer',
+        },
+      }),
+    )
+    await wake(id)
+    await waitForAnswer(id, `scheduled-${task.id}-${task.rule.start}`)
+    const followup = (await rows(id)).tasks.find((t) => t.taskId !== task.id)
+    if (!followup) throw new Error('Missing follow-up task')
+
+    const secondTask = await due(id)
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      local
+        .update(scheduledTasks)
+        .set({ followupHop: 2 })
+        .where(eq(scheduledTasks.id, secondTask.id))
+        .run()
+    })
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      toolCallResponse({
+        name: 'update_scheduled_task',
+        arguments: {
+          task_id: followup.taskId,
+          schedule: { kind: 'once', delay_seconds: 300 },
+        },
+      }),
+    )
+    await wake(id)
+    await waitForAnswer(id, `scheduled-${secondTask.id}-${secondTask.rule.start}`)
+    expect((await rows(id)).tasks.find((t) => t.taskId === followup.taskId)?.followupHop).toBe(3)
   })
 
   it('isolates session_mode new scheduled turns via root.reset() without breaking prior history', async () => {
@@ -659,18 +751,72 @@ describe('scheduled dispatch and receipts', () => {
     await waitForAnswer(id, 'prior-msg')
 
     const task = await due(id)
+    let observedBody = ''
     vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
-      const body = requestBody(init)
-      expect(body).toContain('Read https://example.org/scheduled-only')
-      expect(body).not.toContain('prior-secret-99')
+      observedBody = requestBody(init)
       return textResponse('Fresh scheduled check complete.')
     })
 
     await wake(id)
     await waitForAnswer(id, `scheduled-${task.id}-${task.rule.start}`)
+    expect(observedBody).toContain('Read https://example.org/scheduled-only')
+    expect(observedBody).not.toContain('prior-secret-99')
     await runInDurableObject(env.AGENTS.getByName(id), async (instance) => {
       const page = await instance.readEntries({ after: 0, limit: 50 })
       expect(page.entries.map((e) => e.text).join('\n')).toContain('prior-secret-99')
     })
+  })
+
+  it('defers session_mode new scheduled dispatch while a turn is active and runs isolated after it finishes', async () => {
+    const id = await enabled()
+    const started = Promise.withResolvers<void>()
+    const finishSlow = Promise.withResolvers<Response>()
+    let observedScheduledBody = ''
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () => {
+        started.resolve()
+        return finishSlow.promise
+      })
+      .mockImplementationOnce(async (_input, init) => {
+        observedScheduledBody = requestBody(init)
+        return textResponse('Isolated scheduled run complete.')
+      })
+
+    try {
+      await exports.default.sendMessage(id, {
+        requestId: 'active-operator-turn',
+        content: 'Active secret active-secret-77.',
+      })
+      await started.promise
+
+      const task = await due(id)
+      await wake(id)
+
+      // Busy session must defer without cancelling the active turn or resetting mid-turn.
+      expect((await rows(id)).tasks[0]?.latest).toMatchObject({
+        state: 'dispatching',
+        attempts: 0,
+      })
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
+
+      finishSlow.resolve(textResponse('Operator turn finished.'))
+      await waitForAnswer(id, 'active-operator-turn')
+
+      await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+        const local = await openLocalDb(state.storage)
+        local
+          .update(scheduledTaskOccurrences)
+          .set({ retryAt: Date.now() - 1 })
+          .run()
+      })
+      await wake(id)
+      await waitForAnswer(id, `scheduled-${task.id}-${task.rule.start}`)
+
+      expect(observedScheduledBody).toContain('Read https://example.org/scheduled-only')
+      expect(observedScheduledBody).not.toContain('active-secret-77')
+    } finally {
+      finishSlow.resolve(textResponse('Cleanup'))
+    }
   })
 })

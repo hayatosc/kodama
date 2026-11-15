@@ -21,6 +21,7 @@ import m0008 from '../../../drizzle/durable-object/migrations/0008_complex_yello
 import m0009 from '../../../drizzle/durable-object/migrations/0009_certain_shocker.sql?raw'
 import m0010 from '../../../drizzle/durable-object/migrations/0010_chunky_ironclad.sql?raw'
 import m0011 from '../../../drizzle/durable-object/migrations/0011_broad_lilith.sql?raw'
+import m0012 from '../../../drizzle/durable-object/migrations/0012_funny_random.sql?raw'
 import * as schema from '../../../drizzle/durable-object/schema.ts'
 
 /** Drizzle handle of one object's local tables. */
@@ -48,6 +49,7 @@ export const localMigrations = {
     m0009,
     m0010,
     m0011,
+    m0012,
   },
 }
 

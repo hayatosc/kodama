@@ -300,4 +300,31 @@ describe('outbox pacing and coalescing', () => {
       ])
     })
   })
+
+  it('measures cooldown from dispatch time across consecutive pacing windows', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      enqueueOutboxNotification(
+        db,
+        { sourceId: 'win-1', summary: 'Window 1', artifactIds: [], urgency: 'normal' },
+        10_000,
+      )
+      enqueueOutboxNotification(
+        db,
+        { sourceId: 'win-2', summary: 'Window 2', artifactIds: [], urgency: 'normal' },
+        20_000,
+      )
+      const secondDispatchAt = 10_000 + OUTBOX_PACING_WINDOW_MS
+      expect(dispatchDueOutbox(db, secondDispatchAt)).toBe(1)
+
+      const third = enqueueOutboxNotification(
+        db,
+        { sourceId: 'win-3', summary: 'Window 3', artifactIds: [], urgency: 'normal' },
+        secondDispatchAt + 10_000,
+      )
+      expect(third?.deliveryState).toBe('pending')
+      expect(third?.deliverAfter).toBe(secondDispatchAt + OUTBOX_PACING_WINDOW_MS)
+      expect(nextOutboxWake(db)).toBe(secondDispatchAt + OUTBOX_PACING_WINDOW_MS)
+    })
+  })
 })

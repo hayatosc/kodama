@@ -9,6 +9,7 @@
 import type { JsonValue } from '@earendil-works/chord'
 import type { TSchema } from '@earendil-works/pi-ai'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
+import { sha256Hex } from '../lib/hash.ts'
 import { consumeApprovedCall, createDeferredCall } from './local-db/deferred.ts'
 import type { LocalDb } from './local-db/local.ts'
 import { recordNotification } from './local-db/notifications.ts'
@@ -24,6 +25,7 @@ export interface PermissionDeps {
   settings: AppliedSettings
   onDeferred?: () => Promise<void>
   isReadOnlyMcp?: (toolName: string) => Promise<boolean> | boolean
+  toolDigest?: (toolName: string) => Promise<string | undefined> | string | undefined
 }
 
 const LOW_RISK_TOOLS = new Set([
@@ -60,12 +62,12 @@ const HIGH_RISK_TOOLS = new Set([
 function normalizeForJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeForJson)
   if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
+    const entries: [string, unknown][] = []
     for (const key of Object.keys(value).sort()) {
       const entry = Object.getOwnPropertyDescriptor(value, key)?.value
-      if (entry !== undefined) out[key] = normalizeForJson(entry)
+      if (entry !== undefined) entries.push([key, normalizeForJson(entry)])
     }
-    return out
+    return Object.fromEntries(entries)
   }
   return value
 }
@@ -116,18 +118,21 @@ export function wrapToolWithPermissions<TParameters extends TSchema, TDetails ex
           ? `Tool ${tool.name} requires operator approval before execution`
           : `Auto-mode policy deferred high-risk call to ${tool.name} for operator approval`
       const argumentsJson = stableArgsJson(args)
-      const now = Date.now()
+      const digest = (deps.toolDigest ? await deps.toolDigest(tool.name) : undefined) ?? null
+      const sourceTask = `${String(api.taskId)}:${await sha256Hex(`${digest ?? ''}:${argumentsJson}`)}`
       const outcome = await deps.serialize(async () => {
         const local = await deps.local()
-        const consumed = consumeApprovedCall(local, tool.name, argumentsJson, now)
+        const now = Date.now()
+        const consumed = consumeApprovedCall(local, tool.name, argumentsJson, now, digest)
         if (consumed) return { kind: 'approved' as const }
         const row = createDeferredCall(
           local,
           {
             toolName: tool.name,
+            toolDigest: digest,
             argumentsJson,
             reason,
-            sourceTask: String(api.taskId),
+            sourceTask,
           },
           now,
         )

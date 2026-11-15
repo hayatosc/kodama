@@ -58,6 +58,7 @@ export async function sendAgentOutbox(
   const input = v.parse(OutboxCallSchema, call)
   const now = Date.now()
   await setAlarmNoLaterThan(storage, 'outbox', now + 60_000)
+  context.abortSignal?.throwIfAborted()
   const row = enqueueOutboxNotification(
     local,
     {

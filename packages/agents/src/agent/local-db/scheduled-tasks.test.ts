@@ -181,20 +181,23 @@ describe('reservation store', () => {
         status: 'updated',
         task: { state: 'active', instruction: 'Updated work', nextDue: 2000 },
       })
+      const createdFollowups: string[] = []
       for (let i = 0; i < MAX_ACTIVE_FOLLOWUPS; i++) {
-        insertReservation(
-          local,
-          {
-            sourceTask: `followup-${i}`,
-            sourceEntry: 1,
-            arguments: '{}',
-            instruction: 'Follow up',
-            rule: { kind: 'once', start: 5000 },
-            nextDue: 5000,
-            category: 'followup',
-            followupHop: 1,
-          },
-          1000,
+        createdFollowups.push(
+          insertReservation(
+            local,
+            {
+              sourceTask: `followup-${i}`,
+              sourceEntry: 1,
+              arguments: '{}',
+              instruction: 'Follow up',
+              rule: { kind: 'once', start: 5000 },
+              nextDue: 5000,
+              category: 'followup',
+              followupHop: 1,
+            },
+            1000,
+          ).id,
         )
       }
       expect(() =>
@@ -213,6 +216,30 @@ describe('reservation store', () => {
           1000,
         ),
       ).toThrow('schedule_followup_quota')
+
+      const pausedId = createdFollowups[0]
+      if (!pausedId) throw new Error('Missing follow-up')
+      expect(updateReservation(local, pausedId, { action: 'pause' })).toMatchObject({
+        status: 'updated',
+        task: { state: 'paused' },
+      })
+      insertReservation(
+        local,
+        {
+          sourceTask: 'followup-replacement',
+          sourceEntry: 1,
+          arguments: '{}',
+          instruction: 'Follow up',
+          rule: { kind: 'once', start: 5000 },
+          nextDue: 5000,
+          category: 'followup',
+          followupHop: 1,
+        },
+        1000,
+      )
+      expect(() => updateReservation(local, pausedId, { action: 'resume', nextDue: 6000 })).toThrow(
+        'schedule_followup_quota',
+      )
     })
   })
 

@@ -167,9 +167,10 @@ export function conflict(
   context: OperationContext,
   targetId: string,
   reason: string,
+  target: 'record' | 'skill' | 'task' = 'record',
 ): Plan {
   return {
     result: { status: 'conflict', reason },
-    statements: [recordLedger(db, context, 'conflict', targetId, { reason })],
+    statements: [recordLedger(db, context, 'conflict', targetId, { reason }, target)],
   }
 }

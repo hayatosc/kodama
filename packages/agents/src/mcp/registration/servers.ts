@@ -263,13 +263,18 @@ export async function assignMcp(
   const oldNames = new Set(
     settings.mcp?.filter((tool) => tool.serverId === server.serverId).map((tool) => tool.modelName),
   )
+  const selectedNames = new Set(selected.map((tool) => tool.modelName))
   const nextToolPolicy: Record<string, 'allow' | 'ask' | 'auto' | 'deny'> = {}
   for (const [name, policy] of Object.entries(settings.toolPolicy ?? {})) {
-    if (!oldNames.has(name)) nextToolPolicy[name] = policy
+    if (!oldNames.has(name) || (selectedNames.has(name) && policy === 'deny')) {
+      nextToolPolicy[name] = policy
+    }
   }
   if (!readOnly) {
     for (const tool of selected) {
-      nextToolPolicy[tool.modelName] = 'ask'
+      if (nextToolPolicy[tool.modelName] !== 'deny') {
+        nextToolPolicy[tool.modelName] = 'ask'
+      }
     }
   }
   const updated = parseSettings(call.models, {

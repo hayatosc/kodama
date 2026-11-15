@@ -96,7 +96,13 @@ export async function writeTaskProgress(
   return applyPlan(db, context, async (): Promise<Plan> => {
     const current = await readTaskProgress(db, write.agentId, write.slug)
     if (write.revision !== undefined && (current?.revision ?? undefined) !== write.revision) {
-      return conflict(db, context, key, current === undefined ? 'no_task' : 'target_changed')
+      return conflict(
+        db,
+        context,
+        key,
+        current === undefined ? 'no_task' : 'target_changed',
+        'task',
+      )
     }
     const nextRevision = (current?.revision ?? 0) + 1
     const result: OperationResult = { status: 'applied', recordId: key }
@@ -176,6 +182,7 @@ export async function curateTasks(db: MemoryDb, runId: string, now: number): Pro
             },
             key,
             'target_changed',
+            'task',
           )
         }
         const nextRevision = current.revision + 1

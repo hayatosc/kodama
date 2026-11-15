@@ -20,6 +20,7 @@ import { record, write } from '../../testing/memory.ts'
 import { isMemoryAgentRequest, requestBody, toolCallResponse } from '../../testing/model.ts'
 import type { ToolCall } from '../../testing/model.ts'
 import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.ts'
+import { taskWriteTool } from './working.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -214,5 +215,20 @@ describe('working memory tools', () => {
     await say(agentId, 'task-step-2', 'Check migration progress')
     expect(secondTurn[0]).toContain('- [in_progress] migrate-db — Migrate DB: Step 1 complete')
     expect(secondTurn.at(-1)).toContain('Run step 2 after verifying checksums.')
+
+    const tool = taskWriteTool(
+      {
+        env,
+        agentId: () => agentId,
+        local: async () => {
+          throw new Error('unused')
+        },
+        sharedSpaces: async () => [],
+      },
+      async () => {
+        throw new Error('unused')
+      },
+    )
+    expect(JSON.stringify(tool.parameters)).not.toContain('"archived"')
   })
 })

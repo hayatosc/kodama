@@ -167,7 +167,7 @@ import {
   NotificationQuerySchema,
   NotificationReadSchema,
 } from '../validation.ts'
-import { readEntries } from '../memory/transcript.ts'
+import { latestEntryId, readEntries } from '../memory/transcript.ts'
 import type { EntryPage } from '../memory/transcript.ts'
 import type { ConfigStore } from '../control-plane/config.ts'
 import { pruneSlice, refuseWhenFull, schedulePruneIfNeeded } from './runtime/pruning.ts'
@@ -182,9 +182,20 @@ import { snapshotOf, submissionOf, attentionOf } from './runtime/views.ts'
 import { currentRunInputs } from './runtime/inputs.ts'
 
 import { processOutbox, rearmOutbox, sendAgentOutbox } from './outbox.ts'
-import { armInbox, dispatchInbox, rearmInbox } from './inbox.ts'
-import { enqueueInboxEvent, pendingInboxEvents } from './local-db/inbox.ts'
-import { decideDeferredCall, getDeferredCall, listDeferredCalls } from './local-db/deferred.ts'
+import { armInbox, busyForNewSessionError, dispatchInbox, rearmInbox } from './inbox.ts'
+import type { AdmitOptions } from './inbox.ts'
+import {
+  enqueueInboxEvent,
+  enqueueInboxEventInTx,
+  inboxEventByRequest,
+  pendingInboxEvents,
+} from './local-db/inbox.ts'
+import {
+  decideDeferredCallInTx,
+  getDeferredCall,
+  invalidateMcpDeferredCalls,
+  listDeferredCalls,
+} from './local-db/deferred.ts'
 import type { PermissionDeps } from './permissions.ts'
 import {
   armScheduling,
@@ -419,6 +430,14 @@ export class Agent extends DurableObject<AgentEnv> {
           this.#registry.install(previous)
         }
       },
+      onApplied: async (settings) => {
+        const activeMcp = new Map(
+          (settings.mcp ?? [])
+            .filter((tool) => settings.tools.includes(tool.modelName))
+            .map((tool) => [tool.modelName, tool.digest]),
+        )
+        invalidateMcpDeferredCalls(await this.#local, activeMcp, Date.now())
+      },
       report: async (agentId, version) => {
         await reportApplied(managementDb(this.env.MANAGEMENT_DB), agentId, version)
       },
@@ -436,6 +455,11 @@ export class Agent extends DurableObject<AgentEnv> {
         const applied = await appliedSettings(this.ctx.storage)
         const selected = applied?.mcp?.find((tool) => tool.modelName === toolName)
         return selected?.readOnly !== false && applied?.toolPolicy?.[toolName] !== 'ask'
+      },
+      toolDigest: async (toolName) => {
+        const applied = await appliedSettings(this.ctx.storage)
+        if (!applied?.tools.includes(toolName)) return undefined
+        return applied.mcp?.find((tool) => tool.modelName === toolName)?.digest
       },
     }
   }
@@ -706,7 +730,7 @@ export class Agent extends DurableObject<AgentEnv> {
           this.ctx.storage,
           (operation) => this.#serial(operation),
           (source) => this.#prepareInbox(source),
-          (draft, actorKind) => this.admit(draft, actorKind),
+          (draft, actorKind, options) => this.admit(draft, actorKind, options),
         ))().finally(() => {
         this.#inboxDispatch = undefined
       })
@@ -742,7 +766,7 @@ export class Agent extends DurableObject<AgentEnv> {
           this.ctx.storage,
           (operation) => this.#serial(operation),
           () => this.#prepareScheduled(),
-          (draft) => this.admit(draft, 'system'),
+          (draft, options) => this.admit(draft, 'system', options),
         ))().finally(() => {
         this.#scheduling = undefined
       })
@@ -904,6 +928,7 @@ export class Agent extends DurableObject<AgentEnv> {
   protected async admit(
     draft: SubmissionDraft,
     actorKind?: 'user' | 'agent' | 'system',
+    options?: AdmitOptions,
   ): Promise<Submission> {
     const harness = await this.#harness
     const conversation = await harness.root(context)
@@ -926,6 +951,15 @@ export class Agent extends DurableObject<AgentEnv> {
             settings.toolPolicy?.schedule_task === 'deny'
           )
             throw new Error('schedule_disabled')
+        }
+      }
+      if (options?.interrupt && !(await isIdle(harness))) {
+        await conversation.abort(context)
+      }
+      if (options?.sessionMode === 'new') {
+        if (!(await isIdle(harness))) throw busyForNewSessionError()
+        if ((await latestEntryId(harness)) !== undefined) {
+          await conversation.reset(undefined, context)
         }
       }
       await armRecovery(this.ctx.storage)
@@ -1016,16 +1050,6 @@ export class Agent extends DurableObject<AgentEnv> {
     await this.credentialStore().read(config.model.provider)
     const harness = await this.#harness
     const requestedWhenBusy = origin ? 'followUp' : (message.whenBusy ?? 'followUp')
-    if (requestedWhenBusy === 'interrupt') {
-      const existing = await harness.commit(
-        (tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, message.requestId),
-        context,
-      )
-      if (!existing && !(await isIdle(harness))) {
-        const conversation = await harness.root(context)
-        await conversation.abort(context)
-      }
-    }
     if (await isIdle(harness)) {
       await refreshMemory(this.#workingMemory(), { onlyIfChanged: true })
     }
@@ -1051,6 +1075,7 @@ export class Agent extends DurableObject<AgentEnv> {
             }),
       },
       origin ? 'agent' : 'user',
+      { interrupt: requestedWhenBusy === 'interrupt' },
     )
     return submission.id
   }
@@ -1100,53 +1125,65 @@ export class Agent extends DurableObject<AgentEnv> {
   ): Promise<ResolveDeferredCallResponse> {
     const input = parseResolveDeferredCall(request)
     return this.#serial(async () => {
+      await armInbox(this.ctx.storage)
       const local = await this.#local
       const now = Date.now()
       const existing = getDeferredCall(local, input.approvalId, now)
       if (!existing) throw new Error('approval_not_found')
       if (existing.state === 'expired') {
+        await rearmInbox(local, this.ctx.storage)
         return { approvalId: existing.approvalId, state: 'expired' }
       }
-      const { row, alreadyDecided } = decideDeferredCall(
-        local,
-        input.approvalId,
-        input.decision,
-        input.note,
-        now,
-      )
-      const finalState: ResolveDeferredCallResponse['state'] =
-        row.state === 'consumed'
-          ? 'approved'
-          : row.state === 'approved' || row.state === 'denied'
-            ? row.state
-            : 'expired'
-      if (alreadyDecided || finalState === 'expired') {
-        return { approvalId: row.approvalId, state: finalState }
-      }
-      await armInbox(this.ctx.storage)
-      const resumeRequestId = `approval-${row.approvalId}-${input.decision}`
-      const noteText = input.note ? ` Operator note: ${input.note}.` : ''
-      const resumeContent =
-        input.decision === 'approve'
-          ? `[Operator approved deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Call ${row.toolName} now with the exact approved arguments: ${row.argumentsJson}]`
-          : `[Operator denied deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Do NOT invoke ${row.toolName}; acknowledge the decision and proceed accordingly.]`
-      const { row: inboxRow } = enqueueInboxEvent(
-        local,
-        {
-          requestId: resumeRequestId,
-          source: 'approval',
-          sessionMode: 'resume',
-          whenBusy: 'followUp',
-          content: resumeContent,
-          label: row.toolName,
-        },
-        now,
-      )
+      const resumeRequestId = `approval-${existing.approvalId}-${input.decision}`
+      const outcome = local.transaction((tx) => {
+        const { row, alreadyDecided } = decideDeferredCallInTx(
+          tx,
+          input.approvalId,
+          input.decision,
+          input.note,
+          now,
+        )
+        const finalState: ResolveDeferredCallResponse['state'] =
+          row.state === 'consumed'
+            ? 'approved'
+            : row.state === 'approved' || row.state === 'denied'
+              ? row.state
+              : 'expired'
+        if (finalState === 'expired') {
+          return { row, finalState, alreadyDecided: true, inboxRow: undefined }
+        }
+        const existingResume = inboxEventByRequest(tx, resumeRequestId)
+        if (alreadyDecided && (existingResume !== undefined || row.state === 'consumed')) {
+          return { row, finalState, alreadyDecided: true, inboxRow: existingResume }
+        }
+        const effectiveNote = row.operatorNote ?? input.note
+        const noteText = effectiveNote ? ` Operator note: ${effectiveNote}.` : ''
+        const resumeContent =
+          input.decision === 'approve'
+            ? `[Operator approved deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Call ${row.toolName} now with the exact approved arguments: ${row.argumentsJson}]`
+            : `[Operator denied deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Do NOT invoke ${row.toolName}; acknowledge the decision and proceed accordingly.]`
+        const { row: inboxRow } = enqueueInboxEventInTx(
+          tx,
+          {
+            requestId: resumeRequestId,
+            source: 'approval',
+            sessionMode: 'resume',
+            whenBusy: 'followUp',
+            content: resumeContent,
+            label: row.toolName,
+          },
+          now,
+        )
+        return { row, finalState, alreadyDecided: false, inboxRow }
+      })
       await rearmInbox(local, this.ctx.storage)
+      if (outcome.alreadyDecided) {
+        return { approvalId: outcome.row.approvalId, state: outcome.finalState }
+      }
       return {
-        approvalId: row.approvalId,
-        state: finalState,
-        resumeEventId: inboxRow.id,
+        approvalId: outcome.row.approvalId,
+        state: outcome.finalState,
+        ...(outcome.inboxRow ? { resumeEventId: outcome.inboxRow.id } : {}),
       }
     })
   }
@@ -1541,7 +1578,15 @@ export class Agent extends DurableObject<AgentEnv> {
    */
   async submission(requestId: string): Promise<SubmissionStatus | undefined> {
     parseRequestId(requestId)
-    return submissionOf(await this.#harness, requestId)
+    const harness = await this.#harness
+    const direct = await submissionOf(harness, requestId)
+    if (direct) return direct
+    const row = inboxEventByRequest(await this.#local, requestId)
+    if (row?.batchRequestId && row.state !== 'failed') {
+      const aliased = await submissionOf(harness, row.batchRequestId)
+      if (aliased) return { ...aliased, requestId }
+    }
+    return undefined
   }
 
   /**

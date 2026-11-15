@@ -329,13 +329,17 @@ export const eventInbox = sqliteTable(
     state: text('state', { enum: ['queued', 'admitted', 'settled', 'failed'] })
       .notNull()
       .default('queued'),
+    batchRequestId: text('batch_request_id'),
     submissionId: integer('submission_id'),
     attempts: integer('attempts').notNull().default(0),
     nextRetryAt: integer('next_retry_at').notNull(),
     createdAt: integer('created_at').notNull(),
     settledAt: integer('settled_at'),
   },
-  (t) => [index('kodama_event_inbox_pending').on(t.state, t.nextRetryAt, t.createdAt)],
+  (t) => [
+    index('kodama_event_inbox_pending').on(t.state, t.nextRetryAt, t.createdAt),
+    index('kodama_event_inbox_batch').on(t.state, t.batchRequestId),
+  ],
 )
 
 /** Side-effecting tool calls deferred for operator approval without blocking the worker loop. */
@@ -344,6 +348,7 @@ export const deferredCalls = sqliteTable(
   {
     approvalId: text('approval_id').primaryKey(),
     toolName: text('tool_name').notNull(),
+    toolDigest: text('tool_digest'),
     argumentsJson: text('arguments_json').notNull(),
     reason: text('reason').notNull(),
     sourceTask: text('source_task').notNull().unique(),

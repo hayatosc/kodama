@@ -142,13 +142,15 @@ export function enqueueOutboxNotification(
       .limit(1)
       .get()
 
+    const latestDispatchedAt = latest?.deliverAfter ?? latest?.createdAt
     const inCooldown =
       latest !== undefined &&
-      (latest.deliveryState === 'pending' || latest.createdAt > now - OUTBOX_PACING_WINDOW_MS)
+      (latest.deliveryState === 'pending' ||
+        (latestDispatchedAt !== undefined && latestDispatchedAt > now - OUTBOX_PACING_WINDOW_MS))
     const deliverAfter = inCooldown
       ? latest.deliveryState === 'pending' && latest.deliverAfter !== null
         ? Math.max(now + 1, latest.deliverAfter)
-        : latest.createdAt + OUTBOX_PACING_WINDOW_MS
+        : (latestDispatchedAt ?? now) + OUTBOX_PACING_WINDOW_MS
       : now
 
     return recordNotification(

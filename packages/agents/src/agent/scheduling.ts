@@ -4,9 +4,10 @@
  */
 import { LiveDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, SubmissionDraft, ToolExecutionApi } from '@earendil-works/pi-durable'
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Context } from '@earendil-works/chord/context'
 import * as v from 'valibot'
+import { isBusyForNewSessionError } from './inbox.ts'
+import type { AdmitOptions } from './inbox.ts'
 import type { LocalDb } from './local-db/local.ts'
 import { nextNotificationExpiry, retainNotifications } from './local-db/notifications.ts'
 import {
@@ -34,7 +35,6 @@ import { currentRunInputs } from './runtime/inputs.ts'
 import { setAlarm, setAlarmNoLaterThan } from './runtime/alarms.ts'
 import { isIdle } from './runtime/harness.ts'
 import { submissionOf } from './runtime/views.ts'
-import { latestEntryId } from '../memory/transcript.ts'
 import type { ScheduleCall } from '../tools/scheduled-tasks.ts'
 
 const CreateSchema = v.object({
@@ -49,10 +49,15 @@ const UpdateSchema = v.pipe(
     action: v.optional(v.picklist(['pause', 'resume', 'edit'])),
     instruction: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(16000))),
     schedule: v.optional(ScheduleSchema),
+    session_mode: v.optional(v.picklist(['new', 'resume'])),
   }),
   v.check(
-    (u) => u.action !== undefined || u.instruction !== undefined || u.schedule !== undefined,
-    'schedule_update: provide action, instruction, or schedule',
+    (u) =>
+      u.action !== undefined ||
+      u.instruction !== undefined ||
+      u.schedule !== undefined ||
+      u.session_mode !== undefined,
+    'schedule_update: provide action, instruction, schedule, or session_mode',
   ),
 )
 
@@ -124,6 +129,15 @@ export async function mutateSchedule(
       if (!ownerOnly && input.schedule && input.schedule.kind !== 'once') {
         throw new Error('schedule_owner_required: autonomous updates only allow kind once')
       }
+      let nextHop: number | undefined = undefined
+      if (!ownerOnly && input.schedule !== undefined) {
+        nextHop = currentHop + 1
+        if (nextHop > MAX_FOLLOWUP_HOPS) {
+          throw new Error(
+            `schedule_followup_limit: maximum ${MAX_FOLLOWUP_HOPS} autonomous follow-up hops reached`,
+          )
+        }
+      }
       const now = Date.now()
       const rule = input.schedule ? normalizeSchedule(input.schedule, now) : undefined
       let nextDue: number | null | undefined = undefined
@@ -142,6 +156,8 @@ export async function mutateSchedule(
         ...(input.instruction === undefined ? {} : { instruction: input.instruction }),
         ...(rule === undefined ? {} : { rule }),
         ...(nextDue === undefined ? {} : { nextDue }),
+        ...(input.session_mode === undefined ? {} : { sessionMode: input.session_mode }),
+        ...(nextHop === undefined ? {} : { followupHop: nextHop }),
       })
     }
     const input = v.parse(CreateSchema, call)
@@ -172,7 +188,7 @@ export async function mutateSchedule(
         nextDue: first,
         category: ownerOnly ? 'schedule' : 'followup',
         followupHop: nextHop,
-        sessionMode: input.session_mode ?? 'new',
+        sessionMode: input.session_mode ?? (ownerOnly ? 'new' : 'resume'),
       },
       now,
     )
@@ -250,7 +266,7 @@ export async function dispatchSchedules(
   storage: DurableObjectStorage,
   serialize: <T>(operation: () => Promise<T>) => Promise<T>,
   prepare: () => Promise<void>,
-  admit: (draft: SubmissionDraft) => Promise<unknown>,
+  admit: (draft: SubmissionDraft, options?: AdmitOptions) => Promise<unknown>,
 ): Promise<void> {
   await serialize(async () => {
     await reconcileSchedules(local, harness)
@@ -274,27 +290,31 @@ export async function dispatchSchedules(
       }
       if (!existing) {
         if (task.sessionMode === 'new') {
-          if (!(await isIdle(harness))) {
-            // Wait until the active session finishes before resetting the model context.
-            await serialize(async () => {
+          const deferred = await serialize(async () => {
+            if (!(await isIdle(harness))) {
+              // Wait until the active session finishes before resetting the model context.
               deferOccurrence(local, occurrence, Date.now() + 5_000)
-            })
-            continue
-          }
-          if ((await latestEntryId(harness)) !== undefined) {
-            const root = await harness.root(BACKGROUND_CONTEXT)
-            await root.reset(undefined, BACKGROUND_CONTEXT)
-          }
+              return true
+            }
+            return false
+          })
+          if (deferred) continue
         }
         await prepare()
         await serialize(async () => {
           markAdmissionStarted(local, occurrence.id)
         })
         prepared = true
-        await admit(scheduledDraft(task, occurrence))
+        await admit(scheduledDraft(task, occurrence), { sessionMode: task.sessionMode })
       }
       await serialize(() => reconcileSchedules(local, harness))
     } catch (error) {
+      if (isBusyForNewSessionError(error)) {
+        await serialize(async () => {
+          deferOccurrence(local, occurrence, Date.now() + 5_000)
+        })
+        continue
+      }
       await serialize(async () => {
         const accepted = await submissionOf(harness, occurrence.id)
         if (accepted) {

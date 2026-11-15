@@ -25,6 +25,7 @@ export type ScheduleCall =
       action?: 'pause' | 'resume' | 'edit'
       instruction?: string
       schedule?: Schedule
+      session_mode?: SessionMode
     }
 
 /** Invocation-bound operations provided by the working agent only. */
@@ -95,8 +96,8 @@ export function createScheduleTools(execute?: ScheduleTools) {
     defineTool({
       name: 'update_scheduled_task',
       description:
-        "Pause, resume, or revise the instruction or schedule of this agent's reservation. Updating owner recurring schedules requires an owner-only run; follow-up timers may be updated from autonomous runs.",
-      replay: 'safe',
+        "Pause, resume, or revise the instruction, schedule, or session_mode of this agent's reservation. Updating owner recurring schedules requires an owner-only run; follow-up timers may be updated from autonomous runs.",
+      replay: 'unsafe',
       parameters: Type.Object({
         task_id: Type.String({ minLength: 1, maxLength: 100 }),
         action: Type.Optional(
@@ -104,6 +105,7 @@ export function createScheduleTools(execute?: ScheduleTools) {
         ),
         instruction: Type.Optional(Type.String({ minLength: 1, maxLength: 16000 })),
         schedule: Type.Optional(scheduleParameter),
+        session_mode: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('resume')])),
       }),
       execute: (args, api, context) => run({ operation: 'update', ...args }, api, context),
     }),

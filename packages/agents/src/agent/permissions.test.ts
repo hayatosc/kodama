@@ -18,8 +18,15 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { management, newAgentId, updateSettings } from '../testing/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import { Type } from '@earendil-works/pi-ai'
+import { defineExtension, defineTool, Harness } from '@earendil-works/pi-durable'
+import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { createAgentOptions } from './config.ts'
+import { defaultAgentSettings } from '../control-plane/config.ts'
+import { testCredentialStore } from '../testing/credentials.ts'
 import { openLocalDb } from './local-db/local.ts'
-import { classifyToolRisk, stableArgsJson } from './permissions.ts'
+import { classifyToolRisk, stableArgsJson, wrapToolWithPermissions } from './permissions.ts'
 import { setAlarm } from './runtime/alarms.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -54,6 +61,9 @@ describe('tool permissions and deferred approvals', () => {
     expect(stableArgsJson({ b: 2, a: { y: 2, x: 1, z: undefined } })).toBe(
       stableArgsJson({ a: { x: 1, y: 2 }, b: 2 }),
     )
+    const protoPayload: unknown = JSON.parse('{"__proto__":{"mode":"write"}}')
+    expect(stableArgsJson(protoPayload)).toBe('{"__proto__":{"mode":"write"}}')
+    expect(stableArgsJson(protoPayload)).not.toBe(stableArgsJson({}))
   })
 
   it('defers ask-gated calls non-blockingly, keeps Q&A responsive, and consumes approval once', async () => {
@@ -423,5 +433,262 @@ describe('tool permissions and deferred approvals', () => {
     await waitForAnswer(id, `approval-${deferred.approvalId}-approve`)
     expect(remoteExecutions).toBe(1)
     expect(observedMcpOutput).toContain('Issue #42 created')
+  })
+
+  it('separates deferred approvals by arguments for the same sourceTask and reads consumption expiry inside serialize', async () => {
+    const agentId = await newAgentId()
+    const baseSettings = defaultAgentSettings(env)
+    const testSettings = {
+      ...baseSettings,
+      tools: ['create_artifact'],
+      toolPolicy: { create_artifact: 'ask' as const },
+      memoryPolicy: { remember: true, extract: false },
+    }
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () => toolCallResponse({ name: 'perm_probe', arguments: {} }))
+      .mockImplementationOnce(async () => textResponse('Probe complete.'))
+
+    await runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      let executed = 0
+      const wrapped = wrapToolWithPermissions(
+        {
+          name: 'create_artifact',
+          description: 'Create artifact',
+          parameters: Type.Object({ filename: Type.String() }),
+          execute: async () => {
+            executed++
+            return { output: [{ type: 'text', text: 'ok' }] }
+          },
+        },
+        {
+          local: async () => local,
+          serialize: async (operation) => operation(),
+          settings: async () => testSettings,
+        },
+      )
+      const delayedWrapped = wrapToolWithPermissions(
+        {
+          name: 'create_artifact',
+          description: 'Create artifact',
+          parameters: Type.Object({ filename: Type.String() }),
+          execute: async () => {
+            executed++
+            return { output: [{ type: 'text', text: 'ok' }] }
+          },
+        },
+        {
+          local: async () => local,
+          serialize: async (operation) => {
+            await new Promise((resolve) => setTimeout(resolve, 80))
+            return operation()
+          },
+          settings: async () => testSettings,
+        },
+      )
+
+      let firstText = ''
+      let secondText = ''
+      const probeExtension = defineExtension({
+        name: 'perm-probe',
+        tools: [
+          defineTool({
+            name: 'perm_probe',
+            description: 'Invoke permission wrapper with a real ToolExecutionApi',
+            parameters: Type.Object({}),
+            execute: async (_args, api, context) => {
+              const first = await wrapped.execute({ filename: 'first.txt' }, api, context)
+              const second = await wrapped.execute({ filename: 'second.txt' }, api, context)
+              firstText = first.output?.[0]?.type === 'text' ? first.output[0].text : ''
+              secondText = second.output?.[0]?.type === 'text' ? second.output[0].text : ''
+
+              const now = Date.now()
+              local
+                .insert(deferredCallsTable)
+                .values({
+                  approvalId: '01950000-0000-7000-8000-000000000123',
+                  toolName: 'create_artifact',
+                  toolDigest: null,
+                  argumentsJson: '{"filename":"expiring.txt"}',
+                  reason: 'Ask gate',
+                  sourceTask: 'expiring-source',
+                  state: 'approved',
+                  createdAt: now - 10_000,
+                  expiresAt: now + 50,
+                  decidedAt: now - 5_000,
+                })
+                .run()
+
+              await delayedWrapped.execute({ filename: 'expiring.txt' }, api, context)
+              return { output: [{ type: 'text', text: 'probed' }] }
+            },
+          }),
+        ],
+      })
+
+      const options = createAgentOptions(
+        env,
+        [probeExtension],
+        undefined,
+        await testCredentialStore(agentId),
+      )
+      const storage = await openDurableObjectSqliteStorage(state.storage)
+      const harness = await Harness.open(storage, options, BACKGROUND_CONTEXT)
+      try {
+        const root = await harness.root(BACKGROUND_CONTEXT)
+        const submission = await root.submit(
+          { type: 'input', requestId: 'probe-run', content: 'Run permission probe' },
+          BACKGROUND_CONTEXT,
+        )
+        await submission.wait(BACKGROUND_CONTEXT)
+      } finally {
+        await harness.close(BACKGROUND_CONTEXT)
+      }
+
+      const firstId: unknown = JSON.parse(firstText)
+      const secondId: unknown = JSON.parse(secondText)
+      expect(firstId).toMatchObject({ status: 'deferred' })
+      expect(secondId).toMatchObject({ status: 'deferred' })
+      expect(firstId).not.toEqual(secondId)
+      const allRows = local.select().from(deferredCallsTable).all()
+      expect(allRows).toHaveLength(4)
+      expect(
+        allRows.find((row) => row.approvalId === '01950000-0000-7000-8000-000000000123')?.state,
+      ).toBe('approved')
+      expect(executed).toBe(0)
+    })
+  })
+
+  it('invalidates MCP deferred approvals when the tool definition digest changes or is removed', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, { memoryPolicy: { remember: false, extract: false } })
+
+    const endpoint = `https://${uuidv7()}.example.com/mcp`
+    const server = await registerMcpCatalog(management, 'rebind', endpoint, Date.now())
+    const credential = await putMcpBearer(management, env.CREDENTIAL_KEK_V1, server.serverId, 'tok')
+    const call = {
+      env,
+      db: management,
+      models: createAgentModels(),
+      source: 'operator' as const,
+      now: Date.now(),
+    }
+
+    let description = 'V1 write tool'
+    let remoteExecutions = 0
+    const mcpHandler = async (
+      url: Parameters<typeof fetch>[0],
+      options: Parameters<typeof fetch>[1],
+    ) => {
+      const address = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
+      if (address !== endpoint) return textResponse('unused')
+      if (options?.method === 'DELETE') return new Response(null, { status: 204 })
+      const body: unknown = JSON.parse(typeof options?.body === 'string' ? options.body : '{}')
+      if (!body || typeof body !== 'object' || !('method' in body))
+        throw new Error('Unexpected MCP')
+      if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+      if (!('id' in body)) throw new Error('Missing JSON-RPC id')
+      let result: unknown = { protocolVersion: MCP_PROTOCOL, capabilities: { tools: {} } }
+      if (body.method === 'tools/list') {
+        result = {
+          tools: [
+            {
+              name: 'mutate_item',
+              description,
+              inputSchema: { type: 'object', properties: { item: { type: 'string' } } },
+            },
+          ],
+        }
+      }
+      if (body.method === 'tools/call') {
+        remoteExecutions++
+        result = { content: [{ type: 'text', text: 'Mutated item' }] }
+      }
+      return Response.json(
+        { jsonrpc: '2.0', id: body.id, result },
+        { headers: { 'Mcp-Session-Id': 'mcp-rebind-sess' } },
+      )
+    }
+
+    vi.mocked(fetch).mockImplementation(mcpHandler)
+    const v1 = await discoverMcp(
+      call,
+      env.CREDENTIAL_KEK_V1,
+      server.serverId,
+      credential.credentialId,
+    )
+    const toolV1 = v1.tools[0]
+    if (!toolV1) throw new Error('Missing v1 tool')
+
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      serverId: server.serverId,
+      credentialId: credential.credentialId,
+      agentId: id,
+      toolIds: [toolV1.toolId],
+      catalogDigest: v1.catalogDigest,
+      readOnly: false,
+    })
+
+    let round = 0
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      const address = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
+      if (address === endpoint) return mcpHandler(url, options)
+      round++
+      if (round === 1) {
+        return toolCallResponse({ name: toolV1.modelName, arguments: { item: 'alpha' } })
+      }
+      return textResponse('Deferred v1 call.')
+    })
+    await exports.default.sendMessage(id, { requestId: 'mcp-v1', content: 'Mutate alpha' })
+    await waitForAnswer(id, 'mcp-v1')
+
+    const v1Approval = (await exports.default.deferredCalls(id))[0]
+    if (!v1Approval) throw new Error('Expected v1 approval')
+    await exports.default.resolveDeferredCall(id, {
+      approvalId: v1Approval.approvalId,
+      decision: 'approve',
+    })
+
+    // Rediscover and reassign with a modified tool definition digest before v1 approval executes.
+    description = 'V2 write tool with different semantics'
+    vi.mocked(fetch).mockImplementation(mcpHandler)
+    const v2 = await discoverMcp(
+      call,
+      env.CREDENTIAL_KEK_V1,
+      server.serverId,
+      credential.credentialId,
+    )
+    const toolV2 = v2.tools[0]
+    if (!toolV2) throw new Error('Missing v2 tool')
+    expect(toolV2.digest).not.toBe(toolV1.digest)
+
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      serverId: server.serverId,
+      credentialId: credential.credentialId,
+      agentId: id,
+      toolIds: [toolV2.toolId],
+      catalogDigest: v2.catalogDigest,
+      readOnly: false,
+    })
+
+    // V1 approval must already be expired, and calling the tool under V2 must defer cleanly.
+    expect((await exports.default.deferredCalls(id))[0]?.state).toBe('expired')
+
+    round = 0
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      const address = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
+      if (address === endpoint) return mcpHandler(url, options)
+      round++
+      if (round === 1) {
+        return toolCallResponse({ name: toolV2.modelName, arguments: { item: 'alpha' } })
+      }
+      return textResponse('Deferred v2 call.')
+    })
+    await exports.default.sendMessage(id, { requestId: 'mcp-v2', content: 'Mutate alpha again' })
+    await waitForAnswer(id, 'mcp-v2')
+    expect(remoteExecutions).toBe(0)
+    expect(await exports.default.deferredCalls(id)).toHaveLength(2)
   })
 })

@@ -42,6 +42,8 @@ export interface ApplyDeps {
   change: (settings: AgentSettings) => AgentChange
   /** Prepare while idle; an optional rollback restores published state if persistence fails. */
   prepareSettings: (settings: AgentSettings) => Promise<void | (() => void)>
+  /** Run after the new settings are committed while still idle inside the serial section. */
+  onApplied?: (settings: AgentSettings) => Promise<void>
   /** Record the applied version in the registry; a failure is left to reconciliation. */
   report: (agentId: string, version: number) => Promise<void>
 }
@@ -132,6 +134,7 @@ async function applyAll(deps: ApplyDeps, { agentId, version, settings }: PushedC
       [AGENT_ID_KEY]: agentId,
       [CONFIG_VERSION_KEY]: version,
     })
+    await deps.onApplied?.(settings)
   } catch (error) {
     rollback?.()
     throw error

@@ -175,7 +175,7 @@ export async function updateLocalTasks(
   memory: WorkingMemoryDeps,
   tasks: readonly VisibleTask[],
 ): Promise<void> {
-  saveLocalTasks(await memory.local(), JSON.stringify(tasks), memory.now?.() ?? Date.now())
+  saveLocalTasks(await memory.local(), JSON.stringify(tasks))
 }
 
 /** Render the always-loaded memory again from D1 and store the copy. Run only while idle. */

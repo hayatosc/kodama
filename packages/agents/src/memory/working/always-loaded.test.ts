@@ -22,7 +22,10 @@ import {
   REVISION_CHECK_INTERVAL_MS,
   SHARED_MEMORY_BUDGET,
   storedMemoryText,
+  updateLocalTasks,
 } from './always-loaded.ts'
+import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
+import { storedMemoryCopy } from '../../agent/local-db/memory.ts'
 import { seedOnce } from '../../testing/management.ts'
 
 // The memory agent needs the seeded installation and its credentials.
@@ -31,6 +34,43 @@ beforeAll(seedOnce)
 afterEach(() => vi.restoreAllMocks())
 
 describe('always-loaded cache revisions', () => {
+  it('marks an empty fallback row stale on updateLocalTasks so onlyIfChanged renders memory immediately', async () => {
+    const agentId = uuidv7()
+    await write({
+      scope: `agent:${agentId}`,
+      kind: 'instruction',
+      content: 'Always verify checksums',
+      sourceAgentId: agentId,
+    })
+    const clock = Date.now()
+    const rendered = await runInDurableObject(
+      env.AGENTS.getByName(agentId),
+      async (_instance, state) => {
+        const local = await openLocalDb(state.storage)
+        local.delete(alwaysLoaded).run()
+        const memory = {
+          env,
+          agentId: () => agentId,
+          local: () => Promise.resolve(local),
+          sharedSpaces: () => Promise.resolve([]),
+          now: () => clock,
+        }
+        await updateLocalTasks(memory, [
+          {
+            slug: 'verify-build',
+            title: 'Verify build',
+            status: 'in_progress',
+            summary: 'Step 1',
+          },
+        ])
+        expect(storedMemoryCopy(local)?.checkedAt).toBe(0)
+        await refreshAlwaysLoadedIfChanged(memory)
+        return storedMemoryText(memory)
+      },
+    )
+    expect(rendered).toContain('Always verify checksums')
+  })
+
   it('detects a shared replacement committed between reading content and storing its revision', async () => {
     const agentId = uuidv7()
     const space = uuidv7()
