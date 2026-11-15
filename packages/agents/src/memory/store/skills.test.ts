@@ -64,7 +64,7 @@ describe('writing skills', () => {
 })
 
 describe('skills in a working agent', () => {
-  it('lists at most 50 active skills, most recently written or used first', async () => {
+  it('selects at most 50 recent active skills and sorts them deterministically by name', async () => {
     const agentId = uuidv7()
     for (let index = 0; index <= 50; index++) {
       const written = await writeSkill(
@@ -79,8 +79,9 @@ describe('skills in a working agent', () => {
 
     expect(SKILL_LIST_LIMIT).toBe(50)
     expect(listed).toHaveLength(50)
-    expect(listed[0]).toBe('step-50')
     expect(listed).not.toContain('step-0')
+    expect(listed).toContain('step-50')
+    expect(listed).toEqual([...listed].sort((a, b) => a.localeCompare(b)))
   })
 
   it('lists only its active skills and reads one with skill_read, counting the use', async () => {

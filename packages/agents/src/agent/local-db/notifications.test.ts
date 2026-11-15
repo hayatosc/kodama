@@ -8,9 +8,14 @@ import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { openLocalDb } from './local.ts'
 import {
+  dispatchDueOutbox,
+  enqueueOutboxNotification,
   listNotifications,
   nextNotificationExpiry,
+  nextOutboxWake,
+  OUTBOX_PACING_WINDOW_MS,
   readNotification,
+  recentOutboxSummaries,
   recordNotification,
   retainNotifications,
 } from './notifications.ts'
@@ -191,6 +196,108 @@ describe('recordNotification', () => {
       expect(
         recordNotification(db, { ...completion(), summary: 'a'.repeat(2048) }, 1000),
       ).toBeDefined()
+    })
+  })
+})
+
+describe('outbox pacing and coalescing', () => {
+  it('dispatches the first alert immediately, paces bursts within cooldown, and coalesces due alerts', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      const first = enqueueOutboxNotification(
+        db,
+        {
+          sourceId: 'outbox-1',
+          summary: 'Build failed on main',
+          details: 'Check step timed out',
+          artifactIds: ['a1'],
+          urgency: 'normal',
+        },
+        10_000,
+      )
+      expect(first?.deliveryState).toBe('dispatched')
+      expect(nextOutboxWake(db)).toBeUndefined()
+
+      const second = enqueueOutboxNotification(
+        db,
+        {
+          sourceId: 'outbox-2',
+          summary: 'Disk above 85%',
+          details: 'Node A',
+          artifactIds: ['a2'],
+          urgency: 'normal',
+        },
+        20_000,
+      )
+      const third = enqueueOutboxNotification(
+        db,
+        {
+          sourceId: 'outbox-3',
+          summary: 'Disk above 90%',
+          details: 'Node B',
+          artifactIds: ['a3', 'a2'],
+          urgency: 'normal',
+        },
+        30_000,
+      )
+      expect(second?.deliveryState).toBe('pending')
+      expect(third?.deliveryState).toBe('pending')
+      expect(nextOutboxWake(db)).toBe(10_000 + OUTBOX_PACING_WINDOW_MS)
+      expect(listNotifications(db, {}, 35_000).notifications.map((n) => n.sourceId)).toEqual([
+        'outbox-1',
+      ])
+
+      const dueAt = 10_000 + OUTBOX_PACING_WINDOW_MS
+      expect(dispatchDueOutbox(db, dueAt)).toBe(2)
+      expect(nextOutboxWake(db)).toBeUndefined()
+      const listed = listNotifications(db, {}, dueAt).notifications
+      expect(listed).toHaveLength(2)
+      expect(listed[0]).toMatchObject({
+        source: 'outbox',
+        sourceId: 'outbox-3',
+        summary: 'Disk above 85%\n• Disk above 90%',
+        details: 'Node A\n\n---\n\nNode B',
+        artifactIds: ['a2', 'a3'],
+        referenceState: 'available',
+      })
+      const secondRow = db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.sourceId, 'outbox-2'))
+        .get()
+      expect(secondRow?.deliveryState).toBe('suppressed')
+      expect(recentOutboxSummaries(db, 5).map((item) => item.summary)).toEqual([
+        'Build failed on main',
+        'Disk above 85%\n• Disk above 90%',
+      ])
+    })
+  })
+
+  it('flushes pending alerts immediately when urgency is immediate', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const db = await openLocalDb(state.storage)
+      enqueueOutboxNotification(
+        db,
+        { sourceId: 'o1', summary: 'First', artifactIds: [], urgency: 'normal' },
+        10_000,
+      )
+      enqueueOutboxNotification(
+        db,
+        { sourceId: 'o2', summary: 'Queued', artifactIds: [], urgency: 'normal' },
+        15_000,
+      )
+      const urgent = enqueueOutboxNotification(
+        db,
+        { sourceId: 'o3', summary: 'Critical outage', artifactIds: [], urgency: 'immediate' },
+        20_000,
+      )
+      expect(urgent?.deliveryState).toBe('dispatched')
+      expect(nextOutboxWake(db)).toBeUndefined()
+      expect(listNotifications(db, {}, 20_000).notifications.map((n) => n.sourceId)).toEqual([
+        'o3',
+        'o2',
+        'o1',
+      ])
     })
   })
 })

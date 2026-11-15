@@ -12,7 +12,10 @@ reviewed definitions, and encrypted credentials belong to the installation. Cata
 invalidate existing selections on any agent. See [Single-operator model](single-operator.md).
 
 Registration and discovery expose **no model tools**. Assignment requires explicit tool IDs, the
-current catalog digest, a server-bound credential, an active working agent, and `readOnly: true`. A catalog
+current catalog digest, a server-bound credential, an active working agent, and an optional
+`readOnly` boolean (default `true`; chat proposals stay read-only, while RPC `assign` with
+`readOnly: false` sets `readOnly: false` on each pinned selection and defaults `toolPolicy[modelName]`
+to `'ask'`). A catalog
 update never selects additions. Definitions are immutable by digest; names are fixed ASCII
 `mcp_<server short ID>_<tool short ID>`. The registry changes only at the existing safe-apply boundary.
 Live management checks reject revoked credentials, removed selections, changed definitions,
@@ -20,17 +23,17 @@ disabled tools, and disabled registrations before each send, including after ref
 
 Management operations:
 
-| Operation           | Input fields besides `operation`                                                    |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `add`               | `name`, `endpoint`                                                                  |
-| `list`              | none                                                                                |
-| `status`, `connect` | `serverId`                                                                          |
-| `update`            | `serverId`; optional `name`, `endpoint`, `enabled`                                  |
-| `discover`          | `serverId`; optional `credentialId`                                                 |
-| `bearer`            | `serverId`, `secret`                                                                |
-| `assign`            | `serverId`, `credentialId`, `agentId`, `toolIds`, `catalogDigest`, `readOnly: true` |
-| `unassign`          | `serverId`, `agentId`                                                               |
-| `disconnect`        | `serverId`, `credentialId`                                                          |
+| Operation           | Input fields besides `operation`                                                       |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| `add`               | `name`, `endpoint`                                                                     |
+| `list`              | none                                                                                   |
+| `status`, `connect` | `serverId`                                                                             |
+| `update`            | `serverId`; optional `name`, `endpoint`, `enabled`                                     |
+| `discover`          | `serverId`; optional `credentialId`                                                    |
+| `bearer`            | `serverId`, `secret`                                                                   |
+| `assign`            | `serverId`, `credentialId`, `agentId`, `toolIds`, `catalogDigest`, optional `readOnly` |
+| `unassign`          | `serverId`, `agentId`                                                                  |
+| `disconnect`        | `serverId`, `credentialId`                                                             |
 
 IDs in these operations are UUIDs, not agent slugs. Inspection errors are recorded separately from
 registration. Unsupported schema definitions remain visible for review but cannot be assigned.
@@ -181,8 +184,11 @@ and ten pages, schema nesting to twenty, and model output to 128 KiB. Sessions a
 bound to the exact endpoint; deletion is best effort.
 
 Descriptions, schemas, annotations, results, and links are external data, never permissions. They
-cannot grant web-fetch URLs or alter tool policy. Unsupported image/audio/resource content is
-omitted and marked; validated structured content and text are wrapped in a provenance envelope.
+cannot grant web-fetch URLs or alter tool policy. Even under `toolPolicy[modelName] = 'auto'`,
+tools assigned with `readOnly: false` are classified as high-risk and defer non-blockingly through
+`kodama_deferred_calls` until explicit operator resolution via `resolveDeferredCall`. Unsupported
+image/audio/resource content is omitted and marked; validated structured content and text are
+wrapped in a provenance envelope.
 A list-change notification marks the catalog stale and creates an inbox notice, not a discovery.
 
 A durable call journal records safe classifications, not arguments or outputs. An interrupted call

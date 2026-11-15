@@ -95,7 +95,7 @@ export function insertOp(
 export function claimRevision(
   db: MemoryDb,
   context: OperationContext,
-  target: 'record' | 'checkpoint' | 'skill',
+  target: 'record' | 'checkpoint' | 'skill' | 'task',
   targetId: string,
   revision: number,
 ) {
@@ -144,7 +144,7 @@ export function recordLedger(
   action: string,
   targetId: string,
   detail: unknown,
-  target: 'record' | 'skill' = 'record',
+  target: 'record' | 'skill' | 'task' = 'record',
 ) {
   return db.insert(memoryLedger).values({
     at: context.now,

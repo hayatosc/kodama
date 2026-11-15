@@ -9,13 +9,65 @@ import type { SubmissionRecord } from '@earendil-works/pi-durable'
 import type { ModelThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentEvent } from '@earendil-works/pi-durable'
 
-/** A read-only projection of existing execution/contact state, never a delivery ledger. */
+/** A read-only projection of existing execution/contact/approval state, never a delivery ledger. */
 export interface AttentionItem {
-  source: 'execution' | 'contact'
+  source: 'execution' | 'contact' | 'approval'
   id: string
   reason: string
   lastProgressAt: number | null
-  actions: 'cancel'[]
+  actions: ('cancel' | 'approve' | 'deny')[]
+  toolName?: string
+}
+
+/** Origin of an asynchronous event ingested into the agent inbox. */
+export type InboxEventSource = 'user' | 'webhook' | 'schedule' | 'peer' | 'mcp' | 'approval'
+
+/** Session boundary mode when admitting an event. */
+export type SessionMode = 'resume' | 'new'
+
+/** Fast-ack event payload persisted before model or credential work runs. */
+export interface IngestEventRequest {
+  requestId: string
+  source: InboxEventSource
+  content: string
+  sessionMode?: SessionMode
+  whenBusy?: 'followUp' | 'steer' | 'interrupt'
+  metadata?: Record<string, string>
+}
+
+/** Fast-ack acknowledgement returned after persisting to the local inbox. */
+export interface IngestEventResponse {
+  agentId: string
+  eventId: string
+  requestId: string
+  queued: boolean
+}
+
+/** Operator resolution of a deferred side-effecting tool call. */
+export interface ResolveDeferredCallRequest {
+  approvalId: string
+  decision: 'approve' | 'deny'
+  note?: string
+}
+
+/** Resulting deferred call state and optional follow-up resume event ID. */
+export interface ResolveDeferredCallResponse {
+  approvalId: string
+  state: 'approved' | 'denied' | 'expired'
+  resumeEventId?: string
+}
+
+/** Read-only projection of a deferred call for operator attention or inspection. */
+export interface DeferredCallView {
+  approvalId: string
+  toolName: string
+  argumentsJson: string
+  reason: string
+  state: 'pending' | 'approved' | 'denied' | 'consumed' | 'expired'
+  operatorNote?: string
+  createdAt: number
+  expiresAt: number
+  decidedAt?: number
 }
 
 /** Shared extension payloads; references never grant cross-agent access. */
@@ -52,6 +104,8 @@ export interface McpToolSelection {
   modelName: string
   digest: string
   credentialId: string
+  /** Omitted for read-only selections; set to `false` for write-capable MCP assignments. */
+  readOnly?: boolean
 }
 
 /** The part of a configuration version that Pi and the memory copy use. */
@@ -90,7 +144,7 @@ export interface AgentSettings extends AgentConfig {
   memoryPolicy: MemoryPolicy
   credentials?: CredentialRefs
   /** Per registered tool; a tool missing here is allowed. */
-  toolPolicy?: Record<string, 'allow' | 'deny'>
+  toolPolicy?: Record<string, 'allow' | 'ask' | 'auto' | 'deny'>
 }
 
 /** A bounded day-aligned usage read, charged to the optional agent UUID. */
@@ -204,8 +258,8 @@ export interface SeedResult {
 export interface SendMessageRequest {
   requestId: string
   content: string
-  /** Defaults to followUp; steer joins the current run at the next tool-round boundary. */
-  whenBusy?: 'followUp' | 'steer'
+  /** Defaults to followUp; steer joins at tool boundaries; interrupt aborts active work first. */
+  whenBusy?: 'followUp' | 'steer' | 'interrupt'
 }
 
 /** Internal DO-to-DO provenance; set by sendTo, never inferred from message text. */

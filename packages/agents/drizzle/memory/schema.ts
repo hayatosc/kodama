@@ -118,7 +118,7 @@ export const memoryTerms = sqliteTable(
 export const revisionClaims = sqliteTable(
   'revision_claims',
   {
-    target: text('target', { enum: ['record', 'checkpoint', 'skill'] }).notNull(),
+    target: text('target', { enum: ['record', 'checkpoint', 'skill', 'task'] }).notNull(),
     targetId: text('target_id').notNull(),
     revision: integer('revision').notNull(),
     opId: text('op_id').notNull(),
@@ -148,7 +148,7 @@ export const extractionCheckpoints = sqliteTable('extraction_checkpoints', {
   updatedAt: integer('updated_at').notNull(),
 })
 
-/** Every change to a record or skill, in order: who made it, in which run, and why. */
+/** Every change to a record, skill, or task, in order: who made it, in which run, and why. */
 export const memoryLedger = sqliteTable(
   'memory_ledger',
   {
@@ -158,7 +158,7 @@ export const memoryLedger = sqliteTable(
     opId: text('op_id'),
     actor: text('actor').notNull(),
     action: text('action').notNull(),
-    target: text('target', { enum: ['record', 'skill'] }).notNull(),
+    target: text('target', { enum: ['record', 'skill', 'task'] }).notNull(),
     targetId: text('target_id').notNull(),
     /** For a skill change: the body before it, so an earlier version can be restored by hand. */
     detailJson: text('detail_json'),
@@ -225,5 +225,33 @@ export const skills = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.agentId, t.name] }),
     index('skills_by_status').on(t.agentId, t.status),
+  ],
+)
+
+// Task progress.
+
+/** Only `in_progress` and `blocked` tasks are indexed in the always-loaded prompt. */
+export const TASK_PROGRESS_STATUSES = ['in_progress', 'blocked', 'completed', 'archived'] as const
+
+/**
+ * One active or historical task checkpoint owned by an agent.
+ * Working agents maintain checkpoints directly via `task_write` / `task_read`.
+ */
+export const taskProgress = sqliteTable(
+  'task_progress',
+  {
+    agentId: text('agent_id').notNull(),
+    slug: text('slug').notNull(),
+    title: text('title').notNull(),
+    status: text('status', { enum: TASK_PROGRESS_STATUSES }).notNull().default('in_progress'),
+    summary: text('summary').notNull(),
+    body: text('body').notNull(),
+    revision: integer('revision').notNull().default(1),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.agentId, t.slug] }),
+    index('task_progress_by_status').on(t.agentId, t.status, t.updatedAt),
   ],
 )

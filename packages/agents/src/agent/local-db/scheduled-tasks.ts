@@ -18,6 +18,11 @@ export type ScheduledTask = typeof tasks.$inferSelect
 /** A materialized, uniquely addressed execution. */
 export type ScheduledOccurrence = typeof occurrences.$inferSelect
 
+/** Maximum autonomous follow-up chain depth without owner intervention. */
+export const MAX_FOLLOWUP_HOPS = 5
+/** Maximum concurrently active follow-up reservations per agent. */
+export const MAX_ACTIVE_FOLLOWUPS = 10
+
 const unfinished = inArray(occurrences.state, ['dispatching', 'submitted'])
 
 /** Read a replay before validating temporal limits or generating a new default anchor. */
@@ -31,6 +36,11 @@ export function reservationReplay(
   return row
 }
 
+/** Read one reservation by ID, if it exists. */
+export function getReservation(db: LocalDb, id: string): ScheduledTask | undefined {
+  return db.select().from(tasks).where(eq(tasks.id, id)).get()
+}
+
 /** Insert under the caller's serialized mutation guard; stopped-but-unsettled definitions count. */
 export function insertReservation(
   db: LocalDb,
@@ -41,6 +51,9 @@ export function insertReservation(
     instruction: string
     rule: ScheduleSpec
     nextDue: number
+    category?: 'followup' | 'schedule'
+    followupHop?: number
+    sessionMode?: 'resume' | 'new'
   },
   now: number,
 ): ScheduledTask {
@@ -52,6 +65,7 @@ export function insertReservation(
         .where(
           or(
             eq(tasks.state, 'active'),
+            eq(tasks.state, 'paused'),
             inArray(
               tasks.id,
               tx.select({ id: occurrences.taskId }).from(occurrences).where(unfinished),
@@ -60,6 +74,19 @@ export function insertReservation(
         )
         .get()?.value ?? 0
     if (open >= 100) throw new Error('schedule_quota: maximum 100 active or unsettled reservations')
+    if (input.category === 'followup') {
+      const followups =
+        tx
+          .select({ value: count() })
+          .from(tasks)
+          .where(and(eq(tasks.category, 'followup'), eq(tasks.state, 'active')))
+          .get()?.value ?? 0
+      if (followups >= MAX_ACTIVE_FOLLOWUPS) {
+        throw new Error(
+          `schedule_followup_quota: maximum ${MAX_ACTIVE_FOLLOWUPS} active follow-up timers`,
+        )
+      }
+    }
     return tx
       .insert(tasks)
       .values({ ...input, id: uuidv7(), state: 'active', createdAt: now })
@@ -73,7 +100,8 @@ export function cancelReservation(db: LocalDb, id: string) {
   return db.transaction((tx) => {
     const row = tx.select().from(tasks).where(eq(tasks.id, id)).get()
     if (!row) return { status: 'not_found' }
-    if (row.state === 'active')
+    const stoppable = row.state === 'active' || row.state === 'paused'
+    if (stoppable)
       tx.update(tasks).set({ state: 'cancelled', nextDue: null }).where(eq(tasks.id, id)).run()
     const pending = tx
       .select({ id: occurrences.id })
@@ -81,10 +109,41 @@ export function cancelReservation(db: LocalDb, id: string) {
       .where(and(eq(occurrences.taskId, id), unfinished))
       .get()
     return {
-      status: row.state === 'active' ? 'cancelled' : row.state,
+      status: stoppable ? 'cancelled' : row.state,
       inFlight: pending?.id,
       tooLateForCurrent: pending !== undefined,
     }
+  })
+}
+
+/** Update an active or paused reservation (pause, resume, or revise instruction/schedule). */
+export function updateReservation(
+  db: LocalDb,
+  id: string,
+  patch: {
+    action?: 'pause' | 'resume' | 'edit'
+    instruction?: string
+    rule?: ScheduleSpec
+    nextDue?: number | null
+  },
+) {
+  return db.transaction((tx) => {
+    const row = tx.select().from(tasks).where(eq(tasks.id, id)).get()
+    if (!row) return { status: 'not_found' as const }
+    if (row.state !== 'active' && row.state !== 'paused') {
+      return { status: row.state, updated: false }
+    }
+    let nextState: ScheduledTask['state'] = row.state
+    if (patch.action === 'pause') nextState = 'paused'
+    if (patch.action === 'resume') nextState = 'active'
+    const updates: Partial<typeof tasks.$inferInsert> = {
+      state: nextState,
+      ...(patch.instruction === undefined ? {} : { instruction: patch.instruction }),
+      ...(patch.rule === undefined ? {} : { rule: patch.rule, cursor: null }),
+      ...(patch.nextDue === undefined ? {} : { nextDue: patch.nextDue }),
+    }
+    const updated = tx.update(tasks).set(updates).where(eq(tasks.id, id)).returning().get()
+    return { status: 'updated' as const, task: updated }
   })
 }
 
@@ -104,6 +163,9 @@ export function listReservations(db: LocalDb, filter?: ScheduledTask['state'], c
       taskId: row.id,
       schedule: row.rule,
       instruction: row.instruction,
+      category: row.category,
+      followupHop: row.followupHop,
+      sessionMode: row.sessionMode,
       state: row.state,
       nextDue: row.nextDue,
       latest: db
@@ -208,7 +270,10 @@ export function recordAccepted(db: LocalDb, id: string, submissionId: number, no
     .run()
 }
 
-/** Settle a receipt and complete an exhausted active definition, never revive a cancelled one. */
+/**
+ * Settle a receipt and complete an exhausted active definition, never revive a cancelled one.
+ * Successful scheduled runs finish silently unless the agent explicitly emits via `send_outbox`.
+ */
 export function settleOccurrence(
   db: LocalDb,
   occurrence: ScheduledOccurrence,
@@ -216,6 +281,13 @@ export function settleOccurrence(
   now: number,
   failed = false,
 ): void {
+  if (
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    !Number.isSafeInteger(now + EXTENSION_RETENTION_MS)
+  ) {
+    throw new TypeError('Invalid notification timestamp')
+  }
   db.transaction((tx) => {
     const settled = tx
       .update(occurrences)
@@ -233,24 +305,24 @@ export function settleOccurrence(
           : outcome === 'unanswered:aborted'
             ? 'cancelled'
             : 'unanswered'
-    recordNotification(
-      tx,
-      {
-        source: 'schedule',
-        sourceId: occurrence.id,
-        outcome: completion,
-        summary:
-          completion === 'succeeded'
-            ? 'Scheduled execution completed.'
-            : completion === 'cancelled'
+    if (completion !== 'succeeded') {
+      recordNotification(
+        tx,
+        {
+          source: 'schedule',
+          sourceId: occurrence.id,
+          outcome: completion,
+          summary:
+            completion === 'cancelled'
               ? 'Scheduled execution was cancelled.'
               : completion === 'failed'
                 ? 'Scheduled execution failed.'
                 : 'Scheduled execution ended without an answer.',
-        artifactIds: [],
-      },
-      now,
-    )
+          artifactIds: [],
+        },
+        now,
+      )
+    }
     tx.update(tasks)
       .set({ state: failed ? 'failed' : 'completed', nextDue: null })
       .where(
@@ -272,6 +344,18 @@ export function retryOccurrence(db: LocalDb, occurrence: ScheduledOccurrence, no
       retryAt: now + Math.min(3_600_000, 60_000 * 2 ** Math.min(occurrence.attempts, 6)),
     })
     .where(and(eq(occurrences.id, occurrence.id), unfinished))
+    .run()
+}
+
+/** Postpone a dispatching occurrence without incrementing attempts (e.g. waiting for idle before reset). */
+export function deferOccurrence(
+  db: LocalDb,
+  occurrence: ScheduledOccurrence,
+  retryAt: number,
+): void {
+  db.update(occurrences)
+    .set({ retryAt })
+    .where(and(eq(occurrences.id, occurrence.id), eq(occurrences.state, 'dispatching')))
     .run()
 }
 

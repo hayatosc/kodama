@@ -28,10 +28,16 @@ describe('schedule specifications', () => {
     expect(latestAtOrBefore(rule, now)).toBeUndefined()
   })
 
-  it('runs once and rejects dates that silently normalize or omit timezone', () => {
+  it('runs once with run_at or delay_seconds and rejects invalid combinations', () => {
     const rule = normalizeSchedule({ kind: 'once', run_at: '2026-01-02T09:00:00+09:00' }, now)
     expect(nextAfter(rule, now)).toBe(Date.parse('2026-01-02T00:00:00Z'))
     expect(nextAfter(rule, rule.start)).toBeUndefined()
+    const delayed = normalizeSchedule({ kind: 'once', delay_seconds: 120 }, now)
+    expect(delayed).toEqual({ kind: 'once', start: now + 120_000 })
+    expect(() => normalizeSchedule({ kind: 'once' }, now)).toThrow('schedule_once')
+    expect(() =>
+      normalizeSchedule({ kind: 'once', run_at: '2026-01-02T00:00:00Z', delay_seconds: 60 }, now),
+    ).toThrow('schedule_once')
     expect(scheduleDate('2026-01-02T09:00:00.123+09:00')).toBe(
       Date.parse('2026-01-02T00:00:00.123Z'),
     )

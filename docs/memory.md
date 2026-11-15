@@ -365,8 +365,8 @@ Every working agent gets the `kodama-memory` Pi extension
 ([`agent/memory-extension.ts`](../packages/agents/src/agent/memory-extension.ts)), whatever tools its
 configuration enables:
 
-- the tools `memory_search`, `history_search`, `remember`, and `skill_read`;
-- the `memory` and `skills` prompt sections.
+- the tools `memory_search`, `history_search`, `remember`, `skill_read`, `task_write`, and `task_read`;
+- the `memory`, `skills`, `tasks`, and `recent-outbox` prompt sections.
 
 The memory-writing tools of the memory agent are not in this extension, and `AgentService` cannot
 reach the memory agent.
@@ -377,7 +377,25 @@ The `remember` tool's description tells the model when to call it in the turn:
 - the agent judges something worth keeping: a decision and its reason, a correction from the user,
   a lesson from a failure, or a durable fact it had to look up.
 
-It also lists what not to keep: task progress, guesses, secrets, and one-off requests.
+It also directs multi-step task progress to `task_write`, and prohibits storing guesses, secrets, or
+one-off requests in `remember`.
+
+### Task progress
+
+[`tasks.ts`](../packages/agents/src/memory/tasks.ts) and [`store/tasks.ts`](../packages/agents/src/memory/store/tasks.ts)
+manage durable task checkpoints in the D1 `task_progress` table so ongoing multi-step investigations
+and follow-up loops survive `session_mode: 'new'` context resets:
+
+- Working agents create or update checkpoints by lowercase `slug` (`status`: `in_progress`,
+  `blocked`, `completed`, `archived`), storing a concise one-line `summary` (max 280 chars) and
+  full `body` notes (max 16,000 chars) with optional optimistic-concurrency `revision` checks and
+  `task_read`.
+- Updating a task atomically bumps `scope_revisions` and updates the local `kodama_always_loaded`
+  `tasksJson` index immediately.
+- Only concise summaries of `in_progress` and `blocked` checkpoints (capped at 20 items) load into
+  the `<tasks>` prompt section; full checkpoint bodies load on demand via `task_read`, keeping prompt
+  prefixes compact and cache-stable across turns.
+- Daily consolidation archives `completed` tasks older than 30 days.
 
 `remember` returns `accepted` with the job ID once the job is enqueued; it does not wait for the
 memory model. At most three `remember` calls are accepted per user entry, counted in
@@ -436,7 +454,7 @@ In code, it does the following, deleting in small batches:
 - deletes ledger rows and revision claims older than 90 days;
 - rebuilds the terms of records with an old `search_version`;
 - invalidates agent records that override a `required` shared record;
-- archives skills unused for 30 days;
+- archives skills unused for 30 days and completed `task_progress` checkpoints older than 30 days;
 - enqueues one `consolidate` job for each scope changed in the last day, up to 200 scopes, in
   scope order starting after the last scope of the previous run and wrapping around, so the same
   scopes are not taken every day when more change;
@@ -464,20 +482,25 @@ then does the following:
 ## Always-loaded memory
 
 [`working/always-loaded.ts`](../packages/agents/src/memory/working/always-loaded.ts) renders two
-capped blocks from the always-loaded query:
+capped blocks from the always-loaded query (using fixed labels without shifting timestamps for
+prompt-cache stability):
 
 - the agent's memory, at most 2,200 characters;
 - a shared block, at most 1,000 characters.
 
 Each block shows its budget, for example `[67% — 1,474/2,200 chars]`.
 
-The agent object stores three things in `kodama_always_loaded`:
+The agent object stores four things in `kodama_always_loaded`:
 
 - the rendered text;
 - the `scope_revisions` it was built from;
-- the visible skill list.
+- the visible skill list;
+- the visible active/blocked task summaries (`tasksJson`).
 
-The `memory` and `skills` sections read this stored copy, so a request never queries D1 for them.
+The `memory`, `skills`, `tasks`, and `recent-outbox` sections read object-local SQLite, so a
+request never queries D1 synchronously just to assemble system prompt sections. Only index
+summaries (memory bullets, skill name/description, task slug/status/summary, and up to 5 recent
+dispatched outbox summaries) live in the always-loaded prompt; full bodies remain on-demand via tools.
 
 The copy is refreshed while the agent is idle:
 
@@ -507,15 +530,19 @@ everything.
 A Durable Object has one alarm. [`alarms.ts`](../packages/agents/src/agent/runtime/alarms.ts) stores a due
 time per purpose under `kodama:alarm:<purpose>` and sets the platform alarm to the earliest one.
 
-| Purpose    | Object       | Set by                                                        |
-| ---------- | ------------ | ------------------------------------------------------------- |
-| `recovery` | every agent  | admitted input; cleared when Pi has no runnable task          |
-| `extract`  | working      | going idle (10 minutes later)                                 |
-| `prune`    | every agent  | going idle with storage over the threshold, or a failed check |
-| `jobs`     | memory agent | an enqueued job, a running job (every minute), the next retry |
+| Purpose    | Object       | Set by                                                              |
+| ---------- | ------------ | ------------------------------------------------------------------- |
+| `recovery` | every agent  | admitted input; cleared when Pi has no runnable task                |
+| `schedule` | working      | due scheduled occurrences and follow-up reservations                |
+| `inbox`    | working      | fast-ack `ingestEvent`, `resolveDeferredCall`, retry, and retention |
+| `outbox`   | working      | paced `send_outbox` notifications awaiting burst coalesce flush     |
+| `contact`  | working      | peer delivery retries, receipt collection, and expiry               |
+| `extract`  | working      | going idle (10 minutes later)                                       |
+| `prune`    | every agent  | going idle with storage over the threshold, or a failed check       |
+| `jobs`     | memory agent | an enqueued job, a running job (every minute), the next retry       |
 
 `alarm()` takes every due purpose, refreshes recovery, and runs the rest. Each purpose clears only
-its own time.
+its own time; see [agents.md — Alarms and recovery](agents.md#alarms-and-recovery) for full semantics.
 
 ## Pruning
 

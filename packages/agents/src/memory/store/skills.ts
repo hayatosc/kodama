@@ -45,14 +45,18 @@ export function listSkills(db: MemoryDb, agentId: string): Promise<Skill[]> {
   return db.select().from(skills).where(eq(skills.agentId, agentId)).orderBy(asc(skills.name))
 }
 
-/** The active skills an agent sees, most recently used or written first. */
+/**
+ * The active skills an agent sees: selects up to `SKILL_LIST_LIMIT` most recently used or written
+ * skills, then sorts them deterministically by name so usage timestamps do not churn prompt cache.
+ */
 export async function visibleSkills(db: MemoryDb, agentId: string): Promise<VisibleSkill[]> {
-  return db
+  const rows = await db
     .select({ name: skills.name, description: skills.description })
     .from(skills)
     .where(and(eq(skills.agentId, agentId), eq(skills.status, 'active')))
     .orderBy(desc(coalesce(skills.lastUsedAt, skills.updatedAt)))
     .limit(SKILL_LIST_LIMIT)
+  return rows.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /**

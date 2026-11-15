@@ -8,27 +8,30 @@
  */
 import * as v from 'valibot'
 import { visibleSkills } from '../store/skills.ts'
+import { visibleTasks } from '../store/tasks.ts'
 import { memoryRevisions, promptRecords } from '../store/queries.ts'
-import { markMemoryChecked, saveMemoryCopy, storedMemoryCopy } from '../../agent/local-db/memory.ts'
+import {
+  markMemoryChecked,
+  saveLocalTasks,
+  saveMemoryCopy,
+  storedMemoryCopy,
+} from '../../agent/local-db/memory.ts'
 import type { VisibleSkill } from '../skills.ts'
+import type { VisibleTask } from '../tasks.ts'
 import { memoryDb, agentScope, readableScopes } from '../store/db.ts'
 import type { MemoryRecord } from '../store/db.ts'
 import type { WorkingMemoryDeps } from './deps.ts'
 
-/** Characters of the agent's own records in the prompt. */
-export const AGENT_MEMORY_BUDGET = 2_200
+/** Characters of the agent's own standing instructions in the prompt. */
+export const AGENT_INSTRUCTION_BUDGET = 1_200
+/** Characters of the agent's own facts/notes in the prompt. */
+export const AGENT_FACT_BUDGET = 1_500
 /** Characters of shared records in the prompt. */
 export const SHARED_MEMORY_BUDGET = 1_000
 /** How often a working agent checks D1 for changed scope revisions. */
 export const REVISION_CHECK_INTERVAL_MS = 60_000
 
 type Revisions = Record<string, number>
-
-function budgetLine(label: string, used: number, budget: number): string {
-  const percent = Math.round((used / budget) * 100)
-  const format = (value: number) => value.toLocaleString('en-US')
-  return `${label} [${percent}% — ${format(used)}/${format(budget)} chars]`
-}
 
 /**
  * The most lines a block of `budget` characters can hold: each takes at least four, `- `, one
@@ -52,9 +55,9 @@ function fit(records: readonly MemoryRecord[], budget: number): string[] {
   return lines
 }
 
-function blockText(label: string, lines: readonly string[], budget: number): string {
-  const used = lines.reduce((sum, line) => sum + line.length + 1, 0)
-  return [budgetLine(label, used, budget), ...lines].join('\n')
+function blockText(label: string, lines: readonly string[]): string | undefined {
+  if (lines.length === 0) return undefined
+  return [label, ...lines].join('\n')
 }
 
 /**
@@ -62,27 +65,36 @@ function blockText(label: string, lines: readonly string[], budget: number): str
  * agent record replaces the shared record it overrides, unless that one is required.
  *
  * @remarks
- * Overrides are resolved in the query, so each block reads only as many rows as could fit its
- * budget, however large the scopes grow.
+ * Instructions and facts are budgeted separately so high-importance facts cannot evict standing
+ * instructions. Section headers stay static for prompt cache stability.
  */
 export async function renderAlwaysLoaded(
   db: ReturnType<typeof memoryDb>,
   agentId: string,
   sharedSpaces: readonly string[],
-): Promise<{ text: string; revisions: Revisions; skills: VisibleSkill[] }> {
+): Promise<{
+  text: string
+  revisions: Revisions
+  skills: VisibleSkill[]
+  tasks: VisibleTask[]
+}> {
   const own = agentScope(agentId)
   const scopes = readableScopes(agentId, sharedSpaces)
   // Capture revisions first: a write during rendering must remain visible to the next check,
   // rather than tagging old content with a newer revision and keeping it indefinitely.
   const revisions = await memoryRevisions(db, scopes)
   const shared = scopes.filter((scope) => scope !== own)
-  const agentRecords = await promptRecords(
+  const agentInstructions = await promptRecords(
     db,
     agentId,
     [own],
     scopes,
-    maxLines(AGENT_MEMORY_BUDGET),
+    maxLines(AGENT_INSTRUCTION_BUDGET),
+    ['instruction'],
   )
+  const agentFacts = await promptRecords(db, agentId, [own], scopes, maxLines(AGENT_FACT_BUDGET), [
+    'fact',
+  ])
   const spaceOrder = (record: MemoryRecord) => scopes.indexOf(record.scope)
   const sharedRecords =
     shared.length === 0
@@ -92,14 +104,18 @@ export async function renderAlwaysLoaded(
         )
 
   const skills = await visibleSkills(db, agentId)
-  if (agentRecords.length === 0 && sharedRecords.length === 0)
-    return { text: '', revisions, skills }
+  const tasks = await visibleTasks(db, agentId)
+  const blocks = [
+    blockText('INSTRUCTIONS', fit(agentInstructions, AGENT_INSTRUCTION_BUDGET)),
+    blockText('NOTES', fit(agentFacts, AGENT_FACT_BUDGET)),
+    blockText('SHARED', fit(sharedRecords, SHARED_MEMORY_BUDGET)),
+  ].filter((block): block is string => block !== undefined)
+  if (blocks.length === 0) return { text: '', revisions, skills, tasks }
   const text = [
     'Long-term memory saved in earlier turns. Use memory_search for more, and remember to keep something new.',
-    blockText('MEMORY', fit(agentRecords, AGENT_MEMORY_BUDGET), AGENT_MEMORY_BUDGET),
-    blockText('SHARED', fit(sharedRecords, SHARED_MEMORY_BUDGET), SHARED_MEMORY_BUDGET),
+    ...blocks,
   ].join('\n')
-  return { text, revisions, skills }
+  return { text, revisions, skills, tasks }
 }
 
 function sameRevisions(a: Revisions, b: Revisions): boolean {
@@ -108,9 +124,22 @@ function sameRevisions(a: Revisions, b: Revisions): boolean {
 }
 
 const visibleSkillSchema = v.array(v.object({ name: v.string(), description: v.string() }))
+const visibleTaskSchema = v.array(
+  v.object({
+    slug: v.string(),
+    title: v.string(),
+    status: v.picklist(['in_progress', 'blocked']),
+    summary: v.string(),
+  }),
+)
 
 function parseSkills(json: string): VisibleSkill[] {
   const parsed = v.safeParse(visibleSkillSchema, JSON.parse(json))
+  return parsed.success ? parsed.output : []
+}
+
+function parseTasks(json: string): VisibleTask[] {
+  const parsed = v.safeParse(visibleTaskSchema, JSON.parse(json))
   return parsed.success ? parsed.output : []
 }
 
@@ -135,9 +164,23 @@ export async function storedSkills(memory: WorkingMemoryDeps): Promise<VisibleSk
   return row === undefined ? [] : parseSkills(row.skillsJson)
 }
 
+/** The active task checkpoints listed in the `tasks` section, from the same stored copy. */
+export async function storedTasks(memory: WorkingMemoryDeps): Promise<VisibleTask[]> {
+  const row = storedMemoryCopy(await memory.local())
+  return row === undefined ? [] : parseTasks(row.tasksJson)
+}
+
+/** Immediately update the object-local task cache after `task_write`. */
+export async function updateLocalTasks(
+  memory: WorkingMemoryDeps,
+  tasks: readonly VisibleTask[],
+): Promise<void> {
+  saveLocalTasks(await memory.local(), JSON.stringify(tasks), memory.now?.() ?? Date.now())
+}
+
 /** Render the always-loaded memory again from D1 and store the copy. Run only while idle. */
 export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<void> {
-  const { text, revisions, skills } = await renderAlwaysLoaded(
+  const { text, revisions, skills, tasks } = await renderAlwaysLoaded(
     memoryDb(memory.env.MEMORY_DB),
     memory.agentId(),
     await memory.sharedSpaces(),
@@ -147,6 +190,7 @@ export async function refreshAlwaysLoaded(memory: WorkingMemoryDeps): Promise<vo
     text,
     revisionsJson: JSON.stringify(revisions),
     skillsJson: JSON.stringify(skills),
+    tasksJson: JSON.stringify(tasks),
     checkedAt: memory.now?.() ?? Date.now(),
   }
   const local = await memory.local()

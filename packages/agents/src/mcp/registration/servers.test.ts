@@ -142,14 +142,21 @@ describe('MCP assignments', () => {
       manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
         operation: 'assign',
         ...selection,
-        readOnly: false,
+        toolIds: [],
       }),
     ).rejects.toThrow()
+    await manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
+      operation: 'assign',
+      ...selection,
+      readOnly: false,
+    })
+    expect((await desiredSettings(agentId)).toolPolicy?.[tool.modelName]).toBe('ask')
     await assignMcp(call, env.CREDENTIAL_KEK_V1, selection)
     const settings = await desiredSettings(agentId)
     const selected = settings.mcp?.[0]
     if (!selected) throw new Error('Missing applied selection')
     expect(settings.tools).toContain(tool.modelName)
+    expect(settings.toolPolicy?.[tool.modelName]).toBeUndefined()
     expect(selected.digest).toBe(tool.digest)
     expect(await guardMcpSelection(management, agentId, selected)).toMatchObject({
       remoteName: 'read',

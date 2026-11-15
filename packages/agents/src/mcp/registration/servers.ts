@@ -173,7 +173,10 @@ export async function discoverMcp(
   return { serverId, catalogDigest, inspectedAt: call.now, tools }
 }
 
-/** Explicit read-only attestation is required; annotations are not authority to select a tool. */
+/**
+ * Explicit read-only or write-capable assignment; chat-originated proposals stay read-only, while
+ * write-capable RPC assignments default each selected tool's `toolPolicy` to `'ask'`.
+ */
 export async function assignMcp(
   call: ManagementCall,
   kek: string,
@@ -183,10 +186,12 @@ export async function assignMcp(
     agentId: string
     toolIds: string[]
     catalogDigest: string
-    readOnly: true
+    readOnly?: boolean
   },
   intent?: McpIntent,
 ) {
+  const readOnly = input.readOnly ?? true
+  if (intent && !readOnly) throw new TypeError('mcp_selection_invalid')
   if (intent) {
     const instruction = intent.instruction
     if (
@@ -219,7 +224,7 @@ export async function assignMcp(
   if (!server.enabled || server.catalogDigest !== input.catalogDigest)
     throw new Error('mcp_catalog_changed')
   if (
-    input.readOnly !== true ||
+    typeof readOnly !== 'boolean' ||
     input.toolIds.length === 0 ||
     input.toolIds.length > 100 ||
     new Set(input.toolIds).size !== input.toolIds.length
@@ -243,6 +248,7 @@ export async function assignMcp(
       serverId: server.serverId,
       serverRevision: server.revision,
       credentialId: input.credentialId,
+      ...(readOnly ? {} : { readOnly: false }),
     }
   })
   if (
@@ -257,6 +263,15 @@ export async function assignMcp(
   const oldNames = new Set(
     settings.mcp?.filter((tool) => tool.serverId === server.serverId).map((tool) => tool.modelName),
   )
+  const nextToolPolicy: Record<string, 'allow' | 'ask' | 'auto' | 'deny'> = {}
+  for (const [name, policy] of Object.entries(settings.toolPolicy ?? {})) {
+    if (!oldNames.has(name)) nextToolPolicy[name] = policy
+  }
+  if (!readOnly) {
+    for (const tool of selected) {
+      nextToolPolicy[tool.modelName] = 'ask'
+    }
+  }
   const updated = parseSettings(call.models, {
     ...settings,
     mcp: [...(settings.mcp ?? []).filter((tool) => tool.serverId !== server.serverId), ...selected],
@@ -264,6 +279,7 @@ export async function assignMcp(
       ...settings.tools.filter((name) => !oldNames.has(name)),
       ...selected.map((tool) => tool.modelName),
     ],
+    toolPolicy: Object.keys(nextToolPolicy).length > 0 ? nextToolPolicy : undefined,
   })
   await call.db.batch([
     mcpCommit(
@@ -335,7 +351,11 @@ export async function assignMcp(
       agent.agentId,
       agent.currentVersion,
       updated,
-      { comment: 'Operator selected read-only MCP tools' },
+      {
+        comment: readOnly
+          ? 'Operator selected read-only MCP tools'
+          : 'Operator selected write-capable MCP tools',
+      },
     ),
     call.db
       .delete(mcpAssignments)
@@ -345,7 +365,7 @@ export async function assignMcp(
           eq(mcpAssignments.serverId, server.serverId),
         ),
       ),
-    ...selected.map(({ modelName: _name, ...selection }) =>
+    ...selected.map(({ modelName: _name, readOnly: _readOnly, ...selection }) =>
       call.db.insert(mcpAssignments).values({ agentId: agent.agentId, ...selection }),
     ),
     call.db
@@ -364,7 +384,7 @@ export async function assignMcp(
         credentialId: input.credentialId,
         toolIds: input.toolIds,
         catalogDigest: input.catalogDigest,
-        readOnly: true,
+        readOnly,
         ...(intent ? mcpIntentAudit(intent) : { origin: 'rpc' }),
       },
     }),

@@ -17,10 +17,13 @@ import type { CodeCall } from '../tools/code/execute.ts'
 import type { McpRegistrationCall } from '../mcp/registration/chat-tool.ts'
 import type { ArtifactCall } from '../tools/artifacts.ts'
 import type { ContactAgent } from '../tools/contact.ts'
+import type { OutboxSend } from '../tools/outbox.ts'
 import type { ScheduleTools } from '../tools/scheduled-tasks.ts'
 import { harnessSettings } from './runtime/harness.ts'
 import { guardedModels } from './runtime/restrictions.ts'
 import type { Refusal } from './runtime/restrictions.ts'
+import { wrapToolsWithPermissions } from './permissions.ts'
+import type { PermissionDeps } from './permissions.ts'
 
 /**
  * Register the working agent's optional tools alongside its always-enabled extensions.
@@ -40,10 +43,21 @@ export function createAgentOptions(
   artifacts?: ArtifactCall,
   suppliedRegistry?: Registry,
   mcpRegistration?: McpRegistrationCall,
+  outbox?: OutboxSend,
+  permissions?: PermissionDeps,
 ): HarnessOptions {
+  const rawTools = createAgentTools(
+    contact,
+    web,
+    schedule,
+    code,
+    artifacts,
+    mcpRegistration,
+    outbox,
+  )
   const extension = defineExtension({
     name: 'kodama',
-    tools: createAgentTools(contact, web, schedule, code, artifacts, mcpRegistration),
+    tools: permissions ? wrapToolsWithPermissions(rawTools, permissions) : rawTools,
     sections: [
       section(
         'external-data',

@@ -13,12 +13,14 @@ import {
   dueReservations,
   insertReservation,
   listReservations,
+  MAX_ACTIVE_FOLLOWUPS,
   nextScheduleWake,
   pendingOccurrences,
   recordAccepted,
   reservationReplay,
   retainScheduledReceipts,
   settleOccurrence,
+  updateReservation,
 } from './scheduled-tasks.ts'
 import type { LocalDb } from './local.ts'
 
@@ -49,7 +51,7 @@ describe('reservation store', () => {
     })
   })
 
-  it('claims atomically, blocks overlap, and cancellation cannot resurrect a definition', async () => {
+  it('claims atomically, blocks overlap, settles done silently, and cancellation cannot resurrect a definition', async () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       const task = insert(local)
@@ -77,14 +79,7 @@ describe('reservation store', () => {
         latest: { state: 'settled', outcome: 'done' },
       })
       expect(nextScheduleWake(local)).toBeUndefined()
-      expect(listNotifications(local, {}, 124_001).notifications).toMatchObject([
-        {
-          source: 'schedule',
-          sourceId: occurrence.id,
-          outcome: 'succeeded',
-          referenceState: 'available',
-        },
-      ])
+      expect(listNotifications(local, {}, 124_001).notifications).toEqual([])
     })
   })
 
@@ -110,33 +105,33 @@ describe('reservation store', () => {
     })
   })
 
-  it('commits terminal state and notification atomically, with first transition winning after expiry', async () => {
+  it('commits failure state and notification atomically, with first transition winning after expiry', async () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       const task = insert(local)
       const occurrence = claimOccurrence(local, task, 1000, 61_000, 1000)
-      expect(() => settleOccurrence(local, occurrence, 'done', -1)).toThrow(
+      expect(() => settleOccurrence(local, occurrence, 'unanswered:faulted', -1)).toThrow(
         'Invalid notification timestamp',
       )
       expect(pendingOccurrences(local)).toHaveLength(1)
       expect(local.select().from(notifications).all()).toEqual([])
-      settleOccurrence(local, occurrence, 'done', 2000)
+      settleOccurrence(local, occurrence, 'unanswered:faulted', 2000)
       readNotification(local, 1, 3000)
       settleOccurrence(local, occurrence, 'unanswered:aborted', 4000)
       recordAccepted(local, occurrence.id, 42, 5000)
       expect(local.select().from(notifications).all()).toMatchObject([
-        { sourceId: occurrence.id, outcome: 'succeeded', readAt: 3000, createdAt: 2000 },
+        { sourceId: occurrence.id, outcome: 'failed', readAt: 3000, createdAt: 2000 },
       ])
       expect(pendingOccurrences(local)).toEqual([])
       retainNotifications(local, 2000 + EXTENSION_RETENTION_MS)
-      settleOccurrence(local, occurrence, 'done', 2001 + EXTENSION_RETENTION_MS)
+      settleOccurrence(local, occurrence, 'unanswered:faulted', 2001 + EXTENSION_RETENTION_MS)
       expect(local.select().from(notifications).all()).toEqual([])
-      expect(listReservations(local).tasks[0]?.latest?.outcome).toBe('done')
+      expect(listReservations(local).tasks[0]?.latest?.outcome).toBe('unanswered:faulted')
       // A later nominal execution has its own identity, not the definition's notification key.
       const next = reservationReplay(local, task.sourceTask, '{}')
       if (!next) throw new Error('Missing reservation')
       const second = claimOccurrence(local, next, 61_000, 121_000, 2001 + EXTENSION_RETENTION_MS)
-      settleOccurrence(local, second, 'done', 2002 + EXTENSION_RETENTION_MS)
+      settleOccurrence(local, second, 'unanswered:model_error', 2002 + EXTENSION_RETENTION_MS)
       expect(local.select().from(notifications).all()).toMatchObject([
         { seq: 2, sourceId: second.id },
       ])
@@ -166,6 +161,60 @@ describe('reservation store', () => {
       })
     },
   )
+
+  it('supports pause, resume, edit, and caps active follow-up timers separately', async () => {
+    await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const task = insert(local)
+      expect(updateReservation(local, task.id, { action: 'pause' })).toMatchObject({
+        status: 'updated',
+        task: { state: 'paused' },
+      })
+      expect(dueReservations(local, 10_000)).toEqual([])
+      expect(
+        updateReservation(local, task.id, {
+          action: 'resume',
+          instruction: 'Updated work',
+          nextDue: 2000,
+        }),
+      ).toMatchObject({
+        status: 'updated',
+        task: { state: 'active', instruction: 'Updated work', nextDue: 2000 },
+      })
+      for (let i = 0; i < MAX_ACTIVE_FOLLOWUPS; i++) {
+        insertReservation(
+          local,
+          {
+            sourceTask: `followup-${i}`,
+            sourceEntry: 1,
+            arguments: '{}',
+            instruction: 'Follow up',
+            rule: { kind: 'once', start: 5000 },
+            nextDue: 5000,
+            category: 'followup',
+            followupHop: 1,
+          },
+          1000,
+        )
+      }
+      expect(() =>
+        insertReservation(
+          local,
+          {
+            sourceTask: 'followup-overflow',
+            sourceEntry: 1,
+            arguments: '{}',
+            instruction: 'Follow up',
+            rule: { kind: 'once', start: 5000 },
+            nextDue: 5000,
+            category: 'followup',
+            followupHop: 1,
+          },
+          1000,
+        ),
+      ).toThrow('schedule_followup_quota')
+    })
+  })
 
   it('counts stopped-but-unsettled reservations, enforces quota, and paginates by stable ID', async () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {

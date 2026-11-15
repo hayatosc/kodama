@@ -70,6 +70,7 @@ export function promptRecords(
   scopes: Scope[],
   readable: readonly Scope[],
   limit: number,
+  kinds: readonly ('fact' | 'instruction')[] = ['fact', 'instruction'],
 ) {
   return db
     .select()
@@ -78,7 +79,7 @@ export function promptRecords(
       and(
         inArray(memoryRecords.scope, scopes),
         eq(memoryRecords.status, 'active'),
-        inArray(memoryRecords.kind, ['fact', 'instruction']),
+        inArray(memoryRecords.kind, [...kinds]),
         effectiveForAgent(db, agentId, readable),
       ),
     )

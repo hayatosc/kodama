@@ -101,11 +101,18 @@ export const notifications = sqliteTable(
   'kodama_notifications',
   {
     seq: integer('seq').primaryKey({ autoIncrement: true }),
-    source: text('source', { enum: ['contact', 'schedule', 'mcp'] }).notNull(),
+    source: text('source', {
+      enum: ['contact', 'schedule', 'mcp', 'outbox', 'approval'],
+    }).notNull(),
     sourceId: text('source_id').notNull(),
     outcome: text('outcome').$type<CompletionOutcome>().notNull(),
     summary: text('summary').notNull(),
+    details: text('details'),
     artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull(),
+    deliveryState: text('delivery_state', { enum: ['pending', 'dispatched', 'suppressed'] })
+      .notNull()
+      .default('dispatched'),
+    deliverAfter: integer('deliver_after'),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     readAt: integer('read_at'),
@@ -114,6 +121,7 @@ export const notifications = sqliteTable(
     uniqueIndex('kodama_notifications_source').on(t.source, t.sourceId),
     index('kodama_notifications_unread').on(t.readAt, t.seq),
     index('kodama_notifications_expiry').on(t.expiresAt),
+    index('kodama_notifications_delivery').on(t.deliveryState, t.deliverAfter),
   ],
 )
 
@@ -127,7 +135,16 @@ export const scheduledTasks = sqliteTable(
     arguments: text('arguments').notNull(),
     instruction: text('instruction').notNull(),
     rule: text('rule', { mode: 'json' }).$type<ScheduleSpec>().notNull(),
-    state: text('state', { enum: ['active', 'completed', 'cancelled', 'failed'] }).notNull(),
+    category: text('category', { enum: ['followup', 'schedule'] })
+      .notNull()
+      .default('schedule'),
+    followupHop: integer('followup_hop').notNull().default(0),
+    sessionMode: text('session_mode', { enum: ['resume', 'new'] })
+      .notNull()
+      .default('new'),
+    state: text('state', {
+      enum: ['active', 'paused', 'completed', 'cancelled', 'failed'],
+    }).notNull(),
     nextDue: integer('next_due'),
     cursor: integer('cursor'),
     createdAt: integer('created_at').notNull(),
@@ -237,6 +254,8 @@ export const alwaysLoaded = sqliteTable('kodama_always_loaded', {
   revisionsJson: text('revisions_json').notNull(),
   /** The skills this agent sees, as listed in its `skills` section. */
   skillsJson: text('skills_json').notNull().default('[]'),
+  /** Active task-progress summaries shown in the `tasks` prompt section. */
+  tasksJson: text('tasks_json').notNull().default('[]'),
   checkedAt: integer('checked_at').notNull(),
 })
 
@@ -289,4 +308,52 @@ export const knownUrls = sqliteTable(
     primaryKey({ columns: [t.root, t.url] }),
     index('kodama_known_urls_by_age').on(t.root, t.grantedAt),
   ],
+)
+
+/** Fast-ack event inbox for asynchronous admissions, coalescing, and session boundary routing. */
+export const eventInbox = sqliteTable(
+  'kodama_event_inbox',
+  {
+    id: text('id').primaryKey(),
+    requestId: text('request_id').notNull().unique(),
+    source: text('source', {
+      enum: ['user', 'webhook', 'schedule', 'peer', 'mcp', 'approval'],
+    }).notNull(),
+    sessionMode: text('session_mode', { enum: ['resume', 'new'] })
+      .notNull()
+      .default('resume'),
+    whenBusy: text('when_busy', { enum: ['followUp', 'steer', 'interrupt'] })
+      .notNull()
+      .default('followUp'),
+    payloadJson: text('payload_json').notNull(),
+    state: text('state', { enum: ['queued', 'admitted', 'settled', 'failed'] })
+      .notNull()
+      .default('queued'),
+    submissionId: integer('submission_id'),
+    attempts: integer('attempts').notNull().default(0),
+    nextRetryAt: integer('next_retry_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    settledAt: integer('settled_at'),
+  },
+  (t) => [index('kodama_event_inbox_pending').on(t.state, t.nextRetryAt, t.createdAt)],
+)
+
+/** Side-effecting tool calls deferred for operator approval without blocking the worker loop. */
+export const deferredCalls = sqliteTable(
+  'kodama_deferred_calls',
+  {
+    approvalId: text('approval_id').primaryKey(),
+    toolName: text('tool_name').notNull(),
+    argumentsJson: text('arguments_json').notNull(),
+    reason: text('reason').notNull(),
+    sourceTask: text('source_task').notNull().unique(),
+    state: text('state', {
+      enum: ['pending', 'approved', 'denied', 'consumed', 'expired'],
+    }).notNull(),
+    operatorNote: text('operator_note'),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    decidedAt: integer('decided_at'),
+  },
+  (t) => [index('kodama_deferred_calls_state').on(t.state, t.createdAt)],
 )

@@ -1,17 +1,21 @@
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { scheduledTasks } from '../../drizzle/durable-object/schema.ts'
 import { isKnownUrl } from './local-db/external-data.ts'
 import { openLocalDb } from './local-db/local.ts'
+import { insertReservation } from './local-db/scheduled-tasks.ts'
+import { setAlarm } from './runtime/alarms.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, expectTypeOf, it, vi } from 'vite-plus/test'
 import AgentService from '../index.ts'
-import { management, newAgentId, seedOnce } from '../testing/management.ts'
+import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'
 import { agents } from '../../drizzle/management/schema.ts'
 import { eq } from 'drizzle-orm'
 import { recordNotification } from './local-db/notifications.ts'
 import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { parseMessage } from '../validation.ts'
+import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import {
   modelResponse,
   readEvents,
@@ -272,4 +276,273 @@ it('exposes versioned configuration on the same service as conversations', () =>
   expectTypeOf(exports.default).not.toHaveProperty('setConfig')
   expect(AgentService.prototype).toHaveProperty('getConfig')
   expect(AgentService.prototype).not.toHaveProperty('setConfig')
+})
+
+describe('always-on proactive behavior', () => {
+  it('stays silent when no alert is needed and injects recent-outbox context on subsequent runs', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      memoryPolicy: { remember: true, extract: false },
+      tools: ['current_time', 'schedule_task', 'list_scheduled_tasks', 'send_outbox'],
+    })
+
+    const past = Date.now() - 1000
+    let taskId = ''
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const created = insertReservation(
+        local,
+        {
+          sourceTask: 'eval-silent-task',
+          sourceEntry: 1,
+          arguments: '{}',
+          instruction: 'Inspect queue health; remain silent if healthy.',
+          rule: { kind: 'interval', every: 3_600_000, start: past },
+          nextDue: past,
+          sessionMode: 'new',
+          category: 'schedule',
+        },
+        past - 1000,
+      )
+      taskId = created.id
+      await setAlarm(state.storage, 'schedule', Date.now() - 1)
+    })
+
+    // First scheduled run finds nothing urgent -> finishes without send_outbox -> 0 notifications.
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      textResponse('Queue healthy; staying silent.'),
+    )
+    await runInDurableObject(env.AGENTS.getByName(id), (instance) => instance.alarm())
+    await waitForAnswer(id, `scheduled-${taskId}-${past}`)
+    expect((await exports.default.notifications(id)).notifications).toEqual([])
+
+    // Second wake detects an anomaly and alerts via send_outbox; later turn sees <recent-outbox>.
+    await exports.default.ingestEvent(id, {
+      requestId: 'eval-alert-wake',
+      source: 'webhook',
+      content: 'DLQ depth spiked above threshold.',
+    })
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'send_outbox',
+          arguments: { summary: 'DLQ spike alert: 42 failed jobs' },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Notified operator.'))
+
+    await runInDurableObject(env.AGENTS.getByName(id), async (instance, state) => {
+      await setAlarm(state.storage, 'inbox', Date.now() - 1)
+      await instance.alarm()
+    })
+    await waitForAnswer(id, 'eval-alert-wake')
+    expect((await exports.default.notifications(id)).notifications).toMatchObject([
+      { source: 'outbox', summary: 'DLQ spike alert: 42 failed jobs' },
+    ])
+
+    let seenRecentOutbox = false
+    vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+      const body = requestBody(init)
+      seenRecentOutbox =
+        body.includes('<recent-outbox>') && body.includes('DLQ spike alert: 42 failed jobs')
+      return textResponse('Already alerted operator; suppressing duplicate.')
+    })
+    await exports.default.sendMessage(id, { requestId: 'eval-dedup-check', content: 'Status?' })
+    await waitForAnswer(id, 'eval-dedup-check')
+    expect(seenRecentOutbox).toBe(true)
+  })
+
+  it('persists task_write checkpoints across session_mode new follow-up hops and completes via task_read', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      memoryPolicy: { remember: true, extract: false },
+      tools: ['schedule_task', 'list_scheduled_tasks', 'send_outbox'],
+    })
+
+    const hop1Due = Date.now() - 1000
+    let initialId = ''
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const created = insertReservation(
+        local,
+        {
+          sourceTask: 'eval-hop-1',
+          sourceEntry: 1,
+          arguments: '{}',
+          instruction: 'Start deploy verification for build-77 and follow up.',
+          rule: { kind: 'once', start: hop1Due },
+          nextDue: hop1Due,
+          sessionMode: 'new',
+          category: 'schedule',
+        },
+        hop1Due - 1000,
+      )
+      initialId = created.id
+      await setAlarm(state.storage, 'schedule', Date.now() - 1)
+    })
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'task_write',
+          arguments: {
+            slug: 'deploy-build-77',
+            title: 'Verify build 77 canary',
+            status: 'in_progress',
+            summary: 'Canary started; waiting 2 minutes for metrics',
+            body: 'Step 1 passed. Next: check canary error rate after warmup.',
+          },
+        }),
+      )
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'schedule_task',
+          arguments: {
+            schedule: { kind: 'once', delay_seconds: 120 },
+            instruction: 'Resume build-77 canary verification',
+            session_mode: 'new',
+          },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Scheduled canary follow-up.'))
+
+    await runInDurableObject(env.AGENTS.getByName(id), (instance) => instance.alarm())
+    await waitForAnswer(id, `scheduled-${initialId}-${hop1Due}`)
+
+    // Make the follow-up hop due immediately and wake the schedule alarm.
+    let followupId = ''
+    const hop2Due = Date.now() - 500
+    await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
+      const local = await openLocalDb(state.storage)
+      const all = local.select().from(scheduledTasks).all()
+      const followup = all.find((row) => row.id !== initialId)
+      if (!followup) throw new Error('Expected follow-up schedule row')
+      followupId = followup.id
+      local
+        .update(scheduledTasks)
+        .set({ rule: { kind: 'once', start: hop2Due }, nextDue: hop2Due })
+        .where(eq(scheduledTasks.id, followupId))
+        .run()
+      await setAlarm(state.storage, 'schedule', Date.now() - 1)
+    })
+
+    let sawTaskSectionWithoutPriorTranscript = false
+    vi.mocked(fetch)
+      .mockImplementationOnce(async (_input, init) => {
+        const body = requestBody(init)
+        sawTaskSectionWithoutPriorTranscript =
+          body.includes('<tasks>') &&
+          body.includes('deploy-build-77') &&
+          !body.includes('Scheduled canary follow-up.')
+        return toolCallResponse({
+          name: 'task_read',
+          arguments: { slug: 'deploy-build-77' },
+        })
+      })
+      .mockImplementationOnce(async (_input, init) => {
+        expect(requestBody(init)).toContain('check canary error rate after warmup')
+        return toolCallResponse({
+          name: 'task_write',
+          arguments: {
+            slug: 'deploy-build-77',
+            title: 'Verify build 77 canary',
+            status: 'completed',
+            summary: 'Canary verified healthy at 0% error rate',
+            body: 'Step 1 passed. Step 2 error rate 0%. Marked completed.',
+            revision: 1,
+          },
+        })
+      })
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'send_outbox',
+          arguments: { summary: 'Build 77 canary verified healthy' },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Completed deploy-build-77.'))
+
+    await runInDurableObject(env.AGENTS.getByName(id), (instance) => instance.alarm())
+    await waitForAnswer(id, `scheduled-${followupId}-${hop2Due}`)
+
+    expect(sawTaskSectionWithoutPriorTranscript).toBe(true)
+    expect((await exports.default.notifications(id)).notifications).toMatchObject([
+      { source: 'outbox', summary: 'Build 77 canary verified healthy' },
+    ])
+  })
+
+  it('coalesces burst events, defers high-risk actions without blocking Q&A, and resumes on approval', async () => {
+    const id = await newAgentId()
+    await updateSettings(id, {
+      memoryPolicy: { remember: true, extract: false },
+      tools: ['current_time', 'create_artifact', 'send_outbox'],
+      toolPolicy: { create_artifact: 'ask' },
+    })
+
+    await exports.default.ingestEvent(id, {
+      requestId: 'burst-1',
+      source: 'webhook',
+      content: 'Alert 1: high CPU',
+    })
+    await exports.default.ingestEvent(id, {
+      requestId: 'burst-2',
+      source: 'webhook',
+      content: 'Alert 2: high memory',
+    })
+    await exports.default.ingestEvent(id, {
+      requestId: 'burst-3',
+      source: 'webhook',
+      content: 'Alert 3: high disk IO',
+    })
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async (_input, init) => {
+        expect(requestBody(init)).toContain('[Coalesced 3 queued events]')
+        return toolCallResponse({
+          name: 'create_artifact',
+          arguments: { filename: 'incident-report.txt', content: 'CPU + Mem + IO summary' },
+        })
+      })
+      .mockImplementationOnce(async () => textResponse('Deferred incident-report.txt creation.'))
+
+    await runInDurableObject(env.AGENTS.getByName(id), async (instance, state) => {
+      await setAlarm(state.storage, 'inbox', Date.now() - 1)
+      await instance.alarm()
+    })
+    await waitForAnswer(id, 'burst-1')
+
+    // Normal Q&A responds immediately while incident-report.txt waits for approval.
+    vi.mocked(fetch).mockImplementationOnce(async () =>
+      textResponse('Ready to answer normal chat.'),
+    )
+    await exports.default.sendMessage(id, {
+      requestId: 'concurrent-qa',
+      content: 'Still responsive?',
+    })
+    await waitForAnswer(id, 'concurrent-qa')
+
+    const pending = (await exports.default.deferredCalls(id))[0]
+    if (!pending) throw new Error('Expected pending deferred call')
+    await exports.default.resolveDeferredCall(id, {
+      approvalId: pending.approvalId,
+      decision: 'approve',
+    })
+
+    vi.mocked(fetch)
+      .mockImplementationOnce(async () =>
+        toolCallResponse({
+          name: 'create_artifact',
+          arguments: { filename: 'incident-report.txt', content: 'CPU + Mem + IO summary' },
+        }),
+      )
+      .mockImplementationOnce(async () => textResponse('Saved incident-report.txt.'))
+
+    await runInDurableObject(env.AGENTS.getByName(id), async (instance, state) => {
+      await setAlarm(state.storage, 'inbox', Date.now() - 1)
+      await instance.alarm()
+    })
+    await waitForAnswer(id, `approval-${pending.approvalId}-approve`)
+
+    using artifacts = await exports.default.listArtifacts(id, {})
+    expect(artifacts.map((item) => item.filename)).toEqual(['incident-report.txt'])
+  })
 })

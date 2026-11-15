@@ -448,27 +448,37 @@ interface AgentSettings {
   systemPrompt: string // at most 64,000 characters
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   tools: string[] // unique names of registered tools
+  mcp?: Array<{
+    serverId: string
+    serverRevision: number
+    toolId: string
+    modelName: string
+    digest: string
+    credentialId: string
+    readOnly?: boolean
+  }>
   webSearchRoute?: 'auto' | 'keyless' // absent means auto
   sharedSpaces: string[] // shared memory spaces read by this agent, earliest first
   description?: string // at most 1,000 characters
   labels?: string[] // up to 16 unique labels of lowercase letters, digits, or hyphens
   memoryPolicy: { extract: boolean; remember: boolean }
   credentials?: { primary: Record<string, string> }
-  toolPolicy?: Record<string, 'allow' | 'deny'>
+  toolPolicy?: Record<string, 'allow' | 'ask' | 'auto' | 'deny'>
 }
 ```
 
 - `memoryPolicy.extract: false` stops handing new entries to the memory agent, and
   `memoryPolicy.remember: false` blocks the `remember` tool.
-- `toolPolicy` blocks a denied tool at its call; a tool not listed is allowed.
+- `toolPolicy` sets per-tool permissions (`allow`, `ask`, `auto`, or `deny`); a tool not listed is
+  allowed (`allow`). See [Tool approvals](#tool-approvals).
 - `credentials` explicitly selects credential UUIDs by Pi provider ID; grants and revocation
   are checked at use. No spend-budget configuration or cost-based enforcement exists.
 - The status, display name, and slug are registry columns, not version fields.
 
 A new agent's version 1 holds the defaults of its creation: the model `DEFAULT_MODEL_PROVIDER` and
 `DEFAULT_MODEL_ID` from `cloudflare.config.ts`, the prompt `DEFAULT_SYSTEM_PROMPT` in
-`src/control-plane/config.ts`, thinking off, `web_search` and `web_fetch` enabled, `sharedSpaces` `["global"]`, and both memory
-policies on. Changing the defaults later changes no existing agent.
+`src/control-plane/config.ts`, thinking off, `web_search`, `web_fetch`, `mcp_registration`,
+and `send_outbox` enabled, `sharedSpaces` `["global"]`, and both memory policies on. Changing the defaults later changes no existing agent.
 
 ### Configuration versions
 
@@ -578,16 +588,47 @@ To add a tool:
 1. Implement it in `src/tools/`, in a lowercase hyphenated file such as `current-time.ts`.
 2. Register it in [`src/tools/index.ts`](../packages/agents/src/tools/index.ts).
 
-Agents enable registered tools by name in `tools`. New working agents default to `web_search`
-and `web_fetch`; an explicit applied `tools: []` disables optional tools. Optional tools are
-`current_time`, `contact_agent`, `list_contacts`, `contact_status`, `contact_result`,
-`discover_agents`, `web_search`, and `web_fetch`. The memory tools come from the memory
-extension, not from this list. `contact_agent` is bound only in a working agent's registry; the memory agent neither
-registers it nor permits `sendTo`.
+Agents enable registered tools by name in `tools`. New working agents default to `current_time`,
+`web_search`, `web_fetch`, `mcp_registration`, and `send_outbox`; an explicit applied `tools: []`
+disables optional tools. Optional tools are `current_time`, `contact_agent`, `list_contacts`,
+`contact_status`, `contact_result`, `discover_agents`, `web_search`, `web_fetch`, `schedule_task`,
+`list_scheduled_tasks`, `update_scheduled_task`, `cancel_scheduled_task`, `execute_code`,
+`create_artifact`, `read_artifact`, `list_artifacts`, `delete_artifact`, `mcp_registration`, and
+`send_outbox`. The memory and task-progress tools (`memory_search`, `history_search`, `remember`,
+`skill_read`, `task_write`, `task_read`) come from the memory extension, not from this list.
+`contact_agent` is bound only in a working agent's registry; the memory agent neither registers it nor
+permits `sendTo`.
 
 Locally, `vp run agent tools assistant current_time contact_agent` replaces the optional tool selection
 through the versioned configuration API, preserving the other settings and credential references.
 Omit tool names to disable all optional tools.
+
+### Tool approvals
+
+[`src/agent/permissions.ts`](../packages/agents/src/agent/permissions.ts) and
+[`src/agent/local-db/deferred.ts`](../packages/agents/src/agent/local-db/deferred.ts) enforce
+`settings.toolPolicy` (`allow`, `ask`, `auto`, `deny`) across optional, memory, and MCP tools
+without blocking the conversation loop:
+
+- **`allow`** (default): executes directly. **`deny`**: rejected by `toolGuardExtension`.
+- **`ask`**: defers execution before the tool runs.
+- **`auto`**: classifies each call via `classifyToolRisk(toolName, args, isReadOnlyMcp)`. Read-only
+  informational, memory, task, and `send_outbox` calls plus read-only MCP selections classify as
+  `low` risk and run automatically; mutating artifacts, `execute_code`, `contact_agent`, schedule
+  mutations, and write-capable (`readOnly: false`) or unknown tools classify as `high` risk and
+  defer for approval.
+
+When a call is deferred, Kodama persists a `pending` row in `kodama_deferred_calls` (24-hour TTL),
+records a `source: 'approval'` notification, exposes the wait in `attention()` with
+`actions: ['approve', 'deny']`, and returns a non-error JSON result `{ status: 'deferred', approvalId, toolName, reason }`
+to the model so the current turn finishes and concurrent `sendMessage` / `ingestEvent` Q&A keeps
+responding.
+
+The operator calls `AgentService.resolveDeferredCall(agentId, { approvalId, decision, note? })`,
+which updates the row to `approved` or `denied` and enqueues a `source: 'approval'` resume event into
+`kodama_event_inbox` (`approval-<approvalId>-<decision>`). When the tool is retried with matching
+canonicalized arguments (`stableArgsJson`), `consumeApprovedCall` consumes the single-use `approved`
+row atomically inside a transaction so one approval authorizes exactly one execution.
 
 ## RPC contract
 
@@ -595,20 +636,24 @@ Omit tool names to disable all optional tools.
 at the boundary, admits them from the registry (see [Registry and admission](#registry-and-admission)),
 and forwards to the agent's Durable Object:
 
-| Method                                                    | Result                                                       |
-| --------------------------------------------------------- | ------------------------------------------------------------ |
-| `send(agentId, { requestId, content })`                   | SSE response through terminal submission                     |
-| `subscribe(agentId)`                                      | Continuous agent-wide SSE observation                        |
-| `sendMessage(agentId, { requestId, content })`            | Durable acceptance with `submissionId`                       |
-| `submission(agentId, requestId)`                          | Submission status, or `undefined`                            |
-| `snapshot(agentId)`                                       | Committed user/assistant messages and `busy`                 |
-| `cancel(agentId)`                                         | Stop current work; resolves once idle                        |
-| `notifications(agentId, query?)`                          | Newest-first bounded agent-wide inbox                        |
-| `readNotification(agentId, { seq })`                      | Exact agent-wide read acknowledgement                        |
-| `uploadArtifact(agentId, { filename, mediaType, bytes })` | `ArtifactMetadata`; `chat` admission (active only)           |
-| `listArtifacts(agentId, { cursor?, limit? })`             | `ArtifactMetadata[]`; `read` admission                       |
-| `downloadArtifact(agentId, artifactId)`                   | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
-| `deleteArtifact(agentId, artifactId)`                     | `void`; `read` admission                                     |
+| Method                                                          | Result                                                       |
+| --------------------------------------------------------------- | ------------------------------------------------------------ |
+| `send(agentId, { requestId, content })`                         | SSE response through terminal submission                     |
+| `subscribe(agentId)`                                            | Continuous agent-wide SSE observation                        |
+| `sendMessage(agentId, { requestId, content, whenBusy? })`       | Durable acceptance with `submissionId`                       |
+| `ingestEvent(agentId, { requestId, source, content, ... })`     | Fast-ack SQLite queue acceptance into `kodama_event_inbox`   |
+| `submission(agentId, requestId)`                                | Submission status, or `undefined`                            |
+| `snapshot(agentId)`                                             | Committed user/assistant messages and `busy`                 |
+| `attention(agentId)`                                            | Current execution, contact, and approval waits               |
+| `deferredCalls(agentId)`                                        | Recent and pending deferred tool call approvals              |
+| `resolveDeferredCall(agentId, { approvalId, decision, note? })` | Record approval/denial and queue inbox resume                |
+| `cancel(agentId)`                                               | Stop current work; resolves once idle                        |
+| `notifications(agentId, query?)`                                | Newest-first bounded agent-wide inbox                        |
+| `readNotification(agentId, { seq })`                            | Exact agent-wide read acknowledgement                        |
+| `uploadArtifact(agentId, { filename, mediaType, bytes })`       | `ArtifactMetadata`; `chat` admission (active only)           |
+| `listArtifacts(agentId, { cursor?, limit? })`                   | `ArtifactMetadata[]`; `read` admission                       |
+| `downloadArtifact(agentId, artifactId)`                         | `ArtifactMetadata & { bytes: Uint8Array }`; `read` admission |
+| `deleteArtifact(agentId, artifactId)`                           | `void`; `read` admission                                     |
 
 Artifact `read` admission also permits paused and archived working agents. Metadata contains
 `artifactId`, `filename`, `mediaType`, `size`, `createdAt`, and `expiresAt`, never a storage key.
@@ -659,11 +704,14 @@ few more methods, for other Durable Objects and for `AgentService`:
   reused request ID returns its first submission even when the content differs, and the new
   content is dropped without an error. Generate a fresh ID, such as a UUID v7, for every message,
   and never derive it from a conversation or session alone.
-- Input that arrives while an agent is busy is queued by Pi Durable. `whenBusy` controls how:
+- Input that arrives while an agent is busy is handled according to `whenBusy`:
   - `followUp` (the default) waits for the current run to answer and then starts the next run;
-  - `steer` joins the current run after its current tool round.
+  - `steer` joins the current run after its current tool round;
+  - `interrupt` aborts the active run (`root.abort`) first and submits the new input immediately
+    when idle (or immediately via `followUp` admission on direct `sendMessage` / `inbox` dispatch).
 
-  Neither interrupts an executing tool, and when the agent is idle, both start a run immediately.
+  `followUp` and `steer` never interrupt an executing tool, and when the agent is idle, all three
+  start a run immediately.
 
 - Transient provider failures do not fail a turn. Rate limits, 5xx responses, request timeouts,
   and dropped connections are retried as described in [Harness](#harness), and the wait is durable
@@ -908,14 +956,16 @@ before domain dispatch. Pruning performs one bounded slice per wake, and the mem
 starts a coalesced drain without waiting for model completion. Platform alarm retries are a fallback,
 not the sole guarantee of another wake:
 
-| Purpose    | Meaning                                                               |
-| ---------- | --------------------------------------------------------------------- |
-| `recovery` | resume Pi's scheduler after eviction while work is pending            |
-| `schedule` | reconcile reservations and admit a bounded batch of due inputs        |
-| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results |
-| `extract`  | hand new entries to the memory agent after 10 minutes idle            |
-| `prune`    | archive and delete old entries when storage is over its threshold     |
-| `jobs`     | the memory agent's job runner                                         |
+| Purpose    | Meaning                                                                    |
+| ---------- | -------------------------------------------------------------------------- |
+| `recovery` | resume Pi's scheduler after eviction while work is pending                 |
+| `schedule` | reconcile reservations and admit a bounded batch of due inputs             |
+| `inbox`    | drain `kodama_event_inbox`, retry transient failures, and prune aged items |
+| `outbox`   | flush paced `send_outbox` notifications after the coalesce window expires  |
+| `contact`  | retry peer delivery, collect receipts, acknowledge and expire results      |
+| `extract`  | hand new entries to the memory agent after 10 minutes idle                 |
+| `prune`    | archive and delete old entries when storage is over its threshold          |
+| `jobs`     | the memory agent's job runner                                              |
 
 The same file keeps the `recovery` purpose set while Pi has
 runnable tasks. The alarm is armed before input is admitted, which covers the window between
@@ -926,26 +976,52 @@ On wake, Kodama opens the harness and enables Pi's scheduler. Pi Durable reconst
 tasks and handles their checkpoints, provider retries, and submission deduplication. Its
 Cloudflare adapter only supplies SQLite storage; it does not schedule platform alarms or wake
 an evicted object. Kodama therefore retains the wakeup alarm, not a second task-recovery engine.
-When no task is left, recovery clears only its own time and runs the idle work: scheduling
-extraction and pruning, and any pending memory refresh. Reopening an idle object preserves an
-already scheduled extraction deadline, including one that is due. Admission persists pending
-extraction activity and clears the previous idle deadline; when the new work finishes, extraction
-gets a fresh ten-minute delay. Successful extraction handoff clears that pending activity and its
-deadline. Without new input, later recovery or eviction does not schedule another extraction.
+When no task is left, recovery clears only its own time and runs the idle work: waking due
+`session_mode: 'new'` schedules or queued inbox events, scheduling extraction and pruning, and any
+pending memory refresh. Reopening an idle object preserves an already scheduled extraction deadline,
+including one that is due. Admission persists pending extraction activity and clears the previous
+idle deadline; when the new work finishes, extraction gets a fresh ten-minute delay. Successful
+extraction handoff clears that pending activity and its deadline. Without new input, later recovery
+or eviction does not schedule another extraction.
 
 Model calls can be repeated after an interruption. Request IDs prevent duplicate durable inputs,
 not duplicate provider billing.
 
+## Event inbox
+
+`AgentService.ingestEvent(agentId, { requestId, source, content, sessionMode?, whenBusy?, metadata? })`
+provides a fast-ack ingestion boundary backed by object-local SQLite (`kodama_event_inbox`,
+[`src/agent/local-db/inbox.ts`](../packages/agents/src/agent/local-db/inbox.ts),
+[`src/agent/inbox.ts`](../packages/agents/src/agent/inbox.ts)):
+
+- `ingestEvent` persists the event inside `#serial` and arms the `inbox` alarm purpose without
+  awaiting Pi admission, D1 revision catch-up, or OAuth refresh. Duplicate `requestId` values return
+  the first queued row (`queued: true`, same `eventId`).
+- On the `inbox` alarm (or immediately when Pi transitions idle), `dispatchInbox` reads up to 10 due
+  rows ordered by `(createdAt, id)` and coalesces contiguous events sharing the same `sessionMode`
+  into one `[Coalesced N queued events]` turn, taking the highest-urgency `whenBusy`
+  (`interrupt` > `steer` > `followUp`).
+- When `sessionMode` is `'new'`, dispatch defers if Pi is still busy and resets Pi's context window
+  via `root.reset()` once idle—preserving older stored entries in SQLite for extraction and `history_search`.
+- When `whenBusy` is `'interrupt'`, dispatch aborts the active Pi turn (`root.abort`) before admitting
+  the batch.
+- Transient admission errors retry with exponential backoff (base 10s, max 5 attempts); permanent
+  refusals settle without infinite loops. Settled rows remain for 7 days for `requestId` deduplication.
+
 ## Scheduled tasks
 
-Working agents can opt into `schedule_task`, `list_scheduled_tasks`, and `cancel_scheduled_task` in
-`settings.tools`. They manage only that agent's reservations. There is no new public scheduling RPC,
-external notification channel, or dedicated object. A reservation admits a normal `followUp` input at or after
-its nominal time; it does not guarantee exact-time execution or wait for the model in the alarm.
+Working agents can opt into `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, and
+`cancel_scheduled_task` in `settings.tools`. They manage only that agent's reservations. There is no
+new public scheduling RPC, external notification channel, or dedicated object. A reservation admits a
+normal input at or after its nominal time (`session_mode: 'new'` resets idle context via `root.reset()`
+by default for scheduled tasks, deferring briefly if another turn is active so busy chats are never
+clobbered; `'resume'` appends via `followUp`); it does not guarantee exact-time execution or wait for
+the model in the alarm.
 
-`schedule_task` takes `{ schedule, instruction }`. Supported rules are:
+`schedule_task` takes `{ schedule, instruction, session_mode? }`. Supported rules are:
 
-- `{ kind: 'once', run_at: '2027-01-10T09:00:00+09:00' }` for one execution.
+- `{ kind: 'once', run_at: '2027-01-10T09:00:00+09:00' }` or `{ kind: 'once', delay_seconds: 120 }`
+  for one execution.
 - `{ kind: 'interval', every_seconds: 3600, start_at?, end_at? }` for a fixed elapsed-time cadence.
   The default anchor is creation time plus the period; later times are anchor plus integer multiples,
   never completion time plus the period.
@@ -954,7 +1030,8 @@ its nominal time; it does not guarantee exact-time execution or wait for the mod
   Day-of-month or day-of-week must be the literal `*`; macros, names, seconds, years, `L`, `W`, and `#`
   are not accepted. The zone must be explicit IANA, not an offset or guessed from the conversation.
 
-Dates require RFC3339 with an explicit offset. Creation requires a future start within 365 days.
+Dates require RFC3339 with an explicit offset. Creation requires a future start within 365 days
+(`delay_seconds` ranges from 1 to 31,536,000 seconds).
 Intervals range from 60 to 31,536,000 seconds. Start is inclusive; end is exclusive and optional.
 Cron without an explicit start begins strictly after creation. Invalid calendar dates are rejected;
 day 31 skips shorter months. Missing DST wall-clock minutes are skipped, and a repeated minute runs
@@ -971,9 +1048,10 @@ changing each caller.
 No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
 
 The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
-`agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. There are two
-local tables: immutable definitions with next-time/cursor progress, and uniquely addressed occurrence
-receipts. No future occurrence queue is pre-generated. At most 100 active or stopped-but-unsettled
+`agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. Definitions store
+next-time/cursor progress, `category` (`schedule` or autonomous `followup`), `followupHop`,
+`sessionMode`, and mutable status (`active` / `paused`) alongside uniquely addressed occurrence
+receipts. No future occurrence queue is pre-generated. At most 100 active or paused/unsettled
 reservations are allowed; instructions are limited to 16,000 characters, listings to 50 per stable-ID
 page, and dispatch to 10 attempts per pass. Listings accept a definition-state filter and cursor.
 
@@ -984,46 +1062,53 @@ Long executions therefore do not overlap themselves. Completion callbacks, recov
 
 The durable request ID is `scheduled-<task UUID>-<nominal epoch milliseconds>`. Claiming atomically
 inserts that occurrence and advances its definition cursor; a persistent alarm claim already covers
-the handoff. Retries reconcile Pi acceptance before rechecking current admission policy. An
-`admissionStarted` marker is persisted before crossing that boundary, so a later refusal or retry
-limit cannot turn uncertain acceptance into terminal failure. Confirmed pre-admission transient
-failures retry with exponential backoff (60 seconds to one hour), stopping after five attempts;
-permanent refusal stops immediately. Uncertain admission retries without that terminal cutoff.
-Current lifecycle, tool policy, credentials, and storage checks still apply. Accepted model failure
-settles that occurrence, not the recurring definition. `submitted` means accepted, not successful.
+the handoff. When a `session_mode: 'new'` occurrence sees an active Pi run, `deferOccurrence` postpones
+its wake by 5 seconds without consuming retry `attempts`. Retries reconcile Pi acceptance before
+rechecking current admission policy. An `admissionStarted` marker is persisted before crossing that
+boundary, so a later refusal or retry limit cannot turn uncertain acceptance into terminal failure.
+Confirmed pre-admission transient failures retry with exponential backoff (60 seconds to one hour),
+stopping after five attempts; permanent refusal stops immediately. Uncertain admission retries without
+that terminal cutoff. Current lifecycle, tool policy, credentials, and storage checks still apply.
+Accepted model failure settles that occurrence, not the recurring definition. `submitted` means
+accepted, not successful.
 
 Creation replays use the durable tool-task identity and canonical arguments before revalidating dates
-or generating a default anchor. Cancellation stops future materialization, reports any already
+or generating a default anchor. `update_scheduled_task` supports `pause`, `resume`, `reschedule`, and
+editing `instruction` / `schedule` / `session_mode` on an owner-only run (recomputing `nextDue` and
+rearming the alarm). Cancellation stops future materialization, reports any already
 claimed execution as too late to cancel, and never calls global conversation cancellation. Global
 conversation cancellation likewise does not remove future reservations. Terminal receipts are saved
 before pruning; pruning defers while admission may have started or an accepted submission remains
 unresolved. Never-admitted claims do not block pruning, so storage-pressure retries can recover.
 Settled receipt details may be removed after 30 days, while definitions and cursors are retained as
-replay tombstones. This is
-conservative retention, not a complete history-retention policy. Request IDs prevent duplicate input
-admission, not repeated model calls or provider billing after interruption.
+replay tombstones. Request IDs prevent duplicate input admission, not repeated model calls or provider
+billing after interruption.
 
-Creation and cancellation require a nonempty adopted **owner-only current run**, checked again at
-the mutation boundary against the running tool and exact input set. Earlier peer history and web
-reads do not revoke this permission. Peer-only, scheduled-only, mixed owner/nonowner, idle, or
-unresolved provenance fails closed. After a mixed run settles, a new owner-only run can mutate again.
-Listing is read-only and available to other runs when enabled. Opt-in grants bounded model discretion,
-not proof of the owner's approval of every argument; prompt injection and recurring-cost risks remain.
+Creating recurring definitions, updating existing schedules, and cancelling require a nonempty adopted
+**owner-only current run**, checked again at the mutation boundary against the running tool and exact
+input set. Earlier peer history and web reads do not revoke this permission. Peer-only, scheduled-only,
+mixed owner/nonowner, idle, or unresolved provenance fails closed. A **scheduled run** (`kodama.scheduled-message`)
+may, however, schedule a one-time follow-up (`kind: 'once'`, defaulting to `session_mode: 'resume'`)
+up to `MAX_FOLLOWUP_HOPS = 5` hops (`followupHop`) so multi-step checks can defer their next poll
+cleanly without creating recurring jobs. Listing is read-only and available to other runs when enabled.
+Opt-in grants bounded model discretion, not proof of the owner's approval of every argument; prompt
+injection and recurring-cost risks remain.
 
 Scheduled inputs use `kodama.scheduled-message`, never owner provenance. They do not grant URLs from
 the instruction; existing known URLs and normal search remain usable, with no restored contact-taint
 ban or one-shot web permission. They start their own contact hop at zero and retain the three-hop
 peer limit. Scheduled-only model usage is attributed to the system; an adopted mixed run charges the
 working agent once, with owner attribution taking precedence over peer and then system attribution.
-Dedicated memory jobs retain their requester/job accounting. A scheduled model cannot recursively
-create or cancel definitions, but server-side expansion of an existing immutable recurrence is allowed.
+Dedicated memory jobs retain their requester/job accounting.
 
-Scheduled terminal completions also produce a durable agent-wide inbox notification atomically with
-the occurrence receipt. The notification references the occurrence ID, not its definition, and never
-wakes a model or inserts owner input. Inbox reads use descending sequence pagination and exact
-acknowledgements; see [extensions.md — Inbox API and retention](extensions.md#inbox-api-and-retention).
+Scheduled runs are **silent by default**: normal `done` completions record their occurrence receipt
+without inserting a user-facing inbox notification. Model failures, cancellations, and pre-admission
+refusals still emit a bounded `schedule` inbox notification atomically with the receipt, while
+proactive findings and alerts go through `send_outbox` (see [extensions.md — Outbox](extensions.md#outbox)).
+Inbox reads use descending sequence pagination and exact acknowledgements; see
+[extensions.md — Inbox API and retention](extensions.md#inbox-api-and-retention).
 
-Pause/edit, exceptions and business calendars, sub-minute cadence, full RRULE, external notification
+Exceptions and business calendars, sub-minute recurring cadence, full RRULE, external notification
 delivery, and UI management are outside this version.
 
 ## Storage in the Durable Object
@@ -1039,8 +1124,10 @@ Each object's SQLite holds two sets of tables:
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
   (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
-  (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), and scheduled
-  definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`). Their
+  (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), scheduled
+  definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`), event inbox
+  rows (`kodama_event_inbox`), deferred tool call approvals (`kodama_deferred_calls`), artifacts,
+  contacts, and notifications. Their
   migrations are generated into `drizzle/durable-object/migrations` and applied by
   `src/agent/local-db/local.ts` before the harness opens.
 

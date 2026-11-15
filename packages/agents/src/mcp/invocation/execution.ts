@@ -15,21 +15,27 @@ import { beginMcpCall, finishMcpCall, pruneMcpCalls, mcpRecoveryEpoch } from './
 import type { LocalDb } from '../../agent/local-db/local.ts'
 import { assertAllowed } from '../../agent/runtime/restrictions.ts'
 import type { AppliedSettings, Refusal } from '../../agent/runtime/restrictions.ts'
+import { wrapToolsWithPermissions } from '../../agent/permissions.ts'
+import type { PermissionDeps } from '../../agent/permissions.ts'
 
 /** Build an immutable extension from the applied version, without contacting any MCP server. */
 export async function mcpExtension(
   db: ManagementDb,
   settings: AgentSettings | undefined,
   call: McpCall,
+  permissions?: PermissionDeps,
 ) {
-  const tools = await Promise.all(
+  const rawTools = await Promise.all(
     (settings?.mcp ?? [])
       .filter((tool) => settings?.tools.includes(tool.modelName))
       .map(async (selected) =>
         createMcpTool(selected, await mcpDefinition(db, selected.digest), call),
       ),
   )
-  return defineExtension({ name: 'kodama-mcp', tools })
+  return defineExtension({
+    name: 'kodama-mcp',
+    tools: permissions ? wrapToolsWithPermissions(rawTools, permissions) : rawTools,
+  })
 }
 
 /** One closure per object holds its two-call concurrency bound, not credentials or persistent sessions. */

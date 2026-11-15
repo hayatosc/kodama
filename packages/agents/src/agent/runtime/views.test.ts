@@ -131,3 +131,52 @@ it('reports dispatch and result waits without changing peer state', async () => 
     })
   })
 })
+
+it('reports pending deferred tool approvals and omits expired or decided rows', async () => {
+  const { createDeferredCall, decideDeferredCall } = await import('../local-db/deferred.ts')
+  await withHarness({}, async (harness, state) => {
+    const db = await openLocalDb(state.storage)
+    const now = Date.now()
+    const pending = createDeferredCall(
+      db,
+      {
+        toolName: 'create_artifact',
+        argumentsJson: '{"name":"report.txt"}',
+        reason: 'Tool create_artifact requires operator approval before execution',
+        sourceTask: 'task-pending',
+      },
+      now,
+    )
+    const decided = createDeferredCall(
+      db,
+      {
+        toolName: 'delete_artifact',
+        argumentsJson: '{"id":"art-1"}',
+        reason: 'High risk',
+        sourceTask: 'task-decided',
+      },
+      now,
+    )
+    decideDeferredCall(db, decided.approvalId, 'deny', 'Not needed', now)
+    createDeferredCall(
+      db,
+      {
+        toolName: 'execute_code',
+        argumentsJson: '{"code":"1+1"}',
+        reason: 'Expired request',
+        sourceTask: 'task-expired',
+      },
+      now - 48 * 60 * 60 * 1000,
+    )
+    expect(await attentionOf(harness, db)).toEqual([
+      {
+        source: 'approval',
+        id: pending.approvalId,
+        reason: pending.reason,
+        lastProgressAt: now,
+        actions: ['approve', 'deny'],
+        toolName: 'create_artifact',
+      },
+    ])
+  })
+})
