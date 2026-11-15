@@ -146,17 +146,17 @@ describe('event inbox', () => {
           whenBusy: 'followUp',
           content: 'Event A',
         },
-        now,
+        now - 20,
       )
       // Simulate reserving A before Pi accepts A, then crashing before markInboxAdmitted runs.
-      const reserved = reserveInboxBatch(local, now)
+      const reserved = reserveInboxBatch(local, now - 20)
       expect(reserved?.requestId).toBe('crash-ev-a')
       const root = await harness.root(BACKGROUND_CONTEXT)
-      await root.submit(
+      const subA = await root.submit(
         { type: 'input', requestId: 'crash-ev-a', content: 'Event A' },
         BACKGROUND_CONTEXT,
       )
-      // Event B arrives before recovery runs.
+      // Event B arrives before recovery runs, already due so recovery does not depend on wall time.
       enqueueInboxEvent(
         local,
         {
@@ -166,27 +166,37 @@ describe('event inbox', () => {
           whenBusy: 'followUp',
           content: 'Event B',
         },
-        now + 10,
+        now - 10,
       )
 
       const admittedDrafts: string[] = []
-      await dispatchInbox(
-        local,
-        harness,
-        state.storage,
-        (operation) => operation(),
-        async () => {},
-        async (draft) => {
-          if (draft.requestId) admittedDrafts.push(draft.requestId)
-          return root.submit(draft, BACKGROUND_CONTEXT)
-        },
-      )
+      const submitted: Promise<unknown>[] = []
+      try {
+        await dispatchInbox(
+          local,
+          harness,
+          state.storage,
+          (operation) => operation(),
+          async () => {},
+          async (draft) => {
+            if (draft.requestId) admittedDrafts.push(draft.requestId)
+            const submission = await root.submit(draft, BACKGROUND_CONTEXT)
+            submitted.push(submission.wait(BACKGROUND_CONTEXT))
+            return submission
+          },
+        )
 
-      expect(admittedDrafts).toEqual(['crash-ev-b'])
-      const rows = local.select().from(eventInbox).all()
-      expect(rows).toHaveLength(2)
-      expect(rows.every((row) => row.state === 'admitted')).toBe(true)
-      expect(rows.find((row) => row.requestId === 'crash-ev-b')?.batchRequestId).toBe('crash-ev-b')
+        expect(admittedDrafts).toEqual(['crash-ev-b'])
+        const rows = local.select().from(eventInbox).all()
+        expect(rows).toHaveLength(2)
+        expect(rows.every((row) => row.state === 'admitted')).toBe(true)
+        expect(rows.find((row) => row.requestId === 'crash-ev-b')?.batchRequestId).toBe(
+          'crash-ev-b',
+        )
+      } finally {
+        await Promise.allSettled([subA.wait(BACKGROUND_CONTEXT), ...submitted])
+        await state.storage.deleteAlarm()
+      }
     })
   })
 

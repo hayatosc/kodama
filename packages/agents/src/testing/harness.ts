@@ -26,6 +26,7 @@ export async function withHarness<T>(
     try {
       return await run(harness, state)
     } finally {
+      await state.storage.deleteAlarm()
       await harness.close(BACKGROUND_CONTEXT)
     }
   })
