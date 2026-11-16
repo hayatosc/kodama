@@ -2,23 +2,85 @@
  * @see docs/extensions.md — Completion and notification atomicity
  * @module
  */
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte } from 'drizzle-orm'
-import {
-  contactRequests,
-  notifications,
-  scheduledTaskOccurrences,
-} from '../../../drizzle/durable-object/schema.ts'
+import * as v from 'valibot'
 import {
   EXTENSION_RETENTION_MS,
   MAX_NOTIFICATION_SUMMARY_BYTES,
   MAX_OUTBOX_DETAILS_BYTES,
 } from '../../extensions.ts'
 import type { CompletionNotice, NotificationPage } from '../../extensions.ts'
+import { parseEnum, parseJsonValue } from '../../lib/reylo.ts'
 import { NotificationQuerySchema, parseInput } from '../../validation.ts'
 import type { LocalDb } from './local.ts'
+import dispatchCoalescedOutbox from './sql/dispatch-coalesced-outbox.sql'
+import dispatchSingleOutbox from './sql/dispatch-single-outbox.sql'
+import flushPendingOutbox from './sql/flush-pending-outbox.sql'
+import insertNotification from './sql/insert-notification.sql'
+import listNotificationsQuery from './sql/list-notifications.sql'
+import markNotificationRead from './sql/mark-notification-read.sql'
+import retainNotificationsQuery from './sql/retain-notifications.sql'
+import selectDuePendingOutbox from './sql/select-due-pending-outbox.sql'
+import selectLatestOutboxNotification from './sql/select-latest-outbox-notification.sql'
+import selectLiveNotificationSeq from './sql/select-live-notification-seq.sql'
+import selectNextNotificationExpiry from './sql/select-next-notification-expiry.sql'
+import selectNextOutboxWake from './sql/select-next-outbox-wake.sql'
+import selectNotificationBySource from './sql/select-notification-by-source.sql'
+import selectRecentOutboxSummaries from './sql/select-recent-outbox-summaries.sql'
+import suppressOutboxBySeqs from './sql/suppress-outbox-by-seqs.sql'
 
 /** Cooldown window for pacing consecutive normal-urgency outbox alerts. */
 export const OUTBOX_PACING_WINDOW_MS = 60_000
+
+const NOTIFICATION_SOURCES = ['contact', 'schedule', 'mcp', 'outbox', 'approval'] as const
+const COMPLETION_OUTCOMES = ['succeeded', 'failed', 'cancelled', 'unanswered'] as const
+const DELIVERY_STATES = ['pending', 'dispatched', 'suppressed'] as const
+const artifactIdsSchema = v.array(v.string())
+
+/** Persisted notification row decoded from SQLite. */
+export interface NotificationRow {
+  seq: number
+  source: (typeof NOTIFICATION_SOURCES)[number]
+  sourceId: string
+  outcome: (typeof COMPLETION_OUTCOMES)[number]
+  summary: string
+  details: string | null
+  artifactIds: string[]
+  deliveryState: (typeof DELIVERY_STATES)[number]
+  deliverAfter: number | null
+  createdAt: number
+  expiresAt: number
+  readAt: number | null
+}
+
+function parseNotificationRow(row: {
+  seq: number
+  source: string
+  sourceId: string
+  outcome: string
+  summary: string
+  details: string | null
+  artifactIdsJson: string
+  deliveryState: string
+  deliverAfter: number | null
+  createdAt: number
+  expiresAt: number
+  readAt: number | null
+}): NotificationRow {
+  return {
+    seq: row.seq,
+    source: parseEnum(NOTIFICATION_SOURCES, row.source, 'notification source'),
+    sourceId: row.sourceId,
+    outcome: parseEnum(COMPLETION_OUTCOMES, row.outcome, 'notification outcome'),
+    summary: row.summary,
+    details: row.details,
+    artifactIds: v.parse(artifactIdsSchema, parseJsonValue(row.artifactIdsJson)),
+    deliveryState: parseEnum(DELIVERY_STATES, row.deliveryState, 'notification deliveryState'),
+    deliverAfter: row.deliverAfter,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    readAt: row.readAt,
+  }
+}
 
 function truncateUtf8(text: string, maxBytes: number): string {
   const encoder = new TextEncoder()
@@ -43,10 +105,10 @@ function truncateUtf8(text: string, maxBytes: number): string {
  * @returns The inserted notification, or undefined when this source was already recorded.
  */
 export function recordNotification(
-  db: Pick<LocalDb, 'insert'>,
+  db: LocalDb,
   notice: CompletionNotice,
   now: number,
-) {
+): NotificationRow | undefined {
   if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + EXTENSION_RETENTION_MS))
     throw new TypeError('Invalid notification timestamp')
   if (notice.sourceId.length === 0 || notice.sourceId.length > 256)
@@ -63,23 +125,19 @@ export function recordNotification(
     notice.artifactIds.some((id) => id.length === 0 || id.length > 128)
   )
     throw new TypeError('Invalid notification artifact references')
-  return db
-    .insert(notifications)
-    .values({
-      source: notice.source,
-      sourceId: notice.sourceId,
-      outcome: notice.outcome,
-      summary: notice.summary,
-      details: notice.details ?? null,
-      artifactIds: notice.artifactIds,
-      deliveryState: notice.deliveryState ?? 'dispatched',
-      deliverAfter: notice.deliverAfter ?? null,
-      createdAt: now,
-      expiresAt: now + EXTENSION_RETENTION_MS,
-    })
-    .onConflictDoNothing({ target: [notifications.source, notifications.sourceId] })
-    .returning()
-    .get()
+  const row = insertNotification.runSync(db.sql, {
+    source: notice.source,
+    sourceId: notice.sourceId,
+    outcome: notice.outcome,
+    summary: notice.summary,
+    details: notice.details ?? null,
+    artifactIdsJson: JSON.stringify(notice.artifactIds),
+    deliveryState: notice.deliveryState ?? 'dispatched',
+    deliverAfter: notice.deliverAfter ?? null,
+    createdAt: now,
+    expiresAt: now + EXTENSION_RETENTION_MS,
+  })
+  return row === null ? undefined : parseNotificationRow(row)
 }
 
 /**
@@ -98,18 +156,17 @@ export function enqueueOutboxNotification(
     urgency: 'normal' | 'immediate'
   },
   now: number,
-) {
-  return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(notifications)
-      .where(and(eq(notifications.source, 'outbox'), eq(notifications.sourceId, input.sourceId)))
-      .get()
-    if (existing) return existing
+): NotificationRow | undefined {
+  return db.transactionSync(() => {
+    const existing = selectNotificationBySource.runSync(db.sql, {
+      source: 'outbox',
+      sourceId: input.sourceId,
+    })
+    if (existing !== null) return parseNotificationRow(existing)
 
     if (input.urgency === 'immediate') {
       const inserted = recordNotification(
-        tx,
+        db,
         {
           source: 'outbox',
           sourceId: input.sourceId,
@@ -122,25 +179,12 @@ export function enqueueOutboxNotification(
         },
         now,
       )
-      tx.update(notifications)
-        .set({ deliveryState: 'dispatched', deliverAfter: now })
-        .where(and(eq(notifications.source, 'outbox'), eq(notifications.deliveryState, 'pending')))
-        .run()
+      flushPendingOutbox.runSync(db.sql, { deliverAfter: now })
       return inserted
     }
 
-    const latest = tx
-      .select()
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.source, 'outbox'),
-          inArray(notifications.deliveryState, ['dispatched', 'pending']),
-        ),
-      )
-      .orderBy(desc(notifications.seq))
-      .limit(1)
-      .get()
+    const latestRaw = selectLatestOutboxNotification.runSync(db.sql)
+    const latest = latestRaw === null ? undefined : parseNotificationRow(latestRaw)
 
     const latestDispatchedAt = latest?.deliverAfter ?? latest?.createdAt
     const inCooldown =
@@ -154,7 +198,7 @@ export function enqueueOutboxNotification(
       : now
 
     return recordNotification(
-      tx,
+      db,
       {
         source: 'outbox',
         sourceId: input.sourceId,
@@ -172,27 +216,13 @@ export function enqueueOutboxNotification(
 
 /** Flush due pending outbox notifications, coalescing multiple normal items in one window. */
 export function dispatchDueOutbox(db: LocalDb, now: number): number {
-  return db.transaction((tx) => {
-    const due = tx
-      .select()
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.source, 'outbox'),
-          eq(notifications.deliveryState, 'pending'),
-          lte(notifications.deliverAfter, now),
-        ),
-      )
-      .orderBy(asc(notifications.seq))
-      .all()
+  return db.transactionSync(() => {
+    const due = selectDuePendingOutbox.runSync(db.sql, { now }).map(parseNotificationRow)
     if (due.length === 0) return 0
     if (due.length === 1) {
       const only = due[0]
       if (!only) return 0
-      tx.update(notifications)
-        .set({ deliveryState: 'dispatched', deliverAfter: now })
-        .where(eq(notifications.seq, only.seq))
-        .run()
+      dispatchSingleOutbox.runSync(db.sql, { deliverAfter: now, seq: only.seq })
       return 1
     }
     const target = due.at(-1)
@@ -208,22 +238,16 @@ export function dispatchDueOutbox(db: LocalDb, now: number): number {
       ? truncateUtf8(detailParts.join('\n\n---\n\n'), MAX_OUTBOX_DETAILS_BYTES)
       : null
     const artifactIds = Array.from(new Set(due.flatMap((row) => row.artifactIds))).slice(0, 16)
-    tx.update(notifications)
-      .set({
-        summary: combinedSummary,
-        details: combinedDetails,
-        artifactIds,
-        deliveryState: 'dispatched',
-        deliverAfter: now,
-      })
-      .where(eq(notifications.seq, target.seq))
-      .run()
+    dispatchCoalescedOutbox.runSync(db.sql, {
+      summary: combinedSummary,
+      details: combinedDetails,
+      artifactIdsJson: JSON.stringify(artifactIds),
+      deliverAfter: now,
+      seq: target.seq,
+    })
     const suppressedSeqs = due.slice(0, -1).map((row) => row.seq)
     if (suppressedSeqs.length > 0) {
-      tx.update(notifications)
-        .set({ deliveryState: 'suppressed' })
-        .where(inArray(notifications.seq, suppressedSeqs))
-        .run()
+      suppressOutboxBySeqs.runSync(db.sql, { seqsJson: JSON.stringify(suppressedSeqs) })
     }
     return due.length
   })
@@ -231,15 +255,7 @@ export function dispatchDueOutbox(db: LocalDb, now: number): number {
 
 /** Earliest pending outbox dispatch timestamp, if any. */
 export function nextOutboxWake(db: LocalDb): number | undefined {
-  return (
-    db
-      .select({ at: notifications.deliverAfter })
-      .from(notifications)
-      .where(and(eq(notifications.source, 'outbox'), eq(notifications.deliveryState, 'pending')))
-      .orderBy(asc(notifications.deliverAfter))
-      .limit(1)
-      .get()?.at ?? undefined
-  )
+  return selectNextOutboxWake.runSync(db.sql)?.at ?? undefined
 }
 
 /** Recent dispatched outbox messages shown to the agent to avoid duplicate proactive alerts. */
@@ -247,93 +263,54 @@ export function recentOutboxSummaries(
   db: LocalDb,
   limit = 5,
 ): { seq: number; summary: string; createdAt: number }[] {
-  return db
-    .select({
-      seq: notifications.seq,
-      summary: notifications.summary,
-      createdAt: notifications.createdAt,
-    })
-    .from(notifications)
-    .where(and(eq(notifications.source, 'outbox'), eq(notifications.deliveryState, 'dispatched')))
-    .orderBy(desc(notifications.seq))
-    .limit(limit)
-    .all()
-    .reverse()
+  return selectRecentOutboxSummaries.runSync(db.sql, { limit }).reverse()
 }
 
 /** Delete only inbox metadata; producers must insert exclusively on their first terminal transition. */
 export function retainNotifications(db: LocalDb, now: number): void {
-  db.delete(notifications).where(lte(notifications.expiresAt, now)).run()
+  retainNotificationsQuery.runSync(db.sql, { now })
 }
 
 /** The existing schedule alarm also removes unread or read metadata when its retention ends. */
 export function nextNotificationExpiry(db: LocalDb): number | undefined {
-  return db
-    .select({ at: notifications.expiresAt })
-    .from(notifications)
-    .orderBy(asc(notifications.expiresAt))
-    .limit(1)
-    .get()?.at
+  return selectNextNotificationExpiry.runSync(db.sql)?.at
 }
 
 /** List live notifications newest first, with explicit availability of the object-local result. */
 export function listNotifications(db: LocalDb, query: unknown, now: number): NotificationPage {
   const input = parseInput(NotificationQuerySchema, query)
   retainNotifications(db, now)
-  const rows = db
-    .select({
-      notification: notifications,
-      schedule: { id: scheduledTaskOccurrences.id, settledAt: scheduledTaskOccurrences.settledAt },
-      contact: {
-        id: contactRequests.id,
-        result: contactRequests.result,
-        expiresAt: contactRequests.expiresAt,
-      },
-    })
-    .from(notifications)
-    .leftJoin(
-      scheduledTaskOccurrences,
-      and(
-        eq(notifications.source, 'schedule'),
-        eq(notifications.sourceId, scheduledTaskOccurrences.id),
-      ),
-    )
-    .leftJoin(
-      contactRequests,
-      and(eq(notifications.source, 'contact'), eq(notifications.sourceId, contactRequests.id)),
-    )
-    .where(
-      and(
-        gt(notifications.expiresAt, now),
-        eq(notifications.deliveryState, 'dispatched'),
-        input.before === undefined ? undefined : lt(notifications.seq, input.before),
-        input.unreadOnly ? isNull(notifications.readAt) : undefined,
-      ),
-    )
-    .orderBy(desc(notifications.seq))
-    .limit(input.limit + 1)
-    .all()
+  const rows = listNotificationsQuery.runSync(db.sql, {
+    before: input.before ?? null,
+    unreadOnly: input.unreadOnly ? 1 : 0,
+    now,
+    limit: input.limit + 1,
+  })
   const page = rows.slice(0, input.limit)
   const last = page.at(-1)
   return {
-    notifications: page.map(({ notification, schedule, contact }) => {
+    notifications: page.map((row) => {
+      const notification = parseNotificationRow(row)
       const selfContained =
         notification.source === 'mcp' ||
         notification.source === 'outbox' ||
         notification.source === 'approval'
       const expiresAt =
         notification.source === 'schedule'
-          ? schedule?.settledAt === null || schedule?.settledAt === undefined
+          ? row.scheduleSettledAt === null
             ? undefined
-            : schedule.settledAt + EXTENSION_RETENTION_MS
+            : row.scheduleSettledAt + EXTENSION_RETENTION_MS
           : selfContained
             ? notification.expiresAt
-            : contact?.expiresAt
+            : (row.contactExpiresAt ?? undefined)
       const exists =
-        selfContained || (notification.source === 'schedule' ? schedule !== null : contact !== null)
+        selfContained ||
+        (notification.source === 'schedule' ? row.scheduleId !== null : row.contactId !== null)
       const available =
         selfContained ||
-        (notification.source === 'schedule' ? schedule?.settledAt != null : contact?.result != null)
+        (notification.source === 'schedule'
+          ? row.scheduleSettledAt !== null
+          : row.contactResultJson !== null)
       const { details, deliverAfter, ...base } = notification
       return {
         ...base,
@@ -347,28 +324,13 @@ export function listNotifications(db: LocalDb, query: unknown, now: number): Not
               : 'unavailable',
       }
     }),
-    ...(rows.length > input.limit && last ? { nextBefore: last.notification.seq } : {}),
+    ...(rows.length > input.limit && last ? { nextBefore: last.seq } : {}),
   }
 }
 
 /** Acknowledge only one live sequence; retries preserve the first server-generated timestamp. */
 export function readNotification(db: LocalDb, seq: number, now: number): boolean {
   retainNotifications(db, now)
-  db.update(notifications)
-    .set({ readAt: now })
-    .where(
-      and(
-        eq(notifications.seq, seq),
-        isNull(notifications.readAt),
-        gt(notifications.expiresAt, now),
-      ),
-    )
-    .run()
-  return (
-    db
-      .select({ seq: notifications.seq })
-      .from(notifications)
-      .where(and(eq(notifications.seq, seq), gt(notifications.expiresAt, now)))
-      .get() !== undefined
-  )
+  markNotificationRead.runSync(db.sql, { now, seq, expiresAfter: now })
+  return selectLiveNotificationSeq.runSync(db.sql, { seq, now }) !== null
 }

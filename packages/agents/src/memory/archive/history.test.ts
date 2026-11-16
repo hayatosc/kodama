@@ -6,12 +6,12 @@
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { searchHistory } from './history.ts'
-import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { mockModel, say } from '../../testing/conversation.ts'
 import type { ToolCall } from '../../testing/model.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
 import { toolCallResponse } from '../../testing/model.ts'
 import { db } from '../../testing/memory.ts'
+import insertArchiveSegment from '../store/sql/insert-archive-segment.sql'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 import { newAgentId, seedOnce } from '../../testing/management.ts'
@@ -34,7 +34,7 @@ async function archiveChunks(agentId: string, first: number, times: number[]) {
   const files = await buildSegment(agentId, rows, 1_000)
   const prefix = segmentPrefix(agentId, first, last)
   await exportSegment(env.ARCHIVE, prefix, files)
-  await db.insert(archiveSegments).values({
+  await insertArchiveSegment.run(db, {
     id: segmentId(agentId, first, last),
     agentId,
     firstEntry: first,
@@ -113,7 +113,7 @@ describe('archive pagination', () => {
   it('continues past a full catalog page even when every segment has the same time', async () => {
     const agentId = await newAgentId()
     for (let entry = 1; entry <= 101; entry++) {
-      await db.insert(archiveSegments).values({
+      await insertArchiveSegment.run(db, {
         id: segmentId(agentId, entry, entry),
         agentId,
         firstEntry: entry,

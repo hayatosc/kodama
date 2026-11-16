@@ -4,16 +4,20 @@
  * @module
  */
 import { uuidv7 } from '../lib/uuid.ts'
-import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
 import { applyOperation } from './store/records.ts'
-import type { Scope } from '../../drizzle/memory/schema.ts'
-import {
-  memoryLedger,
-  memoryRecords,
-  memoryTerms,
-  revisionClaims,
-} from '../../drizzle/memory/schema.ts'
+import type { Scope } from './store/db.ts'
+import insertMemoryLedger from './store/sql/insert-memory-ledger.sql'
+import insertMemoryRecord from './store/sql/insert-memory-record.sql'
+import insertMemoryTerms from './store/sql/insert-memory-terms.sql'
+import insertRevisionClaim from './store/sql/insert-revision-claim.sql'
+import selectMemoryRecordById from './store/sql/select-memory-record-by-id.sql'
+import deleteMemoryLedgerByRun from '../testing/sql/delete-memory-ledger-by-run.sql'
+import selectAllRevisionClaims from '../testing/sql/select-all-revision-claims.sql'
+import selectMemoryLedgerByAction from '../testing/sql/select-memory-ledger-by-action.sql'
+import selectMemoryLedgerByRun from '../testing/sql/select-memory-ledger-by-run.sql'
+import selectMemoryTermsByRecord from '../testing/sql/select-memory-terms-by-record.sql'
 import { SEARCH_VERSION, storedTerms } from '../lib/search-text.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../testing/model.ts'
 import { activeContents, db, memoryAgent, parameterLimitedDb } from '../testing/memory.ts'
@@ -43,29 +47,30 @@ describe('consolidation', () => {
     async ({ expired, remaining }) => {
       const runId = uuidv7()
       const now = Date.now()
-      const inserts = Array.from({ length: Math.ceil(expired / 10) }, (_, index) =>
-        db.insert(memoryLedger).values(
-          Array.from({ length: Math.min(10, expired - index * 10) }, () => ({
-            at: 0,
-            runId,
-            actor: 'test',
-            action: 'write' as const,
-            target: 'record' as const,
-            targetId: 'expired',
-          })),
-        ),
+      const inserts = Array.from({ length: expired }, () =>
+        prepareQuery(db, insertMemoryLedger, {
+          at: 0,
+          runId,
+          opId: null,
+          actor: 'test',
+          action: 'write',
+          target: 'record',
+          targetId: 'expired',
+          detailJson: null,
+        }),
       )
-      for (let offset = 0; offset < inserts.length; offset += 50) {
-        const [first, ...rest] = inserts.slice(offset, offset + 50)
-        if (first !== undefined) await db.batch([first, ...rest])
+      for (let offset = 0; offset < inserts.length; offset += 100) {
+        await runBatch(db, inserts.slice(offset, offset + 100))
       }
-      await db.insert(memoryLedger).values({
+      await insertMemoryLedger.run(db, {
         at: now,
         runId,
+        opId: null,
         actor: 'test',
         action: 'write',
         target: 'record',
         targetId: 'retained',
+        detailJson: null,
       })
 
       try {
@@ -78,13 +83,12 @@ describe('consolidation', () => {
         })
 
         expect(result).toEqual({ scopes: 0 })
-        const rows = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, runId))
+        const rows = await selectMemoryLedgerByRun.run(db, { runId })
         expect(rows.filter((row) => row.targetId === 'expired')).toHaveLength(remaining)
         expect(rows.filter((row) => row.targetId === 'retained')).toHaveLength(1)
-        const meta = await db
-          .select()
-          .from(memoryLedger)
-          .where(and(eq(memoryLedger.action, 'meta'), eq(memoryLedger.at, now)))
+        const meta = (await selectMemoryLedgerByAction.run(db, { action: 'meta' })).filter(
+          (row) => row.at === now,
+        )
         expect(meta).toHaveLength(1)
         if (remaining > 0) {
           await consolidateDaily({
@@ -94,11 +98,11 @@ describe('consolidation', () => {
             enqueue: async () => {},
             ...noCursor,
           })
-          const later = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, runId))
+          const later = await selectMemoryLedgerByRun.run(db, { runId })
           expect(later.map((row) => row.targetId)).toEqual(['retained'])
         }
       } finally {
-        await db.delete(memoryLedger).where(eq(memoryLedger.runId, runId))
+        await deleteMemoryLedgerByRun.run(db, { runId })
       }
     },
   )
@@ -152,13 +156,15 @@ describe('consolidation', () => {
         },
       )
     }
-    await db.insert(memoryLedger).values({
+    await insertMemoryLedger.run(db, {
       at: 0,
       runId: 'ancient',
+      opId: null,
       actor: 'test',
       action: 'write',
       target: 'record',
       targetId: agentId,
+      detailJson: null,
     })
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = requestBody(init)
@@ -191,9 +197,9 @@ describe('consolidation', () => {
     await expect
       .poll(() => activeContents(agentId), { timeout: 10_000 })
       .toEqual(['The CI runs on Linux'])
-    const ancient = await db.select().from(memoryLedger).where(eq(memoryLedger.runId, 'ancient'))
+    const ancient = await selectMemoryLedgerByRun.run(db, { runId: 'ancient' })
     expect(ancient).toEqual([])
-    const meta = await db.select().from(memoryLedger).where(eq(memoryLedger.action, 'meta'))
+    const meta = await selectMemoryLedgerByAction.run(db, { action: 'meta' })
     expect(meta.length).toBeGreaterThan(0)
   })
 
@@ -201,21 +207,18 @@ describe('consolidation', () => {
     const now = Date.now()
     const agentId = uuidv7()
     const content = 'このリポジトリでは pnpm を使う'
-    const claim = (targetId: string, claimedAt: number) => ({
-      target: 'record' as const,
-      targetId,
-      revision: 1,
-      opId: uuidv7(),
-      claimedAt,
-    })
-    await db.batch([
-      db
-        .insert(revisionClaims)
-        .values([
-          claim(`${agentId}-expired`, now - LEDGER_RETENTION_MS - 1),
-          claim(`${agentId}-kept`, now - LEDGER_RETENTION_MS + 1),
-        ]),
-      db.insert(memoryRecords).values({
+    const claim = (targetId: string, claimedAt: number) =>
+      prepareQuery(db, insertRevisionClaim, {
+        target: 'record',
+        targetId,
+        revision: 1,
+        opId: uuidv7(),
+        claimedAt,
+      })
+    await runBatch(db, [
+      claim(`${agentId}-expired`, now - LEDGER_RETENTION_MS - 1),
+      claim(`${agentId}-kept`, now - LEDGER_RETENTION_MS + 1),
+      prepareQuery(db, insertMemoryRecord, {
         id: agentId,
         scope: `agent:${agentId}`,
         kind: 'fact',
@@ -223,12 +226,20 @@ describe('consolidation', () => {
         searchVersion: SEARCH_VERSION - 1,
         origin: 'remember',
         sourceAgentId: agentId,
+        sourceEntryFrom: null,
+        sourceEntryTo: null,
         runId: 'old-index',
+        importance: 0.5,
+        required: false,
+        overrides: null,
         observedAt: now,
         createdAt: now,
         updatedAt: now,
       }),
-      db.insert(memoryTerms).values({ recordId: agentId, term: 'stale' }),
+      prepareQuery(db, insertMemoryTerms, {
+        recordId: agentId,
+        termsJson: JSON.stringify(['stale']),
+      }),
     ])
 
     await consolidateDaily({
@@ -240,13 +251,13 @@ describe('consolidation', () => {
     })
 
     expect(LEDGER_RETENTION_MS).toBe(90 * 86400000)
-    const claims = await db.select().from(revisionClaims)
+    const claims = await selectAllRevisionClaims.run(db)
     expect(claims.map((row) => row.targetId).filter((id) => id.startsWith(agentId))).toEqual([
       `${agentId}-kept`,
     ])
-    const terms = await db.select().from(memoryTerms).where(eq(memoryTerms.recordId, agentId))
+    const terms = await selectMemoryTermsByRecord.run(db, { recordId: agentId })
     expect(terms.map((row) => row.term).sort()).toEqual([...storedTerms(content)].sort())
-    const row = await db.select().from(memoryRecords).where(eq(memoryRecords.id, agentId)).get()
+    const row = await selectMemoryRecordById.run(db, { id: agentId })
     expect(row?.searchVersion).toBe(SEARCH_VERSION)
     const found = await searchMemory(db, { query: '使う', scopes: [`agent:${agentId}`], now })
     expect(found.map((record) => record.id)).toEqual([agentId])

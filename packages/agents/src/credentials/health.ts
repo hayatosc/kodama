@@ -1,11 +1,14 @@
 /** Lease-guarded refresh health and safe failure audit, independent of secret persistence. @module */
-import { and, eq, gt } from 'drizzle-orm'
-import { increment, literal } from '../lib/sql.ts'
-import { auditLog, credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
 import { REFRESH_REJECTED } from './refresh.ts'
+import insertRefreshFailureAudit from './sql/insert-refresh-failure-audit.sql'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import updateRefreshFailure from './sql/update-refresh-failure.sql'
+import type { CredentialRow, REFRESH_FAILURE_CATEGORIES } from './vault.ts'
+import { parseCredentialRow } from './vault.ts'
 
-type FailureCategory = NonNullable<typeof credentials.$inferSelect.lastRefreshFailureCategory>
+type FailureCategory = (typeof REFRESH_FAILURE_CATEGORIES)[number]
 
 function category(error: unknown): FailureCategory {
   if (!(error instanceof Error)) return 'failed'
@@ -27,49 +30,38 @@ function category(error: unknown): FailureCategory {
 /** Count a failed refresh once, only while its original active revision/lease is still live. */
 export async function recordRefreshFailure(
   db: ManagementDb,
-  leased: typeof credentials.$inferSelect,
+  leased: CredentialRow,
   leaseId: string,
   at: number,
   error: unknown,
-) {
+): Promise<CredentialRow | undefined> {
   const failure = category(error)
-  const held = and(
-    eq(credentials.credentialId, leased.credentialId),
-    eq(credentials.leaseId, leaseId),
-    eq(credentials.revision, leased.revision),
-    eq(credentials.status, 'active'),
-    gt(credentials.leaseExpiresAt, at),
-  )
-  const [, updated] = await db.batch([
-    db.insert(auditLog).select(
-      db
-        .select({
-          seq: literal(null).as('seq'),
-          opId: literal(leaseId).as('op_id'),
-          at: literal(at).as('at'),
-          source: literal('system').as('source'),
-          action: literal(
-            failure === 'rejected' ? 'credential.needs_reauth' : 'credential.refresh.failed',
-          ).as('action'),
-          targetKind: literal('system').as('target_kind'),
-          targetId: credentials.credentialId,
-          detailJson: literal(
-            JSON.stringify({ kind: leased.kind, provider: leased.provider, category: failure }),
-          ).as('detail_json'),
-        })
-        .from(credentials)
-        .where(held),
-    ),
-    db
-      .update(credentials)
-      .set({
-        ...(failure === 'rejected' ? { status: 'needs_reauth' as const } : {}),
-        refreshFailures: increment(credentials.refreshFailures, 1),
-        lastRefreshFailureAt: at,
-        lastRefreshFailureCategory: failure,
-      })
-      .where(held)
-      .returning(),
+  const [, updatedResult] = await runBatch(db, [
+    prepareQuery(db, insertRefreshFailureAudit, {
+      opId: leaseId,
+      at,
+      action: failure === 'rejected' ? 'credential.needs_reauth' : 'credential.refresh.failed',
+      detailJson: JSON.stringify({
+        kind: leased.kind,
+        provider: leased.provider,
+        category: failure,
+      }),
+      credentialId: leased.credentialId,
+      leaseId,
+      revision: leased.revision,
+      atBound: at,
+    }),
+    prepareQuery(db, updateRefreshFailure, {
+      needsReauth: failure === 'rejected' ? 1 : 0,
+      at,
+      category: failure,
+      credentialId: leased.credentialId,
+      leaseId,
+      revision: leased.revision,
+      atBound: at,
+    }),
   ])
-  return updated[0]
+  if ((updatedResult?.meta.changes ?? 0) === 0) return undefined
+  const row = await selectCredentialById.run(db, { credentialId: leased.credentialId })
+  return row ? parseCredentialRow(row) : undefined
 }

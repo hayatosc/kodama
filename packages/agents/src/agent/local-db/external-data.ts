@@ -6,25 +6,29 @@
  *
  * @module
  */
-import { and, desc, eq, inArray } from 'drizzle-orm'
-import { externalData, knownUrls } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
+import insertExternalData from './sql/insert-external-data.sql'
+import selectExternalData from './sql/select-external-data.sql'
+import selectKnownUrl from './sql/select-known-url.sql'
+import trimKnownUrls from './sql/trim-known-urls.sql'
+import upsertKnownUrl from './sql/upsert-known-url.sql'
 
 /** Known URLs kept per root; granting more drops the least recently granted. */
 export const KNOWN_URL_LIMIT = 1000
 
 /** Preserve the legacy contact-row writer for compatibility tests; not an admission operation. */
 export function markContact(local: LocalDb, root: string, reason: string, eligibleThrough: number) {
-  local
-    .insert(externalData)
-    .values({ root, reason, eligibleThrough, contactedAt: Date.now() })
-    .onConflictDoNothing()
-    .run()
+  insertExternalData.runSync(local.sql, {
+    root,
+    reason,
+    eligibleThrough,
+    contactedAt: Date.now(),
+  })
 }
 
 /** Read historical contact metadata, which no longer conveys trust or permissions. */
 export function contactBoundary(local: LocalDb, root: string): number | undefined {
-  return local.select().from(externalData).where(eq(externalData.root, root)).get()?.eligibleThrough
+  return selectExternalData.runSync(local.sql, { root })?.eligibleThrough
 }
 
 /**
@@ -39,36 +43,17 @@ export function grantUrls(
   now = Date.now(),
 ): void {
   if (urls.length === 0) return
-  local.transaction((tx) => {
+  local.transactionSync(() => {
     for (const url of new Set(urls)) {
-      tx.insert(knownUrls)
-        .values({ root, url, source, grantedAt: now })
-        .onConflictDoUpdate({ target: [knownUrls.root, knownUrls.url], set: { grantedAt: now } })
-        .run()
+      upsertKnownUrl.runSync(local.sql, { root, url, source, grantedAt: now })
     }
-    const stale = tx
-      .select({ url: knownUrls.url })
-      .from(knownUrls)
-      .where(eq(knownUrls.root, root))
-      .orderBy(desc(knownUrls.grantedAt))
-      // SQLite needs a LIMIT before OFFSET; this one never binds.
-      .limit(Number.MAX_SAFE_INTEGER)
-      .offset(KNOWN_URL_LIMIT)
-    tx.delete(knownUrls)
-      .where(and(eq(knownUrls.root, root), inArray(knownUrls.url, stale)))
-      .run()
+    trimKnownUrls.runSync(local.sql, { root, offset: KNOWN_URL_LIMIT })
   })
 }
 
 /** Whether `url` came from the owner, a search result or a fetched page of this root. */
 export function isKnownUrl(local: LocalDb, root: string, url: string): boolean {
-  return (
-    local
-      .select({ url: knownUrls.url })
-      .from(knownUrls)
-      .where(and(eq(knownUrls.root, root), eq(knownUrls.url, url)))
-      .get() !== undefined
-  )
+  return selectKnownUrl.runSync(local.sql, { root, url }) !== null
 }
 
 /**
@@ -85,8 +70,8 @@ export function admitWeb(
     argument: string
   },
 ): void {
-  local.transaction((tx) => {
-    if (request.tool === 'web_fetch' && !isKnownUrl(tx, request.root, request.argument))
+  local.transactionSync(() => {
+    if (request.tool === 'web_fetch' && !isKnownUrl(local, request.root, request.argument))
       throw new Error('unverified_url')
   })
 }

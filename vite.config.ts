@@ -27,8 +27,9 @@ export default defineConfig({
       '.agents/**',
       '.codex/**',
       '.aws/**',
-      '.mise/**',
+      '**/.mise/**',
       '**/.wrangler/**',
+      '**/.reylo/**',
     ],
   },
   lint: {
@@ -36,22 +37,9 @@ export default defineConfig({
     categories: {
       correctness: 'error',
     },
-    ignorePatterns: ['**/.cloudflare/**', '**/.wrangler/**'],
+    ignorePatterns: ['**/.cloudflare/**', '**/.wrangler/**', '**/.reylo/**'],
     rules: {
       ...svelteRules,
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: 'drizzle-orm',
-              importNames: ['sql'],
-              message: 'Use the typed helpers in packages/agents/src/lib/sql.ts.',
-            },
-          ],
-          patterns: ['drizzle-orm/sql', 'drizzle-orm/sql/*'],
-        },
-      ],
       'typescript/no-explicit-any': 'error',
       'typescript/ban-ts-comment': [
         'error',
@@ -75,14 +63,6 @@ export default defineConfig({
       'typescript/no-non-null-assertion': 'error',
       'vite-plus/prefer-vite-plus-imports': 'error',
     },
-    overrides: [
-      {
-        files: ['packages/agents/src/lib/sql.ts'],
-        rules: {
-          'no-restricted-imports': 'off',
-        },
-      },
-    ],
     options: {
       typeAware: true,
       typeCheck: true,

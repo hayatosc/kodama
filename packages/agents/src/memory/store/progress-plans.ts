@@ -3,10 +3,12 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import { prepareQuery } from '../../lib/reylo.ts'
 import type { MemoryDb } from './db.ts'
 import type { Operation } from './records.ts'
-import { extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
+import insertExtractionCheckpoint from './sql/insert-extraction-checkpoint.sql'
+import selectExtractionCheckpointRow from './sql/select-extraction-checkpoint-row.sql'
+import updateExtractionCheckpoint from './sql/update-extraction-checkpoint.sql'
 import { claimRevision, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
 
@@ -16,38 +18,28 @@ export async function planCheckpoint(
   context: OperationContext,
   op: Extract<Operation, { type: 'checkpoint' }>,
 ): Promise<Plan> {
-  const current = await db
-    .select()
-    .from(extractionCheckpoints)
-    .where(eq(extractionCheckpoints.agentId, op.agentId))
-    .get()
+  const current = await selectExtractionCheckpointRow.run(db, { agentId: op.agentId })
   const result: OperationResult = { status: 'applied', recordId: op.agentId }
-  if (current !== undefined && current.lastEntryId >= op.lastEntryId) {
+  if (current !== null && current.lastEntryId >= op.lastEntryId) {
     return { result, statements: [insertOp(db, context, op.type, result)] }
   }
   const advance: Statement[] =
-    current === undefined
+    current === null
       ? [
-          db.insert(extractionCheckpoints).values({
+          prepareQuery(db, insertExtractionCheckpoint, {
             agentId: op.agentId,
             lastEntryId: op.lastEntryId,
             updatedAt: context.now,
           }),
         ]
       : [
-          db
-            .update(extractionCheckpoints)
-            .set({
-              lastEntryId: op.lastEntryId,
-              revision: current.revision + 1,
-              updatedAt: context.now,
-            })
-            .where(
-              and(
-                eq(extractionCheckpoints.agentId, op.agentId),
-                eq(extractionCheckpoints.revision, current.revision),
-              ),
-            ),
+          prepareQuery(db, updateExtractionCheckpoint, {
+            agentId: op.agentId,
+            lastEntryId: op.lastEntryId,
+            nextRevision: current.revision + 1,
+            revision: current.revision,
+            updatedAt: context.now,
+          }),
           claimRevision(db, context, 'checkpoint', op.agentId, current.revision + 1),
         ]
   return {

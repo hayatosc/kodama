@@ -8,9 +8,9 @@ import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { contactBoundary } from '../../agent/local-db/external-data.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import { MEMORY_AGENT_NAME, parseMemoryJob } from '../../memory/jobs.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
+import selectAllMemoryJobs from '../../testing/sql/select-all-memory-jobs.sql'
 import { waitForAnswer, modelResponse } from '../../testing/rpc.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
@@ -56,7 +56,7 @@ it('accepts a peer-influenced remember request with an earlier human input', asy
   )
   const jobs = await runInDurableObject(
     env.AGENTS.getByName(MEMORY_AGENT_NAME),
-    async (_instance, state) => (await openLocalDb(state.storage)).select().from(memoryJobs).all(),
+    async (_instance, state) => selectAllMemoryJobs.runSync((await openLocalDb(state.storage)).sql),
   )
   const job = jobs
     .map((row) => parseMemoryJob(JSON.parse(row.payloadJson)))

@@ -6,8 +6,7 @@
  * @module
  */
 import type { MemoryJob } from './jobs.ts'
-import type { MemoryDb } from './store/db.ts'
-import type { Scope } from '../../drizzle/memory/schema.ts'
+import type { MemoryDb, Scope } from './store/db.ts'
 import { curateSkills } from './store/skills.ts'
 import { curateTasks } from './store/tasks.ts'
 import {

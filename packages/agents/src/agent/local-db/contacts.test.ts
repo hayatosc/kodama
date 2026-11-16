@@ -1,11 +1,12 @@
 /** Durable contact progress, first-terminal completion and explicit result retention. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { contactRequests, notifications } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS, MAX_CONTACT_RESULT_BYTES } from '../../extensions.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import deleteAllNotifications from '../../testing/sql/delete-all-notifications.sql'
+import selectAllNotifications from '../../testing/sql/select-all-notifications.sql'
+import setContactRequestFailed from '../../testing/sql/set-contact-request-failed.sql'
 import { boundedContactResult } from '../contact.ts'
 import { openLocalDb } from './local.ts'
 import {
@@ -50,7 +51,7 @@ describe('sender contact store', () => {
         status: 'pending',
         submissionId: 42,
       })
-      expect(db.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(db.sql)).toEqual([])
       expect(listContacts(db).contacts).toHaveLength(1)
     })
   })
@@ -84,16 +85,16 @@ describe('sender contact store', () => {
         'Invalid notification timestamp',
       )
       expect(contactRequest(db, first.id)?.settledAt).toBeNull()
-      expect(db.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(db.sql)).toEqual([])
       settleContact(db, first.id, answer(), 2000)
       settleContact(db, first.id, boundedContactResult('failed', 'Later failure'), 3000)
       expect(contactRequest(db, first.id)?.result).toEqual(answer())
-      expect(db.select().from(notifications).all()).toMatchObject([
+      expect(selectAllNotifications.runSync(db.sql)).toMatchObject([
         { source: 'contact', sourceId: first.id, outcome: 'succeeded', createdAt: 2000 },
       ])
-      db.delete(notifications).run()
+      deleteAllNotifications.runSync(db.sql)
       settleContact(db, first.id, answer(), 4000)
-      expect(db.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(db.sql)).toEqual([])
       expect(
         contactReplay(await openLocalDb(state.storage), first.sourceTask, first.arguments)?.id,
       ).toBe(first.id)
@@ -121,7 +122,7 @@ describe('sender contact store', () => {
       })
       settleContact(db, terminal.id, answer(), expiredAt + 1)
       expect(contactRequest(db, terminal.id)?.result).toBeNull()
-      expect(db.select().from(notifications).all()).toHaveLength(1)
+      expect(selectAllNotifications.runSync(db.sql)).toHaveLength(1)
       retryContact(db, pending.id, expiredAt)
       expect(contactRequest(db, pending.id)?.retryAt).toBe(expiredAt + 60_000)
     })
@@ -140,10 +141,7 @@ describe('sender contact store', () => {
       expect(JSON.stringify(first)).not.toContain('question')
       const id = first.contacts[0]?.contactId
       if (!id) throw new Error('Missing contact')
-      db.update(contactRequests)
-        .set({ state: 'failed', settledAt: 1 })
-        .where(eq(contactRequests.id, id))
-        .run()
+      setContactRequestFailed.runSync(db.sql, { id, settledAt: 1 })
       expect(reserveContact(db, input(), 1000).state).toBe('dispatching')
     })
   })

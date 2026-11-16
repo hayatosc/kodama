@@ -3,32 +3,80 @@
  *
  * @module
  */
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { availableParallelism } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin'
-import * as v from 'valibot'
+import reylo from 'reylo/vite'
 import { defineConfig } from 'vite-plus'
 import { nodeTestFiles } from './vitest.node.config.ts'
 
-const migrations = await readD1Migrations(`${import.meta.dirname}/drizzle/memory/migrations`)
+const migrations = await readD1Migrations(`${import.meta.dirname}/sql/memory/migrations`)
 const managementMigrations = await readD1Migrations(
-  `${import.meta.dirname}/drizzle/management/migrations`,
+  `${import.meta.dirname}/sql/management/migrations`,
 )
 
-const journalSchema = v.object({ entries: v.array(v.object({ idx: v.number() })) })
-const snapshotSchema = v.object({
-  tables: v.record(v.string(), v.object({ columns: v.record(v.string(), v.unknown()) })),
-})
-
-/** Columns per table in the newest drizzle-kit snapshot of a drizzle-kit output folder. */
+/** Columns per table produced by executing all SQL migrations in `folder` on SQLite. */
 function migratedColumns(folder: string): Record<string, string[]> {
-  const meta = `${import.meta.dirname}/${folder}/meta`
-  const journal = v.parse(journalSchema, JSON.parse(readFileSync(`${meta}/_journal.json`, 'utf8')))
-  const last = journal.entries.at(-1)?.idx ?? 0
-  const name = `${meta}/${String(last).padStart(4, '0')}_snapshot.json`
-  const snapshot = v.parse(snapshotSchema, JSON.parse(readFileSync(name, 'utf8')))
-  return Object.fromEntries(
-    Object.entries(snapshot.tables).map(([table, { columns }]) => [table, Object.keys(columns)]),
-  )
+  const dir = join(import.meta.dirname, folder)
+  const files = readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+  const db = new DatabaseSync(':memory:')
+  try {
+    for (const file of files) {
+      db.exec(readFileSync(join(dir, file), 'utf8'))
+    }
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all()
+    const columnsByTable: Record<string, string[]> = {}
+    for (const row of tables) {
+      const table = row.name
+      if (typeof table !== 'string') continue
+      const pragma = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all()
+      columnsByTable[table] = pragma.flatMap((col) =>
+        typeof col.name === 'string' ? [col.name] : [],
+      )
+    }
+    return columnsByTable
+  } finally {
+    db.close()
+  }
+}
+
+const REYLO_SUFFIX = '?reylo'
+
+/**
+ * `@cloudflare/vitest-plugin` externalizes `.sql` imports via Wrangler's default `Text` module rule
+ * unless the resolved ID has a query string. Appending `?reylo` lets Vitest serve Reylo's
+ * transformed JS module while keeping `?raw` migration imports untouched.
+ */
+function reyloWorkerdPlugin(): ReturnType<typeof reylo> {
+  const base = reylo()
+  return {
+    ...base,
+    resolveId: {
+      order: 'pre',
+      handler(source, importer) {
+        const resolved = base.resolveId.handler(source, importer)
+        return resolved === null ? null : `${resolved}${REYLO_SUFFIX}`
+      },
+    },
+    load(id) {
+      if (!id.endsWith(REYLO_SUFFIX)) return Promise.resolve(null)
+      return base.load.call(this, id.slice(0, -REYLO_SUFFIX.length))
+    },
+    configureVitest(context) {
+      const key = ({ id }: { id: string }): false | undefined =>
+        id.endsWith(REYLO_SUFFIX) ? false : undefined
+      if (context.defineCacheKeyGenerator) context.defineCacheKeyGenerator(key)
+      else context.experimental_defineCacheKeyGenerator?.(key)
+    },
+  }
 }
 
 export default defineConfig({
@@ -36,15 +84,14 @@ export default defineConfig({
     name: 'workerd',
     // Real npm compilation is opt-in so the normal suite remains offline.
     provide: { codeNpmSmoke: process.env.KODAMA_CODE_NPM_SMOKE === '1' },
-    include: ['src/**/*.test.ts', 'drizzle/**/*.test.ts', 'cli/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'cli/**/*.test.ts'],
     exclude: nodeTestFiles,
     setupFiles: ['vitest.setup.ts'],
     // Files share one runtime and module graph; vitest.setup.ts empties storage before each file.
     isolate: false,
     // Each workerd worker keeps a full Miniflare runtime and module graph. Using every core can
-    // exhaust memory and take the host down before the suite finishes, so leave half the cores
-    // for the host and bound the workers.
-    maxWorkers: 4,
+    // exhaust memory and take the host down, so bound workers to at most 4 and host parallelism.
+    maxWorkers: Math.max(1, Math.min(4, availableParallelism())),
     // Vitest's host filesystem cache is not visible inside workerd's virtual filesystem.
     fsModuleCache: false,
     testTimeout: 15_000,
@@ -53,16 +100,17 @@ export default defineConfig({
     expect: { poll: { timeout: 10_000 } },
   },
   plugins: [
+    reyloWorkerdPlugin(),
     cloudflareTest({
       experimental: { newConfig: true },
       miniflare: {
         bindings: {
           CREDENTIAL_KEK_V1: 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
           TEST_MIGRATIONS: migrations,
-          TEST_MIGRATED_COLUMNS: migratedColumns('drizzle/memory/migrations'),
+          TEST_MIGRATED_COLUMNS: migratedColumns('sql/memory/migrations'),
           TEST_MANAGEMENT_MIGRATIONS: managementMigrations,
-          TEST_MANAGEMENT_MIGRATED_COLUMNS: migratedColumns('drizzle/management/migrations'),
-          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('drizzle/durable-object/migrations'),
+          TEST_MANAGEMENT_MIGRATED_COLUMNS: migratedColumns('sql/management/migrations'),
+          TEST_LOCAL_MIGRATED_COLUMNS: migratedColumns('sql/durable-object/migrations'),
         },
         // The test runner renames the Worker; bind its local class rather than the production name.
         durableObjects: {

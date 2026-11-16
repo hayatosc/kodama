@@ -1,10 +1,11 @@
 /** Atomic cursor ingestion, UTC attribution, separate prices and paginated usage RPC. @module */
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { expect, it } from 'vite-plus/test'
-import { credentials, usageDaily, usageIngestion } from '../../drizzle/management/schema.ts'
-import { agentService, newAgentId } from '../testing/management.ts'
+import selectCredentialById from '../credentials/sql/select-credential-by-id.sql'
 import { testCredentialRefs } from '../testing/credentials.ts'
+import { agentService, newAgentId } from '../testing/management.ts'
+import selectUsageDailyByAgent from '../testing/sql/select-usage-daily-by-agent.sql'
+import selectUsageIngestionByAgent from '../testing/sql/select-usage-ingestion-by-agent.sql'
 import { usageRecord } from '../testing/usage.ts'
 import { managementDb } from './db.ts'
 import { ingestUsage, readUsage, usageCheckpoint } from './usage.ts'
@@ -19,7 +20,7 @@ it('atomically ingests duplicate concurrent pages once, keeping late-day usage a
   const page = { rows: [row], through: 1, more: false }
   await Promise.all([ingestUsage(db, agentId, 0, page, 1), ingestUsage(db, agentId, 0, page, 2)])
   expect((await usageCheckpoint(db, agentId))?.lastSeq).toBe(1)
-  const first = await db.select().from(usageDaily).where(eq(usageDaily.chargedAgentId, agentId))
+  const first = await selectUsageDailyByAgent.run(db, { chargedAgentId: agentId })
   expect(first).toHaveLength(1)
   expect(first[0]).toMatchObject({ day: '2026-10-26', attempts: 1, totalTokens: 12, costUsd: 0.05 })
   await ingestUsage(
@@ -30,14 +31,8 @@ it('atomically ingests duplicate concurrent pages once, keeping late-day usage a
     3,
   )
   await ingestUsage(db, agentId, 0, page, 4)
-  expect(
-    (await db.select().from(credentials).where(eq(credentials.credentialId, credentialId)).get())
-      ?.lastUsedAt,
-  ).toBe(row.startedAt)
-  expect(
-    (await db.select().from(usageDaily).where(eq(usageDaily.chargedAgentId, agentId)).get())
-      ?.attempts,
-  ).toBe(2)
+  expect((await selectCredentialById.run(db, { credentialId }))?.lastUsedAt).toBe(row.startedAt)
+  expect((await selectUsageDailyByAgent.run(db, { chargedAgentId: agentId }))[0]?.attempts).toBe(2)
 })
 
 it('separates completeness and subscription reference amounts and supports all stable grouping pages', async () => {
@@ -121,9 +116,7 @@ it('rolls back additions and the checkpoint when a statement in the batch fails'
   const rows = [first, usageRecord({ seq: 2, chargedAgentId: agentId, input: NaN })]
   await expect(ingestUsage(db, agentId, 0, { rows, through: 2, more: false }, 1)).rejects.toThrow()
   expect(await usageCheckpoint(db, agentId)).toBeUndefined()
-  expect(await db.select().from(usageDaily).where(eq(usageDaily.chargedAgentId, agentId))).toEqual(
-    [],
-  )
+  expect(await selectUsageDailyByAgent.run(db, { chargedAgentId: agentId })).toEqual([])
   await ingestUsage(db, agentId, 0, { rows: [first], through: 1, more: false }, 2)
   expect((await usageCheckpoint(db, agentId))?.lastSeq).toBe(1)
 })
@@ -140,7 +133,5 @@ it('rejects a nonterminal or out-of-order page before writing any checkpoint', a
     ),
   ).rejects.toThrow()
   expect(await usageCheckpoint(db, agentId)).toBeUndefined()
-  expect(await db.select().from(usageIngestion).where(eq(usageIngestion.agentId, agentId))).toEqual(
-    [],
-  )
+  expect(await selectUsageIngestionByAgent.run(db, { agentId })).toBeNull()
 })

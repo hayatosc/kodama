@@ -2,19 +2,23 @@
  * Private management and live per-agent grants are distinct from server-bound token resolution.
  * @module
  */
-import { and, eq } from 'drizzle-orm'
 import * as v from 'valibot'
-import { credentials, credentialGrants, agents } from '../../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../../control-plane/db.ts'
-import { mcpServer } from '../registration/catalog.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
 import {
   credentialFingerprint,
   decryptCredential,
   encryptCredential,
 } from '../../credentials/encryption.ts'
+import { parseCredentialRow } from '../../credentials/vault.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { mcpServer } from '../registration/catalog.ts'
 import { mcpClientSchema } from './oauth-http.ts'
+import eraseMcpSecretSql from './sql/erase-mcp-secret.sql'
+import insertMcpCredential from './sql/insert-mcp-credential.sql'
+import selectMcpAgentGrant from './sql/select-mcp-agent-grant.sql'
+import selectMcpSecret from './sql/select-mcp-secret.sql'
 
 const token = v.pipe(v.string(), v.minLength(1), v.maxLength(16_384))
 const binding = {
@@ -96,12 +100,16 @@ export async function mcpSecretInsert(
   const envelope = await encryptCredential(identity, secret, kek)
   return {
     credentialId: identity.credentialId,
-    statement: db.insert(credentials).values({
-      ...identity,
-      ...envelope,
+    statement: prepareQuery(db, insertMcpCredential, {
+      credentialId: identity.credentialId,
+      kind: identity.kind,
+      provider: identity.provider,
+      revision: identity.revision,
+      ciphertext: envelope.ciphertext,
+      iv: envelope.iv,
+      wrappedDek: envelope.wrappedDek,
+      wrapIv: envelope.wrapIv,
       fingerprint: await credentialFingerprint(secret, kek),
-      last4: '',
-      status: 'active',
       createdAt: now,
       expiresAt,
     }),
@@ -115,17 +123,8 @@ export async function mcpSecret(
   serverId: string,
   credentialId: string,
 ) {
-  const row = await db
-    .select()
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.credentialId, credentialId),
-        eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.provider, serverId),
-      ),
-    )
-    .get()
+  const raw = await selectMcpSecret.run(db, { credentialId, serverId })
+  const row = raw ? parseCredentialRow(raw) : undefined
   if (
     !row ||
     row.status !== 'active' ||
@@ -184,21 +183,8 @@ export async function mcpToken(
 
 /** Agent execution needs an active working agent and a live grant, not merely a config reference. */
 export async function mcpAgentGrant(db: ManagementDb, agentId: string, credentialId: string) {
-  const agent = await db
-    .select()
-    .from(agents)
-    .where(
-      and(eq(agents.agentId, agentId), eq(agents.kind, 'working'), eq(agents.status, 'active')),
-    )
-    .get()
-  const grant = await db
-    .select()
-    .from(credentialGrants)
-    .where(
-      and(eq(credentialGrants.credentialId, credentialId), eq(credentialGrants.agentId, agentId)),
-    )
-    .get()
-  if (!agent || !grant) throw new Error('mcp_assignment_revoked')
+  const granted = await selectMcpAgentGrant.run(db, { agentId, credentialId })
+  if (!granted) throw new Error('mcp_assignment_revoked')
 }
 
 /** Register a fixed bearer token without granting it to any agent. */
@@ -227,7 +213,7 @@ export async function putMcpBearer(
     JSON.stringify(parsed.output),
     now,
   )
-  await db.batch([
+  await runBatch(db, [
     insert.statement,
     auditStatement(db, {
       opId: `mcp.credential:${insert.credentialId}`,
@@ -242,19 +228,20 @@ export async function putMcpBearer(
   return { credentialId: insert.credentialId, status: 'active' as const, expiryKnown: false }
 }
 
-/** Remove encrypted bytes and leases; callers compose this with state changes in one D1 batch. */
-export function eraseMcpSecret(db: ManagementDb, credentialId: string, now: number) {
-  return db
-    .update(credentials)
-    .set({
-      status: 'revoked',
-      ciphertext: null,
-      iv: null,
-      wrappedDek: null,
-      wrapIv: null,
-      leaseId: null,
-      leaseExpiresAt: null,
-      revokedAt: now,
-    })
-    .where(and(eq(credentials.credentialId, credentialId), eq(credentials.purpose, 'mcp_server')))
+/** Prepare statement removing encrypted bytes and leases for composition in one D1 batch. */
+export function eraseMcpSecretStatement(
+  db: ManagementDb,
+  credentialId: string,
+  now: number,
+): D1PreparedStatement {
+  return prepareQuery(db, eraseMcpSecretSql, { credentialId, now })
+}
+
+/** Immediately remove encrypted bytes and leases for a denied or abandoned credential. */
+export async function eraseMcpSecret(
+  db: ManagementDb,
+  credentialId: string,
+  now: number,
+): Promise<void> {
+  await eraseMcpSecretSql.run(db, { credentialId, now })
 }

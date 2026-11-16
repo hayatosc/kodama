@@ -5,10 +5,9 @@
  */
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import { skills } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
+import setSkillLastUsedAt from '../../testing/sql/set-skill-last-used-at.sql'
 import { curateSkills, readSkill, setSkillStatus, visibleSkills, writeSkill } from './skills.ts'
 import { SKILL_LIST_LIMIT } from '../skills.ts'
 import type { SkillWrite } from '../skills.ts'
@@ -155,10 +154,7 @@ describe('skill curation', () => {
     await create(agentId, 'idle', 'Unused.')
     await create(agentId, 'busy', 'Used.')
     const now = Date.now()
-    await db
-      .update(skills)
-      .set({ lastUsedAt: now + 20 * DAY })
-      .where(and(eq(skills.agentId, agentId), eq(skills.name, 'busy')))
+    await setSkillLastUsedAt.run(db, { agentId, name: 'busy', lastUsedAt: now + 20 * DAY })
 
     await curateSkills(db, 'curate', now + 31 * DAY)
 

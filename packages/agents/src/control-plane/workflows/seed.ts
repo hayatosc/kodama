@@ -6,19 +6,24 @@
  *
  * @module
  */
+import { memoryAgentSettings } from '../../agent/dedicated/memory/config.ts'
+import type { DefaultModelEnv } from '../../control-plane/config.ts'
+import {
+  defaultAgentSettings,
+  parseSettings,
+  SETTINGS_SCHEMA_VERSION,
+} from '../../control-plane/config.ts'
+import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
+import { validateCredentialRefs } from '../../credentials/validation.ts'
+import { isConstraintError } from '../../lib/errors.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { MEMORY_AGENT_ID, MEMORY_AGENT_NAME } from '../../memory/jobs.ts'
+import type { AgentSettings, SeedResult } from '../../protocol.ts'
+import { auditByOpId, auditStatement } from '../audit.ts'
 import { installationId } from '../installation.ts'
 import { agentRowByObjectName } from '../registry.ts'
-import { isConstraintError } from '../../lib/errors.ts'
-import { parseSettings } from '../../control-plane/config.ts'
-import { validateCredentialRefs } from '../../credentials/validation.ts'
-import { referenceStatements, initialGrantStatements } from '../../credentials/references.ts'
-import { agentConfigVersions, agents } from '../../../drizzle/management/schema.ts'
-import { memoryAgentSettings } from '../../agent/dedicated/memory/config.ts'
-import { defaultAgentSettings, SETTINGS_SCHEMA_VERSION } from '../../control-plane/config.ts'
-import { auditByOpId, auditStatement } from '../audit.ts'
-import type { DefaultModelEnv } from '../../control-plane/config.ts'
-import { MEMORY_AGENT_NAME, MEMORY_AGENT_ID } from '../../memory/jobs.ts'
-import type { AgentSettings, SeedResult } from '../../protocol.ts'
+import insertAgent from '../sql/insert-agent.sql'
+import insertConfigVersion from '../sql/insert-config-version.sql'
 import { createAgent, pushDesired } from './agents.ts'
 import type { ManagementCall } from './agents.ts'
 
@@ -85,18 +90,19 @@ export async function seed(
 
   if (!existingMemory) {
     try {
-      await db.batch([
-        db.insert(agents).values({
+      await runBatch(db, [
+        prepareQuery(db, insertAgent, {
           agentId: MEMORY_AGENT_ID,
           objectName: MEMORY_AGENT_NAME,
           kind: 'dedicated',
           displayName: 'Memory agent',
+          slug: null,
           status: 'active',
           currentVersion: 1,
           createdAt: now,
           updatedAt: now,
         }),
-        db.insert(agentConfigVersions).values({
+        prepareQuery(db, insertConfigVersion, {
           agentId: MEMORY_AGENT_ID,
           version: 1,
           settingsJson: JSON.stringify(initialSettings),

@@ -2,17 +2,21 @@
  * Expired refresh leases mean an unknown rotation outcome, never permission to replay.
  * @module
  */
-import { and, eq, isNull } from 'drizzle-orm'
-import {
-  credentials,
-  credentialGrants,
-  mcpAssignments,
-} from '../../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../../control-plane/db.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
-import { encryptCredential, credentialFingerprint } from '../../credentials/encryption.ts'
-import { mcpAgentGrant, mcpClientSecret, mcpToken, eraseMcpSecret } from './vault.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { credentialFingerprint, encryptCredential } from '../../credentials/encryption.ts'
+import { parseCredentialRow } from '../../credentials/vault.ts'
+import { prepareQuery, runBatch, runChanges } from '../../lib/reylo.ts'
 import { exchangeMcpToken, mcpClientAuthentication } from './oauth-http.ts'
+import claimMcpCredentialLease from './sql/claim-mcp-credential-lease.sql'
+import deleteCredentialGrantsByCredential from './sql/delete-credential-grants-by-credential.sql'
+import deleteMcpAssignmentsByCredential from './sql/delete-mcp-assignments-by-credential.sql'
+import markMcpAuthFailure from './sql/mark-mcp-auth-failure.sql'
+import markMcpCredentialNeedsReauth from './sql/mark-mcp-credential-needs-reauth.sql'
+import markMcpCredentialsStaleLease from './sql/mark-mcp-credentials-stale-lease.sql'
+import saveMcpCredentialRefresh from './sql/save-mcp-credential-refresh.sql'
+import selectMcpSecret from './sql/select-mcp-secret.sql'
+import { eraseMcpSecretStatement, mcpAgentGrant, mcpClientSecret, mcpToken } from './vault.ts'
 
 async function waitForRefresh(signal: AbortSignal) {
   signal.throwIfAborted()
@@ -48,16 +52,11 @@ export async function authorizeMcp(
   const now = Date.now()
   if (row.leaseId) {
     if (row.leaseExpiresAt === null || row.leaseExpiresAt <= now) {
-      await db
-        .update(credentials)
-        .set({ status: 'needs_reauth', leaseId: null, leaseExpiresAt: null })
-        .where(
-          and(
-            eq(credentials.credentialId, credentialId),
-            eq(credentials.revision, row.revision),
-            eq(credentials.leaseId, row.leaseId),
-          ),
-        )
+      await markMcpCredentialsStaleLease.run(db, {
+        credentialId,
+        revision: row.revision,
+        leaseId: row.leaseId,
+      })
       throw new Error('mcp_reauth_required')
     }
     await waitForRefresh(signal)
@@ -67,21 +66,13 @@ export async function authorizeMcp(
     return { access: value.access, revision: row.revision }
   if (value.kind !== 'mcp_oauth' || !value.refresh) throw new Error('mcp_reauth_required')
   const leaseId = crypto.randomUUID()
-  const claimed = await db
-    .update(credentials)
-    .set({ leaseId, leaseExpiresAt: now + 30_000 })
-    .where(
-      and(
-        eq(credentials.credentialId, credentialId),
-        eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.status, 'active'),
-        eq(credentials.revision, row.revision),
-        isNull(credentials.leaseId),
-      ),
-    )
-    .returning()
-    .get()
-  if (!claimed) {
+  const claimedChanges = await runChanges(db, claimMcpCredentialLease, {
+    leaseId,
+    leaseExpiresAt: now + 30_000,
+    credentialId,
+    revision: row.revision,
+  })
+  if (claimedChanges === 0) {
     await waitForRefresh(signal)
     return authorizeMcp(db, kek, serverId, credentialId, endpoint, signal, agentId)
   }
@@ -113,27 +104,19 @@ export async function authorizeMcp(
       plaintext,
       kek,
     )
-    const saved = await db
-      .update(credentials)
-      .set({
-        ...encrypted,
-        revision: row.revision + 1,
-        expiresAt: updated.expiresAt,
-        fingerprint: await credentialFingerprint(plaintext, kek),
-        leaseId: null,
-        leaseExpiresAt: null,
-      })
-      .where(
-        and(
-          eq(credentials.credentialId, credentialId),
-          eq(credentials.status, 'active'),
-          eq(credentials.revision, row.revision),
-          eq(credentials.leaseId, leaseId),
-        ),
-      )
-      .returning()
-      .get()
-    if (!saved) throw new Error('mcp_reauth_required')
+    const savedChanges = await runChanges(db, saveMcpCredentialRefresh, {
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      wrappedDek: encrypted.wrappedDek,
+      wrapIv: encrypted.wrapIv,
+      nextRevision: row.revision + 1,
+      expiresAt: updated.expiresAt,
+      fingerprint: await credentialFingerprint(plaintext, kek),
+      credentialId,
+      revision: row.revision,
+      leaseId,
+    })
+    if (savedChanges === 0) throw new Error('mcp_reauth_required')
     // Reread the live grant and server binding after the external exchange, before sending anything.
     if (agentId) await mcpAgentGrant(db, agentId, credentialId)
     const current = await mcpToken(db, kek, serverId, credentialId)
@@ -147,17 +130,12 @@ export async function authorizeMcp(
         : error instanceof Error && error.message === 'mcp_auth_outcome_unknown'
           ? 'outcome_unknown'
           : 'reauth_required'
-    await db
-      .update(credentials)
-      .set({ status: 'needs_reauth', mcpAuthState: reason, leaseId: null, leaseExpiresAt: null })
-      .where(
-        and(
-          eq(credentials.credentialId, credentialId),
-          eq(credentials.status, 'active'),
-          eq(credentials.revision, row.revision),
-          eq(credentials.leaseId, leaseId),
-        ),
-      )
+    await markMcpCredentialNeedsReauth.run(db, {
+      reason,
+      credentialId,
+      revision: row.revision,
+      leaseId,
+    })
     throw new Error('mcp_reauth_required')
   }
 }
@@ -171,21 +149,12 @@ export async function markMcpAuthenticationFailure(
   revision: number,
 ) {
   if (failure !== 'mcp_auth_required' && failure !== 'mcp_scope_required') return
-  await db
-    .update(credentials)
-    .set({
-      status: 'needs_reauth',
-      mcpAuthState: failure === 'mcp_scope_required' ? 'scope_required' : 'reauth_required',
-    })
-    .where(
-      and(
-        eq(credentials.credentialId, credentialId),
-        eq(credentials.provider, serverId),
-        eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.status, 'active'),
-        eq(credentials.revision, revision),
-      ),
-    )
+  await markMcpAuthFailure.run(db, {
+    reason: failure === 'mcp_scope_required' ? 'scope_required' : 'reauth_required',
+    credentialId,
+    serverId,
+    revision,
+  })
 }
 
 /** Revoke locally first. External revocation is best-effort and cannot restore a local grant. */
@@ -197,17 +166,8 @@ export async function disconnectMcp(
   now = Date.now(),
 ) {
   // A stale server revision still permits the operator to destroy the envelope.
-  const row = await db
-    .select()
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.credentialId, credentialId),
-        eq(credentials.purpose, 'mcp_server'),
-        eq(credentials.provider, serverId),
-      ),
-    )
-    .get()
+  const rawRow = await selectMcpSecret.run(db, { credentialId, serverId })
+  const row = rawRow ? parseCredentialRow(rawRow) : undefined
   if (!row || (row.kind !== 'mcp_bearer' && row.kind !== 'mcp_oauth'))
     throw new Error('mcp_credential_unavailable')
   if (row.status === 'revoked')
@@ -218,10 +178,10 @@ export async function disconnectMcp(
   } catch {
     /* Local revocation must still proceed. */
   }
-  await db.batch([
-    eraseMcpSecret(db, row.credentialId, now),
-    db.delete(mcpAssignments).where(eq(mcpAssignments.credentialId, credentialId)),
-    db.delete(credentialGrants).where(eq(credentialGrants.credentialId, credentialId)),
+  await runBatch(db, [
+    eraseMcpSecretStatement(db, row.credentialId, now),
+    prepareQuery(db, deleteMcpAssignmentsByCredential, { credentialId }),
+    prepareQuery(db, deleteCredentialGrantsByCredential, { credentialId }),
     auditStatement(db, {
       opId: `mcp.disconnect:${credentialId}:${row.revision}`,
       at: now,

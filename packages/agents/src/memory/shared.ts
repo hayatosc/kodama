@@ -7,8 +7,7 @@
  *
  * @module
  */
-import type { Scope } from '../../drizzle/memory/schema.ts'
-import type { MemoryDb, RecordKind } from './store/db.ts'
+import type { MemoryDb, RecordKind, Scope } from './store/db.ts'
 import { applyOperation, recordSharedRejection } from './store/records.ts'
 import { activeRecordRevision, activeRecordsById } from './store/queries.ts'
 import type { NewRecord } from './store/records.ts'

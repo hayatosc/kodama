@@ -1,30 +1,25 @@
 /** Validated private MCP management entry points shared by the CLI and authenticated hosts. @module */
-import { and, eq, exists, inArray } from 'drizzle-orm'
 import * as v from 'valibot'
-import {
-  agents,
-  credentialGrants,
-  mcpAssignments,
-  mcpServers,
-} from '../../../drizzle/management/schema.ts'
-import {
-  mcpCatalogTools,
-  mcpCommit,
-  listMcpCatalog,
-  mcpServer,
-  registerMcpCatalog,
-} from './catalog.ts'
-import { assignMcp, discoverMcp, notifyMcpAssignments } from './servers.ts'
-import { mcpEndpoint } from '../connection/transport.ts'
-import { mcpUiOrigin } from '../authorization/oauth-http.ts'
-import { putMcpBearer } from '../authorization/vault.ts'
-import { disconnectMcp } from '../authorization/refresh.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
 import { parseSettings } from '../../control-plane/config.ts'
 import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'
 import { pushDesired } from '../../control-plane/workflows/agents.ts'
 import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
+import deleteCredentialGrant from '../../credentials/sql/delete-credential-grant.sql'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import { mcpUiOrigin } from '../authorization/oauth-http.ts'
+import { disconnectMcp } from '../authorization/refresh.ts'
+import { putMcpBearer } from '../authorization/vault.ts'
+import { mcpEndpoint } from '../connection/transport.ts'
+import { listMcpCatalog, mcpCatalogTools, mcpServer, registerMcpCatalog } from './catalog.ts'
+import { assignMcp, discoverMcp, notifyMcpAssignments } from './servers.ts'
+import commitMcpAgentVersion from './sql/commit-mcp-agent-version.sql'
+import commitMcpServerState from './sql/commit-mcp-server-state.sql'
+import deleteMcpAssignmentsByServer from './sql/delete-mcp-assignments-by-server.sql'
+import selectMcpAssignmentAgentIds from './sql/select-mcp-assignment-agent-ids.sql'
+import selectWorkingAgent from './sql/select-working-agent.sql'
+import updateMcpServer from './sql/update-mcp-server.sql'
 
 const id = v.pipe(v.string(), v.uuid())
 const name = v.pipe(v.string(), v.minLength(1), v.maxLength(128))
@@ -96,10 +91,9 @@ export async function manageMcp(
     case 'bearer':
       return putMcpBearer(call.db, kek, input.serverId, input.secret, call.now)
     case 'disconnect': {
-      const recipients = await call.db
-        .selectDistinct({ agentId: mcpAssignments.agentId })
-        .from(mcpAssignments)
-        .where(eq(mcpAssignments.credentialId, input.credentialId))
+      const recipients = await selectMcpAssignmentAgentIds.run(call.db, {
+        credentialId: input.credentialId,
+      })
       const result = await disconnectMcp(call.db, kek, input.serverId, input.credentialId)
       for (const recipient of recipients)
         await call.env.AGENTS.getByName(recipient.agentId).mcpCredentialNotice(input.credentialId)
@@ -112,35 +106,24 @@ export async function manageMcp(
       const moved = input.endpoint !== undefined && input.endpoint !== server.endpoint
       if (input.enabled && (moved || !server.catalogDigest))
         throw new Error('mcp_discovery_required')
-      await call.db.batch([
-        mcpCommit(
-          call.db,
-          uuidv7(),
-          exists(
-            call.db
-              .select()
-              .from(mcpServers)
-              .where(
-                and(
-                  eq(mcpServers.serverId, server.serverId),
-                  eq(mcpServers.revision, server.revision),
-                  eq(mcpServers.catalogVersion, server.catalogVersion),
-                ),
-              ),
-          ),
-        ),
-        call.db
-          .update(mcpServers)
-          .set({
-            name: input.name ?? server.name,
-            endpoint: input.endpoint ?? server.endpoint,
-            enabled: moved ? false : (input.enabled ?? server.enabled),
-            revision: server.revision + (moved ? 1 : 0),
-            catalogDigest: moved ? null : server.catalogDigest,
-            catalogVersion: server.catalogVersion + 1,
-            updatedAt: call.now,
-          })
-          .where(eq(mcpServers.serverId, server.serverId)),
+      await runBatch(call.db, [
+        prepareQuery(call.db, commitMcpServerState, {
+          operationId: uuidv7(),
+          serverId: server.serverId,
+          revision: server.revision,
+          catalogVersion: server.catalogVersion,
+          createdAt: Date.now(),
+        }),
+        prepareQuery(call.db, updateMcpServer, {
+          name: input.name ?? server.name,
+          endpoint: input.endpoint ?? server.endpoint,
+          enabled: moved ? false : (input.enabled ?? server.enabled),
+          revision: server.revision + (moved ? 1 : 0),
+          catalogDigest: moved ? null : server.catalogDigest,
+          catalogVersion: server.catalogVersion + 1,
+          updatedAt: call.now,
+          serverId: server.serverId,
+        }),
         auditStatement(call.db, {
           opId: uuidv7(),
           at: call.now,
@@ -159,11 +142,7 @@ export async function manageMcp(
 
 /** Remove the live reference before push; the old applied version is already unable to send. */
 export async function unassignMcp(call: ManagementCall, agentId: string, serverId: string) {
-  const agent = await call.db
-    .select()
-    .from(agents)
-    .where(and(eq(agents.agentId, agentId), eq(agents.kind, 'working')))
-    .get()
+  const agent = await selectWorkingAgent.run(call.db, { agentId })
   if (!agent) throw new Error('mcp_agent_unavailable')
   const previous = await versionRow(call.db, agentId, agent.currentVersion)
   if (!previous) throw new Error('mcp_agent_config_missing')
@@ -180,17 +159,14 @@ export async function unassignMcp(call: ManagementCall, agentId: string, serverI
     tools: settings.tools.filter((tool) => !names.has(tool)),
     toolPolicy: Object.keys(nextToolPolicy).length > 0 ? nextToolPolicy : undefined,
   })
-  await call.db.batch([
-    mcpCommit(
-      call.db,
-      uuidv7(),
-      exists(
-        call.db
-          .select()
-          .from(agents)
-          .where(and(eq(agents.agentId, agentId), eq(agents.currentVersion, agent.currentVersion))),
-      ),
-    ),
+  const removedCredentialIds = [...new Set(removed.map((tool) => tool.credentialId))]
+  await runBatch(call.db, [
+    prepareQuery(call.db, commitMcpAgentVersion, {
+      operationId: uuidv7(),
+      agentId,
+      currentVersion: agent.currentVersion,
+      createdAt: Date.now(),
+    }),
     ...writeVersionStatements(
       call.db,
       { source: call.source, now: call.now, opId: uuidv7() },
@@ -199,17 +175,9 @@ export async function unassignMcp(call: ManagementCall, agentId: string, serverI
       updated,
       { comment: 'Operator removed MCP assignment' },
     ),
-    call.db
-      .delete(mcpAssignments)
-      .where(and(eq(mcpAssignments.agentId, agentId), eq(mcpAssignments.serverId, serverId))),
-    call.db.delete(credentialGrants).where(
-      and(
-        eq(credentialGrants.agentId, agentId),
-        inArray(
-          credentialGrants.credentialId,
-          removed.map((tool) => tool.credentialId),
-        ),
-      ),
+    prepareQuery(call.db, deleteMcpAssignmentsByServer, { agentId, serverId }),
+    ...removedCredentialIds.map((credentialId) =>
+      prepareQuery(call.db, deleteCredentialGrant, { credentialId, agentId }),
     ),
     auditStatement(call.db, {
       opId: uuidv7(),

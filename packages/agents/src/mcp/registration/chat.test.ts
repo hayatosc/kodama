@@ -1,32 +1,35 @@
 /** Chat registration requires durable host intent and a separate exact selection confirmation. @module */
 import { env } from 'cloudflare:workers'
-import { Agent } from '../../agent/agent.ts'
-import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import {
-  credentials,
-  mcpAssignments,
-  mcpOAuthTransactions,
-  mcpProposals,
-  mcpRequests,
-  mcpServers,
-} from '../../../drizzle/management/schema.ts'
+import { Agent } from '../../agent/agent.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import { management, newAgentId } from '../../testing/management.ts'
 import { stopAgentObject } from '../../testing/rpc.ts'
-import { createAgentModels } from '../../control-plane/models.ts'
-import { rememberMcpIntent } from './intents.ts'
-import * as serverWorkflows from './servers.ts'
-import { manageMcpOAuth } from '../authorization/operations.ts'
+import insertMcpOAuthTransactionWithStatus from '../../testing/sql/insert-mcp-oauth-transaction-with-status.sql'
+import insertMcpRequestWithStatus from '../../testing/sql/insert-mcp-request-with-status.sql'
+import selectMcpAssignmentsByAgent from '../../testing/sql/select-mcp-assignments-by-agent.sql'
+import selectMcpProposalsByRequest from '../../testing/sql/select-mcp-proposals-by-request.sql'
+import selectMcpRequestsBySourceAgent from '../../testing/sql/select-mcp-requests-by-source-agent.sql'
+import setCredentialStatus from '../../testing/sql/set-credential-status.sql'
+import setMcpOAuthTransactionStatus from '../../testing/sql/set-mcp-oauth-transaction-status.sql'
+import setMcpRequestExpiresAt from '../../testing/sql/set-mcp-request-expires-at.sql'
+import setMcpServerRevision from '../../testing/sql/set-mcp-server-revision.sql'
 import { completeMcpOAuth } from '../authorization/oauth.ts'
+import { manageMcpOAuth } from '../authorization/operations.ts'
 import { putMcpBearer } from '../authorization/vault.ts'
 import { MCP_PROTOCOL } from '../connection/transport.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
 import {
   chatMcp,
   completeMcpRegistration,
   readMcpChatStatus,
   recoverMcpRegistrations,
 } from './chat.ts'
+import { rememberMcpIntent } from './intents.ts'
+import * as serverWorkflows from './servers.ts'
+import selectMcpRequestById from './sql/select-mcp-request-by-id.sql'
+import selectMcpServerById from './sql/select-mcp-server-by-id.sql'
 
 /** Agents of the running test; a completion notice starts a model turn that outlives the test. */
 const fixtureAgents: string[] = []
@@ -96,10 +99,9 @@ it('asks for an unknown endpoint without searching or guessing, and consumes tha
     chatMcp(call, env.CREDENTIAL_KEK_V1, '', evidence, instruction, intent),
   ).rejects.toThrow()
   expect(
-    await management
-      .select()
-      .from(mcpRequests)
-      .where(eq(mcpRequests.sourceAgentId, evidence.sourceAgentId)),
+    await selectMcpRequestsBySourceAgent.run(management, {
+      sourceAgentId: evidence.sourceAgentId,
+    }),
   ).toHaveLength(1)
 })
 
@@ -125,11 +127,11 @@ it('requires exact intent, leaves OAuth or credential attachment unassigned, the
     ),
   ).rejects.toThrow('mcp_intent_required')
   await chatMcp(call, env.CREDENTIAL_KEK_V1, '', evidence, instruction, intent)
-  const request = await management
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.sourceAgentId, evidence.sourceAgentId))
-    .get()
+  const request = (
+    await selectMcpRequestsBySourceAgent.run(management, {
+      sourceAgentId: evidence.sourceAgentId,
+    })
+  )[0]
   if (!request?.serverId) throw new Error('Missing request')
   const credential = await putMcpBearer(
     management,
@@ -149,19 +151,14 @@ it('requires exact intent, leaves OAuth or credential attachment unassigned, the
     credential.credentialId,
   )
   expect(
-    await management
-      .select()
-      .from(mcpAssignments)
-      .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
+    await selectMcpAssignmentsByAgent.run(management, { agentId: evidence.sourceAgentId }),
   ).toEqual([])
   await readMcpChatStatus(management, evidence.sourceAgentId, evidence.conversationId, {
     operation: 'status',
   })
-  const proposal = await management
-    .select()
-    .from(mcpProposals)
-    .where(eq(mcpProposals.requestId, request.requestId))
-    .get()
+  const proposal = (
+    await selectMcpProposalsByRequest.run(management, { requestId: request.requestId })
+  )[0]
   if (!proposal) throw new Error('Missing proposal')
   const ids: unknown = JSON.parse(proposal.toolIdsJson)
   if (!Array.isArray(ids) || typeof ids[0] !== 'string') throw new Error('Missing tool')
@@ -179,10 +176,7 @@ it('requires exact intent, leaves OAuth or credential attachment unassigned, the
   const confirmed = await rememberMcpIntent(management, next, confirmation)
   await chatMcp(call, env.CREDENTIAL_KEK_V1, '', next, confirmation, confirmed)
   expect(
-    await management
-      .select()
-      .from(mcpAssignments)
-      .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
+    await selectMcpAssignmentsByAgent.run(management, { agentId: evidence.sourceAgentId }),
   ).toHaveLength(1)
   await expect(
     chatMcp(call, env.CREDENTIAL_KEK_V1, '', next, confirmation, confirmed),
@@ -198,11 +192,11 @@ async function pendingRegistration() {
   } as const
   const intent = await rememberMcpIntent(management, test.evidence, instruction)
   await chatMcp(test.call, env.CREDENTIAL_KEK_V1, '', test.evidence, instruction, intent)
-  const request = await management
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.sourceAgentId, test.evidence.sourceAgentId))
-    .get()
+  const request = (
+    await selectMcpRequestsBySourceAgent.run(management, {
+      sourceAgentId: test.evidence.sourceAgentId,
+    })
+  )[0]
   if (!request?.serverId) throw new Error('Missing registration')
   return { ...test, request, serverId: request.serverId }
 }
@@ -288,25 +282,18 @@ it.each(['attach', 'oauth'])(
       credentialId = completed.credentialId
       // Simulate stopping after the atomic OAuth completion, before the facade resumes discovery.
     }
-    await management
-      .update(mcpRequests)
-      .set({ expiresAt: Date.now() - 1 })
-      .where(eq(mcpRequests.requestId, request.requestId))
+    await setMcpRequestExpiresAt.run(management, {
+      requestId: request.requestId,
+      expiresAt: Date.now() - 1,
+    })
     await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
-    const recovered = await management
-      .select()
-      .from(mcpRequests)
-      .where(eq(mcpRequests.requestId, request.requestId))
-      .get()
+    const recovered = await selectMcpRequestById.run(management, { requestId: request.requestId })
     expect(recovered).toMatchObject({ status: 'discovered', credentialId })
     expect(recovered?.notifiedAt).toBeTypeOf('number')
     await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
     expect(exchanges).toBe(kind === 'oauth' ? 1 : 0)
     expect(
-      await management
-        .select()
-        .from(mcpAssignments)
-        .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
+      await selectMcpAssignmentsByAgent.run(management, { agentId: evidence.sourceAgentId }),
     ).toEqual([])
     await expect(
       chatMcp(call, env.CREDENTIAL_KEK_V1, '', evidence, {
@@ -326,10 +313,10 @@ it('does not revive expired unconsumed start or attachment permission with an ex
     serverId,
     'existing',
   )
-  await management
-    .update(mcpRequests)
-    .set({ expiresAt: Date.now() - 1 })
-    .where(eq(mcpRequests.requestId, request.requestId))
+  await setMcpRequestExpiresAt.run(management, {
+    requestId: request.requestId,
+    expiresAt: Date.now() - 1,
+  })
   fetcher.mockClear()
   await expect(
     manageMcpOAuth(management, env.CREDENTIAL_KEK_V1, '', {
@@ -352,12 +339,10 @@ it('does not revive expired unconsumed start or attachment permission with an ex
   await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
   expect(fetcher).not.toHaveBeenCalled()
   expect(
-    await management
-      .select()
-      .from(mcpRequests)
-      .where(eq(mcpRequests.requestId, request.requestId))
-      .get(),
-  ).toMatchObject({ status: 'failed' })
+    await selectMcpRequestById.run(management, { requestId: request.requestId }),
+  ).toMatchObject({
+    status: 'failed',
+  })
 })
 
 it.each(['server', 'credential'])(
@@ -375,20 +360,12 @@ it.each(['server', 'credential'])(
       requestId: request.requestId,
       credentialId,
     })
-    await management
-      .update(mcpRequests)
-      .set({ expiresAt: Date.now() - 1 })
-      .where(eq(mcpRequests.requestId, request.requestId))
-    if (changed === 'server')
-      await management
-        .update(mcpServers)
-        .set({ revision: 2 })
-        .where(eq(mcpServers.serverId, serverId))
-    else
-      await management
-        .update(credentials)
-        .set({ status: 'revoked' })
-        .where(eq(credentials.credentialId, credentialId))
+    await setMcpRequestExpiresAt.run(management, {
+      requestId: request.requestId,
+      expiresAt: Date.now() - 1,
+    })
+    if (changed === 'server') await setMcpServerRevision.run(management, { serverId, revision: 2 })
+    else await setCredentialStatus.run(management, { credentialId, status: 'revoked' })
     fetcher.mockClear()
     await expect(
       completeMcpRegistration(call, env.CREDENTIAL_KEK_V1, request.requestId, credentialId),
@@ -399,9 +376,15 @@ it.each(['server', 'credential'])(
 
 /** Persist the atomic OAuth completion boundary without replaying an exchange in recovery. */
 function completedTransaction(
-  request: typeof mcpRequests.$inferSelect,
+  request: {
+    requestId: string
+    serverId: string | null
+    serverRevision: number | null
+    expiresAt: number
+    createdAt: number
+  },
   credentialId: string,
-): typeof mcpOAuthTransactions.$inferInsert {
+) {
   if (!request.serverId || request.serverRevision === null) throw new Error('Missing server')
   return {
     requestId: request.requestId,
@@ -443,31 +426,33 @@ it('recovers all 101 expired completed OAuth requests across bounded batches wit
     entryId: index + 1,
     expiresAt: Date.now() - 1,
   }))
-  await management.batch([
-    management
-      .update(mcpRequests)
-      .set({ expiresAt: Date.now() - 1 })
-      .where(eq(mcpRequests.requestId, request.requestId)),
-    ...requests.slice(1).map((row) => management.insert(mcpRequests).values(row)),
+  await runBatch(management, [
+    prepareQuery(management, setMcpRequestExpiresAt, {
+      requestId: request.requestId,
+      expiresAt: Date.now() - 1,
+    }),
+    ...requests.slice(1).map((row) => prepareQuery(management, insertMcpRequestWithStatus, row)),
     ...requests.map((row) =>
-      management.insert(mcpOAuthTransactions).values(completedTransaction(row, credentialId)),
+      prepareQuery(
+        management,
+        insertMcpOAuthTransactionWithStatus,
+        completedTransaction(row, credentialId),
+      ),
     ),
   ])
   fetcher.mockClear()
   await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
-  const first = await management
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.sourceAgentId, evidence.sourceAgentId))
+  const first = await selectMcpRequestsBySourceAgent.run(management, {
+    sourceAgentId: evidence.sourceAgentId,
+  })
   expect(first.filter((row) => row.status === 'awaiting_owner_auth')).toHaveLength(1)
   expect(
     first.filter((row) => ['ready_for_discovery', 'discovered'].includes(row.status)),
   ).toHaveLength(100)
   await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
-  const recovered = await management
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.sourceAgentId, evidence.sourceAgentId))
+  const recovered = await selectMcpRequestsBySourceAgent.run(management, {
+    sourceAgentId: evidence.sourceAgentId,
+  })
   expect(recovered).toHaveLength(101)
   expect(notice.mock.calls.map(([requestId]) => requestId).sort()).toEqual(
     requests.map((row) => row.requestId).sort(),
@@ -479,18 +464,11 @@ it('recovers all 101 expired completed OAuth requests across bounded batches wit
   expect(
     recovered.every((row) => row.status === 'discovered' && row.credentialId === credentialId),
   ).toBe(true)
-  const server = await management
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.serverId, serverId))
-    .get()
+  const server = await selectMcpServerById.run(management, { serverId })
   expect(fetcher.mock.calls.length).toBeGreaterThan(0)
   expect(fetcher.mock.calls.every(([url]) => url === server?.endpoint)).toBe(true)
   expect(
-    await management
-      .select()
-      .from(mcpAssignments)
-      .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
+    await selectMcpAssignmentsByAgent.run(management, { agentId: evidence.sourceAgentId }),
   ).toEqual([])
 }, 30_000)
 
@@ -502,12 +480,12 @@ it('keeps OAuth completion committed between the terminal read and expiry sweep 
     serverId,
     'completed',
   )
-  await management
-    .update(mcpRequests)
-    .set({ expiresAt: Date.now() - 1 })
-    .where(eq(mcpRequests.requestId, request.requestId))
+  await setMcpRequestExpiresAt.run(management, {
+    requestId: request.requestId,
+    expiresAt: Date.now() - 1,
+  })
   const transaction = completedTransaction(request, credentialId)
-  await management.insert(mcpOAuthTransactions).values({
+  await insertMcpOAuthTransactionWithStatus.run(management, {
     ...transaction,
     status: 'exchanging',
     credentialId: null,
@@ -516,24 +494,23 @@ it('keeps OAuth completion committed between the terminal read and expiry sweep 
   let completed = false
   const spy = vi.spyOn(env.MANAGEMENT_DB, 'prepare').mockImplementation((query) => {
     const statement = prepare(query)
-    if (!query.startsWith('select ') || !query.includes('from "mcp_oauth_transactions"'))
+    if (!/\bselect\b/i.test(query) || !/\bfrom\s+mcp_oauth_transactions\b/i.test(query))
       return statement
     spy.mockRestore()
     const bind = statement.bind.bind(statement)
     vi.spyOn(statement, 'bind').mockImplementation((...values) => {
       const bound = bind(...values)
-      const raw = bound.raw.bind(bound)
-      vi.spyOn(bound, 'raw').mockImplementation(
-        async <T = unknown[]>(options?: { columnNames?: false }) => {
-          const rows = await raw<T>(options)
-          await management
-            .update(mcpOAuthTransactions)
-            .set({ status: 'completed', credentialId })
-            .where(eq(mcpOAuthTransactions.transactionId, transaction.transactionId))
-          completed = true
-          return rows
-        },
-      )
+      const all = bound.all.bind(bound)
+      vi.spyOn(bound, 'all').mockImplementation(async <T = Record<string, unknown>>() => {
+        const result = await all<T>()
+        await setMcpOAuthTransactionStatus.run(management, {
+          transactionId: transaction.transactionId,
+          status: 'completed',
+          credentialId,
+        })
+        completed = true
+        return result
+      })
       return bound
     })
     return statement
@@ -542,32 +519,22 @@ it('keeps OAuth completion committed between the terminal read and expiry sweep 
   await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
   expect(completed).toBe(true)
   expect(
-    await management
-      .select()
-      .from(mcpRequests)
-      .where(eq(mcpRequests.requestId, request.requestId))
-      .get(),
-  ).toMatchObject({ status: 'awaiting_owner_auth' })
+    await selectMcpRequestById.run(management, { requestId: request.requestId }),
+  ).toMatchObject({
+    status: 'awaiting_owner_auth',
+  })
   expect(fetcher).not.toHaveBeenCalled()
   await recoverMcpRegistrations(call, env.CREDENTIAL_KEK_V1)
   expect(
-    await management
-      .select()
-      .from(mcpRequests)
-      .where(eq(mcpRequests.requestId, request.requestId))
-      .get(),
-  ).toMatchObject({ status: 'discovered', credentialId })
-  const server = await management
-    .select()
-    .from(mcpServers)
-    .where(eq(mcpServers.serverId, serverId))
-    .get()
+    await selectMcpRequestById.run(management, { requestId: request.requestId }),
+  ).toMatchObject({
+    status: 'discovered',
+    credentialId,
+  })
+  const server = await selectMcpServerById.run(management, { serverId })
   expect(fetcher.mock.calls.length).toBeGreaterThan(0)
   expect(fetcher.mock.calls.every(([url]) => url === server?.endpoint)).toBe(true)
   expect(
-    await management
-      .select()
-      .from(mcpAssignments)
-      .where(eq(mcpAssignments.agentId, evidence.sourceAgentId)),
+    await selectMcpAssignmentsByAgent.run(management, { agentId: evidence.sourceAgentId }),
   ).toEqual([])
 })

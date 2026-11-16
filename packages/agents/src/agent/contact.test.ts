@@ -3,20 +3,13 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { env, exports } from 'cloudflare:workers'
-import { and, eq, gt } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { agents } from '../../drizzle/management/schema.ts'
 import { newAgentId, management, updateSettings } from '../testing/management.ts'
 import { rejectionInObject, useMockModel, waitForAnswer as wait } from '../testing/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { withHarness } from '../testing/harness.ts'
 import { contactOrigin, MAX_CONTACT_HOPS, reserveToolContact } from './contact.ts'
 import { Agent } from './agent.ts'
-import {
-  contactReceipts,
-  contactRequests,
-  notifications,
-} from '../../drizzle/durable-object/schema.ts'
 import {
   contactRequest,
   reserveContact,
@@ -36,6 +29,15 @@ import { contactBoundary } from './local-db/external-data.ts'
 import { openLocalDb } from './local-db/local.ts'
 import { CONTACT_WAIT_MS } from '../tools/contact.ts'
 import { PRUNE_LIMITS_KEY } from '../memory/prune/runs.ts'
+import deleteAllNotifications from '../testing/sql/delete-all-notifications.sql'
+import resetContactReceipts from '../testing/sql/reset-contact-receipts.sql'
+import selectAllContactReceipts from '../testing/sql/select-all-contact-receipts.sql'
+import selectAllContactRequests from '../testing/sql/select-all-contact-requests.sql'
+import selectAllNotifications from '../testing/sql/select-all-notifications.sql'
+import setAgentSlug from '../testing/sql/set-agent-slug.sql'
+import setAgentStatus from '../testing/sql/set-agent-status.sql'
+import setAllContactRequestsRetryAt from '../testing/sql/set-all-contact-requests-retry-at.sql'
+import setContactRequestsRetryAtDue from '../testing/sql/set-contact-requests-retry-at-due.sql'
 
 useMockModel()
 
@@ -91,10 +93,7 @@ async function outbound(sender: string, id: string) {
 async function wake(sender: string) {
   await runInDurableObject(env.AGENTS.getByName(sender), async (instance, state) => {
     const local = await openLocalDb(state.storage)
-    local
-      .update(contactRequests)
-      .set({ retryAt: Date.now() - 1 })
-      .run()
+    setAllContactRequestsRetryAt.runSync(local.sql, { retryAt: Date.now() - 1 })
     await setAlarm(state.storage, 'contact', Date.now() - 1)
     await instance.alarm()
   })
@@ -110,15 +109,7 @@ async function contactAlarm(
   await runInDurableObject(env.AGENTS.getByName(sender), async (instance, state) => {
     const db = await openLocalDb(state.storage)
     // Do not resurrect acknowledged rows while polling a partially drained batch.
-    db.update(contactRequests)
-      .set({ retryAt: Date.now() - 1 })
-      .where(
-        and(
-          gt(contactRequests.retryAt, 0),
-          id === undefined ? undefined : eq(contactRequests.id, id),
-        ),
-      )
-      .run()
+    setContactRequestsRetryAtDue.runSync(db.sql, { retryAt: Date.now() - 1, id: id ?? null })
     await state.storage.put('kodama:alarm:contact', Date.now() - 2)
     if (maintenance) await state.storage.put('kodama:alarm:prune', Date.now() - 1)
     if (alarm) await alarm()
@@ -161,7 +152,7 @@ describe('model contacts', () => {
       const sender = await enabled()
       const receiver = await newAgentId()
       const slug = `peer-${receiver}`
-      await management.update(agents).set({ slug }).where(eq(agents.agentId, receiver))
+      await setAgentSlug.run(management, { agentId: receiver, slug })
       const target =
         address === 'uuid' ? receiver : address === 'slug' ? slug : receiver.slice(0, -1)
       vi.mocked(fetch)
@@ -238,8 +229,10 @@ describe('model contacts', () => {
     } finally {
       release.resolve()
     }
-    const row = await runInDurableObject(env.AGENTS.getByName(sender), async (_, state) =>
-      (await openLocalDb(state.storage)).select().from(contactRequests).get(),
+    const row = await runInDurableObject(
+      env.AGENTS.getByName(sender),
+      async (_, state) =>
+        selectAllContactRequests.runSync((await openLocalDb(state.storage)).sql)[0],
     )
     if (!row) throw new Error('Missing contact')
     await waitForAnswer(receiver, row.requestId)
@@ -264,7 +257,7 @@ describe('model contacts', () => {
         expected = 'Ambiguous agent prefix'
       }
       if (kind === 'not-admitting') {
-        await management.update(agents).set({ status: 'paused' }).where(eq(agents.agentId, target))
+        await setAgentStatus.run(management, { agentId: target, status: 'paused' })
         expected = 'paused'
       }
       if (kind === 'missing-credentials') expected = 'credential'
@@ -386,11 +379,11 @@ describe('model contacts', () => {
     }
     await expect
       .poll(async () =>
-        runInDurableObject(
-          env.AGENTS.getByName(sender),
-          async (_, state) =>
-            (await openLocalDb(state.storage)).select().from(contactRequests).get()?.result?.text,
-        ),
+        runInDurableObject(env.AGENTS.getByName(sender), async (_, state) => {
+          const local = await openLocalDb(state.storage)
+          const row = selectAllContactRequests.runSync(local.sql)[0]
+          return row ? contactRequest(local, row.id)?.result?.text : undefined
+        }),
       )
       .toBe('Peer answer.')
   })
@@ -587,7 +580,7 @@ describe('durable provenance', () => {
             () => {},
           ),
         ).rejects.toThrow('contact_execution_changed')
-        expect(local.select().from(contactRequests).all()).toEqual([])
+        expect(selectAllContactRequests.runSync(local.sql)).toEqual([])
       } finally {
         release.resolve()
       }
@@ -615,7 +608,7 @@ describe('durable contact recovery', () => {
           // Simulate the stop after Pi acceptance but before saving its ID or answer.
           await runInDurableObject(peer, async (_, state) => {
             const db = await openLocalDb(state.storage)
-            db.update(contactReceipts).set({ submissionId: 0, result: null, settledAt: null }).run()
+            resetContactReceipts.runSync(db.sql)
           })
         }
         if (window === 'receiver-terminal' || window === 'sender-committed') {
@@ -643,14 +636,14 @@ describe('durable contact recovery', () => {
       ).toHaveLength(1)
       await runInDurableObject(env.AGENTS.getByName(sender), async (_, state) => {
         const db = await openLocalDb(state.storage)
-        expect(db.select().from(notifications).all()).toMatchObject([
+        expect(selectAllNotifications.runSync(db.sql)).toMatchObject([
           { source: 'contact', sourceId: row.id, outcome: 'succeeded' },
         ])
-        db.delete(notifications).run()
+        deleteAllNotifications.runSync(db.sql)
       })
       await wake(sender)
       await runInDurableObject(env.AGENTS.getByName(sender), async (_, state) =>
-        expect((await openLocalDb(state.storage)).select().from(notifications).all()).toEqual([]),
+        expect(selectAllNotifications.runSync((await openLocalDb(state.storage)).sql)).toEqual([]),
       )
     },
   )
@@ -663,10 +656,10 @@ describe('durable contact recovery', () => {
       const row = await outbox(sender, receiver)
       if (kind === 'sender-disabled') await updateSettings(sender, { tools: [] })
       else
-        await management
-          .update(agents)
-          .set({ status: 'paused' })
-          .where(eq(agents.agentId, kind === 'sender-paused' ? sender : receiver))
+        await setAgentStatus.run(management, {
+          agentId: kind === 'sender-paused' ? sender : receiver,
+          status: 'paused',
+        })
       await wake(sender)
       expect((await outbound(sender, row.id))?.result?.outcome).toBe('failed')
       expect((await exports.default.snapshot(receiver)).snapshot.messages).toEqual([])
@@ -724,7 +717,7 @@ describe('durable contact recovery', () => {
     await wake(sender)
     await runInDurableObject(peer, async (_, state) =>
       expect(
-        (await openLocalDb(state.storage)).select().from(contactReceipts).get()?.acknowledgedAt,
+        selectAllContactReceipts.runSync((await openLocalDb(state.storage)).sql)[0]?.acknowledgedAt,
       ).not.toBeNull(),
     )
   })
@@ -869,7 +862,7 @@ describe('durable contact recovery', () => {
           ).toBe(true)
           expect(maintenance).toBe(1)
           if (stage === 'ack') {
-            const notice = (await openLocalDb(state.storage)).select().from(notifications).get()
+            const notice = selectAllNotifications.runSync((await openLocalDb(state.storage)).sql)[0]
             expect(notice?.source).toBe('contact')
             expect(await state.storage.get('kodama:alarm:schedule')).toBe(notice?.expiresAt)
           }
@@ -899,7 +892,7 @@ describe('durable contact recovery', () => {
         ),
       ).toHaveLength(1)
       await runInDurableObject(env.AGENTS.getByName(sender), async (_, state) => {
-        const notice = (await openLocalDb(state.storage)).select().from(notifications).get()
+        const notice = selectAllNotifications.runSync((await openLocalDb(state.storage)).sql)[0]
         expect(notice?.source).toBe('contact')
         expect(await state.storage.get('kodama:alarm:schedule')).toBe(notice?.expiresAt)
       })
@@ -950,7 +943,7 @@ describe('durable contact recovery', () => {
         runInDurableObject(
           env.AGENTS.getByName(sender),
           async (_, state) =>
-            (await openLocalDb(state.storage)).select().from(contactRequests).get()?.retryAt,
+            selectAllContactRequests.runSync((await openLocalDb(state.storage)).sql)[0]?.retryAt,
         ),
       )
       .toBe(0)
@@ -992,10 +985,8 @@ describe('durable contact recovery', () => {
           async () => {
             await contactAlarm(sender, false, undefined, dispatch)
             return runInDurableObject(env.AGENTS.getByName(sender), async (_, state) =>
-              (await openLocalDb(state.storage))
-                .select()
-                .from(contactRequests)
-                .all()
+              selectAllContactRequests
+                .runSync((await openLocalDb(state.storage)).sql)
                 .filter((row) => row.retryAt > 0),
             )
           },

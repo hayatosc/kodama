@@ -7,7 +7,6 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { deferredCalls as deferredCallsTable } from '../../drizzle/durable-object/schema.ts'
 import { createAgentModels } from '../control-plane/models.ts'
 import { MCP_PROTOCOL } from '../mcp/connection/transport.ts'
 import { putMcpBearer } from '../mcp/authorization/vault.ts'
@@ -18,6 +17,8 @@ import { uuidv7 } from '../lib/uuid.ts'
 import { management, newAgentId, updateSettings } from '../testing/management.ts'
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import insertDeferredCallRaw from '../testing/sql/insert-deferred-call-raw.sql'
+import selectAllDeferredCalls from '../testing/sql/select-all-deferred-calls.sql'
 import { Type } from '@earendil-works/pi-ai'
 import { defineExtension, defineTool, Harness } from '@earendil-works/pi-durable'
 import { openDurableObjectSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/cloudflare'
@@ -233,19 +234,18 @@ describe('tool permissions and deferred approvals', () => {
     // Expired rows return state: 'expired' and do not queue execution.
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      local
-        .insert(deferredCallsTable)
-        .values({
-          approvalId: '01950000-0000-7000-8000-000000000099',
-          toolName: 'create_artifact',
-          argumentsJson: '{}',
-          reason: 'Old request',
-          sourceTask: 'expired-task',
-          state: 'pending',
-          createdAt: 1000,
-          expiresAt: 2000,
-        })
-        .run()
+      insertDeferredCallRaw.runSync(local.sql, {
+        approvalId: '01950000-0000-7000-8000-000000000099',
+        toolName: 'create_artifact',
+        toolDigest: null,
+        argumentsJson: '{}',
+        reason: 'Old request',
+        sourceTask: 'expired-task',
+        state: 'pending',
+        createdAt: 1000,
+        expiresAt: 2000,
+        decidedAt: null,
+      })
     })
     const expiredResult = await exports.default.resolveDeferredCall(id, {
       approvalId: '01950000-0000-7000-8000-000000000099',
@@ -504,21 +504,18 @@ describe('tool permissions and deferred approvals', () => {
               secondText = second.output?.[0]?.type === 'text' ? second.output[0].text : ''
 
               const now = Date.now()
-              local
-                .insert(deferredCallsTable)
-                .values({
-                  approvalId: '01950000-0000-7000-8000-000000000123',
-                  toolName: 'create_artifact',
-                  toolDigest: null,
-                  argumentsJson: '{"filename":"expiring.txt"}',
-                  reason: 'Ask gate',
-                  sourceTask: 'expiring-source',
-                  state: 'approved',
-                  createdAt: now - 10_000,
-                  expiresAt: now + 50,
-                  decidedAt: now - 5_000,
-                })
-                .run()
+              insertDeferredCallRaw.runSync(local.sql, {
+                approvalId: '01950000-0000-7000-8000-000000000123',
+                toolName: 'create_artifact',
+                toolDigest: null,
+                argumentsJson: '{"filename":"expiring.txt"}',
+                reason: 'Ask gate',
+                sourceTask: 'expiring-source',
+                state: 'approved',
+                createdAt: now - 10_000,
+                expiresAt: now + 50,
+                decidedAt: now - 5_000,
+              })
 
               await delayedWrapped.execute({ filename: 'expiring.txt' }, api, context)
               return { output: [{ type: 'text', text: 'probed' }] }
@@ -551,7 +548,7 @@ describe('tool permissions and deferred approvals', () => {
       expect(firstId).toMatchObject({ status: 'deferred' })
       expect(secondId).toMatchObject({ status: 'deferred' })
       expect(firstId).not.toEqual(secondId)
-      const allRows = local.select().from(deferredCallsTable).all()
+      const allRows = selectAllDeferredCalls.runSync(local.sql)
       expect(allRows).toHaveLength(4)
       expect(
         allRows.find((row) => row.approvalId === '01950000-0000-7000-8000-000000000123')?.state,
@@ -734,39 +731,35 @@ describe('tool permissions and deferred approvals', () => {
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       const now = Date.now()
-      local
-        .insert(deferredCallsTable)
-        .values([
-          {
-            approvalId: '01950000-0000-7000-8000-000000000201',
-            toolName: 'mcp_0123456789abcdef0123_0123456789abcdef0123',
-            toolDigest: null,
-            argumentsJson: '{}',
-            reason: 'Legacy MCP call without digest',
-            sourceTask: 'legacy-mcp-source',
-            state: 'approved',
-            createdAt: now,
-            expiresAt: now + 60_000,
-            decidedAt: now,
-          },
-          {
-            approvalId: '01950000-0000-7000-8000-000000000202',
-            toolName: 'mcp_custom_native_helper',
-            toolDigest: null,
-            argumentsJson: '{}',
-            reason: 'Native helper without digest',
-            sourceTask: 'native-helper-source',
-            state: 'pending',
-            createdAt: now,
-            expiresAt: now + 60_000,
-          },
-        ])
-        .run()
+      insertDeferredCallRaw.runSync(local.sql, {
+        approvalId: '01950000-0000-7000-8000-000000000201',
+        toolName: 'mcp_0123456789abcdef0123_0123456789abcdef0123',
+        toolDigest: null,
+        argumentsJson: '{}',
+        reason: 'Legacy MCP call without digest',
+        sourceTask: 'legacy-mcp-source',
+        state: 'approved',
+        createdAt: now,
+        expiresAt: now + 60_000,
+        decidedAt: now,
+      })
+      insertDeferredCallRaw.runSync(local.sql, {
+        approvalId: '01950000-0000-7000-8000-000000000202',
+        toolName: 'mcp_custom_native_helper',
+        toolDigest: null,
+        argumentsJson: '{}',
+        reason: 'Native helper without digest',
+        sourceTask: 'native-helper-source',
+        state: 'pending',
+        createdAt: now,
+        expiresAt: now + 60_000,
+        decidedAt: null,
+      })
 
       const expiredCount = invalidateMcpDeferredCalls(local, new Map(), now)
       expect(expiredCount).toBe(1)
 
-      const rows = local.select().from(deferredCallsTable).all()
+      const rows = selectAllDeferredCalls.runSync(local.sql)
       const regRow = rows.find((row) => row.approvalId === pendingReg.approvalId)
       expect(regRow?.toolDigest).toBeNull()
       expect(regRow?.state).toBe('pending')

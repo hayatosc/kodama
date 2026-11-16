@@ -5,21 +5,22 @@
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import {
-  agentConfigVersions,
-  agents,
-  auditLog,
-  systemSettings,
-} from '../../../drizzle/management/schema.ts'
-import { defaultAgentSettings } from '../../control-plane/config.ts'
+import { STATUS_KEY } from '../../agent/runtime/restrictions.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import { management, newAgentId } from '../../testing/management.ts'
 import { modelResponse } from '../../testing/rpc.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
+import selectAuditByTarget from '../../testing/sql/select-audit-by-target.sql'
+import setAgentStatus from '../../testing/sql/set-agent-status.sql'
+import setAgentVersions from '../../testing/sql/set-agent-versions.sql'
+import { defaultAgentSettings } from '../config.ts'
 import { managementDb } from '../db.ts'
 import { createAgentModels } from '../models.ts'
-import { STATUS_KEY } from '../../agent/runtime/restrictions.ts'
+import insertAgent from '../sql/insert-agent.sql'
+import insertConfigVersion from '../sql/insert-config-version.sql'
+import selectAgentById from '../sql/select-agent-by-id.sql'
+import selectSetting from '../sql/select-setting.sql'
 import { reconcileAgents } from './reconcile.ts'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -43,17 +44,20 @@ async function stuckAgents(count: number): Promise<string[]> {
     return {
       agentId,
       objectName: agentId,
-      kind: 'working' as const,
+      kind: 'working',
       displayName: 'stuck',
-      status: 'active' as const,
+      slug: null,
+      status: 'active',
       currentVersion: 1,
       createdAt: 1,
       updatedAt: 1,
     }
   })
   // One batch avoids a round trip per fixture; separate inserts respect D1's parameter limit.
-  const [first, ...rest] = rows.map((row) => management.insert(agents).values(row))
-  if (first !== undefined) await management.batch([first, ...rest])
+  await runBatch(
+    management,
+    rows.map((row) => prepareQuery(management, insertAgent, row)),
+  )
   return rows.map((row) => row.agentId).sort()
 }
 
@@ -66,29 +70,27 @@ describe('reconcileAgents', () => {
     // A version written while its push was lost: the object has never heard of it.
     const agentId = await newAgentId(undefined, false)
     const settings = { ...defaultAgentSettings(env), systemPrompt: 'Reached at last' }
-    await management.batch([
-      management.insert(agentConfigVersions).values({
+    await runBatch(management, [
+      prepareQuery(management, insertConfigVersion, {
         agentId,
         version: 1,
         settingsJson: JSON.stringify(settings),
         schemaVersion: 1,
         source: 'system',
+        comment: null,
         createdAt: Date.now(),
       }),
-      management.update(agents).set({ currentVersion: 1 }).where(eq(agents.agentId, agentId)),
+      prepareQuery(management, setAgentVersions, {
+        agentId,
+        currentVersion: 1,
+        appliedVersion: 0,
+      }),
     ])
 
     expect(await reconcile()).toEqual({ pushed: 100, behind: 100 })
-    const cursor = () =>
-      management
-        .select()
-        .from(systemSettings)
-        .where(eq(systemSettings.key, 'reconcile_cursor'))
-        .get()
+    const cursor = () => selectSetting.run(management, { key: 'reconcile_cursor' })
     expect((await cursor())?.valueJson).toBe(JSON.stringify(stuckIds.at(-1)))
-    expect(
-      await management.select().from(agents).where(eq(agents.agentId, agentId)).get(),
-    ).toMatchObject({ appliedVersion: 0 })
+    expect(await selectAgentById.run(management, { agentId })).toMatchObject({ appliedVersion: 0 })
 
     // The next run reaches the healthy agent, then wraps to the first 99 failures.
     expect(await reconcile()).toEqual({ pushed: 100, behind: 99 })
@@ -98,7 +100,7 @@ describe('reconcileAgents', () => {
       attemptedIds.map((id) => [`Reconciling agent ${id} failed`, 'TypeError']),
     )
 
-    const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    const row = await selectAgentById.run(management, { agentId })
     expect(row).toMatchObject({ currentVersion: 1, appliedVersion: 1 })
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe('Reached at last')
   })
@@ -107,12 +109,8 @@ describe('reconcileAgents', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const agentId = await newAgentId()
     await env.AGENTS.getByName(agentId).setStatus('provisioning')
-    await management
-      .update(agents)
-      .set({ status: 'provisioning' })
-      .where(eq(agents.agentId, agentId))
-    const status = async () =>
-      (await management.select().from(agents).where(eq(agents.agentId, agentId)).get())?.status
+    await setAgentStatus.run(management, { agentId, status: 'provisioning' })
+    const status = async () => (await selectAgentById.run(management, { agentId }))?.status
 
     // Earlier tests may leave failing agents ahead of the cursor; a few runs reach every agent.
     for (let run = 0; run < 3 && (await status()) === 'provisioning'; run++) await reconcile()
@@ -123,7 +121,7 @@ describe('reconcileAgents', () => {
         state.storage.kv.get(STATUS_KEY),
       ),
     ).toBe('active')
-    const audits = await management.select().from(auditLog).where(eq(auditLog.targetId, agentId))
+    const audits = await selectAuditByTarget.run(management, { targetId: agentId })
     expect(audits.filter((row) => row.action === 'agent.activate')).toHaveLength(1)
   })
 })

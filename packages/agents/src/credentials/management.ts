@@ -4,24 +4,26 @@
  *
  * @module
  */
-import { and, eq, ne } from 'drizzle-orm'
 import * as v from 'valibot'
-import {
-  agents,
-  credentials,
-  credentialGrants,
-  agentCredentialRefs,
-} from '../../drizzle/management/schema.ts'
-import type { AgentEnv } from '../env.ts'
-import type { ManagementCall } from '../control-plane/workflows/agents.ts'
-import { auditByOpId, auditStatement } from '../control-plane/audit.ts'
+import { auditByOpId, auditIgnoreStatement, auditStatement } from '../control-plane/audit.ts'
 import { installationId } from '../control-plane/installation.ts'
-import { uuidv7, UUID_PATTERN } from '../lib/uuid.ts'
+import selectAgentById from '../control-plane/sql/select-agent-by-id.sql'
+import type { ManagementCall } from '../control-plane/workflows/agents.ts'
+import type { AgentEnv } from '../env.ts'
 import { isConstraintError } from '../lib/errors.ts'
-import { credentialFingerprint } from './encryption.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
+import { UUID_PATTERN, uuidv7 } from '../lib/uuid.ts'
 import { parseAgentId, RequestIdSchema } from '../validation.ts'
+import { credentialFingerprint } from './encryption.ts'
 import { invalidateCredential } from './invalidation.ts'
-import { credentialInsert, credentialMetadata } from './vault.ts'
+import insertCredentialGrant from './sql/insert-credential-grant.sql'
+import listProviderCredentials from './sql/list-provider-credentials.sql'
+import revokeCredentialSql from './sql/revoke-credential.sql'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import selectCredentialGrant from './sql/select-credential-grant.sql'
+import selectCredentialGrantsByCredential from './sql/select-credential-grants-by-credential.sql'
+import selectCredentialReferences from './sql/select-credential-references.sql'
+import { credentialInsert, credentialMetadata, parseCredentialRow } from './vault.ts'
 
 /** Keep storage diagnostics (which can contain ciphertext bindings) out of RPC exceptions. */
 export async function credentialRpc<T>(run: () => Promise<T>): Promise<T> {
@@ -83,7 +85,7 @@ export async function putCredential(
   await installationId(call.db, call.now)
   // The prepared insert contains ciphertext only. The audit never includes an input object.
   try {
-    const [rows] = await call.db.batch([
+    await runBatch(call.db, [
       statement,
       auditStatement(call.db, {
         opId,
@@ -99,9 +101,9 @@ export async function putCredential(
         },
       }),
     ])
-    const row = rows[0]
+    const row = await selectCredentialById.run(call.db, { credentialId })
     if (!row) throw new Error('credential_unavailable: registration failed')
-    return credentialMetadata(row)
+    return credentialMetadata(parseCredentialRow(row))
   } catch (error) {
     if (isConstraintError(error)) {
       const previous = await replay()
@@ -113,36 +115,24 @@ export async function putCredential(
 
 /** List metadata only; envelopes are never part of this result. */
 export async function listCredentials(call: ManagementCall) {
-  return (
-    await call.db.select().from(credentials).where(eq(credentials.purpose, 'model_provider'))
-  ).map(credentialMetadata)
+  return (await listProviderCredentials.run(call.db)).map((row) =>
+    credentialMetadata(parseCredentialRow(row)),
+  )
 }
 
 /** Read one credential after authorization, rejecting unknown IDs. */
 export async function credentialRow(call: ManagementCall, id: string) {
   if (!UUID_PATTERN.test(id)) throw new TypeError('credentialId must be a lowercase UUID v7')
-  const row = await call.db.select().from(credentials).where(eq(credentials.credentialId, id)).get()
+  const row = await selectCredentialById.run(call.db, { credentialId: id })
   if (!row || row.purpose !== 'model_provider') throw new TypeError('Unknown credential')
-  return row
+  return parseCredentialRow(row)
 }
 
 /** Show the affected agents before a caller chooses to revoke a credential. */
 export async function credentialCoverage(call: ManagementCall, credentialId: string) {
   const row = await credentialRow(call, credentialId)
-  const references = await call.db
-    .select({
-      agentId: agentCredentialRefs.agentId,
-      credentialId: agentCredentialRefs.credentialId,
-      provider: agentCredentialRefs.provider,
-      version: agents.currentVersion,
-    })
-    .from(agentCredentialRefs)
-    .innerJoin(agents, eq(agents.agentId, agentCredentialRefs.agentId))
-    .where(eq(agentCredentialRefs.credentialId, credentialId))
-  const grants = await call.db
-    .select()
-    .from(credentialGrants)
-    .where(eq(credentialGrants.credentialId, credentialId))
+  const references = await selectCredentialReferences.run(call.db, { credentialId })
+  const grants = await selectCredentialGrantsByCredential.run(call.db, { credentialId })
   return {
     credential: credentialMetadata(row),
     references,
@@ -153,25 +143,14 @@ export async function credentialCoverage(call: ManagementCall, credentialId: str
 /** Grant permission without changing a version; assignment is a separate atomic operation. */
 export async function grantCredential(call: ManagementCall, credentialId: string, agentId: string) {
   const row = await credentialRow(call, credentialId)
-  const agent = await call.db
-    .select({ agentId: agents.agentId })
-    .from(agents)
-    .where(eq(agents.agentId, parseAgentId(agentId)))
-    .get()
+  const agent = await selectAgentById.run(call.db, { agentId: parseAgentId(agentId) })
   if (!agent) throw new TypeError('Unknown agent')
   if (row.status !== 'active') throw new Error('credential_unavailable: inactive credential')
-  const findGrant = () =>
-    call.db
-      .select()
-      .from(credentialGrants)
-      .where(
-        and(eq(credentialGrants.credentialId, credentialId), eq(credentialGrants.agentId, agentId)),
-      )
-      .get()
+  const findGrant = () => selectCredentialGrant.run(call.db, { credentialId, agentId })
   if (!(await findGrant())) {
     try {
-      await call.db.batch([
-        call.db.insert(credentialGrants).values({ credentialId, agentId }),
+      await runBatch(call.db, [
+        prepareQuery(call.db, insertCredentialGrant, { credentialId, agentId }),
         auditStatement(call.db, {
           opId: uuidv7(),
           at: call.now,
@@ -199,21 +178,9 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
   const row = await credentialRow(call, credentialId)
   const coverage = await credentialCoverage(call, credentialId)
   if (row.status !== 'revoked')
-    await call.db.batch([
-      call.db
-        .update(credentials)
-        .set({
-          status: 'revoked',
-          ciphertext: null,
-          iv: null,
-          wrappedDek: null,
-          wrapIv: null,
-          revokedAt: call.now,
-          leaseId: null,
-          leaseExpiresAt: null,
-        })
-        .where(and(eq(credentials.credentialId, credentialId), ne(credentials.status, 'revoked'))),
-      auditStatement(call.db, {
+    await runBatch(call.db, [
+      prepareQuery(call.db, revokeCredentialSql, { credentialId, revokedAt: call.now }),
+      auditIgnoreStatement(call.db, {
         opId: `credential.revoke:${credentialId}`,
         at: call.now,
         source: call.source,
@@ -221,7 +188,7 @@ export async function revokeCredential(call: ManagementCall, credentialId: strin
         targetKind: 'system',
         targetId: credentialId,
         detail: { kind: row.kind, provider: row.provider, fingerprint: row.fingerprint },
-      }).onConflictDoNothing(),
+      }),
     ])
   await invalidateCredential(call, credentialId)
   return { credentialId, status: 'revoked' as const, affectedAgents: coverage.agents }

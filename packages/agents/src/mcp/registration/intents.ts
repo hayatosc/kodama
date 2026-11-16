@@ -1,8 +1,12 @@
 /** Host-only management intent persistence and atomic single-use consumption. @module */
-import { and, eq, exists, gt, isNull } from 'drizzle-orm'
-import { agents, mcpCommits, mcpIntents } from '../../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../../control-plane/db.ts'
+import { prepareQuery } from '../../lib/reylo.ts'
 import type { McpInstruction } from './chat-tool.ts'
+import commitMcpIntent from './sql/commit-mcp-intent.sql'
+import consumeMcpIntentQuery from './sql/consume-mcp-intent.sql'
+import insertMcpIntentIgnore from './sql/insert-mcp-intent-ignore.sql'
+import selectActiveWorkingAgent from './sql/select-active-working-agent.sql'
+import selectMcpIntent from './sql/select-mcp-intent.sql'
 
 /** Trusted transport evidence. This type is never parsed from RPC or tool input. */
 export interface McpEvidence {
@@ -21,13 +25,7 @@ export interface McpIntent extends McpEvidence {
 
 /** Chat management is available only on an active working agent, never a dedicated agent. */
 export async function requireMcpAgent(db: ManagementDb, agentId: string) {
-  const row = await db
-    .select()
-    .from(agents)
-    .where(
-      and(eq(agents.agentId, agentId), eq(agents.kind, 'working'), eq(agents.status, 'active')),
-    )
-    .get()
+  const row = await selectActiveWorkingAgent.run(db, { agentId })
   if (!row) throw new Error('mcp_agent_unavailable')
   return row
 }
@@ -42,11 +40,8 @@ export async function rememberMcpIntent(
   const expiresAt = evidence.createdAt + 600_000
   if (expiresAt <= Date.now()) throw new Error('mcp_intent_expired')
   const instructionJson = JSON.stringify(instruction)
-  await db
-    .insert(mcpIntents)
-    .values({ ...evidence, intentId, expiresAt, instructionJson })
-    .onConflictDoNothing()
-  const stored = await db.select().from(mcpIntents).where(eq(mcpIntents.intentId, intentId)).get()
+  await insertMcpIntentIgnore.run(db, { ...evidence, intentId, expiresAt, instructionJson })
+  const stored = await selectMcpIntent.run(db, { intentId })
   if (
     !stored ||
     stored.consumedAt !== null ||
@@ -61,30 +56,23 @@ export async function rememberMcpIntent(
 }
 
 /** Both statements belong to the mutation batch; a failed fence rolls back every write. */
-export function consumeMcpIntent(db: ManagementDb, intent: McpIntent) {
+export function consumeMcpIntent(
+  db: ManagementDb,
+  intent: McpIntent,
+): readonly [D1PreparedStatement, D1PreparedStatement] {
   const now = Date.now()
   return [
-    db.insert(mcpCommits).values({
+    prepareQuery(db, commitMcpIntent, {
       operationId: `intent:${intent.intentId}`,
+      intentId: intent.intentId,
+      sourceAgentId: intent.sourceAgentId,
+      conversationId: intent.conversationId,
+      submissionId: intent.submissionId,
+      instructionJson: JSON.stringify(intent.instruction),
+      now,
       createdAt: now,
-      authorized: exists(
-        db
-          .select()
-          .from(mcpIntents)
-          .where(
-            and(
-              eq(mcpIntents.intentId, intent.intentId),
-              eq(mcpIntents.sourceAgentId, intent.sourceAgentId),
-              eq(mcpIntents.conversationId, intent.conversationId),
-              eq(mcpIntents.submissionId, intent.submissionId),
-              eq(mcpIntents.instructionJson, JSON.stringify(intent.instruction)),
-              gt(mcpIntents.expiresAt, now),
-              isNull(mcpIntents.consumedAt),
-            ),
-          ),
-      ),
     }),
-    db.update(mcpIntents).set({ consumedAt: now }).where(eq(mcpIntents.intentId, intent.intentId)),
+    prepareQuery(db, consumeMcpIntentQuery, { intentId: intent.intentId, now }),
   ] as const
 }
 

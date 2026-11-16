@@ -6,21 +6,61 @@
  *
  * @module
  */
-import { and, asc, desc, eq, isNull, lt, or } from 'drizzle-orm'
-import { coalesce } from '../../lib/sql.ts'
-import { skills } from '../../../drizzle/memory/schema.ts'
-import type { MemoryDb } from './db.ts'
-import { applyPlan } from './records.ts'
-import { agentScope } from './db.ts'
-import { bumpScope, claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
-import type { OperationContext, OperationResult, Plan, Statements } from './statements.ts'
+import { parseEnum, prepareQuery } from '../../lib/reylo.ts'
 import { checkedSkill, SKILL_ARCHIVE_DAYS, SKILL_LIST_LIMIT } from '../skills.ts'
 import type { SkillWrite, VisibleSkill } from '../skills.ts'
+import { agentScope } from './db.ts'
+import type { MemoryDb } from './db.ts'
+import { applyPlan } from './records.ts'
+import incrementSkillUse from './sql/increment-skill-use.sql'
+import insertSkill from './sql/insert-skill.sql'
+import listSkillsQuery from './sql/list-skills.sql'
+import selectSkill from './sql/select-skill.sql'
+import selectStaleSkills from './sql/select-stale-skills.sql'
+import selectVisibleSkills from './sql/select-visible-skills.sql'
+import updateSkillStatus from './sql/update-skill-status.sql'
+import updateSkill from './sql/update-skill.sql'
+import { bumpScope, claimRevision, conflict, insertOp, recordLedger } from './statements.ts'
+import type { OperationContext, OperationResult, Plan, Statements } from './statements.ts'
+
+/** Only `active` skills are listed; `archived` ones can be restored. */
+export const SKILL_STATUSES = ['active', 'archived'] as const
+/** Whether a skill is listed (`active`) or put away (`archived`). */
+export type SkillStatus = (typeof SKILL_STATUSES)[number]
 
 /** A skill row. */
-export type Skill = typeof skills.$inferSelect
-/** Whether a skill is listed (`active`) or put away (`archived`). */
-export type SkillStatus = Skill['status']
+export interface Skill {
+  agentId: string
+  name: string
+  description: string
+  body: string
+  status: SkillStatus
+  evidence: string
+  revision: number
+  useCount: number
+  lastUsedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+function parseSkill(row: {
+  agentId: string
+  name: string
+  description: string
+  body: string
+  status: string
+  evidence: string
+  revision: number
+  useCount: number
+  lastUsedAt: number | null
+  createdAt: number
+  updatedAt: number
+}): Skill {
+  return {
+    ...row,
+    status: parseEnum(SKILL_STATUSES, row.status, 'skill status'),
+  }
+}
 
 /** Skills archived per consolidation, to keep the step small. */
 const CURATE_BATCH = 200
@@ -32,17 +72,19 @@ function skillKey(agentId: string, name: string): string {
 }
 
 /** A skill of an agent, in any status. */
-export function readSkill(db: MemoryDb, agentId: string, name: string) {
-  return db
-    .select()
-    .from(skills)
-    .where(and(eq(skills.agentId, agentId), eq(skills.name, name)))
-    .get()
+export async function readSkill(
+  db: MemoryDb,
+  agentId: string,
+  name: string,
+): Promise<Skill | undefined> {
+  const row = await selectSkill.run(db, { agentId, name })
+  return row === null ? undefined : parseSkill(row)
 }
 
 /** An agent's skills in any status, by name. */
-export function listSkills(db: MemoryDb, agentId: string): Promise<Skill[]> {
-  return db.select().from(skills).where(eq(skills.agentId, agentId)).orderBy(asc(skills.name))
+export async function listSkills(db: MemoryDb, agentId: string): Promise<Skill[]> {
+  const rows = await listSkillsQuery.run(db, { agentId })
+  return rows.map(parseSkill)
 }
 
 /**
@@ -50,12 +92,7 @@ export function listSkills(db: MemoryDb, agentId: string): Promise<Skill[]> {
  * skills, then sorts them deterministically by name so usage timestamps do not churn prompt cache.
  */
 export async function visibleSkills(db: MemoryDb, agentId: string): Promise<VisibleSkill[]> {
-  const rows = await db
-    .select({ name: skills.name, description: skills.description })
-    .from(skills)
-    .where(and(eq(skills.agentId, agentId), eq(skills.status, 'active')))
-    .orderBy(desc(coalesce(skills.lastUsedAt, skills.updatedAt)))
-    .limit(SKILL_LIST_LIMIT)
+  const rows = await selectVisibleSkills.run(db, { agentId, limit: SKILL_LIST_LIMIT })
   return rows.sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -76,10 +113,12 @@ export async function useSkill(
 ): Promise<string | undefined> {
   const skill = await readSkill(db, agentId, name)
   if (skill?.status !== 'active') return undefined
-  await db
-    .update(skills)
-    .set({ useCount: skill.useCount + 1, lastUsedAt: now })
-    .where(and(eq(skills.agentId, agentId), eq(skills.name, name)))
+  await incrementSkillUse.run(db, {
+    agentId,
+    name,
+    nextUseCount: skill.useCount + 1,
+    lastUsedAt: now,
+  })
   return skill.body
 }
 
@@ -106,28 +145,29 @@ export function writeSkill(
       return conflict(db, context, key, current === undefined ? 'no_skill' : 'target_changed')
     }
     const result: OperationResult = { status: 'applied', recordId: key }
-    const fields = {
-      description: write.description,
-      body: write.body,
-      evidence: write.evidence,
-      status: 'active' as const,
-      updatedAt: context.now,
-    }
     const change =
       current === undefined
-        ? db
-            .insert(skills)
-            .values({ agentId: write.agentId, name: write.name, ...fields, createdAt: context.now })
-        : db
-            .update(skills)
-            .set({ ...fields, revision: current.revision + 1 })
-            .where(
-              and(
-                eq(skills.agentId, write.agentId),
-                eq(skills.name, write.name),
-                eq(skills.revision, current.revision),
-              ),
-            )
+        ? prepareQuery(db, insertSkill, {
+            agentId: write.agentId,
+            name: write.name,
+            description: write.description,
+            body: write.body,
+            status: 'active',
+            evidence: write.evidence,
+            createdAt: context.now,
+            updatedAt: context.now,
+          })
+        : prepareQuery(db, updateSkill, {
+            agentId: write.agentId,
+            name: write.name,
+            description: write.description,
+            body: write.body,
+            evidence: write.evidence,
+            status: 'active',
+            updatedAt: context.now,
+            nextRevision: current.revision + 1,
+            revision: current.revision,
+          })
     const statements: Statements = [
       insertOp(db, context, 'skill_write', result),
       change,
@@ -158,16 +198,14 @@ export function setSkillStatus(
     const result: OperationResult = { status: 'applied', recordId: key }
     const statements: Statements = [
       insertOp(db, context, `skill_${target.status}`, result),
-      db
-        .update(skills)
-        .set({ status: target.status, revision: current.revision + 1, updatedAt: context.now })
-        .where(
-          and(
-            eq(skills.agentId, target.agentId),
-            eq(skills.name, target.name),
-            eq(skills.revision, current.revision),
-          ),
-        ),
+      prepareQuery(db, updateSkillStatus, {
+        agentId: target.agentId,
+        name: target.name,
+        status: target.status,
+        nextRevision: current.revision + 1,
+        revision: current.revision,
+        updatedAt: context.now,
+      }),
       claimRevision(db, context, 'skill', key, current.revision + 1),
       recordLedger(db, context, `skill_${target.status}`, key, {}, 'skill'),
       bumpScope(db, context, agentScope(target.agentId)),
@@ -184,17 +222,7 @@ export function setSkillStatus(
  */
 export async function curateSkills(db: MemoryDb, runId: string, now: number): Promise<number> {
   const before = now - SKILL_ARCHIVE_DAYS * DAY_MS
-  const rows = await db
-    .select()
-    .from(skills)
-    .where(
-      and(
-        eq(skills.status, 'active'),
-        lt(skills.updatedAt, before),
-        or(isNull(skills.lastUsedAt), lt(skills.lastUsedAt, before)),
-      ),
-    )
-    .limit(CURATE_BATCH)
+  const rows = (await selectStaleSkills.run(db, { before, limit: CURATE_BATCH })).map(parseSkill)
   for (const skill of rows) {
     await setSkillStatus(
       db,

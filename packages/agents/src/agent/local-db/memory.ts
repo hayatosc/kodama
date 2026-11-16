@@ -3,9 +3,33 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
-import { alwaysLoaded, rememberTurns } from '../../../drizzle/durable-object/schema.ts'
 import type { LocalDb } from './local.ts'
+import markMemoryCheckedQuery from './sql/mark-memory-checked.sql'
+import selectAlwaysLoaded from './sql/select-always-loaded.sql'
+import selectRememberTurn from './sql/select-remember-turn.sql'
+import upsertAlwaysLoaded from './sql/upsert-always-loaded.sql'
+import upsertLocalTasks from './sql/upsert-local-tasks.sql'
+import upsertRememberTurn from './sql/upsert-remember-turn.sql'
+
+/** Cached always-loaded prompt copy stored per agent Durable Object. */
+export interface AlwaysLoadedCopy {
+  id: number
+  text: string
+  revisionsJson: string
+  skillsJson: string
+  tasksJson: string
+  checkedAt: number
+}
+
+/** Input payload for replacing the cached always-loaded prompt copy. */
+export interface AlwaysLoadedCopyInput {
+  id?: number
+  text: string
+  revisionsJson: string
+  skillsJson?: string
+  tasksJson?: string
+  checkedAt: number
+}
 
 /** Durable high-water mark of pages read by the current extraction job. */
 export const EXTRACTION_READ_KEY = 'kodama:extraction-read'
@@ -34,52 +58,38 @@ export function advanceExtractionProgress(
 
 /** Consume a turn's quota synchronously; nothing can interleave between the read and write. */
 export function claimRememberTurn(local: LocalDb, entryId: number, limit: number): boolean {
-  const turn = local.select().from(rememberTurns).where(eq(rememberTurns.entryId, entryId)).get()
+  const turn = selectRememberTurn.runSync(local.sql, { entryId })
   if ((turn?.count ?? 0) >= limit) return false
-  const count = (turn?.count ?? 0) + 1
-  local
-    .insert(rememberTurns)
-    .values({ entryId, count })
-    .onConflictDoUpdate({ target: rememberTurns.entryId, set: { count } })
-    .run()
+  upsertRememberTurn.runSync(local.sql, {
+    entryId,
+    count: (turn?.count ?? 0) + 1,
+  })
   return true
 }
 
 /** The most recent cached prompt copy, if it has been built. */
-export function storedMemoryCopy(local: LocalDb) {
-  return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()
+export function storedMemoryCopy(local: LocalDb): AlwaysLoadedCopy | undefined {
+  return selectAlwaysLoaded.runSync(local.sql) ?? undefined
 }
 
 /** Replace the prompt, skills, tasks, revisions, and check time together. */
-export function saveMemoryCopy(local: LocalDb, row: typeof alwaysLoaded.$inferInsert): void {
-  local
-    .insert(alwaysLoaded)
-    .values(row)
-    .onConflictDoUpdate({ target: alwaysLoaded.id, set: row })
-    .run()
+export function saveMemoryCopy(local: LocalDb, row: AlwaysLoadedCopyInput): void {
+  upsertAlwaysLoaded.runSync(local.sql, {
+    id: row.id ?? 1,
+    text: row.text,
+    revisionsJson: row.revisionsJson,
+    skillsJson: row.skillsJson ?? '[]',
+    tasksJson: row.tasksJson ?? '[]',
+    checkedAt: row.checkedAt,
+  })
 }
 
 /** Update the cached active task index immediately when the agent writes a task checkpoint. */
 export function saveLocalTasks(local: LocalDb, tasksJson: string): void {
-  const existing = storedMemoryCopy(local)
-  if (existing) {
-    local.update(alwaysLoaded).set({ tasksJson }).where(eq(alwaysLoaded.id, 1)).run()
-    return
-  }
-  local
-    .insert(alwaysLoaded)
-    .values({
-      id: 1,
-      text: '',
-      revisionsJson: '{}',
-      skillsJson: '[]',
-      tasksJson,
-      checkedAt: 0,
-    })
-    .run()
+  upsertLocalTasks.runSync(local.sql, { tasksJson })
 }
 
 /** Mark a revision check without changing the rendered copy. */
 export function markMemoryChecked(local: LocalDb, now: number): void {
-  local.update(alwaysLoaded).set({ checkedAt: now }).where(eq(alwaysLoaded.id, 1)).run()
+  markMemoryCheckedQuery.runSync(local.sql, { checkedAt: now })
 }

@@ -1,10 +1,9 @@
 /** Credential refresh through agent admission, model auth, and Durable Object restart. @module */
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
+import selectCredentialById from './sql/select-credential-by-id.sql'
 import { credentialCall } from '../testing/credentials.ts'
 import { newAgentId } from '../testing/management.ts'
 import { modelResponse, waitForAnswer } from '../testing/rpc.ts'
@@ -72,11 +71,7 @@ it('sends with an expired subscription after one refresh, including after evicti
   expect(refreshes).toBe(1)
   expect(modelRequests).toBe(2)
   expect(
-    await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, credential.credentialId))
-      .get(),
+    await selectCredentialById.run(db, { credentialId: credential.credentialId }),
   ).toMatchObject({ status: 'active', revision: 2, leaseId: null })
 })
 

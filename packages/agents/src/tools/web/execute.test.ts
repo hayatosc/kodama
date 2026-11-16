@@ -13,7 +13,7 @@ import {
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import type { Operation } from '../../memory/store/records.ts'
 import { activeContents } from '../../testing/memory.ts'
-import { knownUrls } from '../../../drizzle/durable-object/schema.ts'
+import selectAllKnownUrls from '../../testing/sql/select-all-known-urls.sql'
 import { contactBoundary, markContact } from '../../agent/local-db/external-data.ts'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
@@ -103,7 +103,7 @@ it.each([
           interruption === 'paused' ? 'agent_restricted' : 'aborted',
         )
         expect(fetch).toHaveBeenCalledOnce() // only the harness model request
-        expect(local.select().from(knownUrls).all()).toEqual([])
+        expect(selectAllKnownUrls.runSync(local.sql)).toEqual([])
         expect(webState.keylessAttempts).toHaveLength(0)
         expect(webState.searchAdmissions).toHaveLength(0)
         expect(webState.inFlight).toBe(0)

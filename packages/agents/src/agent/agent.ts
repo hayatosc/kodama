@@ -59,8 +59,7 @@ import {
   readSharedSpaces,
   readConfig,
 } from '../control-plane/config.ts'
-import { managementDb } from '../control-plane/db.ts'
-import { AGENT_STATUSES } from '../../drizzle/management/schema.ts'
+import { AGENT_STATUSES, managementDb } from '../control-plane/db.ts'
 import {
   admitAgent,
   agentRow,
@@ -1135,9 +1134,9 @@ export class Agent extends DurableObject<AgentEnv> {
         return { approvalId: existing.approvalId, state: 'expired' }
       }
       const resumeRequestId = `approval-${existing.approvalId}-${input.decision}`
-      const outcome = local.transaction((tx) => {
+      const outcome = local.transactionSync(() => {
         const { row, alreadyDecided } = decideDeferredCallInTx(
-          tx,
+          local,
           input.approvalId,
           input.decision,
           input.note,
@@ -1152,7 +1151,7 @@ export class Agent extends DurableObject<AgentEnv> {
         if (finalState === 'expired') {
           return { row, finalState, alreadyDecided: true, inboxRow: undefined }
         }
-        const existingResume = inboxEventByRequest(tx, resumeRequestId)
+        const existingResume = inboxEventByRequest(local, resumeRequestId)
         if (alreadyDecided && (existingResume !== undefined || row.state === 'consumed')) {
           return { row, finalState, alreadyDecided: true, inboxRow: existingResume }
         }
@@ -1163,7 +1162,7 @@ export class Agent extends DurableObject<AgentEnv> {
             ? `[Operator approved deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Call ${row.toolName} now with the exact approved arguments: ${row.argumentsJson}]`
             : `[Operator denied deferred tool call ${row.approvalId} (${row.toolName}).${noteText} Do NOT invoke ${row.toolName}; acknowledge the decision and proceed accordingly.]`
         const { row: inboxRow } = enqueueInboxEventInTx(
-          tx,
+          local,
           {
             requestId: resumeRequestId,
             source: 'approval',

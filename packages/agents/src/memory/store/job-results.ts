@@ -3,16 +3,13 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
-import { memoryLedger, memoryOps } from '../../../drizzle/memory/schema.ts'
 import type { MemoryDb } from './db.ts'
+import insertMemoryLedger from './sql/insert-memory-ledger.sql'
+import selectJobOpsResults from './sql/select-job-ops-results.sql'
 
 /** Persisted operation results used to decide a completed job's outcome. */
 export async function jobResults(db: MemoryDb, jobId: string): Promise<string[]> {
-  const ops = await db
-    .select({ resultJson: memoryOps.resultJson })
-    .from(memoryOps)
-    .where(eq(memoryOps.jobId, jobId))
+  const ops = await selectJobOpsResults.run(db, { jobId })
   return ops.map((op) => op.resultJson)
 }
 
@@ -22,9 +19,10 @@ export async function recordJobFailure(
   job: { jobId: string; kind: string; attempts: number },
   now: number,
 ): Promise<void> {
-  await db.insert(memoryLedger).values({
+  await insertMemoryLedger.run(db, {
     at: now,
     runId: job.jobId,
+    opId: null,
     actor: 'memory-agent',
     action: 'job_failed',
     target: 'record',

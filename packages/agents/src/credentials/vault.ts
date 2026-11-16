@@ -6,10 +6,96 @@
  */
 import type { Credential } from '@earendil-works/pi-ai'
 import * as v from 'valibot'
-import { credentials } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
+import { parseEnum, parseNullableEnum, prepareQuery } from '../lib/reylo.ts'
 import { credentialFingerprint, encryptCredential } from './encryption.ts'
 import type { CredentialIdentity } from './encryption.ts'
+import insertCredential from './sql/insert-credential.sql'
+
+/** Allowed credential kinds stored in `credentials`. */
+export const CREDENTIAL_KINDS = [
+  'api_key',
+  'oauth_subscription',
+  'mcp_bearer',
+  'mcp_oauth',
+  'mcp_client',
+  'mcp_transaction',
+] as const
+/** Credential purposes isolating model providers from MCP servers. */
+export const CREDENTIAL_PURPOSES = ['model_provider', 'mcp_server'] as const
+/** Lifecycle statuses of stored credentials. */
+export const CREDENTIAL_STATUSES = ['active', 'revoked', 'needs_reauth'] as const
+/** Auth states recorded on MCP credentials requiring owner intervention. */
+export const MCP_AUTH_STATES = ['reauth_required', 'scope_required', 'outcome_unknown'] as const
+/** Classification of OAuth refresh failures. */
+export const REFRESH_FAILURE_CATEGORIES = ['rejected', 'transient', 'malformed', 'failed'] as const
+
+/** Full row shape from `credentials` with narrowed enum columns. */
+export interface CredentialRow {
+  credentialId: string
+  kind: (typeof CREDENTIAL_KINDS)[number]
+  purpose: (typeof CREDENTIAL_PURPOSES)[number]
+  provider: string
+  status: (typeof CREDENTIAL_STATUSES)[number]
+  mcpAuthState: (typeof MCP_AUTH_STATES)[number] | null
+  revision: number
+  ciphertext: string | null
+  iv: string | null
+  wrappedDek: string | null
+  wrapIv: string | null
+  fingerprint: string
+  last4: string
+  leaseId: string | null
+  leaseExpiresAt: number | null
+  createdAt: number
+  revokedAt: number | null
+  lastUsedAt: number | null
+  expiresAt: number | null
+  lastRefreshedAt: number | null
+  refreshFailures: number
+  lastRefreshFailureAt: number | null
+  lastRefreshFailureCategory: (typeof REFRESH_FAILURE_CATEGORIES)[number] | null
+}
+
+/** Narrow a raw SQL credential row into a {@link CredentialRow}. */
+export function parseCredentialRow(row: {
+  credentialId: string
+  kind: string
+  purpose: string
+  provider: string
+  status: string
+  mcpAuthState: string | null
+  revision: number
+  ciphertext: string | null
+  iv: string | null
+  wrappedDek: string | null
+  wrapIv: string | null
+  fingerprint: string
+  last4: string
+  leaseId: string | null
+  leaseExpiresAt: number | null
+  createdAt: number
+  revokedAt: number | null
+  lastUsedAt: number | null
+  expiresAt: number | null
+  lastRefreshedAt: number | null
+  refreshFailures: number
+  lastRefreshFailureAt: number | null
+  lastRefreshFailureCategory: string | null
+}): CredentialRow {
+  return {
+    ...row,
+    kind: parseEnum(CREDENTIAL_KINDS, row.kind, 'credential kind'),
+    purpose: parseEnum(CREDENTIAL_PURPOSES, row.purpose, 'credential purpose'),
+    status: parseEnum(CREDENTIAL_STATUSES, row.status, 'credential status'),
+    mcpAuthState: parseNullableEnum(MCP_AUTH_STATES, row.mcpAuthState, 'mcp auth state'),
+    lastRefreshFailureCategory: parseNullableEnum(
+      REFRESH_FAILURE_CATEGORIES,
+      row.lastRefreshFailureCategory,
+      'refresh failure category',
+    ),
+  }
+}
 
 const oauthSchema = v.looseObject({
   type: v.literal('oauth'),
@@ -39,7 +125,7 @@ export function parseCredential(kind: CredentialIdentity['kind'], secret: string
 }
 
 /** Safe outward metadata, intentionally constructed without spreading a stored row. */
-export function credentialMetadata(row: typeof credentials.$inferSelect) {
+export function credentialMetadata(row: CredentialRow) {
   return {
     credentialId: row.credentialId,
     kind: row.kind,
@@ -72,17 +158,21 @@ export async function credentialInsert(
   const envelope = await encryptCredential(identity, secret, kek)
   const token = value.type === 'api_key' ? value.key : value.access
   return {
-    statement: db
-      .insert(credentials)
-      .values({
-        ...identity,
-        ...envelope,
-        status: 'active',
-        fingerprint: await credentialFingerprint(secret, kek),
-        last4: token.length >= 16 ? token.slice(-4) : '',
-        createdAt: now,
-        expiresAt: value.type === 'oauth' ? value.expires : null,
-      })
-      .returning(),
+    statement: prepareQuery(db, insertCredential, {
+      credentialId: identity.credentialId,
+      kind: identity.kind,
+      purpose: 'model_provider',
+      provider: identity.provider,
+      status: 'active',
+      revision: identity.revision,
+      ciphertext: envelope.ciphertext,
+      iv: envelope.iv,
+      wrappedDek: envelope.wrappedDek,
+      wrapIv: envelope.wrapIv,
+      fingerprint: await credentialFingerprint(secret, kek),
+      last4: token.length >= 16 ? token.slice(-4) : '',
+      createdAt: now,
+      expiresAt: value.type === 'oauth' ? value.expires : null,
+    }),
   }
 }

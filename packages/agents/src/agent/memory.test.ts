@@ -25,8 +25,7 @@ import { EXTRACT_IDLE_DELAY_MS } from './memory.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 import { newAgentId, updateSettings, seedOnce } from '../testing/management.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
-import { memoryJobs } from '../../drizzle/durable-object/schema.ts'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
+import selectAllMemoryJobs from '../testing/sql/select-all-memory-jobs.sql'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -110,8 +109,9 @@ describe('extraction', () => {
     )
     await runDurableObjectAlarm(stub)
 
-    const jobs = await runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), (_i, state) =>
-      drizzle(state.storage).select().from(memoryJobs).all(),
+    const jobs = await runInDurableObject(
+      env.AGENTS.getByName(MEMORY_AGENT_NAME),
+      async (_i, state) => selectAllMemoryJobs.runSync((await openLocalDb(state.storage)).sql),
     )
     expect(jobs.filter((job) => job.payloadJson.includes(agentId))).toEqual([])
     expect(memoryRequests).toEqual([])

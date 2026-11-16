@@ -5,25 +5,33 @@
  *
  * @module
  */
-import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte } from 'drizzle-orm'
-import type { SQL } from 'drizzle-orm'
-import { applyOperation } from './records.ts'
-import { termStatements } from './statements.ts'
-import type { MemoryDb, MemoryRecord } from './db.ts'
-import {
-  memoryLedger,
-  memoryRecords,
-  memoryTerms,
-  revisionClaims,
-} from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
+import { prepareQuery, runBatch, runChanges } from '../../lib/reylo.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
+import { parseMemoryRecord, parseScope } from './db.ts'
+import type { MemoryDb, MemoryRecord, Scope } from './db.ts'
+import { applyOperation } from './records.ts'
+import countActiveRecordsByScope from './sql/count-active-records-by-scope.sql'
+import deleteMemoryTermsByRecord from './sql/delete-memory-terms-by-record.sql'
+import deleteOldMemoryLedger from './sql/delete-old-memory-ledger.sql'
+import deleteOldRevisionClaims from './sql/delete-old-revision-claims.sql'
+import insertMemoryLedger from './sql/insert-memory-ledger.sql'
+import probeMemoryLedger from './sql/probe-memory-ledger.sql'
+import selectChangedScopesAfter from './sql/select-changed-scopes-after.sql'
+import selectChangedScopesAll from './sql/select-changed-scopes-all.sql'
+import selectChangedScopesWrap from './sql/select-changed-scopes-wrap.sql'
+import selectConsolidationRecords from './sql/select-consolidation-records.sql'
+import selectOverridesOfRequired from './sql/select-overrides-of-required.sql'
+import selectResegmentRecords from './sql/select-resegment-records.sql'
+import updateRecordSearchVersion from './sql/update-record-search-version.sql'
+import { termStatements } from './statements.ts'
+
 /** Records one `consolidate` job reads. */
 export const CONSOLIDATION_RECORD_LIMIT = 200
 /** Scopes consolidated per day; the rest wait for a later run. */
 export const SCOPES_PER_DAY = 200
 /** Rows one maintenance step touches, to stay within one invocation's limits. */
 const BATCH_ROWS = 500
+
 /**
  * Up to `limit` scopes with a record written or changed since `since`, in scope order, starting
  * after `after` and wrapping around to the first.
@@ -39,28 +47,25 @@ export async function changedScopes(
   after: Scope | undefined,
   limit = SCOPES_PER_DAY,
 ): Promise<Scope[]> {
-  const page = (bound: SQL | undefined, size: number) =>
-    db
-      .selectDistinct({ scope: memoryRecords.scope })
-      .from(memoryRecords)
-      .where(and(gte(memoryRecords.updatedAt, since), bound))
-      .orderBy(asc(memoryRecords.scope))
-      .limit(size)
-  if (after === undefined) return (await page(undefined, limit)).map((row) => row.scope)
-  const rest = await page(gt(memoryRecords.scope, after), limit)
+  if (after === undefined) {
+    const rows = await selectChangedScopesAll.run(db, { since, limit })
+    return rows.map((row) => parseScope(row.scope))
+  }
+  const rest = await selectChangedScopesAfter.run(db, { since, after, limit })
   const wrapped =
-    rest.length === limit ? [] : await page(lte(memoryRecords.scope, after), limit - rest.length)
-  return [...rest, ...wrapped].map((row) => row.scope)
+    rest.length === limit
+      ? []
+      : await selectChangedScopesWrap.run(db, { since, after, limit: limit - rest.length })
+  return [...rest, ...wrapped].map((row) => parseScope(row.scope))
 }
 
 /** Active records of a scope for a `consolidate` job, most used first within each kind. */
-export function consolidationRecords(db: MemoryDb, scope: Scope): Promise<MemoryRecord[]> {
-  return db
-    .select()
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.scope, scope), eq(memoryRecords.status, 'active')))
-    .orderBy(memoryRecords.kind, desc(memoryRecords.useCount), desc(memoryRecords.updatedAt))
-    .limit(CONSOLIDATION_RECORD_LIMIT)
+export async function consolidationRecords(db: MemoryDb, scope: Scope): Promise<MemoryRecord[]> {
+  const rows = await selectConsolidationRecords.run(db, {
+    scope,
+    limit: CONSOLIDATION_RECORD_LIMIT,
+  })
+  return rows.map(parseMemoryRecord)
 }
 
 /** Rows rebuilt per batch: each takes a few statements, and a batch should stay small. */
@@ -68,20 +73,18 @@ const RESEGMENT_ROWS = 50
 
 /** Rebuild the search terms of records indexed by an older search-text function. */
 export async function resegmentRecords(db: MemoryDb): Promise<number> {
-  const rows = await db
-    .select({ id: memoryRecords.id, content: memoryRecords.content })
-    .from(memoryRecords)
-    .where(lt(memoryRecords.searchVersion, SEARCH_VERSION))
-    .limit(RESEGMENT_ROWS)
-  const [first, ...rest] = rows.flatMap((row) => [
-    db.delete(memoryTerms).where(eq(memoryTerms.recordId, row.id)),
-    ...termStatements(db, row.id, row.content),
-    db
-      .update(memoryRecords)
-      .set({ searchVersion: SEARCH_VERSION })
-      .where(eq(memoryRecords.id, row.id)),
-  ])
-  if (first !== undefined) await db.batch([first, ...rest])
+  const rows = await selectResegmentRecords.run(db, {
+    searchVersion: SEARCH_VERSION,
+    limit: RESEGMENT_ROWS,
+  })
+  await runBatch(
+    db,
+    rows.flatMap((row) => [
+      prepareQuery(db, deleteMemoryTermsByRecord, { recordId: row.id }),
+      ...termStatements(db, row.id, row.content),
+      prepareQuery(db, updateRecordSearchVersion, { id: row.id, searchVersion: SEARCH_VERSION }),
+    ]),
+  )
   return rows.length
 }
 
@@ -90,7 +93,7 @@ export async function resegmentRecords(db: MemoryDb): Promise<number> {
  * ago has long since finished.
  */
 export async function forgetOldClaims(db: MemoryDb, before: number): Promise<void> {
-  await db.delete(revisionClaims).where(lt(revisionClaims.claimedAt, before))
+  await deleteOldRevisionClaims.run(db, { before })
 }
 
 /**
@@ -98,29 +101,20 @@ export async function forgetOldClaims(db: MemoryDb, before: number): Promise<voi
  *
  * @returns How many were deleted in this call.
  */
-export async function forgetOldLedger(db: MemoryDb, before: number): Promise<number> {
+export function forgetOldLedger(db: MemoryDb, before: number): Promise<number> {
   // Keep the IDs in SQLite: expanding them into bindings would exceed D1's 100-parameter limit.
-  const expired = db
-    .select({ seq: memoryLedger.seq })
-    .from(memoryLedger)
-    .where(lt(memoryLedger.at, before))
-    .limit(BATCH_ROWS)
-  const result = await db.delete(memoryLedger).where(inArray(memoryLedger.seq, expired)).run()
-  return result.meta.changes
+  return runChanges(db, deleteOldMemoryLedger, { before, limit: BATCH_ROWS })
 }
 
 /** Log the database size and the active records per scope, to watch growth against D1's limit. */
 export async function recordSizes(db: MemoryDb, runId: string, now: number): Promise<void> {
   // Every D1 result reports the database size after the statement.
-  const probe = await db.select({ id: memoryLedger.seq }).from(memoryLedger).limit(1).run()
-  const counts = await db
-    .select({ scope: memoryRecords.scope, records: count() })
-    .from(memoryRecords)
-    .where(eq(memoryRecords.status, 'active'))
-    .groupBy(memoryRecords.scope)
-  await db.insert(memoryLedger).values({
+  const probe = await prepareQuery(db, probeMemoryLedger).run()
+  const counts = await countActiveRecordsByScope.run(db)
+  await insertMemoryLedger.run(db, {
     at: now,
     runId,
+    opId: null,
     actor: 'consolidation',
     action: 'meta',
     target: 'record',
@@ -143,20 +137,7 @@ export async function invalidateOverridesOfRequired(
   runId: string,
   now: number,
 ): Promise<number> {
-  const required = db
-    .select({ id: memoryRecords.id })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.required, true), eq(memoryRecords.status, 'active')))
-  const rows = await db
-    .select({
-      id: memoryRecords.id,
-      revision: memoryRecords.revision,
-      scope: memoryRecords.scope,
-      sourceAgentId: memoryRecords.sourceAgentId,
-    })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.status, 'active'), inArray(memoryRecords.overrides, required)))
-    .limit(BATCH_ROWS)
+  const rows = await selectOverridesOfRequired.run(db, { limit: BATCH_ROWS })
   for (const row of rows) {
     await applyOperation(
       db,
@@ -173,7 +154,7 @@ export async function invalidateOverridesOfRequired(
         revision: row.revision,
         reason: 'overrides a required shared record',
         evidence: {
-          scope: row.scope,
+          scope: parseScope(row.scope),
           sourceAgentId: row.sourceAgentId,
           origin: 'consolidation',
         },

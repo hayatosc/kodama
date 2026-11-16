@@ -1,5 +1,4 @@
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { scheduledTasks } from '../../drizzle/durable-object/schema.ts'
 import { isKnownUrl } from './local-db/external-data.ts'
 import { openLocalDb } from './local-db/local.ts'
 import { insertReservation } from './local-db/scheduled-tasks.ts'
@@ -10,8 +9,9 @@ import { env, exports } from 'cloudflare:workers'
 import { describe, expect, expectTypeOf, it, vi } from 'vite-plus/test'
 import AgentService from '../index.ts'
 import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'
-import { agents } from '../../drizzle/management/schema.ts'
-import { eq } from 'drizzle-orm'
+import selectAllScheduledTasks from '../testing/sql/select-all-scheduled-tasks.sql'
+import setAgentStatus from '../testing/sql/set-agent-status.sql'
+import setScheduledTaskRule from '../testing/sql/set-scheduled-task-rule.sql'
 import { recordNotification } from './local-db/notifications.ts'
 import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { parseMessage } from '../validation.ts'
@@ -74,7 +74,7 @@ describe('notification RPC', () => {
     'admits inbox reads and acknowledgement for %s agents',
     async (status) => {
       const id = await newAgentId()
-      await management.update(agents).set({ status }).where(eq(agents.agentId, id))
+      await setAgentStatus.run(management, { agentId: id, status })
       expect((await exports.default.notifications(id)).notifications).toEqual([])
       expect(await exports.default.readNotification(id, { seq: 1 })).toBe(false)
       expect(fetch).not.toHaveBeenCalled()
@@ -85,7 +85,7 @@ describe('notification RPC', () => {
     const seeded = await seedOnce()
     const unavailable = await newAgentId()
     for (const status of ['provisioning', 'deleting', 'deleted'] as const) {
-      await management.update(agents).set({ status }).where(eq(agents.agentId, unavailable))
+      await setAgentStatus.run(management, { agentId: unavailable, status })
       await expect(Promise.resolve(exports.default.notifications(unavailable))).rejects.toThrow(
         'agent_unavailable',
       )
@@ -414,15 +414,15 @@ describe('always-on proactive behavior', () => {
     const hop2Due = Date.now() - 500
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      const all = local.select().from(scheduledTasks).all()
+      const all = selectAllScheduledTasks.runSync(local.sql)
       const followup = all.find((row) => row.id !== initialId)
       if (!followup) throw new Error('Expected follow-up schedule row')
       followupId = followup.id
-      local
-        .update(scheduledTasks)
-        .set({ rule: { kind: 'once', start: hop2Due }, nextDue: hop2Due })
-        .where(eq(scheduledTasks.id, followupId))
-        .run()
+      setScheduledTaskRule.runSync(local.sql, {
+        id: followupId,
+        rule: JSON.stringify({ kind: 'once', start: hop2Due }),
+        nextDue: hop2Due,
+      })
       await setAlarm(state.storage, 'schedule', Date.now() - 1)
     })
 

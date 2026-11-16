@@ -5,12 +5,16 @@
  * @module
  */
 import { uuidv7 } from '../../lib/uuid.ts'
-import { and, eq } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vite-plus/test'
-import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
-import { db, parameterLimitedDb, record, write } from '../../testing/memory.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import type { Scope } from './db.ts'
 import { readableScopes } from './db.ts'
+import insertMemoryRecord from './sql/insert-memory-record.sql'
+import insertMemoryTerms from './sql/insert-memory-terms.sql'
+import selectMemoryRecordById from './sql/select-memory-record-by-id.sql'
+import { db, parameterLimitedDb, record, write } from '../../testing/memory.ts'
+import selectMemoryRecordsByScopeUseCount from '../../testing/sql/select-memory-records-by-scope-use-count.sql'
+import setMemoryRecordStatus from '../../testing/sql/set-memory-record-status.sql'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import { searchMemory } from './search.ts'
 import { seedOnce } from '../../testing/management.ts'
@@ -31,7 +35,7 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
       const candidate = offset + index
       const id = `${agentId}-${candidate}`
       return [
-        db.insert(memoryRecords).values({
+        prepareQuery(db, insertMemoryRecord, {
           id,
           scope: `agent:${agentId}`,
           kind: 'fact',
@@ -39,17 +43,23 @@ async function seedCandidates(agentId: string, size: number): Promise<void> {
           searchVersion: SEARCH_VERSION,
           origin: 'remember',
           sourceAgentId: agentId,
+          sourceEntryFrom: null,
+          sourceEntryTo: null,
           runId: 'search-boundary',
           importance: candidate / size,
+          required: false,
+          overrides: null,
           observedAt: NOW,
           createdAt: NOW,
           updatedAt: NOW,
         }),
-        db.insert(memoryTerms).values({ recordId: id, term: 'needle' }),
+        prepareQuery(db, insertMemoryTerms, {
+          recordId: id,
+          termsJson: JSON.stringify(['needle']),
+        }),
       ]
     }).flat()
-    const [first, ...rest] = statements
-    if (first !== undefined) await db.batch([first, ...rest])
+    await runBatch(db, statements)
   }
 }
 
@@ -129,7 +139,7 @@ describe('working-agent search precedence', () => {
     expect(theirs.map((row) => row.content)).toEqual(['Reply in English'])
     const mine = await searchMemory(parameterLimitedDb, { ...options, query: 'Reply' })
     expect(mine.map((row) => row.content)).toEqual(['Reply in Japanese'])
-    await db.update(memoryRecords).set({ status: 'invalid' }).where(eq(memoryRecords.id, override))
+    await setMemoryRecordStatus.run(db, { id: override, status: 'invalid' })
     const restored = await searchMemory(parameterLimitedDb, options)
     expect(restored.map((row) => row.content)).toEqual(['Reply in English'])
   })
@@ -160,7 +170,7 @@ describe('working-agent search precedence', () => {
     expect((await searchMemory(parameterLimitedDb, options)).map((row) => row.content)).toEqual([
       'Pushing to main is fine',
     ])
-    await db.update(memoryRecords).set({ status: 'invalid' }).where(eq(memoryRecords.id, target))
+    await setMemoryRecordStatus.run(db, { id: target, status: 'invalid' })
     const visible = await searchMemory(parameterLimitedDb, {
       ...options,
       scopes: readableScopes(agentId, [space]),
@@ -189,16 +199,16 @@ describe('search parameter limits', () => {
       })
 
       expect(found.map((record) => record.content)).toEqual(expected)
-      const used = await db
-        .select({ content: memoryRecords.content, lastUsedAt: memoryRecords.lastUsedAt })
-        .from(memoryRecords)
-        .where(and(eq(memoryRecords.scope, `agent:${agentId}`), eq(memoryRecords.useCount, 1)))
+      const used = await selectMemoryRecordsByScopeUseCount.run(db, {
+        scope: `agent:${agentId}`,
+        useCount: 1,
+      })
       expect(used.map((record) => record.content).sort()).toEqual([...expected].sort())
       expect(used.map((record) => record.lastUsedAt)).toEqual([NOW, NOW, NOW])
-      const unused = await db
-        .select({ id: memoryRecords.id })
-        .from(memoryRecords)
-        .where(and(eq(memoryRecords.scope, `agent:${agentId}`), eq(memoryRecords.useCount, 0)))
+      const unused = await selectMemoryRecordsByScopeUseCount.run(db, {
+        scope: `agent:${agentId}`,
+        useCount: 0,
+      })
       expect(unused).toHaveLength(size - 3)
     },
   )
@@ -250,12 +260,8 @@ describe('searching memory', () => {
     const found = await searchMemory(db, { query: 'pnpm', scopes: [mine.scope], now: NOW })
 
     expect(found.map((record) => record.id)).toEqual([id])
-    const used = await db
-      .select({ useCount: memoryRecords.useCount, lastUsedAt: memoryRecords.lastUsedAt })
-      .from(memoryRecords)
-      .where(eq(memoryRecords.id, id))
-      .get()
-    expect(used).toEqual({ useCount: 1, lastUsedAt: NOW })
+    const used = await selectMemoryRecordById.run(db, { id })
+    expect(used).toMatchObject({ useCount: 1, lastUsedAt: NOW })
   })
 
   it('ranks events down with a 30-day half-life, but not facts', async () => {
@@ -268,25 +274,33 @@ describe('searching memory', () => {
       { id: `${agentId}-old-event`, kind: 'event', importance: 1, age: 30 * day },
       { id: `${agentId}-older-event`, kind: 'event', importance: 1, age: 60 * day },
     ] as const
-    await db.batch([
-      db.insert(memoryRecords).values(
-        ranked.map((candidate) => ({
+    await runBatch(
+      db,
+      ranked.flatMap((candidate) => [
+        prepareQuery(db, insertMemoryRecord, {
           id: candidate.id,
           scope,
           kind: candidate.kind,
           content: `rollout ${candidate.id}`,
           searchVersion: SEARCH_VERSION,
-          origin: 'remember' as const,
+          origin: 'remember',
           sourceAgentId: agentId,
+          sourceEntryFrom: null,
+          sourceEntryTo: null,
           runId: 'ranking',
           importance: candidate.importance,
+          required: false,
+          overrides: null,
           observedAt: NOW - candidate.age,
           createdAt: NOW,
           updatedAt: NOW,
-        })),
-      ),
-      db.insert(memoryTerms).values(ranked.map(({ id }) => ({ recordId: id, term: 'rollout' }))),
-    ])
+        }),
+        prepareQuery(db, insertMemoryTerms, {
+          recordId: candidate.id,
+          termsJson: JSON.stringify(['rollout']),
+        }),
+      ]),
+    )
 
     const found = await searchMemory(db, { query: 'rollout', scopes: [scope], now: NOW })
 

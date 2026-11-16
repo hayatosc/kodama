@@ -5,28 +5,69 @@
  * @see docs/agents.md — Tool approvals
  * @module
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lte, ne, or } from 'drizzle-orm'
-import { deferredCalls } from '../../../drizzle/durable-object/schema.ts'
+import { parseEnum } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { LocalDb } from './local.ts'
+import consumeDeferredCall from './sql/consume-deferred-call.sql'
+import decideDeferredCallQuery from './sql/decide-deferred-call.sql'
+import expireDeferredCallsByIds from './sql/expire-deferred-calls-by-ids.sql'
+import expireDeferredCallsQuery from './sql/expire-deferred-calls.sql'
+import insertDeferredCall from './sql/insert-deferred-call.sql'
+import listDeferredCallsQuery from './sql/list-deferred-calls.sql'
+import selectApprovedCallNullDigest from './sql/select-approved-call-null-digest.sql'
+import selectApprovedCallWithDigest from './sql/select-approved-call-with-digest.sql'
+import selectDeferredCallById from './sql/select-deferred-call-by-id.sql'
+import selectDeferredCallBySourceTask from './sql/select-deferred-call-by-source-task.sql'
+import selectMcpDeferredCandidates from './sql/select-mcp-deferred-candidates.sql'
+import selectPendingDeferredCalls from './sql/select-pending-deferred-calls.sql'
 
 /** Default expiration window (24 hours) for an unanswered tool approval request. */
 export const DEFERRED_CALL_TTL_MS = 24 * 60 * 60 * 1000
 
 const MCP_MODEL_NAME = /^mcp_[a-f0-9]{20}_[a-f0-9]{20}$/u
 
+const DEFERRED_CALL_STATES = ['pending', 'approved', 'denied', 'consumed', 'expired'] as const
+
+/** Permitted lifecycle state of a deferred tool call approval. */
+export type DeferredCallState = (typeof DEFERRED_CALL_STATES)[number]
+
 /** A deferred tool call row. */
-export type DeferredCallRow = typeof deferredCalls.$inferSelect
+export interface DeferredCallRow {
+  approvalId: string
+  toolName: string
+  toolDigest: string | null
+  argumentsJson: string
+  reason: string
+  sourceTask: string
+  state: DeferredCallState
+  operatorNote: string | null
+  createdAt: number
+  expiresAt: number
+  decidedAt: number | null
+}
+
+function parseDeferredCallRow(row: {
+  approvalId: string
+  toolName: string
+  toolDigest: string | null
+  argumentsJson: string
+  reason: string
+  sourceTask: string
+  state: string
+  operatorNote: string | null
+  createdAt: number
+  expiresAt: number
+  decidedAt: number | null
+}): DeferredCallRow {
+  return {
+    ...row,
+    state: parseEnum(DEFERRED_CALL_STATES, row.state, 'deferred call state'),
+  }
+}
 
 /** Mark expired pending approvals so they cannot be accidentally approved or executed later. */
 export function expireDeferredCalls(db: LocalDb, now: number): number {
-  const expired = db
-    .update(deferredCalls)
-    .set({ state: 'expired', decidedAt: now })
-    .where(and(eq(deferredCalls.state, 'pending'), lte(deferredCalls.expiresAt, now)))
-    .returning({ approvalId: deferredCalls.approvalId })
-    .all()
-  return expired.length
+  return expireDeferredCallsQuery.runSync(db.sql, { decidedAt: now, expiresBefore: now }).length
 }
 
 /**
@@ -38,27 +79,8 @@ export function invalidateMcpDeferredCalls(
   activeDigests: ReadonlyMap<string, string>,
   now: number,
 ): number {
-  return db.transaction((tx) => {
-    const candidates = tx
-      .select({
-        approvalId: deferredCalls.approvalId,
-        toolName: deferredCalls.toolName,
-        toolDigest: deferredCalls.toolDigest,
-      })
-      .from(deferredCalls)
-      .where(
-        and(
-          inArray(deferredCalls.state, ['pending', 'approved']),
-          or(
-            isNotNull(deferredCalls.toolDigest),
-            and(
-              like(deferredCalls.toolName, 'mcp_%'),
-              ne(deferredCalls.toolName, 'mcp_registration'),
-            ),
-          ),
-        ),
-      )
-      .all()
+  return db.transactionSync(() => {
+    const candidates = selectMcpDeferredCandidates.runSync(db.sql)
     const staleIds = candidates
       .filter((row) => {
         // Legacy MCP rows without a digest use mcp_<20hex>_<20hex>; native mcp_* tools do not.
@@ -68,17 +90,10 @@ export function invalidateMcpDeferredCalls(
       })
       .map((row) => row.approvalId)
     if (staleIds.length === 0) return 0
-    return tx
-      .update(deferredCalls)
-      .set({ state: 'expired', decidedAt: now })
-      .where(
-        and(
-          inArray(deferredCalls.approvalId, staleIds),
-          inArray(deferredCalls.state, ['pending', 'approved']),
-        ),
-      )
-      .returning({ approvalId: deferredCalls.approvalId })
-      .all().length
+    return expireDeferredCallsByIds.runSync(db.sql, {
+      decidedAt: now,
+      idsJson: JSON.stringify(staleIds),
+    }).length
   })
 }
 
@@ -97,28 +112,23 @@ export function createDeferredCall(
   },
   now: number,
 ): DeferredCallRow {
-  return db.transaction((tx) => {
-    const existing = tx
-      .select()
-      .from(deferredCalls)
-      .where(eq(deferredCalls.sourceTask, input.sourceTask))
-      .get()
-    if (existing) return existing
-    return tx
-      .insert(deferredCalls)
-      .values({
+  return db.transactionSync(() => {
+    const existing = selectDeferredCallBySourceTask.runSync(db.sql, {
+      sourceTask: input.sourceTask,
+    })
+    if (existing !== null) return parseDeferredCallRow(existing)
+    return parseDeferredCallRow(
+      insertDeferredCall.runSync(db.sql, {
         approvalId: uuidv7(),
         toolName: input.toolName,
         toolDigest: input.toolDigest ?? null,
         argumentsJson: input.argumentsJson,
         reason: input.reason,
         sourceTask: input.sourceTask,
-        state: 'pending',
         createdAt: now,
         expiresAt: now + DEFERRED_CALL_TTL_MS,
-      })
-      .returning()
-      .get()
+      }),
+    )
   })
 }
 
@@ -129,7 +139,8 @@ export function getDeferredCall(
   now: number,
 ): DeferredCallRow | undefined {
   expireDeferredCalls(db, now)
-  return db.select().from(deferredCalls).where(eq(deferredCalls.approvalId, approvalId)).get()
+  const row = selectDeferredCallById.runSync(db.sql, { approvalId })
+  return row === null ? undefined : parseDeferredCallRow(row)
 }
 
 /**
@@ -143,51 +154,38 @@ export function consumeApprovedCall(
   now: number,
   toolDigest: string | null = null,
 ): DeferredCallRow | undefined {
-  return db.transaction((tx) => {
-    const match = tx
-      .select()
-      .from(deferredCalls)
-      .where(
-        and(
-          eq(deferredCalls.toolName, toolName),
-          toolDigest !== null
-            ? eq(deferredCalls.toolDigest, toolDigest)
-            : isNull(deferredCalls.toolDigest),
-          eq(deferredCalls.argumentsJson, argumentsJson),
-          eq(deferredCalls.state, 'approved'),
-          gt(deferredCalls.expiresAt, now),
-        ),
-      )
-      .orderBy(asc(deferredCalls.createdAt))
-      .limit(1)
-      .get()
-    if (!match) return undefined
-    const updated = tx
-      .update(deferredCalls)
-      .set({ state: 'consumed' })
-      .where(
-        and(eq(deferredCalls.approvalId, match.approvalId), eq(deferredCalls.state, 'approved')),
-      )
-      .returning()
-      .get()
-    return updated
+  return db.transactionSync(() => {
+    const match =
+      toolDigest !== null
+        ? selectApprovedCallWithDigest.runSync(db.sql, {
+            toolName,
+            toolDigest,
+            argumentsJson,
+            now,
+          })
+        : selectApprovedCallNullDigest.runSync(db.sql, {
+            toolName,
+            argumentsJson,
+            now,
+          })
+    if (match === null) return undefined
+    const updated = consumeDeferredCall.runSync(db.sql, { approvalId: match.approvalId })
+    return updated === null ? undefined : parseDeferredCallRow(updated)
   })
 }
 
 /** Record an operator decision inside an existing SQLite transaction. */
 export function decideDeferredCallInTx(
-  tx: Pick<LocalDb, 'select' | 'update'>,
+  tx: LocalDb,
   approvalId: string,
   decision: 'approve' | 'deny',
   note: string | undefined,
   now: number,
 ): { row: DeferredCallRow; alreadyDecided: boolean } {
-  tx.update(deferredCalls)
-    .set({ state: 'expired', decidedAt: now })
-    .where(and(eq(deferredCalls.state, 'pending'), lte(deferredCalls.expiresAt, now)))
-    .run()
-  const row = tx.select().from(deferredCalls).where(eq(deferredCalls.approvalId, approvalId)).get()
-  if (!row) throw new Error('approval_not_found')
+  expireDeferredCalls(tx, now)
+  const raw = selectDeferredCallById.runSync(tx.sql, { approvalId })
+  if (raw === null) throw new Error('approval_not_found')
+  const row = parseDeferredCallRow(raw)
   const targetState = decision === 'approve' ? 'approved' : 'denied'
   if (row.state === targetState || (row.state === 'consumed' && decision === 'approve')) {
     return { row, alreadyDecided: true }
@@ -195,17 +193,14 @@ export function decideDeferredCallInTx(
   if (row.state !== 'pending') {
     throw new Error(`approval_not_pending:${row.state}`)
   }
-  const updated = tx
-    .update(deferredCalls)
-    .set({
-      state: targetState,
-      operatorNote: note ?? null,
-      decidedAt: now,
-    })
-    .where(and(eq(deferredCalls.approvalId, approvalId), eq(deferredCalls.state, 'pending')))
-    .returning()
-    .get()
-  return { row: updated, alreadyDecided: false }
+  const updated = decideDeferredCallQuery.runSync(tx.sql, {
+    state: targetState,
+    operatorNote: note ?? null,
+    decidedAt: now,
+    approvalId,
+  })
+  if (updated === null) throw new Error('approval_not_pending')
+  return { row: parseDeferredCallRow(updated), alreadyDecided: false }
 }
 
 /** Record an operator decision (`approve` or `deny`) on a pending deferred call. */
@@ -216,22 +211,17 @@ export function decideDeferredCall(
   note: string | undefined,
   now: number,
 ): { row: DeferredCallRow; alreadyDecided: boolean } {
-  return db.transaction((tx) => decideDeferredCallInTx(tx, approvalId, decision, note, now))
+  return db.transactionSync(() => decideDeferredCallInTx(db, approvalId, decision, note, now))
 }
 
 /** Pending non-expired deferred calls for `attention()` projection, oldest first. */
 export function pendingDeferredCalls(db: LocalDb, now: number): DeferredCallRow[] {
   expireDeferredCalls(db, now)
-  return db
-    .select()
-    .from(deferredCalls)
-    .where(and(eq(deferredCalls.state, 'pending'), gt(deferredCalls.expiresAt, now)))
-    .orderBy(asc(deferredCalls.createdAt))
-    .all()
+  return selectPendingDeferredCalls.runSync(db.sql, { now }).map(parseDeferredCallRow)
 }
 
 /** Recent deferred calls (newest first) for inspection via RPC. */
 export function listDeferredCalls(db: LocalDb, now: number, limit = 50): DeferredCallRow[] {
   expireDeferredCalls(db, now)
-  return db.select().from(deferredCalls).orderBy(desc(deferredCalls.createdAt)).limit(limit).all()
+  return listDeferredCallsQuery.runSync(db.sql, { limit }).map(parseDeferredCallRow)
 }

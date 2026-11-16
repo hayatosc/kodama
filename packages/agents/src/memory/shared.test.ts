@@ -1,13 +1,12 @@
 import { uuidv7 } from '../lib/uuid.ts'
 import { evictDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import { memoryRecords } from '../../drizzle/memory/schema.ts'
-import type { Scope } from '../../drizzle/memory/schema.ts'
+import type { Scope } from './store/db.ts'
 import { invalidateOverridesOfRequired } from './store/maintenance.ts'
 import { writeShared } from './shared.ts'
 import { context, db, record, renderedAlwaysLoaded, write } from '../testing/memory.ts'
+import selectActiveRecordsByScope from '../testing/sql/select-active-records-by-scope.sql'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 import { newAgentId, updateSettings, seedOnce } from '../testing/management.ts'
@@ -26,10 +25,7 @@ function fact(content: string, agentId: string = uuidv7()): Promise<string> {
 }
 
 function activeIn(space: string) {
-  return db
-    .select()
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.scope, `shared:${space}`), eq(memoryRecords.status, 'active')))
+  return selectActiveRecordsByScope.run(db, { scope: `shared:${space}` })
 }
 
 describe('shared spaces', () => {

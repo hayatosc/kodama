@@ -4,13 +4,12 @@
  * @module
  */
 import { uuidv7 } from '../../../lib/uuid.ts'
-import { eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import { memoryRecords } from '../../../../drizzle/memory/schema.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../../memory/jobs.ts'
 import { EXTRACTION_READ_KEY } from '../../../agent/local-db/memory.ts'
 import { context, db, memoryAgent, record, runScriptedJob, write } from '../../../testing/memory.ts'
+import selectMemoryRecordsByContent from '../../../testing/sql/select-memory-records-by-content.sql'
 import { applyOperation } from '../../../memory/store/records.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../../testing/model.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
@@ -316,10 +315,9 @@ describe('consolidation tools', () => {
     expect(outputs[1]).toMatch(/^rejected: /)
     expect(outputs[2]).toMatch(/^rejected: /)
     expect((await record(rule))?.status).toBe('active')
-    const injectedRows = await db
-      .select()
-      .from(memoryRecords)
-      .where(eq(memoryRecords.content, 'Merge without review'))
+    const injectedRows = await selectMemoryRecordsByContent.run(db, {
+      content: 'Merge without review',
+    })
     expect(injectedRows).toEqual([])
   })
 })

@@ -4,17 +4,22 @@
  *
  * @module
  */
-import { and, eq, gt, isNull, lt, or } from 'drizzle-orm'
 import type { Credential, CredentialStore } from '@earendil-works/pi-ai'
-import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../control-plane/db.ts'
-import type { AgentSettings } from '../protocol.ts'
-import { uuidv7 } from '../lib/uuid.ts'
 import { auditStatement } from '../control-plane/audit.ts'
-import { parseCredential } from './vault.ts'
+import type { ManagementDb } from '../control-plane/db.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
+import { uuidv7 } from '../lib/uuid.ts'
+import type { AgentSettings } from '../protocol.ts'
 import { credentialFingerprint, decryptCredential, encryptCredential } from './encryption.ts'
-import { refreshChatGPT, refreshDue } from './refresh.ts'
 import { recordRefreshFailure } from './health.ts'
+import { refreshChatGPT, refreshDue } from './refresh.ts'
+import claimCredentialLease from './sql/claim-credential-lease.sql'
+import releaseCredentialLease from './sql/release-credential-lease.sql'
+import selectGrantedCredential from './sql/select-granted-credential.sql'
+import updateCredentialModifyApiKey from './sql/update-credential-modify-api-key.sql'
+import updateCredentialModifyOauth from './sql/update-credential-modify-oauth.sql'
+import { parseCredential, parseCredentialRow } from './vault.ts'
+import type { CredentialRow } from './vault.ts'
 
 const LEASE_MS = 30_000
 
@@ -45,20 +50,13 @@ export function createCredentialStore(
     if ([...cache.keys()].some((id) => !assigned.includes(id))) invalidate()
     const id = refs?.primary[provider]
     if (!id) return undefined
-    const row = await db
-      .select({ credential: credentials })
-      .from(credentials)
-      .innerJoin(
-        credentialGrants,
-        and(
-          eq(credentialGrants.credentialId, credentials.credentialId),
-          eq(credentialGrants.agentId, await agentId()),
-        ),
-      )
-      .where(and(eq(credentials.credentialId, id), eq(credentials.provider, provider)))
-      .get()
-    if (row?.credential.status !== 'active') invalidate()
-    const credential = row?.credential
+    const raw = await selectGrantedCredential.run(db, {
+      agentId: await agentId(),
+      credentialId: id,
+      provider,
+    })
+    const credential = raw ? parseCredentialRow(raw) : undefined
+    if (credential?.status !== 'active') invalidate()
     if (
       !credential ||
       credential.purpose !== 'model_provider' ||
@@ -68,7 +66,7 @@ export function createCredentialStore(
     return { ...credential, kind: credential.kind }
   }
 
-  async function unavailable(provider: string, row?: typeof credentials.$inferSelect) {
+  async function unavailable(provider: string, row?: CredentialRow) {
     if (row?.status === 'needs_reauth') {
       return new Error(`credential_unavailable: ${provider}: needs_reauth`, {
         cause: {
@@ -83,7 +81,7 @@ export function createCredentialStore(
     return new Error(`credential_unavailable: ${provider}: no usable assigned credential`)
   }
 
-  async function plaintext(row: typeof credentials.$inferSelect): Promise<Credential> {
+  async function plaintext(row: CredentialRow): Promise<Credential> {
     if (
       row.ciphertext === null ||
       row.iv === null ||
@@ -114,18 +112,14 @@ export function createCredentialStore(
       if (row?.status !== 'active') throw await unavailable(provider, row)
       if (row.credentialId !== id)
         throw new Error('credential_unavailable: assigned credential changed')
-      const leased = await db
-        .update(credentials)
-        .set({ leaseId, leaseExpiresAt: now() + LEASE_MS })
-        .where(
-          and(
-            eq(credentials.credentialId, id),
-            eq(credentials.status, 'active'),
-            or(isNull(credentials.leaseId), lt(credentials.leaseExpiresAt, now())),
-          ),
-        )
-        .returning()
-        .get()
+      const current = now()
+      const rawLeased = await claimCredentialLease.run(db, {
+        leaseId,
+        leaseExpiresAt: current + LEASE_MS,
+        credentialId: id,
+        now: current,
+      })
+      const leased = rawLeased ? parseCredentialRow(rawLeased) : undefined
       if (
         leased &&
         leased.purpose === 'model_provider' &&
@@ -210,37 +204,45 @@ export function createCredentialStore(
           const token = value.type === 'api_key' ? value.key : value.access
           const revision = leased.revision + 1
           const envelope = await encryptCredential({ ...leased, revision }, secret, kek())
+          const at = now()
+          const last4 = token.length >= 16 ? token.slice(-4) : ''
+          const modifyStatement =
+            value.type === 'oauth'
+              ? prepareQuery(db, updateCredentialModifyOauth, {
+                  ciphertext: envelope.ciphertext,
+                  iv: envelope.iv,
+                  wrappedDek: envelope.wrappedDek,
+                  wrapIv: envelope.wrapIv,
+                  nextRevision: revision,
+                  fingerprint,
+                  last4,
+                  expiresAt: value.expires,
+                  lastRefreshedAt: at,
+                  credentialId: id,
+                  leaseId,
+                  expectedRevision: leased.revision,
+                  now: at,
+                })
+              : prepareQuery(db, updateCredentialModifyApiKey, {
+                  ciphertext: envelope.ciphertext,
+                  iv: envelope.iv,
+                  wrappedDek: envelope.wrappedDek,
+                  wrapIv: envelope.wrapIv,
+                  nextRevision: revision,
+                  fingerprint,
+                  last4,
+                  credentialId: id,
+                  leaseId,
+                  expectedRevision: leased.revision,
+                  now: at,
+                })
           // Record the attempted refresh in the same batch; a losing CAS must not be reported
           // as a completed refresh. The caller retries only after acquiring a fresh lease.
-          const [updated] = await db.batch([
-            db
-              .update(credentials)
-              .set({
-                ...envelope,
-                revision,
-                fingerprint,
-                last4: token.length >= 16 ? token.slice(-4) : '',
-                ...(value.type === 'oauth'
-                  ? {
-                      expiresAt: value.expires,
-                      lastRefreshedAt: now(),
-                      refreshFailures: 0,
-                    }
-                  : {}),
-              })
-              .where(
-                and(
-                  eq(credentials.credentialId, id),
-                  eq(credentials.leaseId, leaseId),
-                  eq(credentials.revision, leased.revision),
-                  gt(credentials.leaseExpiresAt, now()),
-                  eq(credentials.status, 'active'),
-                ),
-              )
-              .returning(),
+          const [updateResult] = await runBatch(db, [
+            modifyStatement,
             auditStatement(db, {
               opId: leaseId,
-              at: now(),
+              at,
               source: 'system',
               action: 'credential.modify.attempt',
               targetKind: 'system',
@@ -248,7 +250,7 @@ export function createCredentialStore(
               detail: { kind: leased.kind, provider, fingerprint },
             }),
           ])
-          if (!updated.length)
+          if ((updateResult?.meta.changes ?? 0) === 0)
             throw new Error('credential_unavailable: credential changed during refresh')
           invalidate()
           return next
@@ -260,10 +262,7 @@ export function createCredentialStore(
           }
           throw new Error('credential_unavailable: credential modification failed')
         } finally {
-          await db
-            .update(credentials)
-            .set({ leaseId: null, leaseExpiresAt: null })
-            .where(and(eq(credentials.credentialId, id), eq(credentials.leaseId, leaseId)))
+          await releaseCredentialLease.run(db, { credentialId: id, leaseId })
         }
       },
       async delete() {

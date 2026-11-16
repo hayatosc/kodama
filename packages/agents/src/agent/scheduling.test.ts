@@ -7,16 +7,8 @@ import { withHarness } from '../testing/harness.ts'
 import { dispatchSchedules, mutateSchedule, rearmScheduling } from './scheduling.ts'
 import { recordNotification } from './local-db/notifications.ts'
 import { EXTENSION_RETENTION_MS } from '../extensions.ts'
-import { eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vite-plus/test'
-import {
-  scheduledTasks,
-  scheduledTaskOccurrences,
-  notifications,
-  usage,
-} from '../../drizzle/durable-object/schema.ts'
 import { management, newAgentId, updateSettings } from '../testing/management.ts'
-import { agents, credentialGrants } from '../../drizzle/management/schema.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, textResponse, toolCallResponse } from '../testing/model.ts'
 import { openLocalDb } from './local-db/local.ts'
@@ -25,6 +17,20 @@ import { isKnownUrl, markContact } from './local-db/external-data.ts'
 import { setAlarm } from './runtime/alarms.ts'
 import { createScheduleTools } from '../tools/scheduled-tasks.ts'
 import { uuidv7 } from '../lib/uuid.ts'
+import deleteCredentialGrantsByAgent from '../testing/sql/delete-credential-grants-by-agent.sql'
+import resetScheduledOccurrencesDispatching from '../testing/sql/reset-scheduled-occurrences-dispatching.sql'
+import selectAllNotifications from '../testing/sql/select-all-notifications.sql'
+import selectAllScheduledOccurrences from '../testing/sql/select-all-scheduled-occurrences.sql'
+import selectAllUsage from '../testing/sql/select-all-usage.sql'
+import selectScheduledOccurrencesByTask from '../testing/sql/select-scheduled-occurrences-by-task.sql'
+import setAgentStatus from '../testing/sql/set-agent-status.sql'
+import setAllScheduledTasksState from '../testing/sql/set-all-scheduled-tasks-state.sql'
+import setNotificationsExpiresAt from '../testing/sql/set-notifications-expires-at.sql'
+import setScheduledOccurrencesAdmissionAttempts from '../testing/sql/set-scheduled-occurrences-admission-attempts.sql'
+import setScheduledOccurrencesAttemptsRetry from '../testing/sql/set-scheduled-occurrences-attempts-retry.sql'
+import setScheduledOccurrencesRetryAt from '../testing/sql/set-scheduled-occurrences-retry-at.sql'
+import setScheduledTaskHop from '../testing/sql/set-scheduled-task-hop.sql'
+import setScheduledTaskHopAndRule from '../testing/sql/set-scheduled-task-hop-and-rule.sql'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
@@ -96,15 +102,12 @@ it('uses the existing schedule alarm for idle inbox retention without waking the
     )
     await rearmScheduling(local, state.storage)
     expect(await state.storage.get('kodama:alarm:schedule')).toBe(now + EXTENSION_RETENTION_MS)
-    local
-      .update(notifications)
-      .set({ expiresAt: now - 1 })
-      .run()
+    setNotificationsExpiresAt.runSync(local.sql, { expiresAt: now - 1 })
   })
   await wake(id)
   await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
     const local = await openLocalDb(state.storage)
-    expect(local.select().from(notifications).all()).toEqual([])
+    expect(selectAllNotifications.runSync(local.sql)).toEqual([])
     expect(await state.storage.get('kodama:alarm:schedule')).toBeUndefined()
   })
   expect(fetch).not.toHaveBeenCalled()
@@ -309,8 +312,8 @@ describe('scheduled dispatch and receipts', () => {
       const id = await enabled()
       await due(id)
       if (reason === 'credentials')
-        await management.delete(credentialGrants).where(eq(credentialGrants.agentId, id))
-      else await management.update(agents).set({ status: 'archived' }).where(eq(agents.agentId, id))
+        await deleteCredentialGrantsByAgent.run(management, { agentId: id })
+      else await setAgentStatus.run(management, { agentId: id, status: 'archived' })
       await wake(id)
       expect((await rows(id)).tasks[0]).toMatchObject({
         state: 'failed',
@@ -361,12 +364,12 @@ describe('scheduled dispatch and receipts', () => {
         latest: { state: 'dispatching', admissionStarted: false, attempts: 1, outcome: null },
       })
       expect(admit).not.toHaveBeenCalled()
-      expect(local.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(local.sql)).toEqual([])
       // Exhaust confirmed pre-admission failures; only the final transition produces a notice.
-      local
-        .update(scheduledTaskOccurrences)
-        .set({ attempts: 4, retryAt: Date.now() - 1 })
-        .run()
+      setScheduledOccurrencesAttemptsRetry.runSync(local.sql, {
+        attempts: 4,
+        retryAt: Date.now() - 1,
+      })
       await dispatchSchedules(
         local,
         harness,
@@ -378,7 +381,7 @@ describe('scheduled dispatch and receipts', () => {
         admit,
       )
       expect(listReservations(local).tasks[0]?.latest?.outcome).toBe('admission_retry_exhausted')
-      expect(local.select().from(notifications).all()).toMatchObject([{ outcome: 'failed' }])
+      expect(selectAllNotifications.runSync(local.sql)).toMatchObject([{ outcome: 'failed' }])
     })
   })
 
@@ -388,7 +391,10 @@ describe('scheduled dispatch and receipts', () => {
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       claimOccurrence(local, task, task.rule.start, undefined, Date.now() - 1000)
-      local.update(scheduledTaskOccurrences).set({ admissionStarted: true, attempts: 5 }).run()
+      setScheduledOccurrencesAdmissionAttempts.runSync(local.sql, {
+        admissionStarted: true,
+        attempts: 5,
+      })
     })
     await updateSettings(id, { tools: [] })
     await wake(id)
@@ -416,14 +422,8 @@ describe('scheduled dispatch and receipts', () => {
       expect(
         isKnownUrl(local, String(ROOT_CONVERSATION_ID), 'https://example.org/scheduled-only'),
       ).toBe(false)
-      expect(
-        local
-          .select()
-          .from(usage)
-          .all()
-          .map((row) => row.actorKind),
-      ).toEqual(['system'])
-      expect(local.select().from(scheduledTaskOccurrences).all()).toHaveLength(1)
+      expect(selectAllUsage.runSync(local.sql).map((row) => row.actorKind)).toEqual(['system'])
+      expect(selectAllScheduledOccurrences.runSync(local.sql)).toHaveLength(1)
     })
   })
 
@@ -460,17 +460,8 @@ describe('scheduled dispatch and receipts', () => {
     // Simulate a crash after Pi committed acceptance but before the domain receipt persisted.
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      local
-        .update(scheduledTaskOccurrences)
-        .set({
-          state: 'dispatching',
-          submissionId: null,
-          settledAt: null,
-          outcome: null,
-          retryAt: Date.now() - 1000,
-        })
-        .run()
-      local.update(scheduledTasks).set({ state: 'active' }).run()
+      resetScheduledOccurrencesDispatching.runSync(local.sql, { retryAt: Date.now() - 1000 })
+      setAllScheduledTasksState.runSync(local.sql, { state: 'active' })
     })
     await updateSettings(id, { tools: [] })
     await wake(id)
@@ -524,13 +515,9 @@ describe('scheduled dispatch and receipts', () => {
     await expect.poll(async () => (await rows(id)).tasks[0]?.latest?.outcome).toBe('done')
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      expect(
-        local
-          .select()
-          .from(scheduledTaskOccurrences)
-          .where(eq(scheduledTaskOccurrences.taskId, task.id))
-          .all(),
-      ).toHaveLength(1)
+      expect(selectScheduledOccurrencesByTask.runSync(local.sql, { taskId: task.id })).toHaveLength(
+        1,
+      )
     })
   })
 
@@ -643,11 +630,12 @@ describe('scheduled dispatch and receipts', () => {
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
       const past = Date.now() - 1000
-      local
-        .update(scheduledTasks)
-        .set({ followupHop: 5, rule: { kind: 'once', start: past }, nextDue: past })
-        .where(eq(scheduledTasks.id, followup.taskId))
-        .run()
+      setScheduledTaskHopAndRule.runSync(local.sql, {
+        id: followup.taskId,
+        followupHop: 5,
+        rule: JSON.stringify({ kind: 'once', start: past }),
+        nextDue: past,
+      })
     })
     let observedCreateReject = ''
     let observedUpdateReject = ''
@@ -721,11 +709,10 @@ describe('scheduled dispatch and receipts', () => {
     const secondTask = await due(id)
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      local
-        .update(scheduledTasks)
-        .set({ followupHop: 2 })
-        .where(eq(scheduledTasks.id, secondTask.id))
-        .run()
+      setScheduledTaskHop.runSync(local.sql, {
+        id: secondTask.id,
+        followupHop: 2,
+      })
     })
     vi.mocked(fetch).mockImplementationOnce(async () =>
       toolCallResponse({
@@ -805,10 +792,9 @@ describe('scheduled dispatch and receipts', () => {
 
       await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
         const local = await openLocalDb(state.storage)
-        local
-          .update(scheduledTaskOccurrences)
-          .set({ retryAt: Date.now() - 1 })
-          .run()
+        setScheduledOccurrencesRetryAt.runSync(local.sql, {
+          retryAt: Date.now() - 1,
+        })
       })
       await wake(id)
       await waitForAnswer(id, `scheduled-${task.id}-${task.rule.start}`)

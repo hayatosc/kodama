@@ -9,7 +9,6 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { eventInbox } from '../../drizzle/durable-object/schema.ts'
 import { dispatchInbox } from './inbox.ts'
 import { isKnownUrl } from './local-db/external-data.ts'
 import { enqueueInboxEvent, reserveInboxBatch } from './local-db/inbox.ts'
@@ -19,6 +18,7 @@ import { withHarness } from '../testing/harness.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { requestBody, textResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import selectAllEventInbox from '../testing/sql/select-all-event-inbox.sql'
 import '@earendil-works/pi-ai/api/openai-responses'
 
 useMockModel()
@@ -67,7 +67,7 @@ describe('event inbox', () => {
 
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      expect(local.select().from(eventInbox).all()).toHaveLength(2)
+      expect(selectAllEventInbox.runSync(local.sql)).toHaveLength(2)
     })
 
     vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
@@ -87,7 +87,7 @@ describe('event inbox', () => {
 
     await runInDurableObject(env.AGENTS.getByName(id), async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      const rows = local.select().from(eventInbox).all()
+      const rows = selectAllEventInbox.runSync(local.sql)
       expect(rows.every((row) => row.state === 'admitted')).toBe(true)
     })
   })
@@ -187,7 +187,7 @@ describe('event inbox', () => {
         )
 
         expect(admittedDrafts).toEqual(['crash-ev-b'])
-        const rows = local.select().from(eventInbox).all()
+        const rows = selectAllEventInbox.runSync(local.sql)
         expect(rows).toHaveLength(2)
         expect(rows.every((row) => row.state === 'admitted')).toBe(true)
         expect(rows.find((row) => row.requestId === 'crash-ev-b')?.batchRequestId).toBe(

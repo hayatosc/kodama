@@ -4,11 +4,10 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { memoryLedger } from '../../../drizzle/memory/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { context, db } from '../../testing/memory.ts'
+import selectMemoryLedgerByOp from '../../testing/sql/select-memory-ledger-by-op.sql'
 import { TASK_ARCHIVE_DAYS, TASK_LIST_LIMIT } from '../tasks.ts'
 import {
   curateTasks,
@@ -55,9 +54,9 @@ describe('task progress store', () => {
       revision: 9,
     })
     expect(stale.status).toBe('conflict')
-    expect(
-      await db.select().from(memoryLedger).where(eq(memoryLedger.opId, staleOp.opId)),
-    ).toMatchObject([{ action: 'conflict', target: 'task', targetId: `${agentId}/deploy-v2` }])
+    expect(await selectMemoryLedgerByOp.run(db, { opId: staleOp.opId })).toMatchObject([
+      { action: 'conflict', target: 'task', targetId: `${agentId}/deploy-v2` },
+    ])
 
     const updated = await writeTaskProgress(db, context(3_000), {
       agentId,

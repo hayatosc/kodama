@@ -7,8 +7,11 @@
  * @module
  */
 import { safeFailure } from '../../lib/errors.ts'
-import { and, asc, eq, gt, lte, ne, or } from 'drizzle-orm'
-import { agents, systemSettings } from '../../../drizzle/management/schema.ts'
+import { parseAgentRow } from '../db.ts'
+import listAgentsForReconcileWrap from '../sql/list-agents-for-reconcile-wrap.sql'
+import listAgentsForReconcile from '../sql/list-agents-for-reconcile.sql'
+import selectSetting from '../sql/select-setting.sql'
+import upsertSetting from '../sql/upsert-setting.sql'
 import { finishProvisioning, pushDesired } from './agents.ts'
 import type { ManagementCall } from './agents.ts'
 
@@ -21,28 +24,17 @@ export interface ReconcileResult {
   behind: number
 }
 
-/** Agents whose object is behind, or that never finished provisioning. */
-const needsWork = or(
-  ne(agents.currentVersion, agents.appliedVersion),
-  eq(agents.status, 'provisioning'),
-)
-
 /** The agent ID the previous run stopped at; the next run starts after it. */
 async function readCursor(call: ManagementCall): Promise<string> {
-  const row = await call.db
-    .select()
-    .from(systemSettings)
-    .where(eq(systemSettings.key, 'reconcile_cursor'))
-    .get()
-  return row === undefined ? '' : String(JSON.parse(row.valueJson))
+  const row = await selectSetting.run(call.db, { key: 'reconcile_cursor' })
+  return row === null ? '' : String(JSON.parse(row.valueJson))
 }
 
 async function writeCursor(call: ManagementCall, agentId: string): Promise<void> {
-  const valueJson = JSON.stringify(agentId)
-  await call.db
-    .insert(systemSettings)
-    .values({ key: 'reconcile_cursor', valueJson })
-    .onConflictDoUpdate({ target: systemSettings.key, set: { valueJson } })
+  await upsertSetting.run(call.db, {
+    key: 'reconcile_cursor',
+    valueJson: JSON.stringify(agentId),
+  })
 }
 
 /**
@@ -50,20 +42,13 @@ async function writeCursor(call: ManagementCall, agentId: string): Promise<void>
  * the first, so every agent that needs work is reached within a bounded number of runs.
  */
 async function nextBatch(call: ManagementCall, cursor: string) {
-  const after = await call.db
-    .select()
-    .from(agents)
-    .where(and(needsWork, gt(agents.agentId, cursor)))
-    .orderBy(asc(agents.agentId))
-    .limit(RECONCILE_BATCH)
-  if (after.length === RECONCILE_BATCH || cursor === '') return after
-  const wrapped = await call.db
-    .select()
-    .from(agents)
-    .where(and(needsWork, lte(agents.agentId, cursor)))
-    .orderBy(asc(agents.agentId))
-    .limit(RECONCILE_BATCH - after.length)
-  return [...after, ...wrapped]
+  const after = await listAgentsForReconcile.run(call.db, { cursor, limit: RECONCILE_BATCH })
+  if (after.length === RECONCILE_BATCH || cursor === '') return after.map(parseAgentRow)
+  const wrapped = await listAgentsForReconcileWrap.run(call.db, {
+    cursor,
+    limit: RECONCILE_BATCH - after.length,
+  })
+  return [...after, ...wrapped].map(parseAgentRow)
 }
 
 /**

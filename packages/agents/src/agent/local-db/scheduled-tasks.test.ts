@@ -2,10 +2,11 @@
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vite-plus/test'
-import { notifications, scheduledTaskOccurrences } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import { listNotifications, readNotification, retainNotifications } from './notifications.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import selectAllNotifications from '../../testing/sql/select-all-notifications.sql'
+import selectAllScheduledOccurrences from '../../testing/sql/select-all-scheduled-occurrences.sql'
 import { openLocalDb } from './local.ts'
 import {
   cancelReservation,
@@ -100,8 +101,8 @@ describe('reservation store', () => {
       retainNotifications(local, 40 * 86_400_000)
       settleOccurrence(local, occurrence, 'done', 40 * 86_400_000)
       recordAccepted(local, occurrence.id, 42, 40 * 86_400_000)
-      expect(local.select().from(notifications).all()).toEqual([])
-      expect(local.select().from(scheduledTaskOccurrences).all()).toEqual([])
+      expect(selectAllNotifications.runSync(local.sql)).toEqual([])
+      expect(selectAllScheduledOccurrences.runSync(local.sql)).toEqual([])
     })
   })
 
@@ -114,25 +115,25 @@ describe('reservation store', () => {
         'Invalid notification timestamp',
       )
       expect(pendingOccurrences(local)).toHaveLength(1)
-      expect(local.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(local.sql)).toEqual([])
       settleOccurrence(local, occurrence, 'unanswered:faulted', 2000)
       readNotification(local, 1, 3000)
       settleOccurrence(local, occurrence, 'unanswered:aborted', 4000)
       recordAccepted(local, occurrence.id, 42, 5000)
-      expect(local.select().from(notifications).all()).toMatchObject([
+      expect(selectAllNotifications.runSync(local.sql)).toMatchObject([
         { sourceId: occurrence.id, outcome: 'failed', readAt: 3000, createdAt: 2000 },
       ])
       expect(pendingOccurrences(local)).toEqual([])
       retainNotifications(local, 2000 + EXTENSION_RETENTION_MS)
       settleOccurrence(local, occurrence, 'unanswered:faulted', 2001 + EXTENSION_RETENTION_MS)
-      expect(local.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(local.sql)).toEqual([])
       expect(listReservations(local).tasks[0]?.latest?.outcome).toBe('unanswered:faulted')
       // A later nominal execution has its own identity, not the definition's notification key.
       const next = reservationReplay(local, task.sourceTask, '{}')
       if (!next) throw new Error('Missing reservation')
       const second = claimOccurrence(local, next, 61_000, 121_000, 2001 + EXTENSION_RETENTION_MS)
       settleOccurrence(local, second, 'unanswered:model_error', 2002 + EXTENSION_RETENTION_MS)
-      expect(local.select().from(notifications).all()).toMatchObject([
+      expect(selectAllNotifications.runSync(local.sql)).toMatchObject([
         { seq: 2, sourceId: second.id },
       ])
     })

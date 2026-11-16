@@ -3,21 +3,16 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
 import { expect, it } from 'vite-plus/test'
-import { agents } from '../../drizzle/management/schema.ts'
 import { management, newAgentId } from '../testing/management.ts'
+import setAgentVersions from '../testing/sql/set-agent-versions.sql'
+import selectAgentById from './sql/select-agent-by-id.sql'
 import { reportApplied } from './versions.ts'
 
 it('accepts progress only up to the desired version', async () => {
   const agentId = await newAgentId()
-  await management
-    .update(agents)
-    .set({ currentVersion: 3, appliedVersion: 1 })
-    .where(eq(agents.agentId, agentId))
-  const applied = async () =>
-    (await management.select().from(agents).where(eq(agents.agentId, agentId)).get())
-      ?.appliedVersion
+  await setAgentVersions.run(management, { agentId, currentVersion: 3, appliedVersion: 1 })
+  const applied = async () => (await selectAgentById.run(management, { agentId }))?.appliedVersion
 
   await reportApplied(management, agentId, 4)
   expect(await applied()).toBe(1)

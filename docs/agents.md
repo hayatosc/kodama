@@ -23,16 +23,12 @@ planned and not implemented.
 ```text
 packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
-  drizzle.memory.config.ts  drizzle-kit config for the long-term memory D1 schema (drizzle/memory/)
-  drizzle.management.config.ts
-                            drizzle-kit config for the management D1 schema (drizzle/management/)
-  drizzle.durable-object.config.ts
-                            drizzle-kit config for kodama's tables in each Durable Object
-                            (drizzle/durable-object/)
-  drizzle/
-    memory/                 long-term memory D1 schema (schema.ts) and its migrations (migrations/)
-    management/             management D1 schema: registry, versions, principals, audit; migrations
-    durable-object/         schema of kodama's tables in each object, and their migrations
+  sql/
+    memory/migrations/      long-term memory D1 SQL migrations
+    management/migrations/  management D1 SQL migrations: registry, versions, principals, audit
+    durable-object/migrations/
+                            migrations of kodama's tables in each object's SQLite
+    pi-tables.sql           Pi Durable table schema for Reylo static typechecking
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
@@ -150,7 +146,7 @@ imports say where it sits.
 | contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                                 | lib                                                                                     |
 | settings           | `src/control-plane/config.ts`, `src/control-plane/models.ts`                                                                                                         | lib, contracts, tool registry                                                           |
 | memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                         | lib                                                                                     |
-| storage            | `drizzle/`, `src/agent/local-db/`                                                                                                                                    | lib, memory contracts                                                                   |
+| storage            | `sql/`, `src/agent/local-db/`                                                                                                                                        | lib, memory contracts                                                                   |
 | management         | `src/control-plane/`, except `service/`                                                                                                                              | lib, contracts, settings, storage                                                       |
 | credential storage | `src/credentials/`, except the management flows below                                                                                                                | lib, contracts, settings, storage, management                                           |
 | memory store       | `src/memory/store/`                                                                                                                                                  | lib, storage, memory contracts                                                          |
@@ -181,7 +177,7 @@ Some consequences:
   contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
   the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
-  store functions, never construct Drizzle queries or import agent classes. Agents supply shared
+  store functions, never construct database queries or import agent classes. Agents supply shared
   state and operations; prompt refresh, extraction scheduling, and peer delivery remain outside tools.
   Pure argument normalization in `src/tools/web/url.ts` is also used by RPC validation.
   `src/tools/index.ts` registers optional general tools; memory tools are wired by the working agent's
@@ -320,9 +316,9 @@ KODAMA_CODE_NPM_SMOKE=1 pnpm test src/tools/code/execute.test.ts
 
 ## Management database
 
-Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `drizzle/memory/`) holds long-term
+Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `sql/memory/migrations/`) holds long-term
 memory ([memory.md](memory.md)). `kodama-management` (`MANAGEMENT_DB`, schema in
-[`drizzle/management/schema.ts`](../packages/agents/drizzle/management/schema.ts)) holds the source of
+[`sql/management/migrations/`](../packages/agents/sql/management/migrations/)) holds the source of
 truth for agents:
 
 | Table                   | Contents                                                                        |
@@ -1116,19 +1112,18 @@ delivery, and UI management are outside this version.
 Each object's SQLite holds two sets of tables:
 
 - **Pi Durable's tables**: entries, tasks, documents, submissions, and their metadata. Pi creates
-  and migrates them. Pruning deletes old rows through the column definitions in
-  [`src/agent/local-db/pi-tables.ts`](../packages/agents/src/agent/local-db/pi-tables.ts), which must be checked
-  on every Pi upgrade.
+  and migrates them. Pruning reads and deletes old rows using Reylo `.sql` queries checked against
+  [`sql/pi-tables.sql`](../packages/agents/sql/pi-tables.sql), which must be checked on every Pi
+  upgrade.
 - **Kodama's tables**, prefixed `kodama_`, defined in
-  [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): model
+  [`sql/durable-object/migrations/`](../packages/agents/sql/durable-object/migrations/): model
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
   (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
   (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), scheduled
   definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`), event inbox
   rows (`kodama_event_inbox`), deferred tool call approvals (`kodama_deferred_calls`), artifacts,
-  contacts, and notifications. Their
-  migrations are generated into `drizzle/durable-object/migrations` and applied by
+  contacts, and notifications. Their SQL migrations are applied synchronously by
   `src/agent/local-db/local.ts` before the harness opens.
 
 Small values use the object's key-value storage under `kodama:` keys: alarm times, prune limits,
@@ -1159,26 +1154,24 @@ cp packages/agents/.dev.vars.example packages/agents/.dev.vars
 pnpm dev:agents
 ```
 
-`pnpm dev:agents` first applies both D1 databases' Drizzle migrations locally, then runs `cf dev`,
-which starts the Vite-powered Worker with local D1, R2, and Durable Objects. It exposes RPC, not a
-browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3` persistence root and the binding
-names as local D1 IDs. It requires no Cloudflare account or remote database ID; `cf d1 list --local`
-uses a different local resource catalog and is not needed. Repeated starts preserve existing data,
-and migration failure prevents the Worker from starting. Stop the dev server before restarting it
-so only one process is using its local storage.
+`pnpm dev:agents` first prepares Reylo SQL types and applies both D1 databases' SQL migrations
+locally, then runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
+Objects. It exposes RPC, not a browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3`
+persistence root and the binding names as local D1 IDs. It requires no Cloudflare account or remote
+database ID; `cf d1 list --local` uses a different local resource catalog and is not needed.
+Repeated starts preserve existing data, and migration failure prevents the Worker from starting.
+Stop the dev server before restarting it so only one process is using its local storage.
 
-| Command                                                  | Effect                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `pnpm check`                                             | `tsrs` type check, type-aware Oxlint, Oxfmt check, and tests              |
-| `pnpm typecheck`                                         | type check with `tsrs`, the Rust port of the TypeScript compiler          |
-| `pnpm typecheck:compat`                                  | compatibility type check with TypeScript's `tsc` (used in CI)             |
-| `pnpm test`                                              | workspace tests                                                           |
-| `pnpm format`                                            | format the repository                                                     |
-| `pnpm build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
-| `pnpm cf:types` (in `packages/agents`)                   | regenerate runtime types                                                  |
-| `pnpm db:generate:memory` (in `packages/agents`)         | write a D1 migration after `drizzle/memory/schema.ts` changes             |
-| `pnpm db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes  |
-| `pnpm db:generate:management` (in `packages/agents`)     | write a management migration after `drizzle/management/schema.ts` changes |
+| Command                                  | Effect                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| `pnpm check`                             | `tsrs` type check, type-aware Oxlint, Oxfmt check, and tests            |
+| `pnpm typecheck`                         | type check with `tsrs`, the Rust port of the TypeScript compiler        |
+| `pnpm typecheck:compat`                  | compatibility type check with TypeScript's `tsc` (used in CI)           |
+| `pnpm test`                              | workspace tests                                                         |
+| `pnpm format`                            | format the repository                                                   |
+| `pnpm build` (in `packages/agents`)      | `cf build` into `.cloudflare/output/v0/`, no deploy                     |
+| `pnpm cf:types` (in `packages/agents`)   | regenerate runtime types                                                |
+| `pnpm db:prepare` (in `packages/agents`) | rebuild Reylo `.reylo/typecheck.sqlite` and `.reylo/types/` from `sql/` |
 
 ### Local agent CLI
 
@@ -1274,9 +1267,9 @@ server if another configuration evaluation replaces it.
 
 Tests use Vitest with the Cloudflare plugin, so they run inside workerd with real RPC, Pi Durable,
 SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked, and no API key is
-needed. `vitest.worker.config.ts` reads the generated migrations of both D1 databases for the setup.
-It also passes the columns from the drizzle-kit snapshots, so a test fails when a schema and its
-migrations differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
+needed. `vitest.worker.config.ts` reads the SQL migrations of both D1 databases and Durable Object
+local storage, computing expected column snapshots in SQLite so tests fail when migrated schemas
+differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
 entrypoint and token filesystem tests. Both projects run with `pnpm check` and share the Istanbul
 coverage report from `pnpm test:coverage`. The entrypoint tests mock token access and HTTP transport,
 not argument parsing or stream output; the token tests use temporary directories and remove them.
@@ -1308,7 +1301,8 @@ this allowance to new errors or timeouts; keep rejection assertions and the obje
 | `src/control-plane/workflows/seed.test.ts`   | the seed, the first agent, the memory agent's versions        |
 | `src/control-plane/registry.test.ts`         | admission without object storage, and resolving references    |
 | `src/control-plane/principals.test.ts`       | every kind of caller as a principal and actor; disabled ones  |
-| `src/control-plane/db.test.ts`               | the D1 behaviors the management database relies on            |
+| `src/control-plane/db.test.ts`               | D1 behavior and migrated management schema parity             |
+| `src/agent/local-db/local.test.ts`           | Durable Object local SQLite migration parity                  |
 | `src/agent/runtime/config-apply.test.ts`     | applying at idle, convergence, partial failures, restrictions |
 | `src/index.test.ts`                          | the entrypoint's HTTP refusal and the daily cron              |
 | `src/agent/agent.test.ts`                    | the Agent RPC and input validation                            |
@@ -1317,7 +1311,6 @@ this allowance to new errors or timeouts; keep rejection assertions and the obje
 | `src/control-plane/config.test.ts`           | the settings schema, and versions applied across eviction     |
 | `src/control-plane/models.test.ts`           | provider credentials                                          |
 | `cli/*.test.ts`                              | the CLI's commands, token, stream output, and adapter Worker  |
-| `drizzle/*/schema.test.ts`                   | each schema matches its generated migrations                  |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name every test file
 `<module>.test.ts` after the module it tests, in the same folder; describe the observable behavior it checks, and run `pnpm check` before submitting.
@@ -1331,8 +1324,8 @@ From `packages/agents`:
    `kodama-archive` that `cloudflare.config.ts` binds.
 3. Find the database IDs with `pnpm cf d1 list`; the pinned CLI requires IDs, not database or
    binding names. Apply the migrations with
-   `pnpm cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
-   `pnpm cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
+   `pnpm cf d1 migrations apply <memory-database-id> --dir sql/memory/migrations` and
+   `pnpm cf d1 migrations apply <management-database-id> --dir sql/management/migrations`, then
    check that `pnpm cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
 4. Provision `CREDENTIAL_KEK_V1` externally as a base64-encoded random 32-byte key. The Worker
    reads it only; it cannot manage Worker Secrets. See the operational policy in

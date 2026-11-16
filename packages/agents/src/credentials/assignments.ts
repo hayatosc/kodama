@@ -1,15 +1,19 @@
 /** Credential assignments update grants, configuration versions, indexes, and audit atomically. @module */
-import { and, eq } from 'drizzle-orm'
-import { agents, credentialGrants } from '../../drizzle/management/schema.ts'
+import { auditStatement } from '../control-plane/audit.ts'
+import { parseSettings } from '../control-plane/config.ts'
+import { parseAgentRow } from '../control-plane/db.ts'
+import { listAgentRows } from '../control-plane/registry.ts'
+import selectAgentById from '../control-plane/sql/select-agent-by-id.sql'
+import { versionRow, writeVersionStatements } from '../control-plane/versions.ts'
 import { pushDesired } from '../control-plane/workflows/agents.ts'
 import type { ManagementCall } from '../control-plane/workflows/agents.ts'
-import { parseSettings } from '../control-plane/config.ts'
-import { versionRow, writeVersionStatements } from '../control-plane/versions.ts'
-import { auditStatement } from '../control-plane/audit.ts'
-import { parseAgentId } from '../validation.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
 import { uuidv7 } from '../lib/uuid.ts'
+import { parseAgentId } from '../validation.ts'
 import { credentialRow } from './management.ts'
 import { referenceStatements } from './references.ts'
+import deleteCredentialGrant from './sql/delete-credential-grant.sql'
+import insertCredentialGrantIgnore from './sql/insert-credential-grant-ignore.sql'
 
 /** Assign or unassign one credential, for one agent or every current agent, as one D1 transaction. */
 export async function assignCredential(
@@ -21,11 +25,14 @@ export async function assignCredential(
   const credential = await credentialRow(call, credentialId)
   if (!remove && credential.status !== 'active')
     throw new Error('credential_unavailable: inactive credential')
-  const targets = await call.db
-    .select()
-    .from(agents)
-    .where(target === 'all' ? undefined : eq(agents.agentId, parseAgentId(target)))
-  if (targets.length === 0 && target !== 'all') throw new TypeError('Unknown agent')
+  const targets =
+    target === 'all'
+      ? await listAgentRows(call.db, {})
+      : await (async () => {
+          const row = await selectAgentById.run(call.db, { agentId: parseAgentId(target) })
+          if (!row) throw new TypeError('Unknown agent')
+          return [parseAgentRow(row)]
+        })()
   const changes = await Promise.all(
     targets.map(async (agent) => {
       const row = await versionRow(call.db, agent.agentId, agent.currentVersion)
@@ -52,7 +59,7 @@ export async function assignCredential(
       return { agent, updated, statements }
     }),
   )
-  await call.db.batch([
+  await runBatch(call.db, [
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
@@ -70,23 +77,10 @@ export async function assignCredential(
     ...changes.flatMap(({ agent, updated, statements }) => [
       ...statements,
       ...referenceStatements(call.db, agent.agentId, updated),
-      ...(remove
-        ? [
-            call.db
-              .delete(credentialGrants)
-              .where(
-                and(
-                  eq(credentialGrants.credentialId, credentialId),
-                  eq(credentialGrants.agentId, agent.agentId),
-                ),
-              ),
-          ]
-        : [
-            call.db
-              .insert(credentialGrants)
-              .values({ credentialId, agentId: agent.agentId })
-              .onConflictDoNothing(),
-          ]),
+      prepareQuery(call.db, remove ? deleteCredentialGrant : insertCredentialGrantIgnore, {
+        credentialId,
+        agentId: agent.agentId,
+      }),
     ]),
   ])
   await Promise.all(

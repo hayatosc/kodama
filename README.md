@@ -13,7 +13,7 @@ of the RPC transport.
 packages/
   agents/                 @kodama/agents: RPC Worker and Durable Objects
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
-    drizzle/              Drizzle schemas and their generated migrations, per database
+    sql/                  SQL migrations per database and pi-tables.sql for Reylo typechecking
     src/index.ts          Service-binding RPC entrypoint (AgentService)
     src/control-plane/    The management database: registry, admission, versions, lifecycle, config, models
     src/control-plane/workflows/

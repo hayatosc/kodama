@@ -5,11 +5,12 @@
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type { MemoryJob } from '../../memory/jobs.ts'
+import setMemoryJobCreatedAt from '../../testing/sql/set-memory-job-created-at.sql'
+import setMemoryJobNotBefore from '../../testing/sql/set-memory-job-not-before.sql'
+import setMemoryJobSettled from '../../testing/sql/set-memory-job-settled.sql'
 import { openLocalDb } from './local.ts'
 import { nextJob, retryJob, STARVATION_LIMIT_MS, startJob, storeJob } from './memory-jobs.ts'
 
@@ -38,16 +39,12 @@ describe('nextJob', () => {
         { kind: 'consolidate', scope: `agent:${agentId}`, day: '2026-01-02' },
         undefined,
       )
-      local.update(memoryJobs).set({ createdAt: 0 }).where(eq(memoryJobs.jobId, newer.jobId)).run()
+      setMemoryJobCreatedAt.runSync(local.sql, { jobId: newer.jobId, createdAt: 0 })
 
       const order: string[] = []
       for (let next = nextJob(local, Date.now()); next; next = nextJob(local, Date.now())) {
         order.push(next.jobId === newer.jobId ? 'consolidate (oldest)' : next.kind)
-        local
-          .update(memoryJobs)
-          .set({ status: 'settled', outcome: 'persisted' })
-          .where(eq(memoryJobs.jobId, next.jobId))
-          .run()
+        setMemoryJobSettled.runSync(local.sql, { jobId: next.jobId, outcome: 'persisted' })
       }
       expect(order).toEqual(['remember', 'extract', 'consolidate (oldest)', 'consolidate'])
     })
@@ -60,7 +57,7 @@ describe('nextJob', () => {
       const fresh = await storeJob(local, remember, undefined)
       const now = Date.now()
       const dueAt = (notBefore: number) =>
-        local.update(memoryJobs).set({ notBefore }).where(eq(memoryJobs.jobId, waiting.jobId)).run()
+        setMemoryJobNotBefore.runSync(local.sql, { jobId: waiting.jobId, notBefore })
 
       dueAt(now - STARVATION_LIMIT_MS + 1)
       expect(nextJob(local, now)?.jobId).toBe(fresh.jobId)

@@ -1,17 +1,18 @@
 /** Installation-wide catalog and atomic mutation fences against local management D1. @module */
-import { eq, exists } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { auditLog, mcpServers } from '../../../drizzle/management/schema.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { management } from '../../testing/management.ts'
+import selectAuditByTarget from '../../testing/sql/select-audit-by-target.sql'
+import setMcpServerEnabled from '../../testing/sql/set-mcp-server-enabled.sql'
 import {
   listMcpCatalog,
   mcpCatalogTools,
-  mcpCommit,
   mcpServer,
   registerMcpCatalog,
   resolveMcpName,
 } from './catalog.ts'
+import commitMcpServerState from './sql/commit-mcp-server-state.sql'
 
 describe('MCP installation catalog', () => {
   it('reuses an endpoint without identity provisioning or implicit enablement', async () => {
@@ -24,10 +25,7 @@ describe('MCP installation catalog', () => {
     expect(await mcpCatalogTools(management, first.serverId)).toEqual([])
     expect(await mcpServer(management, first.serverId)).toEqual(first)
     expect(await listMcpCatalog(management)).toContainEqual(first)
-    const audit = await management
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.targetId, first.serverId))
+    const audit = await selectAuditByTarget.run(management, { targetId: first.serverId })
     expect(audit).toHaveLength(1)
     expect(audit[0]?.source).toBe('operator')
     expect(audit[0]).not.toHaveProperty('actorId')
@@ -55,16 +53,18 @@ describe('MCP installation catalog', () => {
       Date.now(),
     )
     await expect(
-      management.batch([
-        mcpCommit(
-          management,
-          uuidv7(),
-          exists(management.select().from(mcpServers).where(eq(mcpServers.revision, -1))),
-        ),
-        management
-          .update(mcpServers)
-          .set({ enabled: true })
-          .where(eq(mcpServers.serverId, server.serverId)),
+      runBatch(management, [
+        prepareQuery(management, commitMcpServerState, {
+          operationId: uuidv7(),
+          serverId: server.serverId,
+          revision: -1,
+          catalogVersion: server.catalogVersion,
+          createdAt: Date.now(),
+        }),
+        prepareQuery(management, setMcpServerEnabled, {
+          serverId: server.serverId,
+          enabled: 1,
+        }),
       ]),
     ).rejects.toThrow()
     expect((await mcpServer(management, server.serverId)).enabled).toBe(false)

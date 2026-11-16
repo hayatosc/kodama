@@ -3,8 +3,9 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vite-plus/test'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
-import { usage } from '../../../drizzle/durable-object/schema.ts'
 import { newAgentId } from '../../testing/management.ts'
+import deleteAllUsage from '../../testing/sql/delete-all-usage.sql'
+import selectAllUsage from '../../testing/sql/select-all-usage.sql'
 import { openLocalDb } from './local.ts'
 import {
   startUsage,
@@ -55,15 +56,9 @@ it('exports only a terminal prefix and prunes only thirty-day-old acknowledgment
     expect(usageSince(local, 0, 20).rows).toHaveLength(2)
     acknowledgeUsage(local, slow, 100)
     acknowledgeUsage(local, slow, 100 + 30 * 86_400_000)
-    expect(local.select().from(usage).all()).toHaveLength(2)
+    expect(selectAllUsage.runSync(local.sql)).toHaveLength(2)
     acknowledgeUsage(local, slow, 101 + 30 * 86_400_000)
-    expect(
-      local
-        .select()
-        .from(usage)
-        .all()
-        .map((row) => row.seq),
-    ).toEqual([fast])
+    expect(selectAllUsage.runSync(local.sql).map((row) => row.seq)).toEqual([fast])
     expect(usageSince(local, slow, 20).rows).toHaveLength(1)
   })
 })
@@ -80,7 +75,7 @@ it('never double counts a terminal result or optional subset counters', async ()
     selectUsageCredential(local, seq, { credentialId: 'credential', kind: 'oauth_subscription' })
     finishUsage(local, seq, message)
     finishUsage(local, seq, { ...message, stopReason: 'error' })
-    const rows = local.select().from(usage).all()
+    const rows = selectAllUsage.runSync(local.sql)
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({
       status: 'succeeded',
@@ -124,7 +119,7 @@ it('keeps lost and ambiguous usage null and partial failures as lower bounds', a
       stopReason: 'error',
       errorMessage: 'rate_limit: secret must not persist',
     })
-    const rows = local.select().from(usage).all()
+    const rows = selectAllUsage.runSync(local.sql)
     expect(rows[0]).toMatchObject({
       status: 'interrupted',
       usageState: 'unknown',
@@ -144,7 +139,7 @@ it('keeps lost and ambiguous usage null and partial failures as lower bounds', a
       totalTokens: 20,
     })
     expect(JSON.stringify(rows)).not.toContain('secret must not persist')
-    local.delete(usage).run()
+    deleteAllUsage.runSync(local.sql)
     expect(start()).toBeGreaterThan(partial)
   })
 })

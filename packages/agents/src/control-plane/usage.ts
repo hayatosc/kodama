@@ -1,42 +1,59 @@
 /** Atomic daily ingestion and usage reads in the management database. @module */
-import { and, eq, exists, asc, gt, gte, lt, isNull, or, sum, count, min } from 'drizzle-orm'
-import type { AnyColumn } from 'drizzle-orm'
-import { sumWhen, groupKey, increment, literal } from '../lib/sql.ts'
-import { agents } from '../../drizzle/management/schema.ts'
-import type { UsageQuery } from '../protocol.ts'
-import {
-  usageDaily as daily,
-  usageIngestion as ingestion,
-} from '../../drizzle/management/schema.ts'
 import { lastUsedStatement } from '../credentials/usage.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
 import type { UsagePage, UsageRow } from '../agent/local-db/usage.ts'
+import type { UsageQuery } from '../protocol.ts'
 import type { ManagementDb } from './db.ts'
+import insertUsageIngestionIgnore from './sql/insert-usage-ingestion-ignore.sql'
+import selectUsageIngestion from './sql/select-usage-ingestion.sql'
+import updateUsageIngestion from './sql/update-usage-ingestion.sql'
+import upsertUsageDaily from './sql/upsert-usage-daily.sql'
+import usageByAgent from './sql/usage-by-agent.sql'
+import usageByCredential from './sql/usage-by-credential.sql'
+import usageByDay from './sql/usage-by-day.sql'
+import usageByModel from './sql/usage-by-model.sql'
+import usageFreshness from './sql/usage-freshness.sql'
 
-function amounts(state: 'reported' | 'partial') {
-  const sum = (value: AnyColumn<{ data: number }>) => sumWhen(eq(daily.usageState, state), value)
+type UsageRowFlat = (typeof usageByDay)['~reylo']['element']
+
+function toUsageGroup(row: UsageRowFlat) {
   return {
-    attempts: sum(daily.attempts),
-    input: sum(daily.input),
-    output: sum(daily.output),
-    cacheRead: sum(daily.cacheRead),
-    cacheWrite: sum(daily.cacheWrite),
-    totalTokens: sum(daily.totalTokens),
-    reasoning: sum(daily.reasoning),
-    cacheWrite1h: sum(daily.cacheWrite1h),
-    reasoningReported: sum(daily.reasoningReported),
-    cacheWrite1hReported: sum(daily.cacheWrite1hReported),
-    payAsYouGoCatalogCostUsd: sumWhen(
-      and(eq(daily.usageState, state), eq(daily.credentialKind, 'api_key')),
-      daily.costUsd,
-    ),
-    subscriptionApiEquivalentUsd: sumWhen(
-      and(eq(daily.usageState, state), eq(daily.credentialKind, 'oauth_subscription')),
-      daily.costUsd,
-    ),
-    unattributedCatalogCostUsd: sumWhen(
-      and(eq(daily.usageState, state), isNull(daily.credentialKind)),
-      daily.costUsd,
-    ),
+    key: row.key,
+    attempts: row.attempts,
+    failed: row.failed,
+    rateLimited: row.rateLimited,
+    unknown: row.unknown,
+    notApplicable: row.notApplicable,
+    reported: {
+      attempts: row.reportedAttempts,
+      input: row.reportedInput,
+      output: row.reportedOutput,
+      cacheRead: row.reportedCacheRead,
+      cacheWrite: row.reportedCacheWrite,
+      totalTokens: row.reportedTotalTokens,
+      reasoning: row.reportedReasoning,
+      cacheWrite1h: row.reportedCacheWrite1h,
+      reasoningReported: row.reportedReasoningReported,
+      cacheWrite1hReported: row.reportedCacheWrite1hReported,
+      payAsYouGoCatalogCostUsd: row.reportedPayAsYouGoCatalogCostUsd,
+      subscriptionApiEquivalentUsd: row.reportedSubscriptionApiEquivalentUsd,
+      unattributedCatalogCostUsd: row.reportedUnattributedCatalogCostUsd,
+    },
+    partial: {
+      attempts: row.partialAttempts,
+      input: row.partialInput,
+      output: row.partialOutput,
+      cacheRead: row.partialCacheRead,
+      cacheWrite: row.partialCacheWrite,
+      totalTokens: row.partialTotalTokens,
+      reasoning: row.partialReasoning,
+      cacheWrite1h: row.partialCacheWrite1h,
+      reasoningReported: row.partialReasoningReported,
+      cacheWrite1hReported: row.partialCacheWrite1hReported,
+      payAsYouGoCatalogCostUsd: row.partialPayAsYouGoCatalogCostUsd,
+      subscriptionApiEquivalentUsd: row.partialSubscriptionApiEquivalentUsd,
+      unattributedCatalogCostUsd: row.partialUnattributedCatalogCostUsd,
+    },
   }
 }
 
@@ -46,55 +63,23 @@ export async function readUsage(
   query: UsageQuery & { limit: number },
   now: number,
 ) {
-  const dimensions: [AnyColumn, ...AnyColumn[]] =
+  const groupQuery =
     query.groupBy === 'day'
-      ? [daily.day]
+      ? usageByDay
       : query.groupBy === 'agent'
-        ? [daily.chargedAgentId]
+        ? usageByAgent
         : query.groupBy === 'credential'
-          ? [daily.credentialId, daily.credentialKind]
-          : [daily.provider, daily.model]
-  const key = groupKey(...dimensions)
-  const rows = await db
-    .select({
-      key: key.as('group_key'),
-      attempts: sum(daily.attempts).mapWith(Number),
-      failed: sum(daily.failed).mapWith(Number),
-      rateLimited: sum(daily.rateLimited).mapWith(Number),
-      unknown: sumWhen(eq(daily.usageState, 'unknown'), daily.attempts),
-      notApplicable: sumWhen(eq(daily.usageState, 'not_applicable'), daily.attempts),
-      reported: amounts('reported'),
-      partial: amounts('partial'),
-    })
-    .from(daily)
-    .where(
-      and(
-        gte(daily.day, query.from),
-        lt(daily.day, query.to),
-        query.agentId ? eq(daily.chargedAgentId, query.agentId) : undefined,
-        query.cursor ? gt(key, query.cursor) : undefined,
-      ),
-    )
-    .groupBy(key)
-    .orderBy(asc(key))
-    .limit(query.limit + 1)
-  const freshness = await db
-    .select({
-      sources: count(),
-      pendingSources: sumWhen(
-        or(
-          isNull(ingestion.updatedAt),
-          lt(ingestion.updatedAt, now - 26 * 3_600_000),
-          eq(ingestion.caughtUp, false),
-        ),
-        1,
-      ),
-      oldestCheckedAt: min(ingestion.updatedAt),
-    })
-    .from(agents)
-    .leftJoin(ingestion, eq(agents.agentId, ingestion.agentId))
-    .get()
-  const groups = rows.slice(0, query.limit)
+          ? usageByCredential
+          : usageByModel
+  const rows = await groupQuery.run(db, {
+    fromDay: query.from,
+    toDay: query.to,
+    agentId: query.agentId ?? null,
+    cursor: query.cursor ?? null,
+    limit: query.limit + 1,
+  })
+  const freshness = await usageFreshness.run(db, { staleBefore: now - 26 * 3_600_000 })
+  const groups = rows.slice(0, query.limit).map(toUsageGroup)
   return {
     groups,
     nextCursor: rows.length > query.limit ? (groups.at(-1)?.key ?? null) : null,
@@ -102,7 +87,7 @@ export async function readUsage(
       ...freshness,
       checkedAt: now,
       incomplete:
-        (freshness?.pendingSources ?? 0) > 0 ||
+        freshness.pendingSources > 0 ||
         groups.some((row) => row.unknown > 0 || row.partial.attempts > 0),
     },
   }
@@ -110,7 +95,7 @@ export async function readUsage(
 
 /** Read the durable cursor, including after an uncertain commit or lost acknowledgment. */
 export async function usageCheckpoint(db: ManagementDb, agentId: string) {
-  return db.select().from(ingestion).where(eq(ingestion.agentId, agentId)).get()
+  return (await selectUsageIngestion.run(db, { agentId })) ?? undefined
 }
 
 function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after: number) {
@@ -125,72 +110,32 @@ function bucketStatement(db: ManagementDb, row: UsageRow, agentId: string, after
     row.actorKind,
     row.usageState,
   ])
-  const counts = {
-    attempts: literal(1),
-    failed: literal(
+  return prepareQuery(db, upsertUsageDaily, {
+    bucket,
+    day,
+    chargedAgentId: row.chargedAgentId,
+    credentialId: row.credentialId,
+    credentialKind: row.credentialKind,
+    provider: row.provider,
+    model: row.model,
+    actorKind: row.actorKind,
+    usageState: row.usageState,
+    failed:
       row.status === 'failed' || row.status === 'aborted' || row.status === 'interrupted' ? 1 : 0,
-    ),
-    rateLimited: literal(row.rateLimited ? 1 : 0),
-    input: literal(row.input ?? 0),
-    output: literal(row.output ?? 0),
-    cacheRead: literal(row.cacheRead ?? 0),
-    cacheWrite: literal(row.cacheWrite ?? 0),
-    totalTokens: literal(row.totalTokens ?? 0),
-    reasoning: literal(row.reasoning ?? 0),
-    cacheWrite1h: literal(row.cacheWrite1h ?? 0),
-    reasoningReported: literal(row.reasoning === null ? 0 : 1),
-    cacheWrite1hReported: literal(row.cacheWrite1h === null ? 0 : 1),
-    costUsd: literal(row.totalCost ?? 0),
-  }
-  return db
-    .insert(daily)
-    .select(
-      db
-        .select({
-          bucket: literal(bucket).as('bucket'),
-          day: literal(day).as('day'),
-          chargedAgentId: literal(row.chargedAgentId).as('charged_agent_id'),
-          credentialId: literal(row.credentialId).as('credential_id'),
-          credentialKind: literal(row.credentialKind).as('credential_kind'),
-          provider: literal(row.provider).as('provider'),
-          model: literal(row.model).as('model'),
-          actorKind: literal(row.actorKind).as('actor_kind'),
-          usageState: literal(row.usageState).as('usage_state'),
-          attempts: counts.attempts.as('attempts'),
-          failed: counts.failed.as('failed'),
-          rateLimited: counts.rateLimited.as('rate_limited'),
-          input: counts.input.as('input'),
-          output: counts.output.as('output'),
-          cacheRead: counts.cacheRead.as('cache_read'),
-          cacheWrite: counts.cacheWrite.as('cache_write'),
-          totalTokens: counts.totalTokens.as('total_tokens'),
-          reasoning: counts.reasoning.as('reasoning'),
-          cacheWrite1h: counts.cacheWrite1h.as('cache_write_1h'),
-          reasoningReported: counts.reasoningReported.as('reasoning_reported'),
-          cacheWrite1hReported: counts.cacheWrite1hReported.as('cache_write_1h_reported'),
-          costUsd: counts.costUsd.as('cost_usd'),
-        })
-        .from(ingestion)
-        .where(and(eq(ingestion.agentId, agentId), eq(ingestion.lastSeq, after))),
-    )
-    .onConflictDoUpdate({
-      target: daily.bucket,
-      set: {
-        attempts: increment(daily.attempts, 1),
-        failed: increment(daily.failed, counts.failed),
-        rateLimited: increment(daily.rateLimited, counts.rateLimited),
-        input: increment(daily.input, counts.input),
-        output: increment(daily.output, counts.output),
-        cacheRead: increment(daily.cacheRead, counts.cacheRead),
-        cacheWrite: increment(daily.cacheWrite, counts.cacheWrite),
-        totalTokens: increment(daily.totalTokens, counts.totalTokens),
-        reasoning: increment(daily.reasoning, counts.reasoning),
-        cacheWrite1h: increment(daily.cacheWrite1h, counts.cacheWrite1h),
-        reasoningReported: increment(daily.reasoningReported, counts.reasoningReported),
-        cacheWrite1hReported: increment(daily.cacheWrite1hReported, counts.cacheWrite1hReported),
-        costUsd: increment(daily.costUsd, counts.costUsd),
-      },
-    })
+    rateLimited: row.rateLimited ? 1 : 0,
+    input: row.input ?? 0,
+    output: row.output ?? 0,
+    cacheRead: row.cacheRead ?? 0,
+    cacheWrite: row.cacheWrite ?? 0,
+    totalTokens: row.totalTokens ?? 0,
+    reasoning: row.reasoning ?? 0,
+    cacheWrite1h: row.cacheWrite1h ?? 0,
+    reasoningReported: row.reasoning === null ? 0 : 1,
+    cacheWrite1hReported: row.cacheWrite1h === null ? 0 : 1,
+    costUsd: row.totalCost ?? 0,
+    agentId,
+    after,
+  })
 }
 
 /** A bounded atomic batch: additions are guarded by the old cursor, which advances last. */
@@ -213,23 +158,20 @@ export async function ingestUsage(
       throw new TypeError('Invalid terminal usage prefix')
     previous = row.seq
   }
-  const guard = exists(
-    db
-      .select({ seq: ingestion.lastSeq })
-      .from(ingestion)
-      .where(and(eq(ingestion.agentId, agentId), eq(ingestion.lastSeq, after))),
-  )
-  await db.batch([
-    db.insert(ingestion).values({ agentId, updatedAt: 0 }).onConflictDoNothing(),
+  await runBatch(db, [
+    prepareQuery(db, insertUsageIngestionIgnore, { agentId }),
     ...page.rows.map((row) => bucketStatement(db, row, agentId, after)),
     ...page.rows.flatMap((row) =>
       row.credentialId === null
         ? []
-        : [lastUsedStatement(db, row.credentialId, row.startedAt, guard)],
+        : [lastUsedStatement(db, row.credentialId, row.startedAt, agentId, after)],
     ),
-    db
-      .update(ingestion)
-      .set({ lastSeq: page.through, updatedAt: now, caughtUp: !page.more })
-      .where(and(eq(ingestion.agentId, agentId), eq(ingestion.lastSeq, after))),
+    prepareQuery(db, updateUsageIngestion, {
+      through: page.through,
+      updatedAt: now,
+      caughtUp: !page.more,
+      agentId,
+      after,
+    }),
   ])
 }

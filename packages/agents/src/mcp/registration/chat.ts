@@ -1,11 +1,9 @@
 /** Shared registration progress and host-generated selection proposals for chat. @module */
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, notExists, or } from 'drizzle-orm'
-import {
-  mcpProposals,
-  mcpRequests,
-  mcpOAuthTransactions,
-} from '../../../drizzle/management/schema.ts'
 import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
+import { parseEnum, prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { record } from '../../tools/web/stream.ts'
+import { mcpToken } from '../authorization/vault.ts'
 import {
   mcpCatalogTools,
   mcpCommit,
@@ -13,14 +11,74 @@ import {
   registerMcpCatalog,
   resolveMcpName,
 } from './catalog.ts'
-import { record } from '../../tools/web/stream.ts'
+import type { McpRegistrationInput } from './chat-tool.ts'
 import { consumeMcpIntent, requireMcpAgent } from './intents.ts'
 import type { McpEvidence, McpIntent } from './intents.ts'
-import { mcpToken } from '../authorization/vault.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
-import type { McpRegistrationInput } from './chat-tool.ts'
-import { assignMcp, discoverMcp } from './servers.ts'
 import { mcpConnectLink } from './operations.ts'
+import { assignMcp, discoverMcp } from './servers.ts'
+import failExpiredMcpRequests from './sql/fail-expired-mcp-requests.sql'
+import insertMcpProposal from './sql/insert-mcp-proposal.sql'
+import insertMcpRequest from './sql/insert-mcp-request.sql'
+import markMcpRequestNotified from './sql/mark-mcp-request-notified.sql'
+import selectMcpCompletedOauthForRequest from './sql/select-mcp-completed-oauth-for-request.sql'
+import selectMcpProposal from './sql/select-mcp-proposal.sql'
+import selectMcpRequestById from './sql/select-mcp-request-by-id.sql'
+import selectMcpRequestBySourceId from './sql/select-mcp-request-by-source-id.sql'
+import selectMcpRequestLatestCreated from './sql/select-mcp-request-latest-created.sql'
+import selectMcpRequestLatestEntry from './sql/select-mcp-request-latest-entry.sql'
+import selectTerminalMcpRequests from './sql/select-terminal-mcp-requests.sql'
+import selectUnnotifiedMcpRequests from './sql/select-unnotified-mcp-requests.sql'
+import updateMcpRequestAwaitingOwnerAuth from './sql/update-mcp-request-awaiting-owner-auth.sql'
+import updateMcpRequestDiscovered from './sql/update-mcp-request-discovered.sql'
+import updateMcpRequestReady from './sql/update-mcp-request-ready.sql'
+import updateMcpRequestRecoverFailed from './sql/update-mcp-request-recover-failed.sql'
+import updateMcpRequestRecoverReady from './sql/update-mcp-request-recover-ready.sql'
+
+const MCP_REQUEST_STATUSES = [
+  'awaiting_endpoint',
+  'registered_unverified',
+  'awaiting_owner_auth',
+  'ready_for_discovery',
+  'discovered',
+  'failed',
+] as const
+
+interface McpRequestRow {
+  requestId: string
+  sourceAgentId: string
+  conversationId: string
+  entryId: number
+  submissionId: string
+  serverId: string | null
+  serverRevision: number | null
+  credentialId: string | null
+  status: (typeof MCP_REQUEST_STATUSES)[number]
+  name: string
+  notifiedAt: number | null
+  expiresAt: number
+  createdAt: number
+}
+
+function parseMcpRequestRow(row: {
+  requestId: string
+  sourceAgentId: string
+  conversationId: string
+  entryId: number
+  submissionId: string
+  serverId: string | null
+  serverRevision: number | null
+  credentialId: string | null
+  status: string
+  name: string
+  notifiedAt: number | null
+  expiresAt: number
+  createdAt: number
+}): McpRequestRow {
+  return {
+    ...row,
+    status: parseEnum(MCP_REQUEST_STATUSES, row.status, 'mcp request status'),
+  }
+}
 
 /** A request is scoped to its source agent and conversation, not merely its identifier. */
 export async function mcpChatRequest(
@@ -28,18 +86,12 @@ export async function mcpChatRequest(
   evidence: McpEvidence,
   serverId?: string,
 ) {
-  return call.db
-    .select()
-    .from(mcpRequests)
-    .where(
-      and(
-        eq(mcpRequests.sourceAgentId, evidence.sourceAgentId),
-        eq(mcpRequests.conversationId, evidence.conversationId),
-        serverId ? eq(mcpRequests.serverId, serverId) : undefined,
-      ),
-    )
-    .orderBy(desc(mcpRequests.createdAt))
-    .get()
+  const row = await selectMcpRequestLatestCreated.run(call.db, {
+    sourceAgentId: evidence.sourceAgentId,
+    conversationId: evidence.conversationId,
+    serverId: serverId ?? null,
+  })
+  return row ? parseMcpRequestRow(row) : undefined
 }
 
 /** Resume discovery only: authentication never creates an agent assignment. */
@@ -49,11 +101,8 @@ export async function completeMcpRegistration(
   requestId: string,
   credentialId: string,
 ) {
-  const request = await call.db
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.requestId, requestId))
-    .get()
+  const rawRequest = await selectMcpRequestById.run(call.db, { requestId })
+  const request = rawRequest ? parseMcpRequestRow(rawRequest) : undefined
   if (!request?.serverId || request.serverRevision === null)
     throw new Error('mcp_registration_expired')
   const attached =
@@ -61,110 +110,44 @@ export async function completeMcpRegistration(
     request.credentialId === credentialId
   const completed =
     !attached && request.status === 'awaiting_owner_auth'
-      ? await call.db
-          .select()
-          .from(mcpOAuthTransactions)
-          .where(
-            and(
-              eq(mcpOAuthTransactions.requestId, requestId),
-              eq(mcpOAuthTransactions.serverId, request.serverId),
-              eq(mcpOAuthTransactions.serverRevision, request.serverRevision),
-              eq(mcpOAuthTransactions.credentialId, credentialId),
-              eq(mcpOAuthTransactions.status, 'completed'),
-            ),
-          )
-          .get()
-      : undefined
+      ? await selectMcpCompletedOauthForRequest.run(call.db, {
+          requestId,
+          serverId: request.serverId,
+          serverRevision: request.serverRevision,
+          credentialId,
+        })
+      : null
   if (!attached && !completed) throw new Error('mcp_registration_expired')
   const { server } = await mcpToken(call.db, kek, request.serverId, credentialId)
   if (server.revision !== request.serverRevision) throw new Error('mcp_registration_changed')
   if (request.status === 'discovered') return request
-  await call.db
-    .update(mcpRequests)
-    .set({ credentialId, status: 'ready_for_discovery' })
-    .where(eq(mcpRequests.requestId, requestId))
+  await updateMcpRequestReady.run(call.db, { credentialId, requestId })
   await requireMcpAgent(call.db, request.sourceAgentId)
   await discoverMcp(call, kek, server.serverId, credentialId)
-  await call.db
-    .update(mcpRequests)
-    .set({ status: 'discovered' })
-    .where(eq(mcpRequests.requestId, requestId))
-  return { ...request, status: 'discovered', credentialId }
+  await updateMcpRequestDiscovered.run(call.db, { requestId })
+  return { ...request, status: 'discovered' as const, credentialId }
 }
 
 /** Recover completed authentication without repeating code exchange, consent, or assignment. */
 export async function recoverMcpRegistrations(call: ManagementCall, kek: string) {
-  const terminal = await call.db
-    .select({ transaction: mcpOAuthTransactions, request: mcpRequests })
-    .from(mcpOAuthTransactions)
-    .innerJoin(mcpRequests, eq(mcpRequests.requestId, mcpOAuthTransactions.requestId))
-    .where(
-      and(
-        eq(mcpRequests.status, 'awaiting_owner_auth'),
-        inArray(mcpOAuthTransactions.status, ['completed', 'denied', 'reauth_required']),
-      ),
-    )
-    .limit(100)
-  for (const { transaction, request } of terminal) {
-    await call.db
-      .update(mcpRequests)
-      .set(
-        transaction.status === 'completed' &&
-          transaction.credentialId &&
-          transaction.serverId === request.serverId &&
-          transaction.serverRevision === request.serverRevision
-          ? { status: 'ready_for_discovery', credentialId: transaction.credentialId }
-          : { status: 'failed' },
-      )
-      .where(
-        and(
-          eq(mcpRequests.requestId, request.requestId),
-          eq(mcpRequests.status, 'awaiting_owner_auth'),
-        ),
-      )
+  const terminal = await selectTerminalMcpRequests.run(call.db)
+  for (const row of terminal) {
+    if (
+      row.txStatus === 'completed' &&
+      row.txCredentialId &&
+      row.txServerId === row.requestServerId &&
+      row.txServerRevision === row.requestServerRevision
+    ) {
+      await updateMcpRequestRecoverReady.run(call.db, {
+        credentialId: row.txCredentialId,
+        requestId: row.requestId,
+      })
+    } else {
+      await updateMcpRequestRecoverFailed.run(call.db, { requestId: row.requestId })
+    }
   }
-  await call.db
-    .update(mcpRequests)
-    .set({ status: 'failed' })
-    .where(
-      and(
-        lt(mcpRequests.expiresAt, Date.now()),
-        // Completion may be outside the recovery batch or commit after its read.
-        or(
-          ne(mcpRequests.status, 'awaiting_owner_auth'),
-          notExists(
-            call.db
-              .select({ id: mcpOAuthTransactions.transactionId })
-              .from(mcpOAuthTransactions)
-              .where(
-                and(
-                  eq(mcpOAuthTransactions.requestId, mcpRequests.requestId),
-                  eq(mcpOAuthTransactions.serverId, mcpRequests.serverId),
-                  eq(mcpOAuthTransactions.serverRevision, mcpRequests.serverRevision),
-                  eq(mcpOAuthTransactions.status, 'completed'),
-                  isNotNull(mcpOAuthTransactions.credentialId),
-                  ne(mcpOAuthTransactions.credentialId, ''),
-                ),
-              ),
-          ),
-        ),
-        inArray(mcpRequests.status, [
-          'awaiting_endpoint',
-          'registered_unverified',
-          'awaiting_owner_auth',
-        ]),
-      ),
-    )
-  const rows = await call.db
-    .select()
-    .from(mcpRequests)
-    .where(
-      and(
-        isNull(mcpRequests.notifiedAt),
-        inArray(mcpRequests.status, ['ready_for_discovery', 'discovered', 'failed']),
-      ),
-    )
-    .limit(100)
+  await failExpiredMcpRequests.run(call.db, { now: Date.now() })
+  const rows = await selectUnnotifiedMcpRequests.run(call.db)
   for (const request of rows) {
     try {
       if (request.status === 'ready_for_discovery' && request.credentialId)
@@ -172,10 +155,7 @@ export async function recoverMcpRegistrations(call: ManagementCall, kek: string)
       await call.env.AGENTS.getByName(request.sourceAgentId).mcpRegistrationNotice(
         request.requestId,
       )
-      await call.db
-        .update(mcpRequests)
-        .set({ notifiedAt: Date.now() })
-        .where(eq(mcpRequests.requestId, request.requestId))
+      await markMcpRequestNotified.run(call.db, { now: Date.now(), requestId: request.requestId })
     } catch {
       /* Retry only discovery or deduplicated notification delivery; never token exchange or assignment. */
     }
@@ -188,11 +168,7 @@ export async function mcpRegistrationNotice(
   agentId: string,
   requestId: string,
 ) {
-  const request = await db
-    .select()
-    .from(mcpRequests)
-    .where(and(eq(mcpRequests.requestId, requestId), eq(mcpRequests.sourceAgentId, agentId)))
-    .get()
+  const request = await selectMcpRequestBySourceId.run(db, { requestId, agentId })
   if (!request || (request.status !== 'discovered' && request.status !== 'failed'))
     throw new Error('mcp_registration_not_complete')
   return {
@@ -215,7 +191,7 @@ function externalDescription(raw: string) {
 
 async function proposal(
   call: Pick<ManagementCall, 'db'>,
-  request: typeof mcpRequests.$inferSelect,
+  request: McpRequestRow,
   input: McpRegistrationInput,
 ) {
   if (!request.serverId || !request.credentialId || request.status !== 'discovered')
@@ -229,12 +205,8 @@ async function proposal(
   const page = input.page ?? 0
   if (!Number.isInteger(page) || page < 0 || page > 9) throw new Error('mcp_page_invalid')
   const previous = input.proposalId
-    ? await call.db
-        .select()
-        .from(mcpProposals)
-        .where(eq(mcpProposals.proposalId, input.proposalId))
-        .get()
-    : undefined
+    ? await selectMcpProposal.run(call.db, { proposalId: input.proposalId })
+    : null
   if (
     input.proposalId &&
     (!previous ||
@@ -248,7 +220,7 @@ async function proposal(
     throw new Error('mcp_proposal_changed')
   const proposalId = previous?.proposalId ?? uuidv7()
   if (!previous)
-    await call.db.insert(mcpProposals).values({
+    await insertMcpProposal.run(call.db, {
       proposalId,
       requestId: request.requestId,
       sourceAgentId: request.sourceAgentId,
@@ -298,19 +270,13 @@ export async function readMcpChatStatus(
   input: McpRegistrationInput,
 ) {
   await requireMcpAgent(db, sourceAgentId)
-  const request = await db
-    .select()
-    .from(mcpRequests)
-    .where(
-      and(
-        eq(mcpRequests.sourceAgentId, sourceAgentId),
-        eq(mcpRequests.conversationId, conversationId),
-        input.serverId ? eq(mcpRequests.serverId, input.serverId) : undefined,
-      ),
-    )
-    .orderBy(desc(mcpRequests.entryId))
-    .get()
-  if (!request) return { status: 'registration_required' }
+  const raw = await selectMcpRequestLatestEntry.run(db, {
+    sourceAgentId,
+    conversationId,
+    serverId: input.serverId ?? null,
+  })
+  if (!raw) return { status: 'registration_required' }
+  const request = parseMcpRequestRow(raw)
   if (request.status !== 'discovered')
     return { status: request.status, requestId: request.requestId, assigned: false }
   return proposal({ db }, request, input)
@@ -340,15 +306,23 @@ export async function chatMcp(
       : await resolveMcpName(call.db, instruction.name)
     const endpoint = instruction.endpoint ?? existing?.endpoint
     if (!endpoint) {
-      await call.db.batch([
+      await runBatch(call.db, [
         mcpCommit(call.db, uuidv7()),
         ...consumeMcpIntent(call.db, intent),
-        call.db.insert(mcpRequests).values({
+        prepareQuery(call.db, insertMcpRequest, {
           requestId: uuidv7(),
-          ...evidence,
-          name: instruction.name,
+          sourceAgentId: evidence.sourceAgentId,
+          conversationId: evidence.conversationId,
+          entryId: evidence.entryId,
+          submissionId: evidence.submissionId,
+          serverId: null,
+          serverRevision: null,
+          credentialId: null,
           status: 'awaiting_endpoint',
+          name: instruction.name,
+          notifiedAt: null,
           expiresAt: intent.expiresAt,
+          createdAt: evidence.createdAt,
         }),
       ])
       return {
@@ -371,16 +345,11 @@ export async function chatMcp(
         /* Inspection failure is recorded separately from registration. */
       }
     }
-    await call.db
-      .update(mcpRequests)
-      .set({ status: 'awaiting_owner_auth' })
-      .where(
-        and(
-          eq(mcpRequests.sourceAgentId, evidence.sourceAgentId),
-          eq(mcpRequests.entryId, evidence.entryId),
-          eq(mcpRequests.conversationId, evidence.conversationId),
-        ),
-      )
+    await updateMcpRequestAwaitingOwnerAuth.run(call.db, {
+      sourceAgentId: evidence.sourceAgentId,
+      entryId: evidence.entryId,
+      conversationId: evidence.conversationId,
+    })
   }
   if (input.operation === 'assign') {
     if (
@@ -392,11 +361,9 @@ export async function chatMcp(
         JSON.stringify([...(input.toolIds ?? [])].sort())
     )
       throw new Error('mcp_intent_required')
-    const selected = await call.db
-      .select()
-      .from(mcpProposals)
-      .where(eq(mcpProposals.proposalId, intent.instruction.proposalId))
-      .get()
+    const selected = await selectMcpProposal.run(call.db, {
+      proposalId: intent.instruction.proposalId,
+    })
     if (!selected) throw new Error('mcp_proposal_expired')
     return assignMcp(
       call,

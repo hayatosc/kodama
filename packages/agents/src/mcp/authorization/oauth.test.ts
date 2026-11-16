@@ -1,17 +1,18 @@
 /** Local OAuth fixtures exercise PKCE, single-use callbacks and purpose isolation, not real servers. @module */
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { eq } from 'drizzle-orm'
-import { credentials, mcpOAuthTransactions } from '../../../drizzle/management/schema.ts'
-import { management } from '../../testing/management.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
-import { registerMcpCatalog } from '../registration/catalog.ts'
-import { completeMcpOAuth, startMcpOAuth } from './oauth.ts'
-import { mcpToken, putMcpBearer } from './vault.ts'
-import { authorizeMcp, disconnectMcp, markMcpAuthenticationFailure } from './refresh.ts'
+import selectCredentialById from '../../credentials/sql/select-credential-by-id.sql'
 import { parseCredential } from '../../credentials/vault.ts'
-import { manageMcpOAuth } from './operations.ts'
-import { mcpRequest, closeMcpSession } from '../connection/transport.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { management } from '../../testing/management.ts'
+import selectMcpOAuthTransactionById from '../../testing/sql/select-mcp-oauth-transaction-by-id.sql'
+import setCredentialLease from '../../testing/sql/set-credential-lease.sql'
+import { closeMcpSession, mcpRequest } from '../connection/transport.ts'
+import { registerMcpCatalog } from '../registration/catalog.ts'
 import { mcpLoopbackRedirect } from './oauth-http.ts'
+import { completeMcpOAuth, startMcpOAuth } from './oauth.ts'
+import { manageMcpOAuth } from './operations.ts'
+import { authorizeMcp, disconnectMcp, markMcpAuthenticationFailure } from './refresh.ts'
+import { mcpToken, putMcpBearer } from './vault.ts'
 
 const kek = btoa(String.fromCharCode(...new Uint8Array(32).fill(42)))
 const origin = 'https://ui.example.com'
@@ -344,11 +345,7 @@ describe('MCP OAuth transactions', () => {
         2,
       )
       expect(
-        await management
-          .select()
-          .from(credentials)
-          .where(eq(credentials.credentialId, completed.credentialId))
-          .get(),
+        await selectCredentialById.run(management, { credentialId: completed.credentialId }),
       ).toMatchObject({ status: 'needs_reauth', revision: 2 })
     },
   )
@@ -362,10 +359,11 @@ describe('MCP OAuth transactions', () => {
       code: 'code',
     })
     if (completed.status !== 'completed') throw new Error('Fixture authorization failed')
-    await management
-      .update(credentials)
-      .set({ leaseId: 'interrupted-refresh', leaseExpiresAt: Date.now() - 1 })
-      .where(eq(credentials.credentialId, completed.credentialId))
+    await setCredentialLease.run(management, {
+      credentialId: completed.credentialId,
+      leaseId: 'interrupted-refresh',
+      leaseExpiresAt: Date.now() - 1,
+    })
     await expect(
       authorizeMcp(
         management,
@@ -441,16 +439,12 @@ describe('MCP OAuth transactions', () => {
       completeMcpOAuth(management, kek, origin, { state, browserNonce, code: 'code' }),
     ).rejects.toThrow('mcp_auth_callback_invalid')
     expect(tokenCalls(fetcher.mock.calls)).toHaveLength(1)
-    const transaction = await management
-      .select()
-      .from(mcpOAuthTransactions)
-      .where(eq(mcpOAuthTransactions.transactionId, started.transactionId))
-      .get()
-    const verifierRow = await management
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, transaction?.verifierId ?? ''))
-      .get()
+    const transaction = await selectMcpOAuthTransactionById.run(management, {
+      transactionId: started.transactionId,
+    })
+    const verifierRow = await selectCredentialById.run(management, {
+      credentialId: transaction?.verifierId ?? '',
+    })
     expect(verifierRow?.ciphertext).toBeNull()
   })
 

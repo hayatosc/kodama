@@ -5,10 +5,8 @@
  */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { vi } from 'vite-plus/test'
 import { createAgentModels } from '../control-plane/models.ts'
-import { piEntries } from '../agent/local-db/pi-tables.ts'
 import {
   isMemoryAgentRequest,
   isSummaryRequest,
@@ -18,6 +16,8 @@ import {
   toolResults,
 } from './model.ts'
 import { waitForAnswer } from './rpc.ts'
+import selectPiEntryHeads from './sql/select-pi-entry-heads.sql'
+import selectPiEntryIds from './sql/select-pi-entry-ids.sql'
 
 const contextWindow =
   createAgentModels().getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)?.contextWindow ?? 0
@@ -79,11 +79,8 @@ export async function compactedAgent(agentId: string, codename: string) {
 /** The `head` of the newest head marker in the agent's entries, if any. */
 export function headOf(agentId: string): Promise<number | undefined> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) => {
-    const row = drizzle(state.storage)
-      .select({ head: piEntries.head })
-      .from(piEntries)
-      .orderBy(piEntries.id)
-      .all()
+    const row = selectPiEntryHeads
+      .runSync(state.storage.sql)
       .findLast((entry) => entry.head !== null)
     return row?.head ?? undefined
   })
@@ -92,10 +89,6 @@ export function headOf(agentId: string): Promise<number | undefined> {
 /** The IDs of the entries the agent still stores. */
 export function storedEntryIds(agentId: string): Promise<number[]> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) =>
-    drizzle(state.storage)
-      .select({ id: piEntries.id })
-      .from(piEntries)
-      .all()
-      .map((row) => row.id),
+    selectPiEntryIds.runSync(state.storage.sql).map((row) => row.id),
   )
 }

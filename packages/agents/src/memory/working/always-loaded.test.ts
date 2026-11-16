@@ -7,11 +7,13 @@ import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { afterNextMemoryRecordsRead, context, db, write } from '../../testing/memory.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { applyOperation } from '../store/records.ts'
-import { memoryRecords } from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
+import type { Scope } from '../store/db.ts'
+import insertMemoryRecord from '../store/sql/insert-memory-record.sql'
+import deleteAlwaysLoaded from '../../testing/sql/delete-always-loaded.sql'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
 import {
   AGENT_FACT_BUDGET,
@@ -24,7 +26,6 @@ import {
   storedMemoryText,
   updateLocalTasks,
 } from './always-loaded.ts'
-import { alwaysLoaded } from '../../../drizzle/durable-object/schema.ts'
 import { storedMemoryCopy } from '../../agent/local-db/memory.ts'
 import { seedOnce } from '../../testing/management.ts'
 
@@ -47,7 +48,7 @@ describe('always-loaded cache revisions', () => {
       env.AGENTS.getByName(agentId),
       async (_instance, state) => {
         const local = await openLocalDb(state.storage)
-        local.delete(alwaysLoaded).run()
+        deleteAlwaysLoaded.runSync(local.sql)
         const memory = {
           env,
           agentId: () => agentId,
@@ -198,35 +199,35 @@ describe('always-loaded budgets', () => {
     const agentId = uuidv7()
     const space = uuidv7()
     const now = Date.now()
-    const row = (id: string, scope: Scope, importance: number, overrides?: string) => ({
-      id,
-      scope,
-      kind: 'fact' as const,
-      content: 'x',
-      searchVersion: SEARCH_VERSION,
-      origin: 'remember' as const,
-      sourceAgentId: agentId,
-      runId: 'override-limit',
-      importance,
-      ...(overrides === undefined ? {} : { overrides }),
-      observedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    })
+    const row = (id: string, scope: Scope, importance: number, overrides: string | null = null) =>
+      prepareQuery(db, insertMemoryRecord, {
+        id,
+        scope,
+        kind: 'fact',
+        content: 'x',
+        searchVersion: SEARCH_VERSION,
+        origin: 'remember',
+        sourceAgentId: agentId,
+        sourceEntryFrom: null,
+        sourceEntryTo: null,
+        runId: 'override-limit',
+        importance,
+        required: false,
+        overrides,
+        observedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
     // 255 one-character shared lines, of which the ten most important are overridden.
-    const sharedRows = Array.from({ length: 255 }, (_, index) =>
-      row(`${space}-${index}`, `shared:${space}`, 1 - index / 1000),
-    )
-    const overrides = sharedRows
+    const sharedIds = Array.from({ length: 255 }, (_, index) => `${space}-${index}`)
+    const sharedRows = sharedIds.map((id, index) => row(id, `shared:${space}`, 1 - index / 1000))
+    const overrides = sharedIds
       .slice(0, 10)
-      .map((target, index) => row(`${agentId}-${index}`, `agent:${agentId}`, 0.5, target.id))
-    const rows = [...sharedRows, ...overrides]
-    const inserts = []
-    for (let offset = 0; offset < rows.length; offset += 5) {
-      inserts.push(db.insert(memoryRecords).values(rows.slice(offset, offset + 5)))
+      .map((targetId, index) => row(`${agentId}-${index}`, `agent:${agentId}`, 0.5, targetId))
+    const statements = [...sharedRows, ...overrides]
+    for (let offset = 0; offset < statements.length; offset += 100) {
+      await runBatch(db, statements.slice(offset, offset + 100))
     }
-    const [first, ...rest] = inserts
-    if (first !== undefined) await db.batch([first, ...rest])
 
     const { text } = await renderAlwaysLoaded(db, agentId, [space])
 

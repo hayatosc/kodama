@@ -1,26 +1,21 @@
 /** Seed initialization validates both models before creating agents; identity is independent. @module */
-import { credentialCall, testCredentialRefs } from '../../testing/credentials.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import {
-  agentConfigVersions,
-  agentCredentialRefs,
-  credentialGrants,
-  auditLog,
-  agents,
-  systemSettings,
-} from '../../../drizzle/management/schema.ts'
+import { runBatch } from '../../lib/reylo.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+import { credentialCall, testCredentialRefs } from '../../testing/credentials.ts'
 import { agentService, management, seedOnce } from '../../testing/management.ts'
 import { activeContents, memoryAgent } from '../../testing/memory.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
-import { piEntries } from '../../agent/local-db/pi-tables.ts'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
-import { seed, FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG } from './seed.ts'
-import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+import selectAllAgents from '../../testing/sql/select-all-agents.sql'
+import selectAllSystemSettings from '../../testing/sql/select-all-system-settings.sql'
+import selectPiEntryRecords from '../../testing/sql/select-pi-entry-records.sql'
+import selectAgentById from '../sql/select-agent-by-id.sql'
+import selectAgentBySlug from '../sql/select-agent-by-slug.sql'
+import { FIRST_AGENT_PROMPT, FIRST_AGENT_SLUG, seed } from './seed.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -31,8 +26,8 @@ useMockModel()
 afterEach(() => vi.restoreAllMocks())
 
 async function firstAgent() {
-  const row = await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG)).get()
-  if (row === undefined) throw new Error('The seed created no first agent')
+  const row = await selectAgentBySlug.run(management, { slug: FIRST_AGENT_SLUG })
+  if (row === null) throw new Error('The seed created no first agent')
   return row
 }
 
@@ -41,20 +36,23 @@ describe('seed', () => {
     'rejects missing %s references without creating agents or changing identity',
     async (missing) => {
       // The memory-test helper seeds in beforeAll; exercise a genuinely fresh installation.
-      for (const table of [
-        auditLog,
-        agentCredentialRefs,
-        credentialGrants,
-        agentConfigVersions,
-        agents,
-        systemSettings,
-      ])
-        await management.delete(table)
+      const tables = [
+        'audit_log',
+        'agent_credential_refs',
+        'credential_grants',
+        'agent_config_versions',
+        'agents',
+        'system_settings',
+      ]
+      await runBatch(
+        management,
+        tables.map((table) => management.prepare(`DELETE FROM ${table}`)),
+      )
       const refs = await testCredentialRefs()
       if (missing === 'all') refs.primary = {}
       else delete refs.primary[missing]
       const call = credentialCall()
-      const identity = await management.select().from(systemSettings)
+      const identity = await selectAllSystemSettings.run(management)
       await expect(
         seed(
           {
@@ -64,8 +62,8 @@ describe('seed', () => {
           refs,
         ),
       ).rejects.toThrow('credential_unavailable')
-      expect(await management.select().from(agents)).toEqual([])
-      expect(await management.select().from(systemSettings)).toEqual(identity)
+      expect(await selectAllAgents.run(management)).toEqual([])
+      expect(await selectAllSystemSettings.run(management)).toEqual(identity)
       await exports.default.seed(await testCredentialRefs())
     },
   )
@@ -81,11 +79,7 @@ describe('seed', () => {
     expect(again).toEqual(seeded)
     expect(seeded.memoryAgentId).toBe(MEMORY_AGENT_ID)
 
-    const memory = await management
-      .select()
-      .from(agents)
-      .where(eq(agents.agentId, MEMORY_AGENT_ID))
-      .get()
+    const memory = await selectAgentById.run(management, { agentId: MEMORY_AGENT_ID })
     expect(memory).toMatchObject({
       kind: 'dedicated',
       objectName: 'kodama:memory',
@@ -108,12 +102,12 @@ describe('seed', () => {
     })
     expect(first.objectName).toBe(first.agentId)
     expect(first).not.toHaveProperty('ownerId')
-    const settings = await management.select().from(systemSettings)
+    const settings = await selectAllSystemSettings.run(management)
     expect(Object.fromEntries(settings.map((row) => [row.key, JSON.parse(row.valueJson)]))).toEqual(
       { install_id: seeded.installId },
     )
     expect(
-      (await management.select().from(agents).where(eq(agents.slug, FIRST_AGENT_SLUG))).length,
+      (await selectAllAgents.run(management)).filter((row) => row.slug === FIRST_AGENT_SLUG).length,
     ).toBe(1)
 
     const { settings: v1 } = await agentService().getConfig(first.agentId)
@@ -183,7 +177,7 @@ describe('seed', () => {
       .toBe('settled')
     expect(await activeContents(sourceAgentId)).toEqual([])
     const blocked = await runInDurableObject(memoryAgent(), (_instance, state) =>
-      drizzle(state.storage).select({ record: piEntries.record }).from(piEntries).all(),
+      selectPiEntryRecords.runSync(state.storage.sql),
     )
     expect(JSON.stringify(blocked)).toContain("denied by the agent's tool policy")
   })

@@ -1,13 +1,10 @@
 /** Secret-safe OAuth management facade for the future authenticated UI and local CLI. @module */
-import { and, eq, inArray, lt, gt } from 'drizzle-orm'
 import * as v from 'valibot'
-import {
-  credentials,
-  mcpOAuthTransactions,
-  mcpRequests,
-} from '../../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../../control-plane/db.ts'
+import { prepareQuery, runBatch, runChanges } from '../../lib/reylo.ts'
+import { mcpEndpoint } from '../connection/transport.ts'
 import { mcpServer } from '../registration/catalog.ts'
+import selectMcpRequestById from '../registration/sql/select-mcp-request-by-id.sql'
 import { completeMcpOAuth, configureMcpOAuthClient, startMcpOAuth } from './oauth.ts'
 import {
   mcpClientDocument,
@@ -15,8 +12,12 @@ import {
   mcpLoopbackRedirect,
   mcpOAuthEndpoint,
 } from './oauth-http.ts'
-import { mcpEndpoint } from '../connection/transport.ts'
-import { eraseMcpSecret, mcpSecretInsert, mcpToken } from './vault.ts'
+import attachMcpRequest from './sql/attach-mcp-request.sql'
+import expireMcpOAuthTransaction from './sql/expire-mcp-oauth-transaction.sql'
+import listMcpServerCredentials from './sql/list-mcp-server-credentials.sql'
+import selectExpiredMcpOAuthTransactions from './sql/select-expired-mcp-oauth-transactions.sql'
+import selectMcpOAuthTransactionsByServer from './sql/select-mcp-oauth-transactions-by-server.sql'
+import { eraseMcpSecretStatement, mcpSecretInsert, mcpToken } from './vault.ts'
 
 const id = v.pipe(v.string(), v.uuid())
 const nonce = v.pipe(v.string(), v.minLength(32), v.maxLength(256))
@@ -60,28 +61,11 @@ const schema = v.variant('operation', [
 
 /** Recover only expired transactions; an uncertain code exchange is never retried. */
 export async function recoverMcpOAuth(db: ManagementDb, now = Date.now()) {
-  const expired = await db
-    .select()
-    .from(mcpOAuthTransactions)
-    .where(
-      and(
-        inArray(mcpOAuthTransactions.status, ['pending', 'exchanging']),
-        lt(mcpOAuthTransactions.expiresAt, now),
-      ),
-    )
-    .limit(100)
+  const expired = await selectExpiredMcpOAuthTransactions.run(db, { now })
   for (const transaction of expired)
-    await db.batch([
-      db
-        .update(mcpOAuthTransactions)
-        .set({ status: 'reauth_required' })
-        .where(
-          and(
-            eq(mcpOAuthTransactions.transactionId, transaction.transactionId),
-            inArray(mcpOAuthTransactions.status, ['pending', 'exchanging']),
-          ),
-        ),
-      eraseMcpSecret(db, transaction.verifierId, now),
+    await runBatch(db, [
+      prepareQuery(db, expireMcpOAuthTransaction, { transactionId: transaction.transactionId }),
+      eraseMcpSecretStatement(db, transaction.verifierId, now),
     ])
 }
 
@@ -113,15 +97,11 @@ export async function manageMcpOAuth(
         }),
         Date.now(),
       )
-      await envelope.statement
+      await envelope.statement.run()
       return { credentialId: envelope.credentialId }
     }
     case 'attach': {
-      const request = await db
-        .select()
-        .from(mcpRequests)
-        .where(eq(mcpRequests.requestId, input.requestId))
-        .get()
+      const request = await selectMcpRequestById.run(db, { requestId: input.requestId })
       if (
         !request?.serverId ||
         request.expiresAt <= Date.now() ||
@@ -131,19 +111,12 @@ export async function manageMcpOAuth(
       const { server } = await mcpToken(db, kek, request.serverId, input.credentialId)
       if (server.revision !== request.serverRevision) throw new Error('mcp_registration_changed')
       // Persist consumed attachment permission before the service attempts discovery.
-      const attached = await db
-        .update(mcpRequests)
-        .set({ status: 'ready_for_discovery', credentialId: input.credentialId })
-        .where(
-          and(
-            eq(mcpRequests.requestId, request.requestId),
-            eq(mcpRequests.status, 'awaiting_owner_auth'),
-            gt(mcpRequests.expiresAt, Date.now()),
-          ),
-        )
-        .returning()
-        .get()
-      if (!attached) throw new Error('mcp_registration_expired')
+      const attachedChanges = await runChanges(db, attachMcpRequest, {
+        credentialId: input.credentialId,
+        requestId: request.requestId,
+        now: Date.now(),
+      })
+      if (attachedChanges === 0) throw new Error('mcp_registration_expired')
       return { status: 'completed', requestId: input.requestId, credentialId: input.credentialId }
     }
     case 'begin':
@@ -151,11 +124,7 @@ export async function manageMcpOAuth(
       if (input.operation === 'begin-loopback') mcpLoopbackRedirect(input.loopbackRedirectUri ?? '')
       else if (input.loopbackRedirectUri !== undefined) throw new Error('mcp_redirect_invalid')
       if (input.requestId) {
-        const request = await db
-          .select()
-          .from(mcpRequests)
-          .where(eq(mcpRequests.requestId, input.requestId))
-          .get()
+        const request = await selectMcpRequestById.run(db, { requestId: input.requestId })
         const server = await mcpServer(db, input.serverId)
         if (
           !request ||
@@ -203,32 +172,10 @@ export async function manageMcpOAuth(
     }
     case 'status': {
       await mcpServer(db, input.serverId)
-      const rows = await db
-        .select({
-          credentialId: credentials.credentialId,
-          kind: credentials.kind,
-          status: credentials.status,
-          expiresAt: credentials.expiresAt,
-          authState: credentials.mcpAuthState,
-          revision: credentials.revision,
-        })
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.provider, input.serverId),
-            eq(credentials.purpose, 'mcp_server'),
-            inArray(credentials.kind, ['mcp_bearer', 'mcp_oauth']),
-          ),
-        )
-      const transactions = await db
-        .select({
-          transactionId: mcpOAuthTransactions.transactionId,
-          status: mcpOAuthTransactions.status,
-          expiresAt: mcpOAuthTransactions.expiresAt,
-        })
-        .from(mcpOAuthTransactions)
-        .where(and(eq(mcpOAuthTransactions.serverId, input.serverId)))
-        .limit(100)
+      const rows = await listMcpServerCredentials.run(db, { serverId: input.serverId })
+      const transactions = await selectMcpOAuthTransactionsByServer.run(db, {
+        serverId: input.serverId,
+      })
       return {
         credentials: rows.map((row) => ({ ...row, expiryKnown: row.expiresAt !== null })),
         transactions,

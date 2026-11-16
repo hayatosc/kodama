@@ -1,15 +1,14 @@
 /** Literal text artifacts through real tools, with bounded output and owner-local admission. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vite-plus/test'
-import { artifacts } from '../../drizzle/durable-object/schema.ts'
 import { openLocalDb } from '../agent/local-db/local.ts'
 import { STATUS_KEY } from '../agent/runtime/restrictions.ts'
 import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
-import { toolCallResponse, requestBody } from '../testing/model.ts'
+import { requestBody, toolCallResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
+import setArtifactExpiresAt from '../testing/sql/set-artifact-expires-at.sql'
 import { artifactReadResult, createArtifactTools } from './artifacts.ts'
 import { isRegisteredTool } from './index.ts'
 
@@ -257,10 +256,7 @@ it('refuses foreign, expired and missing IDs through the read tool without leaki
   )
   await runInDurableObject(env.AGENTS.getByName(owner), async (_, state) => {
     const db = await openLocalDb(state.storage)
-    db.update(artifacts)
-      .set({ expiresAt: Date.now() - 1 })
-      .where(eq(artifacts.id, file.artifactId))
-      .run()
+    setArtifactExpiresAt.runSync(db.sql, { id: file.artifactId, expiresAt: Date.now() - 1 })
   })
   const result = await invoke(owner, 'read_artifact', { artifactId: file.artifactId })
   expect(result).toContain('artifact_unavailable')

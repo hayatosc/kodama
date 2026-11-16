@@ -1,13 +1,16 @@
 import { listDurableObjectIds } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
-import { defaultAgentSettings } from './config.ts'
+import { prepareQuery, runBatch } from '../lib/reylo.ts'
+import { uuidv7 } from '../lib/uuid.ts'
 import { management, newAgentId, seedOnce, updateSettings } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
-import { uuidv7 } from '../lib/uuid.ts'
+import setAgentSlug from '../testing/sql/set-agent-slug.sql'
+import setAgentStatus from '../testing/sql/set-agent-status.sql'
+import { defaultAgentSettings } from './config.ts'
 import { discoverAgents, resolveAgentRef } from './registry.ts'
+import insertAgent from './sql/insert-agent.sql'
+import insertConfigVersion from './sql/insert-config-version.sql'
 // Load the provider outside short-lived DO requests.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -57,10 +60,7 @@ describe('AgentService admission', () => {
 
   it('refuses chat to an agent that is not active, without reaching its object', async () => {
     const agentId = await newAgentId()
-    await management
-      .update(agents)
-      .set({ status: 'provisioning' })
-      .where(eq(agents.agentId, agentId))
+    await setAgentStatus.run(management, { agentId, status: 'provisioning' })
     const send = exports.default.sendMessage(agentId, { requestId: 'r', content: 'Hello' })
     expect(await rejection(send)).toMatch(/agent_unavailable/)
     expect(await hasStorage(agentId)).toBe(false)
@@ -70,7 +70,7 @@ describe('AgentService admission', () => {
     'serves reads but refuses chat while the agent is %s',
     async (status) => {
       const agentId = await newAgentId()
-      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      await setAgentStatus.run(management, { agentId, status })
       const send = exports.default.sendMessage(agentId, { requestId: 'r', content: 'Hello' })
       expect(await rejection(send)).toMatch(/agent_unavailable/)
       using read = await exports.default.snapshot(agentId)
@@ -83,7 +83,7 @@ describe('AgentService admission', () => {
     'refuses reads while the agent is %s',
     async (status) => {
       const agentId = await newAgentId()
-      await management.update(agents).set({ status }).where(eq(agents.agentId, agentId))
+      await setAgentStatus.run(management, { agentId, status })
       expect(await rejection(exports.default.snapshot(agentId))).toMatch(/agent_unavailable/)
       expect(await rejection(exports.default.submission(agentId, 'r'))).toMatch(/agent_unavailable/)
     },
@@ -98,21 +98,22 @@ describe('discoverAgents', () => {
     const match = ids.at(-1)
     for (let offset = 0; offset < ids.length; offset += 10) {
       const page = ids.slice(offset, offset + 10)
-      await management.batch([
-        management.insert(agents).values(
-          page.map((agentId) => ({
+      await runBatch(management, [
+        ...page.map((agentId) =>
+          prepareQuery(management, insertAgent, {
             agentId,
             objectName: agentId,
-            kind: 'working' as const,
+            kind: 'working',
             displayName: 'Discovery fixture',
-            status: 'active' as const,
+            slug: null,
+            status: 'active',
             currentVersion: 1,
             createdAt: start,
             updatedAt: start,
-          })),
+          }),
         ),
-        management.insert(agentConfigVersions).values(
-          page.map((agentId) => ({
+        ...page.map((agentId) =>
+          prepareQuery(management, insertConfigVersion, {
             agentId,
             version: 1,
             settingsJson: JSON.stringify({
@@ -120,9 +121,10 @@ describe('discoverAgents', () => {
               labels: agentId === match ? ['last-page-match'] : [],
             }),
             schemaVersion: 1,
-            source: 'system' as const,
+            source: 'system',
+            comment: null,
             createdAt: start,
-          })),
+          }),
         ),
       ])
     }
@@ -150,7 +152,7 @@ describe('discoverAgents', () => {
     })
     await updateSettings(paused, { description: 'Japanese literature', labels: ['literature'] })
     await updateSettings(wrongLabel, { description: 'Japanese literature', labels: ['other'] })
-    await management.update(agents).set({ status: 'paused' }).where(eq(agents.agentId, paused))
+    await setAgentStatus.run(management, { agentId: paused, status: 'paused' })
     const result = await discoverAgents(management, { query: 'JAPANESE', label: 'literature' })
     expect(result.agents).toEqual([
       {
@@ -180,7 +182,7 @@ describe('resolveAgentRef', () => {
   it('resolves a UUID, a slug, and a unique UUID prefix to the registry row', async () => {
     const agentId = await newAgentId()
     const slug = `ref-${uuidv7().slice(-12)}`
-    await management.update(agents).set({ slug }).where(eq(agents.agentId, agentId))
+    await setAgentSlug.run(management, { agentId, slug })
     for (const ref of [agentId, slug, agentId.slice(0, 24)]) {
       expect((await resolveAgentRef(management, ref)).agentId).toBe(agentId)
     }
@@ -191,9 +193,9 @@ describe('resolveAgentRef', () => {
     const squatter = await newAgentId()
     const prefix = target.slice(0, 18)
     const hexSlug = `cafe-${uuidv7().slice(-12)}`
-    await management.update(agents).set({ slug: prefix }).where(eq(agents.agentId, squatter))
+    await setAgentSlug.run(management, { agentId: squatter, slug: prefix })
     const other = await newAgentId()
-    await management.update(agents).set({ slug: hexSlug }).where(eq(agents.agentId, other))
+    await setAgentSlug.run(management, { agentId: other, slug: hexSlug })
 
     const captured = await rejection(resolveAgentRef(management, prefix))
     expect(captured).toMatch(/Ambiguous agent prefix/)

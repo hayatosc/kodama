@@ -5,11 +5,24 @@
  * @see docs/agents.md — Event inbox
  * @module
  */
-import { and, asc, eq, inArray, isNotNull, lte } from 'drizzle-orm'
-import { eventInbox } from '../../../drizzle/durable-object/schema.ts'
-import type { InboxEventSource, SessionMode } from '../../protocol.ts'
+import { parseEnum, parseJsonValue } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import type { InboxEventSource, SessionMode } from '../../protocol.ts'
 import type { LocalDb } from './local.ts'
+import clearInboxBatchReservationQuery from './sql/clear-inbox-batch-reservation.sql'
+import failInboxEvent from './sql/fail-inbox-event.sql'
+import insertInboxEvent from './sql/insert-inbox-event.sql'
+import markInboxAdmittedQuery from './sql/mark-inbox-admitted.sql'
+import reserveInboxBatchQuery from './sql/reserve-inbox-batch.sql'
+import retainInboxQuery from './sql/retain-inbox.sql'
+import retryInboxEvent from './sql/retry-inbox-event.sql'
+import selectInboxByRequestId from './sql/select-inbox-by-request-id.sql'
+import selectNextQueuedInbox from './sql/select-next-queued-inbox.sql'
+import selectNextSettledInbox from './sql/select-next-settled-inbox.sql'
+import selectPendingInboxEvents from './sql/select-pending-inbox-events.sql'
+import selectReservedInboxMarker from './sql/select-reserved-inbox-marker.sql'
+import selectReservedInboxRows from './sql/select-reserved-inbox-rows.sql'
+import settleInboxEventsQuery from './sql/settle-inbox-events.sql'
 
 /** Maximum queued events read or coalesced in one wake. */
 export const INBOX_BATCH_LIMIT = 10
@@ -20,8 +33,51 @@ export const INBOX_MAX_ATTEMPTS = 5
 /** Keep settled/failed inbox items for 7 days for requestId deduplication, then prune. */
 export const INBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
+const INBOX_SOURCES = ['user', 'webhook', 'schedule', 'peer', 'mcp', 'approval'] as const
+const SESSION_MODES = ['resume', 'new'] as const
+const WHEN_BUSY_MODES = ['followUp', 'steer', 'interrupt'] as const
+const INBOX_STATES = ['queued', 'admitted', 'settled', 'failed'] as const
+
 /** A persisted event inbox row. */
-export type InboxEventRow = typeof eventInbox.$inferSelect
+export interface InboxEventRow {
+  id: string
+  requestId: string
+  source: InboxEventSource
+  sessionMode: SessionMode
+  whenBusy: (typeof WHEN_BUSY_MODES)[number]
+  payloadJson: string
+  state: (typeof INBOX_STATES)[number]
+  batchRequestId: string | null
+  submissionId: number | null
+  attempts: number
+  nextRetryAt: number
+  createdAt: number
+  settledAt: number | null
+}
+
+function parseInboxEventRow(row: {
+  id: string
+  requestId: string
+  source: string
+  sessionMode: string
+  whenBusy: string
+  payloadJson: string
+  state: string
+  batchRequestId: string | null
+  submissionId: number | null
+  attempts: number
+  nextRetryAt: number
+  createdAt: number
+  settledAt: number | null
+}): InboxEventRow {
+  return {
+    ...row,
+    source: parseEnum(INBOX_SOURCES, row.source, 'inbox source'),
+    sessionMode: parseEnum(SESSION_MODES, row.sessionMode, 'inbox sessionMode'),
+    whenBusy: parseEnum(WHEN_BUSY_MODES, row.whenBusy, 'inbox whenBusy'),
+    state: parseEnum(INBOX_STATES, row.state, 'inbox state'),
+  }
+}
 
 /** Serialized event payload inside `eventInbox.payloadJson`. */
 export interface InboxPayload {
@@ -42,7 +98,7 @@ export interface CoalescedInboxBatch {
 /** Parse a stored `payloadJson` field safely. */
 export function parseInboxPayload(payloadJson: string): InboxPayload {
   try {
-    const parsed: unknown = JSON.parse(payloadJson)
+    const parsed = parseJsonValue(payloadJson)
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
@@ -62,7 +118,7 @@ export function parseInboxPayload(payloadJson: string): InboxPayload {
 
 /** Insert or deduplicate an inbox event inside an existing SQLite transaction. */
 export function enqueueInboxEventInTx(
-  tx: Pick<LocalDb, 'select' | 'insert'>,
+  tx: LocalDb,
   input: {
     requestId: string
     source: InboxEventSource
@@ -73,33 +129,23 @@ export function enqueueInboxEventInTx(
   },
   now: number,
 ): { row: InboxEventRow; deduplicated: boolean } {
-  const existing = tx
-    .select()
-    .from(eventInbox)
-    .where(eq(eventInbox.requestId, input.requestId))
-    .get()
-  if (existing) return { row: existing, deduplicated: true }
+  const existing = selectInboxByRequestId.runSync(tx.sql, { requestId: input.requestId })
+  if (existing !== null) return { row: parseInboxEventRow(existing), deduplicated: true }
   const payload: InboxPayload = {
     content: input.content,
     ...(input.label === undefined ? {} : { label: input.label }),
   }
-  const inserted = tx
-    .insert(eventInbox)
-    .values({
-      id: uuidv7(),
-      requestId: input.requestId,
-      source: input.source,
-      sessionMode: input.sessionMode,
-      whenBusy: input.whenBusy,
-      payloadJson: JSON.stringify(payload),
-      state: 'queued',
-      attempts: 0,
-      nextRetryAt: now,
-      createdAt: now,
-    })
-    .returning()
-    .get()
-  return { row: inserted, deduplicated: false }
+  const inserted = insertInboxEvent.runSync(tx.sql, {
+    id: uuidv7(),
+    requestId: input.requestId,
+    source: input.source,
+    sessionMode: input.sessionMode,
+    whenBusy: input.whenBusy,
+    payloadJson: JSON.stringify(payload),
+    nextRetryAt: now,
+    createdAt: now,
+  })
+  return { row: parseInboxEventRow(inserted), deduplicated: false }
 }
 
 /**
@@ -118,26 +164,20 @@ export function enqueueInboxEvent(
   },
   now: number,
 ): { row: InboxEventRow; deduplicated: boolean } {
-  return db.transaction((tx) => enqueueInboxEventInTx(tx, input, now))
+  return db.transactionSync(() => enqueueInboxEventInTx(db, input, now))
 }
 
 /** Look up an inbox event by caller `requestId` so coalesced callers can resolve Pi status. */
-export function inboxEventByRequest(
-  db: Pick<LocalDb, 'select'>,
-  requestId: string,
-): InboxEventRow | undefined {
-  return db.select().from(eventInbox).where(eq(eventInbox.requestId, requestId)).get()
+export function inboxEventByRequest(db: LocalDb, requestId: string): InboxEventRow | undefined {
+  const row = selectInboxByRequestId.runSync(db.sql, { requestId })
+  return row === null ? undefined : parseInboxEventRow(row)
 }
 
 /** Queued events whose retry window is due, oldest first. */
 export function pendingInboxEvents(db: LocalDb, now: number): InboxEventRow[] {
-  return db
-    .select()
-    .from(eventInbox)
-    .where(and(eq(eventInbox.state, 'queued'), lte(eventInbox.nextRetryAt, now)))
-    .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
-    .limit(INBOX_BATCH_LIMIT)
-    .all()
+  return selectPendingInboxEvents
+    .runSync(db.sql, { now, limit: INBOX_BATCH_LIMIT })
+    .map(parseInboxEventRow)
 }
 
 function buildCoalescedBatch(
@@ -204,39 +244,26 @@ export function coalesceInboxBatch(
  * marks only the events that actually belonged to the admitted submission.
  */
 export function reserveInboxBatch(db: LocalDb, now: number): CoalescedInboxBatch | undefined {
-  return db.transaction((tx) => {
-    const reservedMarker = tx
-      .select({ batchRequestId: eventInbox.batchRequestId })
-      .from(eventInbox)
-      .where(and(eq(eventInbox.state, 'queued'), isNotNull(eventInbox.batchRequestId)))
-      .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
-      .limit(1)
-      .get()?.batchRequestId
+  return db.transactionSync(() => {
+    const reservedMarker = selectReservedInboxMarker.runSync(db.sql)?.batchRequestId
     if (reservedMarker) {
-      const reservedRows = tx
-        .select()
-        .from(eventInbox)
-        .where(and(eq(eventInbox.state, 'queued'), eq(eventInbox.batchRequestId, reservedMarker)))
-        .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
-        .all()
+      const reservedRows = selectReservedInboxRows
+        .runSync(db.sql, { batchRequestId: reservedMarker })
+        .map(parseInboxEventRow)
       if (reservedRows.length > 0) {
         return buildCoalescedBatch(reservedRows, reservedMarker)
       }
     }
-    const due = tx
-      .select()
-      .from(eventInbox)
-      .where(and(eq(eventInbox.state, 'queued'), lte(eventInbox.nextRetryAt, now)))
-      .orderBy(asc(eventInbox.createdAt), asc(eventInbox.id))
-      .limit(INBOX_BATCH_LIMIT)
-      .all()
+    const due = selectPendingInboxEvents
+      .runSync(db.sql, { now, limit: INBOX_BATCH_LIMIT })
+      .map(parseInboxEventRow)
     const batch = coalesceInboxBatch(due)
     if (!batch) return undefined
     const ids = batch.batch.map((row) => row.id)
-    tx.update(eventInbox)
-      .set({ batchRequestId: batch.requestId })
-      .where(inArray(eventInbox.id, ids))
-      .run()
+    reserveInboxBatchQuery.runSync(db.sql, {
+      batchRequestId: batch.requestId,
+      idsJson: JSON.stringify(ids),
+    })
     return {
       ...batch,
       batch: batch.batch.map((row) => ({ ...row, batchRequestId: batch.requestId })),
@@ -247,10 +274,7 @@ export function reserveInboxBatch(db: LocalDb, now: number): CoalescedInboxBatch
 /** Release batch reservation before Pi admission when a `sessionMode: 'new'` wake must defer. */
 export function clearInboxBatchReservation(db: LocalDb, ids: readonly string[]): void {
   if (ids.length === 0) return
-  db.update(eventInbox)
-    .set({ batchRequestId: null })
-    .where(and(inArray(eventInbox.id, [...ids]), eq(eventInbox.state, 'queued')))
-    .run()
+  clearInboxBatchReservationQuery.runSync(db.sql, { idsJson: JSON.stringify(ids) })
 }
 
 /** Mark a batch of inbox items admitted into Pi with the resulting submission ID. */
@@ -261,40 +285,36 @@ export function markInboxAdmitted(
   now: number,
 ): void {
   if (ids.length === 0) return
-  db.update(eventInbox)
-    .set({ state: 'admitted', submissionId, settledAt: now })
-    .where(inArray(eventInbox.id, [...ids]))
-    .run()
+  markInboxAdmittedQuery.runSync(db.sql, {
+    submissionId,
+    settledAt: now,
+    idsJson: JSON.stringify(ids),
+  })
 }
 
 /** Mark admitted items settled once Pi reaches a terminal state (or permanent refusal clears batch). */
 export function settleInboxEvents(db: LocalDb, ids: readonly string[], now: number): void {
   if (ids.length === 0) return
-  db.update(eventInbox)
-    .set({ state: 'settled', batchRequestId: null, settledAt: now })
-    .where(inArray(eventInbox.id, [...ids]))
-    .run()
+  settleInboxEventsQuery.runSync(db.sql, { settledAt: now, idsJson: JSON.stringify(ids) })
 }
 
 /** Back off a failed inbox batch or mark it terminally failed after `INBOX_MAX_ATTEMPTS`. */
 export function retryInboxBatch(db: LocalDb, rows: readonly InboxEventRow[], now: number): void {
-  db.transaction((tx) => {
+  db.transactionSync(() => {
     for (const row of rows) {
       const nextAttempts = row.attempts + 1
       if (nextAttempts >= INBOX_MAX_ATTEMPTS) {
-        tx.update(eventInbox)
-          .set({ state: 'failed', batchRequestId: null, attempts: nextAttempts, settledAt: now })
-          .where(eq(eventInbox.id, row.id))
-          .run()
+        failInboxEvent.runSync(db.sql, {
+          attempts: nextAttempts,
+          settledAt: now,
+          id: row.id,
+        })
       } else {
-        tx.update(eventInbox)
-          .set({
-            batchRequestId: null,
-            attempts: nextAttempts,
-            nextRetryAt: now + INBOX_RETRY_DELAY_MS * 2 ** row.attempts,
-          })
-          .where(eq(eventInbox.id, row.id))
-          .run()
+        retryInboxEvent.runSync(db.sql, {
+          attempts: nextAttempts,
+          nextRetryAt: now + INBOX_RETRY_DELAY_MS * 2 ** row.attempts,
+          id: row.id,
+        })
       }
     }
   })
@@ -302,20 +322,8 @@ export function retryInboxBatch(db: LocalDb, rows: readonly InboxEventRow[], now
 
 /** Earliest future retry or retention cleanup timestamp for the `inbox` alarm purpose. */
 export function nextInboxWake(db: LocalDb): number | undefined {
-  const nextQueued = db
-    .select({ at: eventInbox.nextRetryAt })
-    .from(eventInbox)
-    .where(eq(eventInbox.state, 'queued'))
-    .orderBy(asc(eventInbox.nextRetryAt))
-    .limit(1)
-    .get()?.at
-  const nextSettled = db
-    .select({ at: eventInbox.settledAt })
-    .from(eventInbox)
-    .where(inArray(eventInbox.state, ['admitted', 'settled', 'failed']))
-    .orderBy(asc(eventInbox.settledAt))
-    .limit(1)
-    .get()?.at
+  const nextQueued = selectNextQueuedInbox.runSync(db.sql)?.at
+  const nextSettled = selectNextSettledInbox.runSync(db.sql)?.at
   const cleanupAt =
     nextSettled !== null && nextSettled !== undefined ? nextSettled + INBOX_RETENTION_MS : undefined
   if (nextQueued === undefined) return cleanupAt
@@ -325,12 +333,5 @@ export function nextInboxWake(db: LocalDb): number | undefined {
 
 /** Delete settled/failed/admitted rows older than `INBOX_RETENTION_MS`. */
 export function retainInbox(db: LocalDb, now: number): void {
-  db.delete(eventInbox)
-    .where(
-      and(
-        inArray(eventInbox.state, ['admitted', 'settled', 'failed']),
-        lte(eventInbox.settledAt, now - INBOX_RETENTION_MS),
-      ),
-    )
-    .run()
+  retainInboxQuery.runSync(db.sql, { before: now - INBOX_RETENTION_MS })
 }

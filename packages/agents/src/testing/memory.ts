@@ -3,22 +3,22 @@
  *
  * @module
  */
-import { uuidv7 } from '../lib/uuid.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { vi } from 'vite-plus/test'
-import { drizzle } from 'drizzle-orm/d1'
+import { openLocalDb } from '../agent/local-db/local.ts'
+import { storedMemoryCopy } from '../agent/local-db/memory.ts'
+import { uuidv7 } from '../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
-import { memoryDb, schema } from '../memory/store/db.ts'
+import type { MemoryJob } from '../memory/jobs.ts'
+import { memoryDb, parseMemoryRecord } from '../memory/store/db.ts'
+import type { MemoryDb, MemoryRecord } from '../memory/store/db.ts'
 import { applyOperation } from '../memory/store/records.ts'
 import type { NewRecord } from '../memory/store/records.ts'
-import { memoryRecords } from '../../drizzle/memory/schema.ts'
+import selectActiveRecordContents from '../memory/store/sql/select-active-record-contents.sql'
+import selectMemoryRecordById from '../memory/store/sql/select-memory-record-by-id.sql'
 import type { OperationContext } from '../memory/store/statements.ts'
 import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.ts'
-import { alwaysLoaded } from '../../drizzle/durable-object/schema.ts'
-import { openLocalDb } from '../agent/local-db/local.ts'
-import type { MemoryJob } from '../memory/jobs.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
@@ -30,16 +30,26 @@ import type { ToolCall } from './model.ts'
 
 /** The memory database of the tests. */
 export const db = memoryDb(env.MEMORY_DB)
+
 /** Real D1 queries with the production parameter limit enforced even in the local emulator. */
-export const parameterLimitedDb = drizzle(env.MEMORY_DB, {
-  schema,
-  logger: {
-    logQuery(_query, params) {
-      if (params.length > 100)
-        throw new Error(`D1 parameter limit exceeded: ${params.length} > 100`)
-    },
+export const parameterLimitedDb: MemoryDb = {
+  prepare(query) {
+    const statement = env.MEMORY_DB.prepare(query)
+    const bind = statement.bind.bind(statement)
+    vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+      if (values.length > 100) {
+        throw new Error(`D1 parameter limit exceeded: ${values.length} > 100`)
+      }
+      return bind(...values)
+    })
+    return statement
   },
-})
+  batch: (statements) => env.MEMORY_DB.batch(statements),
+  exec: (query) => env.MEMORY_DB.exec(query),
+  withSession: (constraintOrBookmark) => env.MEMORY_DB.withSession(constraintOrBookmark),
+  dump: () => env.MEMORY_DB.dump(),
+}
+
 /**
  * Interleave one write after a real record query has captured its rows: the next one, or the one
  * after `skip` others.
@@ -53,20 +63,18 @@ export function afterNextMemoryRecordsRead(
   let remaining = skip
   const prepareSpy = vi.spyOn(database, 'prepare').mockImplementation((query) => {
     const statement = prepare(query)
-    if (!query.startsWith('select ') || !query.includes('from "memory_records"')) return statement
+    if (!/\bselect\b/i.test(query) || !/\bfrom\s+memory_records\b/i.test(query)) return statement
     if (remaining-- > 0) return statement
     prepareSpy.mockRestore()
     const bind = statement.bind.bind(statement)
     vi.spyOn(statement, 'bind').mockImplementation((...values) => {
       const bound = bind(...values)
-      const raw = bound.raw.bind(bound)
-      vi.spyOn(bound, 'raw').mockImplementation(
-        async <T = unknown[]>(options?: { columnNames?: false }) => {
-          const rows = await raw<T>(options)
-          await write()
-          return rows
-        },
-      )
+      const all = bound.all.bind(bound)
+      vi.spyOn(bound, 'all').mockImplementation(async <T = Record<string, unknown>>() => {
+        const result = await all<T>()
+        await write()
+        return result
+      })
       return bound
     })
     return statement
@@ -93,16 +101,14 @@ export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): P
 }
 
 /** A record by ID, in any status. */
-export function record(id: string) {
-  return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
+export async function record(id: string): Promise<MemoryRecord | undefined> {
+  const row = await selectMemoryRecordById.run(db, { id })
+  return row === null ? undefined : parseMemoryRecord(row)
 }
 
 /** The contents of an agent's active records. */
 export async function activeContents(agentId: string): Promise<string[]> {
-  const rows = await db
-    .select({ content: memoryRecords.content })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.scope, `agent:${agentId}`), eq(memoryRecords.status, 'active')))
+  const rows = await selectActiveRecordContents.run(db, { scope: `agent:${agentId}` })
   return rows.map((row) => row.content)
 }
 
@@ -110,7 +116,7 @@ export async function activeContents(agentId: string): Promise<string[]> {
 export function storedAlwaysLoaded(agentId: string): Promise<string> {
   return runInDurableObject(env.AGENTS.getByName(agentId), async (_instance, state) => {
     const local = await openLocalDb(state.storage)
-    return local.select().from(alwaysLoaded).where(eq(alwaysLoaded.id, 1)).get()?.text ?? ''
+    return storedMemoryCopy(local)?.text ?? ''
   })
 }
 

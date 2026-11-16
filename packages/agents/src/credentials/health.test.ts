@@ -1,63 +1,55 @@
 /** Refresh health is revision/lease guarded and stores only allowlisted failure categories. @module */
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { expect, it } from 'vite-plus/test'
-import { auditLog, credentials } from '../../drizzle/management/schema.ts'
-import { uuidv7 } from '../lib/uuid.ts'
 import { managementDb } from '../control-plane/db.ts'
+import { uuidv7 } from '../lib/uuid.ts'
+import insertLeasedCredential from '../testing/sql/insert-leased-credential.sql'
+import selectAuditByTarget from '../testing/sql/select-audit-by-target.sql'
+import updateLeasedCredentialFields from '../testing/sql/update-leased-credential-fields.sql'
 import { recordRefreshFailure } from './health.ts'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import { parseCredentialRow } from './vault.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
 async function lease() {
   const leaseId = uuidv7()
-  const [row] = await db
-    .insert(credentials)
-    .values({
-      credentialId: uuidv7(),
-      kind: 'oauth_subscription',
-      provider: 'openai',
-      status: 'active',
-      ciphertext: '',
-      wrappedDek: '',
-      revision: 1,
-      fingerprint: 'fixture',
-      last4: '',
-      createdAt: 1,
-      leaseId,
-      leaseExpiresAt: 10_000,
-    })
-    .returning()
-  if (!row) throw new Error('Missing fixture')
-  return { row, leaseId }
+  const raw = await insertLeasedCredential.run(db, {
+    credentialId: uuidv7(),
+    kind: 'oauth_subscription',
+    provider: 'openai',
+    status: 'active',
+    ciphertext: '',
+    wrappedDek: '',
+    revision: 1,
+    fingerprint: 'fixture',
+    last4: '',
+    createdAt: 1,
+    leaseId,
+    leaseExpiresAt: 10_000,
+  })
+  if (!raw) throw new Error('Missing fixture')
+  return { row: parseCredentialRow(raw), leaseId }
 }
 
 it.each(['expired', 'revision', 'revoked', 'lease'] as const)(
   'ignores a %s stale refresh writer',
   async (change) => {
     const { row, leaseId } = await lease()
-    await db
-      .update(credentials)
-      .set({
-        ...(change === 'expired' ? { leaseExpiresAt: 2 } : {}),
-        ...(change === 'revision' ? { revision: 2 } : {}),
-        ...(change === 'revoked' ? { status: 'revoked' as const } : {}),
-        ...(change === 'lease' ? { leaseId: uuidv7() } : {}),
-      })
-      .where(eq(credentials.credentialId, row.credentialId))
+    await updateLeasedCredentialFields.run(db, {
+      credentialId: row.credentialId,
+      leaseExpiresAt: change === 'expired' ? 2 : row.leaseExpiresAt,
+      revision: change === 'revision' ? 2 : row.revision,
+      status: change === 'revoked' ? 'revoked' : row.status,
+      leaseId: change === 'lease' ? uuidv7() : row.leaseId,
+    })
     expect(
       await recordRefreshFailure(db, row, leaseId, 3, new Error('secret remote payload')),
     ).toBeUndefined()
-    expect(await db.select().from(auditLog).where(eq(auditLog.targetId, row.credentialId))).toEqual(
-      [],
-    )
-    expect(
-      await db
-        .select()
-        .from(credentials)
-        .where(eq(credentials.credentialId, row.credentialId))
-        .get(),
-    ).toMatchObject({ refreshFailures: 0 })
+    expect(await selectAuditByTarget.run(db, { targetId: row.credentialId })).toEqual([])
+    expect(await selectCredentialById.run(db, { credentialId: row.credentialId })).toMatchObject({
+      refreshFailures: 0,
+    })
   },
 )
 
@@ -73,7 +65,7 @@ it.each([
     lastRefreshFailureAt: 3,
     lastRefreshFailureCategory: category,
   })
-  const events = await db.select().from(auditLog).where(eq(auditLog.targetId, row.credentialId))
+  const events = await selectAuditByTarget.run(db, { targetId: row.credentialId })
   expect(events).toHaveLength(1)
   expect(events[0]).toMatchObject({ source: 'system', action: 'credential.refresh.failed' })
   expect(JSON.stringify(events)).not.toContain(message)

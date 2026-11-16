@@ -1,0 +1,29 @@
+SELECT
+  credential_id AS credentialId,
+  kind,
+  purpose,
+  provider,
+  status,
+  mcp_auth_state AS mcpAuthState,
+  revision,
+  ciphertext,
+  iv,
+  wrapped_dek AS wrappedDek,
+  wrap_iv AS wrapIv,
+  fingerprint,
+  last4,
+  lease_id AS leaseId,
+  lease_expires_at AS leaseExpiresAt,
+  created_at AS createdAt,
+  revoked_at AS revokedAt,
+  last_used_at AS lastUsedAt,
+  expires_at AS expiresAt,
+  last_refreshed_at AS lastRefreshedAt,
+  refresh_failures AS refreshFailures,
+  last_refresh_failure_at AS lastRefreshFailureAt,
+  last_refresh_failure_category AS lastRefreshFailureCategory
+FROM credentials
+WHERE credential_id = :credentialId
+  AND purpose = 'mcp_server'
+  AND provider = :serverId
+LIMIT 1;

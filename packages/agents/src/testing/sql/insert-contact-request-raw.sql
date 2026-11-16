@@ -1,0 +1,31 @@
+INSERT INTO kodama_contact_requests (
+  id,
+  source_task,
+  source_entry,
+  arguments,
+  target_agent_id,
+  request_id,
+  content,
+  hop,
+  state,
+  retry_at,
+  result,
+  created_at,
+  settled_at,
+  expires_at
+) VALUES (
+  :id,
+  :sourceTask,
+  :sourceEntry,
+  :arguments,
+  :targetAgentId,
+  :requestId,
+  :content,
+  :hop,
+  :state,
+  :retryAt,
+  :result,
+  :createdAt,
+  :settledAt,
+  :expiresAt
+);

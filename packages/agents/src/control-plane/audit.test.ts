@@ -1,12 +1,13 @@
 /** Audit reads preserve replay history, actor identity and safe, exclusive pagination. @module */
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vite-plus/test'
-import { auditLog } from '../../drizzle/management/schema.ts'
-import { agentService, caller } from '../testing/management.ts'
+import { runBatch } from '../lib/reylo.ts'
 import { uuidv7 } from '../lib/uuid.ts'
+import { agentService, caller } from '../testing/management.ts'
+import selectAllAuditLog from '../testing/sql/select-all-audit-log.sql'
 import { AuditQuerySchema, parseInput } from '../validation.ts'
-import { managementDb } from './db.ts'
 import { auditByOpId, auditStatement, readAudit } from './audit.ts'
+import { managementDb } from './db.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
@@ -19,7 +20,7 @@ it('reads real credential operations with their actor and without secrets or rea
     secret,
   })
   await agentService().revokeCredential(metadata.credentialId)
-  const before = await db.select().from(auditLog)
+  const before = await selectAllAuditLog.run(db)
   const result = await agentService().audit({ targetId: metadata.credentialId, limit: 50 })
   expect(result.entries.map((row) => row.action)).toEqual(['credential.revoke', 'credential.put'])
   expect(
@@ -29,13 +30,13 @@ it('reads real credential operations with their actor and without secrets or rea
   ).toBe(true)
   expect(result.entries[0]?.source).toBe('operator')
   expect(JSON.stringify(result)).not.toMatch(/ciphertext|wrappedDek|sk-audit-fixture-secret/)
-  expect(await db.select().from(auditLog)).toEqual(before)
+  expect(await selectAllAuditLog.run(db)).toEqual(before)
 })
 
 it('paginates by exclusive sequence, retains old operation replay, and represents system actors as null', async () => {
   const targetId = uuidv7()
   const opId = uuidv7()
-  await db.batch([
+  await runBatch(db, [
     auditStatement(db, {
       opId,
       at: 1,

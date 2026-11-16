@@ -2,28 +2,38 @@
  * The future authenticated UI is only a pass-through; it must supply its session nonce.
  * @module
  */
-import { and, eq, gt } from 'drizzle-orm'
 import * as v from 'valibot'
-import { mcpOAuthTransactions, mcpOAuthClients } from '../../../drizzle/management/schema.ts'
-import type { ManagementDb } from '../../control-plane/db.ts'
-import { mcpServer } from '../registration/catalog.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
+import type { ManagementDb } from '../../control-plane/db.ts'
+import { prepareQuery, runBatch, runChanges } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
-import {
-  eraseMcpSecret,
-  mcpSecret,
-  mcpSecretInsert,
-  mcpClientSecret,
-  mcpClientSecretPayload,
-} from './vault.ts'
+import { mcpServer } from '../registration/catalog.ts'
 import {
   discoverMcpOAuth,
   exchangeMcpToken,
-  mcpLoopbackRedirect,
   mcpClientDocument,
   mcpClientSchema,
+  mcpLoopbackRedirect,
   registerMcpOAuthClient,
 } from './oauth-http.ts'
+import claimMcpOAuthTransaction from './sql/claim-mcp-oauth-transaction.sql'
+import completeMcpOAuthTransaction from './sql/complete-mcp-oauth-transaction.sql'
+import failMcpOAuthTransaction from './sql/fail-mcp-oauth-transaction.sql'
+import insertMcpOAuthClientRegistering from './sql/insert-mcp-oauth-client-registering.sql'
+import insertMcpOAuthTransaction from './sql/insert-mcp-oauth-transaction.sql'
+import selectMcpOAuthClient from './sql/select-mcp-oauth-client.sql'
+import selectMcpOAuthTransactionPending from './sql/select-mcp-oauth-transaction-pending.sql'
+import updateMcpOAuthClientFailed from './sql/update-mcp-oauth-client-failed.sql'
+import updateMcpOAuthClientReady from './sql/update-mcp-oauth-client-ready.sql'
+import upsertMcpOAuthClient from './sql/upsert-mcp-oauth-client.sql'
+import {
+  eraseMcpSecret,
+  eraseMcpSecretStatement,
+  mcpClientSecret,
+  mcpClientSecretPayload,
+  mcpSecret,
+  mcpSecretInsert,
+} from './vault.ts'
 
 function randomSecret() {
   return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
@@ -88,29 +98,16 @@ export async function configureMcpOAuthClient(
         now,
       )
     : undefined
-  const insert = db
-    .insert(mcpOAuthClients)
-    .values({
-      registrationId,
-      serverId,
-      issuer: client.issuer,
-      redirectUri: client.redirectUri,
-      metadataJson: JSON.stringify(client),
-      secretId: envelope?.credentialId,
-      status: 'ready',
-      createdAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [mcpOAuthClients.serverId, mcpOAuthClients.issuer, mcpOAuthClients.redirectUri],
-      set: {
-        registrationId,
-        metadataJson: JSON.stringify(client),
-        secretId: envelope?.credentialId ?? null,
-        status: 'ready',
-        createdAt: now,
-      },
-    })
-  await db.batch(envelope ? [envelope.statement, insert] : [insert])
+  const insert = prepareQuery(db, upsertMcpOAuthClient, {
+    registrationId,
+    serverId,
+    issuer: client.issuer,
+    redirectUri: client.redirectUri,
+    metadataJson: JSON.stringify(client),
+    secretId: envelope?.credentialId ?? null,
+    createdAt: now,
+  })
+  await runBatch(db, envelope ? [envelope.statement, insert] : [insert])
   return { registrationId }
 }
 
@@ -144,17 +141,11 @@ export async function startMcpOAuth(
   const signal = AbortSignal.timeout(10_000)
   const discovered = await discoverMcpOAuth(server.endpoint, selectedIssuer, signal)
   const metadata = discovered.metadata
-  const existing = await db
-    .select()
-    .from(mcpOAuthClients)
-    .where(
-      and(
-        eq(mcpOAuthClients.serverId, serverId),
-        eq(mcpOAuthClients.issuer, metadata.issuer),
-        eq(mcpOAuthClients.redirectUri, redirectUri),
-      ),
-    )
-    .get()
+  const existing = await selectMcpOAuthClient.run(db, {
+    serverId,
+    issuer: metadata.issuer,
+    redirectUri,
+  })
   let client: v.InferOutput<typeof mcpClientSchema>
   let clientSecretId: string | undefined
   if (existing) {
@@ -173,12 +164,11 @@ export async function startMcpOAuth(
   } else if (metadata.registration_endpoint) {
     const registrationId = uuidv7(now)
     // Persist before the external side effect. A crash never silently replays DCR.
-    await db.insert(mcpOAuthClients).values({
+    await insertMcpOAuthClientRegistering.run(db, {
       registrationId,
       serverId,
       issuer: metadata.issuer,
       redirectUri,
-      status: 'registering',
       createdAt: now,
     })
     try {
@@ -227,16 +217,14 @@ export async function startMcpOAuth(
           )
         : undefined
       clientSecretId = envelope?.credentialId
-      const complete = db
-        .update(mcpOAuthClients)
-        .set({ status: 'ready', metadataJson: JSON.stringify(client), secretId: clientSecretId })
-        .where(eq(mcpOAuthClients.registrationId, registrationId))
-      await db.batch(envelope ? [envelope.statement, complete] : [complete])
+      const complete = prepareQuery(db, updateMcpOAuthClientReady, {
+        metadataJson: JSON.stringify(client),
+        secretId: clientSecretId ?? null,
+        registrationId,
+      })
+      await runBatch(db, envelope ? [envelope.statement, complete] : [complete])
     } catch {
-      await db
-        .update(mcpOAuthClients)
-        .set({ status: 'reauth_required' })
-        .where(eq(mcpOAuthClients.registrationId, registrationId))
+      await updateMcpOAuthClientFailed.run(db, { registrationId })
       throw new Error('mcp_client_registration_required')
     }
   } else throw new Error('mcp_client_registration_required')
@@ -271,10 +259,10 @@ export async function startMcpOAuth(
     client,
     clientSecretId,
   }
-  await db.batch([
+  await runBatch(db, [
     envelope.statement,
-    db.insert(mcpOAuthTransactions).values({
-      requestId,
+    prepareQuery(db, insertMcpOAuthTransaction, {
+      requestId: requestId ?? null,
       transactionId,
       serverId,
       serverRevision: server.revision,
@@ -282,7 +270,6 @@ export async function startMcpOAuth(
       browserDigest: await digest(browserNonce),
       bindingJson: JSON.stringify(binding),
       verifierId: envelope.credentialId,
-      status: 'pending',
       expiresAt: now + 600_000,
       createdAt: now,
     }),
@@ -347,18 +334,11 @@ export async function completeMcpOAuth(
   )
     throw new Error('mcp_auth_callback_invalid')
   const stateDigest = await digest(input.state)
-  const transaction = await db
-    .select()
-    .from(mcpOAuthTransactions)
-    .where(
-      and(
-        eq(mcpOAuthTransactions.stateDigest, stateDigest),
-        eq(mcpOAuthTransactions.browserDigest, await digest(input.browserNonce)),
-        eq(mcpOAuthTransactions.status, 'pending'),
-        gt(mcpOAuthTransactions.expiresAt, now),
-      ),
-    )
-    .get()
+  const transaction = await selectMcpOAuthTransactionPending.run(db, {
+    stateDigest,
+    browserDigest: await digest(input.browserNonce),
+    now,
+  })
   if (!transaction) throw new Error('mcp_auth_callback_invalid')
   const binding = v.parse(bindingSchema, json(transaction.bindingJson))
   const server = await mcpServer(db, transaction.serverId)
@@ -374,18 +354,11 @@ export async function completeMcpOAuth(
     binding.resource !== server.endpoint
   )
     throw new Error('mcp_auth_binding_changed')
-  const claimed = await db
-    .update(mcpOAuthTransactions)
-    .set({ status: input.denied ? 'denied' : 'exchanging' })
-    .where(
-      and(
-        eq(mcpOAuthTransactions.transactionId, transaction.transactionId),
-        eq(mcpOAuthTransactions.status, 'pending'),
-      ),
-    )
-    .returning()
-    .get()
-  if (!claimed) throw new Error('mcp_auth_callback_consumed')
+  const claimedChanges = await runChanges(db, claimMcpOAuthTransaction, {
+    status: input.denied ? 'denied' : 'exchanging',
+    transactionId: transaction.transactionId,
+  })
+  if (claimedChanges === 0) throw new Error('mcp_auth_callback_consumed')
   if (input.denied) {
     await eraseMcpSecret(db, transaction.verifierId, now)
     return { status: 'denied' as const }
@@ -447,13 +420,13 @@ export async function completeMcpOAuth(
       issuedAt,
       expiresAt,
     )
-    await db.batch([
+    await runBatch(db, [
       envelope.statement,
-      eraseMcpSecret(db, transaction.verifierId, issuedAt),
-      db
-        .update(mcpOAuthTransactions)
-        .set({ status: 'completed', credentialId: envelope.credentialId })
-        .where(eq(mcpOAuthTransactions.transactionId, transaction.transactionId)),
+      eraseMcpSecretStatement(db, transaction.verifierId, issuedAt),
+      prepareQuery(db, completeMcpOAuthTransaction, {
+        credentialId: envelope.credentialId,
+        transactionId: transaction.transactionId,
+      }),
       auditStatement(db, {
         opId: `mcp.oauth.complete:${transaction.transactionId}`,
         at: issuedAt,
@@ -471,12 +444,9 @@ export async function completeMcpOAuth(
       expiryKnown: expiresAt !== null,
     }
   } catch {
-    await db.batch([
-      eraseMcpSecret(db, transaction.verifierId, Date.now()),
-      db
-        .update(mcpOAuthTransactions)
-        .set({ status: 'reauth_required' })
-        .where(eq(mcpOAuthTransactions.transactionId, transaction.transactionId)),
+    await runBatch(db, [
+      eraseMcpSecretStatement(db, transaction.verifierId, Date.now()),
+      prepareQuery(db, failMcpOAuthTransaction, { transactionId: transaction.transactionId }),
     ])
     throw new Error('mcp_reauth_required')
   }

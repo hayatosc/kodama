@@ -6,24 +6,19 @@
  *
  * @module
  */
-import { and, eq, exists } from 'drizzle-orm'
-import * as v from 'valibot'
-import { VersionSchema } from '../../validation.ts'
 import type { Models } from '@earendil-works/pi-ai'
-import { mcpCommit } from '../../mcp/registration/catalog.ts'
-import { agentConfigVersions, agents, mcpAssignments } from '../../../drizzle/management/schema.ts'
+import * as v from 'valibot'
+import type { MemoryModelEnv } from '../../agent/dedicated/memory/config.ts'
+import {
+  defaultAgentSettings,
+  parseSettings,
+  SETTINGS_SCHEMA_VERSION,
+} from '../../control-plane/config.ts'
 import { initialGrantStatements, referenceStatements } from '../../credentials/references.ts'
 import { validateCredentialRefs } from '../../credentials/validation.ts'
-import { defaultAgentSettings, parseSettings } from '../../control-plane/config.ts'
-import { auditByOpId, auditStatement } from '../audit.ts'
-import type { AgentRow, ManagementDb, VersionRow } from '../db.ts'
-import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../registry.ts'
-import { reportApplied, versionRow, versionRows, writeVersionStatements } from '../versions.ts'
-import { SETTINGS_SCHEMA_VERSION } from '../../control-plane/config.ts'
-import type { MemoryModelEnv } from '../../agent/dedicated/memory/config.ts'
 import type { AgentEnv } from '../../env.ts'
-import { safeFailure } from '../../lib/errors.ts'
-import { errorText, isConstraintError } from '../../lib/errors.ts'
+import { errorText, isConstraintError, safeFailure } from '../../lib/errors.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import type {
   AgentSettings,
@@ -37,6 +32,16 @@ import type {
   RollbackConfigRequest,
   UpdateConfigRequest,
 } from '../../protocol.ts'
+import { VersionSchema } from '../../validation.ts'
+import { auditByOpId, auditIgnoreStatement, auditStatement } from '../audit.ts'
+import type { AgentRow, ManagementDb, VersionRow } from '../db.ts'
+import { agentRow, listAgentRows, resolveAgentRef, summaryOf } from '../registry.ts'
+import activateAgent from '../sql/activate-agent.sql'
+import commitMcpFenceAgentAssignment from '../sql/commit-mcp-fence-agent-assignment.sql'
+import insertAgent from '../sql/insert-agent.sql'
+import insertConfigVersion from '../sql/insert-config-version.sql'
+import renameAgentSql from '../sql/rename-agent.sql'
+import { reportApplied, versionRow, versionRows, writeVersionStatements } from '../versions.ts'
 
 /** The bindings and variables the management flows use. */
 export type ManagementEnv = Pick<AgentEnv, 'AGENTS' | 'MANAGEMENT_DB'> & MemoryModelEnv
@@ -129,19 +134,20 @@ export async function finishProvisioning(call: ManagementCall, agentId: string):
   const active: AgentStatus = 'active'
   // The object's copy first: the registry is the source, and a stop here is finished next time.
   await call.env.AGENTS.getByName(row.objectName).setStatus(active)
-  await call.db.batch([
-    call.db
-      .update(agents)
-      .set({ status: active, updatedAt: call.now })
-      .where(and(eq(agents.agentId, agentId), eq(agents.status, 'provisioning'))),
-    auditStatement(call.db, {
+  await runBatch(call.db, [
+    prepareQuery(call.db, activateAgent, {
+      status: active,
+      updatedAt: call.now,
+      agentId,
+    }),
+    auditIgnoreStatement(call.db, {
       opId: `agent.activate:${agentId}`,
       at: call.now,
       source: call.source,
       action: 'agent.activate',
       targetKind: 'agent',
       targetId: agentId,
-    }).onConflictDoNothing(),
+    }),
   ])
   return agentRow(call.db, agentId)
 }
@@ -183,8 +189,8 @@ export async function createAgent(
   await validateCredentialRefs(call.db, settings)
   const agentId = uuidv7(call.now)
   try {
-    await call.db.batch([
-      call.db.insert(agents).values({
+    await runBatch(call.db, [
+      prepareQuery(call.db, insertAgent, {
         agentId,
         objectName: agentId,
         kind: 'working',
@@ -195,7 +201,7 @@ export async function createAgent(
         createdAt: call.now,
         updatedAt: call.now,
       }),
-      call.db.insert(agentConfigVersions).values({
+      prepareQuery(call.db, insertConfigVersion, {
         agentId,
         version: 1,
         settingsJson: JSON.stringify(settings),
@@ -268,14 +274,15 @@ export async function renameAgent(
   change: RenameAgentRequest,
 ): Promise<AgentSummary> {
   await agentRow(call.db, agentId)
-  const set = {
-    ...(change.displayName === undefined ? {} : { displayName: change.displayName }),
-    ...(change.slug === undefined ? {} : { slug: change.slug }),
-    updatedAt: call.now,
-  }
   try {
-    await call.db.batch([
-      call.db.update(agents).set(set).where(eq(agents.agentId, agentId)),
+    await runBatch(call.db, [
+      prepareQuery(call.db, renameAgentSql, {
+        displayName: change.displayName ?? null,
+        updateSlug: change.slug === undefined ? 0 : 1,
+        slug: change.slug ?? null,
+        updatedAt: call.now,
+        agentId,
+      }),
       auditStatement(call.db, {
         opId: `agent.rename:${agentId}:${uuidv7(call.now)}`,
         at: call.now,
@@ -334,34 +341,23 @@ async function writeVersion(
   await validateCredentialRefs(call.db, write.settings, agentId)
   const mcpFences = (write.settings.mcp ?? []).map((selected) => {
     if (row.kind !== 'working') throw new Error('mcp_agent_unavailable')
-    return mcpCommit(
-      call.db,
-      uuidv7(),
-      exists(
-        call.db
-          .select()
-          .from(mcpAssignments)
-          .innerJoin(agents, eq(agents.agentId, mcpAssignments.agentId))
-          .where(
-            and(
-              eq(agents.kind, 'working'),
-              eq(mcpAssignments.agentId, agentId),
-              eq(mcpAssignments.toolId, selected.toolId),
-              eq(mcpAssignments.serverId, selected.serverId),
-              eq(mcpAssignments.serverRevision, selected.serverRevision),
-              eq(mcpAssignments.digest, selected.digest),
-              eq(mcpAssignments.credentialId, selected.credentialId),
-            ),
-          ),
-      ),
-    )
+    return prepareQuery(call.db, commitMcpFenceAgentAssignment, {
+      operationId: uuidv7(),
+      agentId,
+      toolId: selected.toolId,
+      serverId: selected.serverId,
+      serverRevision: selected.serverRevision,
+      digest: selected.digest,
+      credentialId: selected.credentialId,
+      createdAt: Date.now(),
+    })
   })
   const detail = {
     ...(write.comment === undefined ? {} : { comment: write.comment }),
     ...(write.rollbackOf === undefined ? {} : { rollbackOf: write.rollbackOf }),
   }
   try {
-    await call.db.batch([
+    await runBatch(call.db, [
       ...writeVersionStatements(
         call.db,
         { source: call.source, now: call.now, opId: write.opId },

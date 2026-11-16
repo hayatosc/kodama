@@ -1,0 +1,32 @@
+INSERT INTO credentials (
+  credential_id,
+  purpose,
+  kind,
+  provider,
+  revision,
+  ciphertext,
+  iv,
+  wrapped_dek,
+  wrap_iv,
+  fingerprint,
+  last4,
+  status,
+  created_at,
+  expires_at
+)
+VALUES (
+  :credentialId,
+  'mcp_server',
+  :kind,
+  :provider,
+  :revision,
+  :ciphertext,
+  :iv,
+  :wrappedDek,
+  :wrapIv,
+  :fingerprint,
+  '',
+  'active',
+  :createdAt,
+  :expiresAt
+);

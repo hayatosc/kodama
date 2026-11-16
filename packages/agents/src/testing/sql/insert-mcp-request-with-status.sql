@@ -1,0 +1,30 @@
+INSERT INTO mcp_requests (
+  request_id,
+  source_agent_id,
+  conversation_id,
+  entry_id,
+  submission_id,
+  server_id,
+  server_revision,
+  credential_id,
+  status,
+  name,
+  notified_at,
+  expires_at,
+  created_at
+)
+VALUES (
+  :requestId,
+  :sourceAgentId,
+  :conversationId,
+  :entryId,
+  :submissionId,
+  :serverId::nullable(text),
+  :serverRevision::nullable(int),
+  :credentialId::nullable(text),
+  :status,
+  :name,
+  :notifiedAt::nullable(int),
+  :expiresAt,
+  :createdAt
+);

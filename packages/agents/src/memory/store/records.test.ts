@@ -1,13 +1,14 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
 import { applyOperation } from './records.ts'
 import { memoryDb } from './db.ts'
+import type { Scope } from './db.ts'
 import type { NewRecord } from './records.ts'
 import type { OperationContext } from './statements.ts'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
+import selectActiveRecordContents from './sql/select-active-record-contents.sql'
+import selectMemoryRecordById from './sql/select-memory-record-by-id.sql'
+import selectScopeRevisions from './sql/select-scope-revisions.sql'
 
 const db = memoryDb(env.MEMORY_DB)
 const NOW = Date.UTC(2026, 9, 1)
@@ -34,19 +35,12 @@ function fact(scope: Scope, agentId: string, content: string, entryTo: number): 
 }
 
 async function activeContents(scope: Scope): Promise<string[]> {
-  const rows = await db
-    .select({ content: memoryRecords.content })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.scope, scope), eq(memoryRecords.status, 'active')))
+  const rows = await selectActiveRecordContents.run(db, { scope })
   return rows.map((row) => row.content)
 }
 
 async function revision(id: string): Promise<number | undefined> {
-  const row = await db
-    .select({ revision: memoryRecords.revision })
-    .from(memoryRecords)
-    .where(eq(memoryRecords.id, id))
-    .get()
+  const row = await selectMemoryRecordById.run(db, { id })
   return row?.revision
 }
 
@@ -175,13 +169,7 @@ describe('applying operations', () => {
   it('changes the scope revision for facts but not for events', async () => {
     const { scope, agentId } = agentScope()
     const current = async () =>
-      (
-        await db
-          .select({ revision: scopeRevisions.revision })
-          .from(scopeRevisions)
-          .where(eq(scopeRevisions.scope, scope))
-          .get()
-      )?.revision
+      (await selectScopeRevisions.run(db, { scopesJson: JSON.stringify([scope]) }))[0]?.revision
 
     await applyOperation(db, context(uuidv7()), {
       type: 'write',
@@ -245,11 +233,7 @@ describe('checking operations', () => {
     })
 
     if (result.status !== 'applied') throw new Error(`supersede ${result.status}`)
-    const row = await db
-      .select()
-      .from(memoryRecords)
-      .where(eq(memoryRecords.id, result.recordId))
-      .get()
+    const row = await selectMemoryRecordById.run(db, { id: result.recordId })
     expect(row).toMatchObject({ sourceEntryFrom: 120, sourceEntryTo: 120, content: 'uses pnpm' })
   })
 

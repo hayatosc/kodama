@@ -3,58 +3,20 @@
  *
  * @module
  */
-import { and, desc, eq, inArray, ne, notExists, or } from 'drizzle-orm'
-import { alias } from 'drizzle-orm/sqlite-core'
-import { memoryRecords, scopeRevisions } from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
-import { agentScope } from './db.ts'
-import type { MemoryDb } from './db.ts'
-
-/**
- * The condition that keeps only the records `agentId` sees once overrides apply: its own records,
- * except those overriding a required shared record, and shared records it has not overridden.
- *
- * @remarks
- * Resolving this in SQL lets a query rank and limit the visible records only.
- */
-export function effectiveForAgent(db: MemoryDb, agentId: string, scopes: readonly Scope[]) {
-  const own = agentScope(agentId)
-  const target = alias(memoryRecords, 'required_target')
-  const override = alias(memoryRecords, 'agent_override')
-  const requiredTarget = db
-    .select({ id: target.id })
-    .from(target)
-    .where(
-      and(
-        eq(target.id, memoryRecords.overrides),
-        eq(target.status, 'active'),
-        eq(target.required, true),
-        ne(target.scope, own),
-        inArray(target.scope, [...scopes]),
-      ),
-    )
-  const ownOverride = db
-    .select({ id: override.id })
-    .from(override)
-    .where(
-      and(
-        eq(override.overrides, memoryRecords.id),
-        eq(override.scope, own),
-        eq(override.status, 'active'),
-      ),
-    )
-  return or(
-    and(eq(memoryRecords.scope, own), notExists(requiredTarget)),
-    and(ne(memoryRecords.scope, own), or(eq(memoryRecords.required, true), notExists(ownOverride))),
-  )
-}
+import { agentScope, parseMemoryRecord, parseScope } from './db.ts'
+import type { MemoryDb, MemoryRecord, Scope } from './db.ts'
+import selectActiveRecordRevision from './sql/select-active-record-revision.sql'
+import selectActiveRecordsById from './sql/select-active-records-by-id.sql'
+import selectPromptRecords from './sql/select-prompt-records.sql'
+import selectScopeRevisions from './sql/select-scope-revisions.sql'
 
 /** Current revisions for the scopes a prompt reads. */
 export async function memoryRevisions(
   db: MemoryDb,
-  scopes: Scope[],
+  scopes: readonly Scope[],
 ): Promise<Record<string, number>> {
-  const rows = await db.select().from(scopeRevisions).where(inArray(scopeRevisions.scope, scopes))
+  if (scopes.length === 0) return {}
+  const rows = await selectScopeRevisions.run(db, { scopesJson: JSON.stringify(scopes) })
   return Object.fromEntries(rows.map((row) => [row.scope, row.revision]))
 }
 
@@ -64,47 +26,40 @@ export async function memoryRevisions(
  *
  * @param readable - Every scope the agent reads, which decides the overrides that apply.
  */
-export function promptRecords(
+export async function promptRecords(
   db: MemoryDb,
   agentId: string,
-  scopes: Scope[],
+  scopes: readonly Scope[],
   readable: readonly Scope[],
   limit: number,
   kinds: readonly ('fact' | 'instruction')[] = ['fact', 'instruction'],
-) {
-  return db
-    .select()
-    .from(memoryRecords)
-    .where(
-      and(
-        inArray(memoryRecords.scope, scopes),
-        eq(memoryRecords.status, 'active'),
-        inArray(memoryRecords.kind, [...kinds]),
-        effectiveForAgent(db, agentId, readable),
-      ),
-    )
-    .orderBy(
-      desc(memoryRecords.pinned),
-      desc(memoryRecords.importance),
-      // SQLite orders NULL first ascending, so never-used records come last descending.
-      desc(memoryRecords.lastUsedAt),
-    )
-    .limit(limit)
+): Promise<MemoryRecord[]> {
+  if (scopes.length === 0 || kinds.length === 0 || limit <= 0) return []
+  const rows = await selectPromptRecords.run(db, {
+    own: agentScope(agentId),
+    scopesJson: JSON.stringify(scopes),
+    readableJson: JSON.stringify(readable),
+    kindsJson: JSON.stringify(kinds),
+    limit,
+  })
+  return rows.map(parseMemoryRecord)
 }
 
 /** Active evidence records for a proposed shared write. */
-export function activeRecordsById(db: MemoryDb, ids: readonly string[]) {
-  return db
-    .select()
-    .from(memoryRecords)
-    .where(and(inArray(memoryRecords.id, [...ids]), eq(memoryRecords.status, 'active')))
+export async function activeRecordsById(
+  db: MemoryDb,
+  ids: readonly string[],
+): Promise<MemoryRecord[]> {
+  if (ids.length === 0) return []
+  const rows = await selectActiveRecordsById.run(db, { idsJson: JSON.stringify(ids) })
+  return rows.map(parseMemoryRecord)
 }
 
 /** The current scope and revision of an active replacement target. */
-export function activeRecordRevision(db: MemoryDb, id: string) {
-  return db
-    .select({ scope: memoryRecords.scope, revision: memoryRecords.revision })
-    .from(memoryRecords)
-    .where(and(eq(memoryRecords.id, id), eq(memoryRecords.status, 'active')))
-    .get()
+export async function activeRecordRevision(
+  db: MemoryDb,
+  id: string,
+): Promise<{ scope: Scope; revision: number } | undefined> {
+  const row = await selectActiveRecordRevision.run(db, { id })
+  return row === null ? undefined : { scope: parseScope(row.scope), revision: row.revision }
 }

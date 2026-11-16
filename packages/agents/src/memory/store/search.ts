@@ -5,12 +5,14 @@
  *
  * @module
  */
-import { and, eq, gte, inArray, lt } from 'drizzle-orm'
-import { effectiveForAgent } from './queries.ts'
-import type { MemoryDb, MemoryRecord } from './db.ts'
-import { memoryRecords, memoryTerms } from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { searchTermSets } from '../../lib/search-text.ts'
+import { agentScope, parseMemoryRecord } from './db.ts'
+import type { MemoryDb, MemoryRecord, Scope } from './db.ts'
+import incrementMemoryRecordUse from './sql/increment-memory-record-use.sql'
+import selectMemoryRecordsByIds from './sql/select-memory-records-by-ids.sql'
+import selectRecordsWithTermExact from './sql/select-records-with-term-exact.sql'
+import selectRecordsWithTermPrefix from './sql/select-records-with-term-prefix.sql'
 
 /** What to search, and where. */
 export interface SearchOptions {
@@ -36,7 +38,7 @@ function score(record: MemoryRecord, now: number): number {
 
 /** Candidates per query word, enough for a scope of a few thousand records. */
 const CANDIDATES_PER_WORD = 500
-/** One ID is one binding; D1 allows at most 100 parameters per statement. */
+/** Fetch batch size, keeping memory overhead bounded per round-trip. */
 const RECORDS_PER_FETCH = 100
 
 /** Active records of the scopes that have `term`, or a term starting with it. */
@@ -47,22 +49,23 @@ async function recordsWithTerm(
   scopes: readonly Scope[],
   forAgent: string | undefined,
 ): Promise<Set<string>> {
-  const rows = await db
-    .select({ id: memoryTerms.recordId })
-    .from(memoryTerms)
-    .innerJoin(memoryRecords, eq(memoryRecords.id, memoryTerms.recordId))
-    .where(
-      and(
+  const own = forAgent === undefined ? null : agentScope(forAgent)
+  const scopesJson = JSON.stringify(scopes)
+  const rows = prefix
+    ? await selectRecordsWithTermPrefix.run(db, {
+        own,
+        scopesJson,
+        termFrom: term,
         // A prefix is the range of terms from it up to the next possible string.
-        prefix
-          ? and(gte(memoryTerms.term, term), lt(memoryTerms.term, `${term}\u{10FFFF}`))
-          : eq(memoryTerms.term, term),
-        eq(memoryRecords.status, 'active'),
-        inArray(memoryRecords.scope, [...scopes]),
-        forAgent === undefined ? undefined : effectiveForAgent(db, forAgent, scopes),
-      ),
-    )
-    .limit(CANDIDATES_PER_WORD)
+        termTo: `${term}\u{10FFFF}`,
+        limit: CANDIDATES_PER_WORD,
+      })
+    : await selectRecordsWithTermExact.run(db, {
+        own,
+        scopesJson,
+        term,
+        limit: CANDIDATES_PER_WORD,
+      })
   return new Set(rows.map((row) => row.id))
 }
 
@@ -89,11 +92,9 @@ export async function searchMemory(
     const ids = [...matches].slice(0, CANDIDATES_PER_WORD)
     const records: MemoryRecord[] = []
     for (let offset = 0; offset < ids.length; offset += RECORDS_PER_FETCH) {
-      const rows = await db
-        .select()
-        .from(memoryRecords)
-        .where(inArray(memoryRecords.id, ids.slice(offset, offset + RECORDS_PER_FETCH)))
-      records.push(...rows)
+      const chunk = ids.slice(offset, offset + RECORDS_PER_FETCH)
+      const rows = await selectMemoryRecordsByIds.run(db, { idsJson: JSON.stringify(chunk) })
+      records.push(...rows.map(parseMemoryRecord))
     }
     const ranked = records
       .map((record) => ({ record, score: score(record, now) }))
@@ -108,11 +109,14 @@ export async function searchMemory(
 
 /** One more use of each record; a use counted twice at the same moment may be lost, which is fine. */
 async function countUses(db: MemoryDb, records: readonly MemoryRecord[], now: number) {
-  const [first, ...rest] = records.map((record) =>
-    db
-      .update(memoryRecords)
-      .set({ useCount: record.useCount + 1, lastUsedAt: now })
-      .where(eq(memoryRecords.id, record.id)),
+  await runBatch(
+    db,
+    records.map((record) =>
+      prepareQuery(db, incrementMemoryRecordUse, {
+        id: record.id,
+        nextUseCount: record.useCount + 1,
+        lastUsedAt: now,
+      }),
+    ),
   )
-  if (first !== undefined) await db.batch([first, ...rest])
 }

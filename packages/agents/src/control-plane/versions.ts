@@ -6,12 +6,17 @@
  *
  * @module
  */
-import { and, desc, eq, gte, lt } from 'drizzle-orm'
-import { agentConfigVersions, agents } from '../../drizzle/management/schema.ts'
 import { SETTINGS_SCHEMA_VERSION } from '../control-plane/config.ts'
+import { prepareQuery } from '../lib/reylo.ts'
 import type { AgentSettings } from '../protocol.ts'
 import { auditStatement } from './audit.ts'
+import { parseVersionRow } from './db.ts'
 import type { ManagementDb, VersionRow } from './db.ts'
+import advanceDesiredVersion from './sql/advance-desired-version.sql'
+import insertConfigVersion from './sql/insert-config-version.sql'
+import reportAppliedVersion from './sql/report-applied-version.sql'
+import selectConfigVersion from './sql/select-config-version.sql'
+import selectConfigVersions from './sql/select-config-versions.sql'
 
 /** Who writes a version, when, and its retry key. */
 export interface VersionWrite {
@@ -32,10 +37,10 @@ export function writeVersionStatements(
   expected: number,
   settings: AgentSettings,
   detail: { comment?: string; rollbackOf?: number },
-) {
+): readonly [D1PreparedStatement, D1PreparedStatement, D1PreparedStatement] {
   const version = expected + 1
   return [
-    db.insert(agentConfigVersions).values({
+    prepareQuery(db, insertConfigVersion, {
       agentId,
       version,
       settingsJson: JSON.stringify(settings),
@@ -44,10 +49,12 @@ export function writeVersionStatements(
       comment: detail.comment ?? null,
       createdAt: write.now,
     }),
-    db
-      .update(agents)
-      .set({ currentVersion: version, updatedAt: write.now })
-      .where(and(eq(agents.agentId, agentId), eq(agents.currentVersion, expected))),
+    prepareQuery(db, advanceDesiredVersion, {
+      version,
+      updatedAt: write.now,
+      agentId,
+      expected,
+    }),
     auditStatement(db, {
       opId: write.opId,
       at: write.now,
@@ -61,46 +68,39 @@ export function writeVersionStatements(
 }
 
 /** One stored version, if it exists. */
-export function versionRow(
+export async function versionRow(
   db: ManagementDb,
   agentId: string,
   version: number,
 ): Promise<VersionRow | undefined> {
-  return db
-    .select()
-    .from(agentConfigVersions)
-    .where(and(eq(agentConfigVersions.agentId, agentId), eq(agentConfigVersions.version, version)))
-    .get()
+  const row = await selectConfigVersion.run(db, { agentId, version })
+  return row === null ? undefined : parseVersionRow(row)
 }
 
 /** An agent's versions, newest first, before version `before` when given. */
-export function versionRows(
+export async function versionRows(
   db: ManagementDb,
   agentId: string,
   page: { before?: number; limit: number },
 ): Promise<VersionRow[]> {
-  const conditions = [
-    eq(agentConfigVersions.agentId, agentId),
-    page.before === undefined ? undefined : lt(agentConfigVersions.version, page.before),
-  ]
-  return db
-    .select()
-    .from(agentConfigVersions)
-    .where(and(...conditions))
-    .orderBy(desc(agentConfigVersions.version))
-    .limit(page.limit)
+  const rows = await selectConfigVersions.run(db, {
+    agentId,
+    before: page.before ?? null,
+    limit: page.limit,
+  })
+  return rows.map(parseVersionRow)
 }
 
 /** Record that the agent's object applied `version`; never moves backwards or past desired. */
-export function reportApplied(db: ManagementDb, agentId: string, version: number) {
-  return db
-    .update(agents)
-    .set({ appliedVersion: version })
-    .where(
-      and(
-        eq(agents.agentId, agentId),
-        lt(agents.appliedVersion, version),
-        gte(agents.currentVersion, version),
-      ),
-    )
+export async function reportApplied(
+  db: ManagementDb,
+  agentId: string,
+  version: number,
+): Promise<void> {
+  await reportAppliedVersion.run(db, {
+    version,
+    agentId,
+    appliedCeiling: version,
+    desiredFloor: version,
+  })
 }

@@ -1,24 +1,25 @@
 /** MCP catalog and assignment workflows against real local D1, with remote transport fixtures. @module */
 import { env } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { mcpAssignments, mcpTools } from '../../../drizzle/management/schema.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
+import { validateCredentialRefs } from '../../credentials/validation.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import {
   desiredSettings,
   management,
   newAgentId,
   updateSettings,
 } from '../../testing/management.ts'
-import { createAgentModels } from '../../control-plane/models.ts'
-import { guardMcpSelection, registerMcpCatalog, mcpServer } from './catalog.ts'
-import { validateCredentialRefs } from '../../credentials/validation.ts'
-import { putMcpBearer } from '../authorization/vault.ts'
+import selectMcpAssignmentsByAgent from '../../testing/sql/select-mcp-assignments-by-agent.sql'
+import selectMcpAssignmentsByAgentServer from '../../testing/sql/select-mcp-assignments-by-agent-server.sql'
 import { disconnectMcp } from '../authorization/refresh.ts'
+import { putMcpBearer } from '../authorization/vault.ts'
 import { MCP_PROTOCOL } from '../connection/transport.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
-import { assignMcp, discoverMcp, disableMcp } from './servers.ts'
-import { manageMcp } from './operations.ts'
+import { guardMcpSelection, mcpServer, registerMcpCatalog } from './catalog.ts'
 import { mcpCatalogNotices } from './notifications.ts'
+import { manageMcp } from './operations.ts'
+import { assignMcp, disableMcp, discoverMcp } from './servers.ts'
+import selectMcpToolById from './sql/select-mcp-tool-by-id.sql'
 
 async function fixture() {
   const agentId = await newAgentId()
@@ -140,9 +141,7 @@ describe('MCP assignments', () => {
   it('registration and inspection publish nothing; explicit assignment creates a pinned version', async () => {
     const { call, agentId, selection, tool } = await fixture()
     expect((await desiredSettings(agentId)).mcp).toBeUndefined()
-    expect(
-      await management.select().from(mcpAssignments).where(eq(mcpAssignments.agentId, agentId)),
-    ).toEqual([])
+    expect(await selectMcpAssignmentsByAgent.run(management, { agentId })).toEqual([])
     await expect(
       manageMcp(call, env.CREDENTIAL_KEK_V1, '', {
         operation: 'assign',
@@ -182,11 +181,7 @@ describe('MCP assignments', () => {
       { name: 'extra', description: 'New unselected tool', inputSchema: { type: 'object' } },
     ])
     await discoverMcp(call, env.CREDENTIAL_KEK_V1, server.serverId, credential.credentialId)
-    const changed = await management
-      .select()
-      .from(mcpTools)
-      .where(eq(mcpTools.toolId, tool.toolId))
-      .get()
+    const changed = await selectMcpToolById.run(management, { toolId: tool.toolId })
     expect(changed?.modelName).toBe(tool.modelName)
     expect(changed?.digest).not.toBe(tool.digest)
     await expect(guardMcpSelection(management, agentId, selected)).rejects.toThrow(
@@ -220,15 +215,10 @@ describe('MCP assignments', () => {
     const otherAgentId = await newAgentId()
     await assignMcp(call, env.CREDENTIAL_KEK_V1, selection)
     expect(
-      await management
-        .select()
-        .from(mcpAssignments)
-        .where(
-          and(
-            eq(mcpAssignments.agentId, otherAgentId),
-            eq(mcpAssignments.serverId, server.serverId),
-          ),
-        ),
+      await selectMcpAssignmentsByAgentServer.run(management, {
+        agentId: otherAgentId,
+        serverId: server.serverId,
+      }),
     ).toEqual([])
     await assignMcp(call, env.CREDENTIAL_KEK_V1, { ...selection, agentId: otherAgentId })
     expect((await desiredSettings(otherAgentId)).mcp).toHaveLength(1)

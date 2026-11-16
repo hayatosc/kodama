@@ -1,10 +1,9 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { agents } from '../../../drizzle/management/schema.ts'
 import { reconcileAgents } from '../../control-plane/workflows/reconcile.ts'
 import { managementDb } from '../../control-plane/db.ts'
+import selectAgentById from '../../control-plane/sql/select-agent-by-id.sql'
 import {
   agentService,
   management,
@@ -23,7 +22,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 afterEach(() => vi.restoreAllMocks())
 
 async function versions(agentId: string) {
-  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await selectAgentById.run(management, { agentId })
   return { desired: row?.currentVersion, applied: row?.appliedVersion }
 }
 

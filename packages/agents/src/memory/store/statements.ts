@@ -3,19 +3,16 @@
  *
  * @module
  */
-import { eq } from 'drizzle-orm'
-import type { BatchItem } from 'drizzle-orm/batch'
 import * as v from 'valibot'
-import type { MemoryDb } from './db.ts'
-import {
-  memoryLedger,
-  memoryOps,
-  memoryTerms,
-  revisionClaims,
-  scopeRevisions,
-} from '../../../drizzle/memory/schema.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
+import { prepareQuery } from '../../lib/reylo.ts'
 import { storedTerms } from '../../lib/search-text.ts'
+import type { MemoryDb, Scope } from './db.ts'
+import insertMemoryLedger from './sql/insert-memory-ledger.sql'
+import insertMemoryOp from './sql/insert-memory-op.sql'
+import insertMemoryTerms from './sql/insert-memory-terms.sql'
+import insertRevisionClaim from './sql/insert-revision-claim.sql'
+import selectMemoryOp from './sql/select-memory-op.sql'
+import upsertScopeRevision from './sql/upsert-scope-revision.sql'
 
 /**
  * The result of an operation: `stale` means the candidate rests on older entries than the record it
@@ -47,26 +44,22 @@ const operationResultSchema = v.variant('status', [
 ])
 
 /** One statement of a D1 batch. */
-export type Statement = BatchItem<'sqlite'>
+export type Statement = D1PreparedStatement
 /** The statements of one batch; a batch has at least one. */
 export type Statements = [Statement, ...Statement[]]
 
-/** D1 binds at most 100 parameters per statement; a term row takes two. */
-const TERMS_PER_STATEMENT = 50
-
 /**
- * Inserts of a record's search terms.
- *
- * @remarks
- * D1 binds at most 100 parameters per statement, so the rows are split across statements.
+ * Inserts of a record's search terms using a single SQLite `json_each` statement.
  */
 export function termStatements(db: MemoryDb, recordId: string, content: string): Statement[] {
-  const rows = storedTerms(content).map((term) => ({ term, recordId }))
-  const statements: Statement[] = []
-  for (let start = 0; start < rows.length; start += TERMS_PER_STATEMENT) {
-    statements.push(db.insert(memoryTerms).values(rows.slice(start, start + TERMS_PER_STATEMENT)))
-  }
-  return statements
+  const terms = storedTerms(content)
+  if (terms.length === 0) return []
+  return [
+    prepareQuery(db, insertMemoryTerms, {
+      recordId,
+      termsJson: JSON.stringify(terms),
+    }),
+  ]
 }
 
 /** The `memory_ops` row that records an operation and its result, so a repeat finds it. */
@@ -75,8 +68,8 @@ export function insertOp(
   context: OperationContext,
   op: string,
   result: OperationResult,
-) {
-  return db.insert(memoryOps).values({
+): Statement {
+  return prepareQuery(db, insertMemoryOp, {
     opId: context.opId,
     jobId: context.jobId,
     op,
@@ -98,10 +91,14 @@ export function claimRevision(
   target: 'record' | 'checkpoint' | 'skill' | 'task',
   targetId: string,
   revision: number,
-) {
-  return db
-    .insert(revisionClaims)
-    .values({ target, targetId, revision, opId: context.opId, claimedAt: context.now })
+): Statement {
+  return prepareQuery(db, insertRevisionClaim, {
+    target,
+    targetId,
+    revision,
+    opId: context.opId,
+    claimedAt: context.now,
+  })
 }
 
 /** A new value each time; scope revisions are compared for equality only. */
@@ -111,12 +108,12 @@ function newScopeRevision(): number {
 }
 
 /** Give a scope a new revision, so agents reading it refresh their always-loaded copy. */
-export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope) {
-  const revision = newScopeRevision()
-  return db
-    .insert(scopeRevisions)
-    .values({ scope, revision, updatedAt: context.now })
-    .onConflictDoUpdate({ target: scopeRevisions.scope, set: { revision, updatedAt: context.now } })
+export function bumpScope(db: MemoryDb, context: OperationContext, scope: Scope): Statement {
+  return prepareQuery(db, upsertScopeRevision, {
+    scope,
+    revision: newScopeRevision(),
+    updatedAt: context.now,
+  })
 }
 
 /** The stored result of an operation that was already applied, if any. */
@@ -124,12 +121,8 @@ export async function appliedResult(
   db: MemoryDb,
   opId: string,
 ): Promise<OperationResult | undefined> {
-  const row = await db
-    .select({ resultJson: memoryOps.resultJson })
-    .from(memoryOps)
-    .where(eq(memoryOps.opId, opId))
-    .get()
-  if (row === undefined) return undefined
+  const row = await selectMemoryOp.run(db, { opId })
+  if (row === null) return undefined
   const parsed: unknown = JSON.parse(row.resultJson)
   return v.parse(operationResultSchema, parsed)
 }
@@ -145,8 +138,8 @@ export function recordLedger(
   targetId: string,
   detail: unknown,
   target: 'record' | 'skill' | 'task' = 'record',
-) {
-  return db.insert(memoryLedger).values({
+): Statement {
+  return prepareQuery(db, insertMemoryLedger, {
     at: context.now,
     runId: context.runId,
     opId: context.opId,

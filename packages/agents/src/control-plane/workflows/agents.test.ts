@@ -1,22 +1,23 @@
 /** Agent management commits registry, configuration and credential references together. @module */
-import { defaultAgentSettings } from '../../control-plane/config.ts'
-import { grantTestCredentials, testCredentialRefs } from '../../testing/credentials.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
 import { env, exports } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vite-plus/test'
-import {
-  agentConfigVersions,
-  agentCredentialRefs,
-  agents,
-  auditLog,
-} from '../../../drizzle/management/schema.ts'
-import { agentService, caller, management, newAgentId, seedOnce } from '../../testing/management.ts'
-import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
-import { write, db } from '../../testing/memory.ts'
-import { agentScope } from '../../memory/store/db.ts'
-import { memoryRecords } from '../../../drizzle/memory/schema.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import { MEMORY_AGENT_ID } from '../../memory/jobs.ts'
+import { agentScope } from '../../memory/store/db.ts'
+import selectActiveRecordContents from '../../memory/store/sql/select-active-record-contents.sql'
+import { grantTestCredentials, testCredentialRefs } from '../../testing/credentials.ts'
+import { agentService, caller, management, newAgentId, seedOnce } from '../../testing/management.ts'
+import { db, write } from '../../testing/memory.ts'
+import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
+import selectAllAgentCredentialRefs from '../../testing/sql/select-all-agent-credential-refs.sql'
+import selectAllAgents from '../../testing/sql/select-all-agents.sql'
+import selectAllAuditLog from '../../testing/sql/select-all-audit-log.sql'
+import selectAllConfigVersions from '../../testing/sql/select-all-config-versions.sql'
+import selectAuditByTarget from '../../testing/sql/select-audit-by-target.sql'
+import updateConfigVersionSettings from '../../testing/sql/update-config-version-settings.sql'
+import { defaultAgentSettings } from '../config.ts'
+import selectAgentById from '../sql/select-agent-by-id.sql'
+import selectConfigVersions from '../sql/select-config-versions.sql'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -62,16 +63,10 @@ it('keeps credential coverage aligned with create, update and rollback versions'
       credentials: { primary: { openai: credential.credentialId } },
     },
   })
-  const references = () =>
-    management
-      .select()
-      .from(agentCredentialRefs)
-      .where(
-        and(
-          eq(agentCredentialRefs.agentId, created.agentId),
-          eq(agentCredentialRefs.credentialId, credential.credentialId),
-        ),
-      )
+  const references = async () =>
+    (await selectAllAgentCredentialRefs.run(management)).filter(
+      (row) => row.agentId === created.agentId && row.credentialId === credential.credentialId,
+    )
   expect(await references()).toEqual([
     { agentId: created.agentId, provider: 'openai', credentialId: credential.credentialId },
   ])
@@ -103,10 +98,10 @@ it('rejects unknown credential references before create or version writes', asyn
   const configuration = await agentService().getConfig(source.agentId)
   const settings = { ...configuration.settings, credentials: { primary: { openai: uuidv7() } } }
   const state = async () => ({
-    agents: await management.select().from(agents),
-    versions: await management.select().from(agentConfigVersions),
-    refs: await management.select().from(agentCredentialRefs),
-    audit: await management.select().from(auditLog),
+    agents: await selectAllAgents.run(management),
+    versions: await selectAllConfigVersions.run(management),
+    refs: await selectAllAgentCredentialRefs.run(management),
+    audit: await selectAllAuditLog.run(management),
   })
   const before = await state()
   expect(
@@ -130,10 +125,10 @@ it('rejects unknown credential references before create or version writes', asyn
   ).toContain('Unknown credential')
   expect(await state()).toEqual(before)
   // Simulate an old configuration whose referenced credential no longer exists.
-  await management
-    .update(agentConfigVersions)
-    .set({ settingsJson: JSON.stringify(settings) })
-    .where(eq(agentConfigVersions.agentId, source.agentId))
+  await updateConfigVersionSettings.run(management, {
+    agentId: source.agentId,
+    settingsJson: JSON.stringify(settings),
+  })
   const historical = await state()
   expect(
     await rejection(
@@ -152,11 +147,7 @@ describe('createAgent', () => {
     await caller()
     const created = await create('Researcher', uniqueSlug())
     expect(created.agentId).toMatch(UUID_V7)
-    const registry = await management
-      .select()
-      .from(agents)
-      .where(eq(agents.agentId, created.agentId))
-      .get()
+    const registry = await selectAgentById.run(management, { agentId: created.agentId })
     expect(registry).toMatchObject({
       objectName: created.agentId,
       kind: 'working',
@@ -170,17 +161,15 @@ describe('createAgent', () => {
       appliedVersion: 1,
       pending: false,
     })
-    const versions = await management
-      .select()
-      .from(agentConfigVersions)
-      .where(eq(agentConfigVersions.agentId, created.agentId))
+    const versions = await selectConfigVersions.run(management, {
+      agentId: created.agentId,
+      before: null,
+      limit: 50,
+    })
     expect(versions.map((row) => row.version)).toEqual([1])
     expect(registry).not.toHaveProperty('ownerId')
     expect(versions[0]?.source).toBe('operator')
-    const audit = await management
-      .select({ action: auditLog.action })
-      .from(auditLog)
-      .where(eq(auditLog.targetId, created.agentId))
+    const audit = await selectAuditByTarget.run(management, { targetId: created.agentId })
     expect(audit.map((row) => row.action)).toEqual(['agent.create', 'agent.activate'])
 
     await exports.default.sendMessage(created.agentId, { requestId: 'hi', content: 'Hello' })
@@ -220,7 +209,7 @@ describe('createAgent', () => {
     ])
 
     expect(second.agentId).toBe(first.agentId)
-    const rows = await management.select().from(agents).where(eq(agents.slug, request.slug))
+    const rows = (await selectAllAgents.run(management)).filter((row) => row.slug === request.slug)
     expect(rows).toHaveLength(1)
   })
 
@@ -259,10 +248,7 @@ describe('renameAgent', () => {
     expect((await agentService().resolveAgent(slug)).agentId).toBe(agentId)
     const history = (await exports.default.snapshot(agentId)).snapshot.messages
     expect(history.filter((message) => message.role === 'user')).toHaveLength(1)
-    const memory = await db
-      .select()
-      .from(memoryRecords)
-      .where(eq(memoryRecords.scope, agentScope(agentId)))
+    const memory = await selectActiveRecordContents.run(db, { scope: agentScope(agentId) })
     expect(memory.map((row) => row.content)).toEqual(['Likes tea'])
     const cleared = await agentService().renameAgent(agentId, { slug: null })
     expect(cleared.slug).toBeUndefined()
@@ -327,17 +313,15 @@ describe('configuration versions', () => {
     expect(lost).toHaveLength(1)
     expect(lost[0]).toMatchObject({ error: expect.stringMatching(/version_conflict/) })
 
-    const versions = await management
-      .select()
-      .from(agentConfigVersions)
-      .where(eq(agentConfigVersions.agentId, agentId))
-    expect(versions.map((row) => row.version)).toEqual([1, 2])
-    const configAudits = await management
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.targetId, agentId))
+    const versions = await selectConfigVersions.run(management, {
+      agentId,
+      before: null,
+      limit: 50,
+    })
+    expect(versions.map((row) => row.version).reverse()).toEqual([1, 2])
+    const configAudits = await selectAuditByTarget.run(management, { targetId: agentId })
     expect(configAudits.filter((row) => row.action === 'agent.config')).toHaveLength(1)
-    const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    const row = await selectAgentById.run(management, { agentId })
     expect(row?.currentVersion).toBe(2)
   })
 

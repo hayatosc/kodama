@@ -5,8 +5,8 @@
  *
  * @module
  */
-import type { TASK_PROGRESS_STATUSES } from '../../drizzle/memory/schema.ts'
-
+/** Lifecycle statuses persisted for a working agent's durable task checkpoint. */
+export const TASK_PROGRESS_STATUSES = ['in_progress', 'blocked', 'completed', 'archived'] as const
 /** Lifecycle states for a working agent's durable task checkpoint. */
 export type TaskProgressStatus = (typeof TASK_PROGRESS_STATUSES)[number]
 

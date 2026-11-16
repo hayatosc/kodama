@@ -1,7 +1,6 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { refuseWhenFull, STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
 import { setAlarm } from '../../agent/runtime/alarms.ts'
@@ -19,15 +18,15 @@ import { requestBody, textResponse, toolCallResponse, toolResults } from '../../
 import { PRUNE_LIMITS_KEY } from './runs.ts'
 import { prunedThrough } from '../../agent/local-db/pruning.ts'
 import { memoryDb } from '../store/db.ts'
-import { archiveSegments } from '../../../drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import {
-  memoryJobs,
-  pruneRuns,
-  scheduledTaskOccurrences,
-} from '../../../drizzle/durable-object/schema.ts'
+import insertPruneRun from '../../agent/local-db/sql/insert-prune-run.sql'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { markContact } from '../../agent/local-db/external-data.ts'
+import selectAllMemoryJobs from '../../testing/sql/select-all-memory-jobs.sql'
+import selectAllPruneRuns from '../../testing/sql/select-all-prune-runs.sql'
+import selectArchiveSegmentsByAgent from '../../testing/sql/select-archive-segments-by-agent.sql'
+import setScheduledOccurrencesRetryAt from '../../testing/sql/set-scheduled-occurrences-retry-at.sql'
+import setScheduledOccurrencesState from '../../testing/sql/set-scheduled-occurrences-state.sql'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import {
   BACKGROUND_USAGE,
@@ -69,10 +68,7 @@ describe('pruning', () => {
 
     const ids = await storedEntryIds(agentId)
     expect(ids.every((id) => id >= (head ?? 0))).toBe(true)
-    const segments = await db
-      .select()
-      .from(archiveSegments)
-      .where(eq(archiveSegments.agentId, agentId))
+    const segments = await selectArchiveSegmentsByAgent.run(db, { agentId })
     expect(segments).toHaveLength(1)
     expect(segments[0]?.lastEntry).toBeLessThan(head ?? 0)
     const segment = segments[0]
@@ -80,7 +76,7 @@ describe('pruning', () => {
     expect(segment.firstEntry).toBeLessThanOrEqual(segment.lastEntry)
     const runs = await runInDurableObject(stub, async (_i, state) => {
       const local = await openLocalDb(state.storage)
-      return local.select().from(pruneRuns).all()
+      return selectAllPruneRuns.runSync(local.sql)
     })
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ firstEntry: segment.firstEntry, lastEntry: segment.lastEntry })
@@ -117,7 +113,7 @@ describe('pruning', () => {
       env.AGENTS.getByName(MEMORY_AGENT_NAME),
       async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return local.select().from(memoryJobs).all()
+        return selectAllMemoryJobs.runSync(local.sql)
       },
     )
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
@@ -149,10 +145,8 @@ describe('pruning', () => {
     const jobsOf = (agentId: string) =>
       runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return local
-          .select({ kind: memoryJobs.kind, payloadJson: memoryJobs.payloadJson })
-          .from(memoryJobs)
-          .all()
+        return selectAllMemoryJobs
+          .runSync(local.sql)
           .filter((job) => job.payloadJson.includes(agentId))
           .map((job) => job.kind)
       })
@@ -228,17 +222,13 @@ describe('pruning', () => {
     await runInDurableObject(stub, async (_i, state) => {
       const local = await openLocalDb(state.storage)
       const now = Date.now()
-      local
-        .insert(pruneRuns)
-        .values({
-          firstEntry: 1,
-          lastEntry: head - 1,
-          head,
-          state: 'prepared',
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run()
+      insertPruneRun.runSync(local.sql, {
+        firstEntry: 1,
+        lastEntry: head - 1,
+        head,
+        createdAt: now,
+        updatedAt: now,
+      })
     })
 
     // Without force and under the threshold, only the unfinished run is carried on.
@@ -307,10 +297,7 @@ describe('pruning', () => {
       await expect(refuseWhenFull(state.storage)).rejects.toThrow(STORAGE_MAINTENANCE_ERROR)
       expect(await instance.prune({ force: true })).toBe('pruned')
       expect(state.storage.sql.databaseSize).toBeLessThanOrEqual(hardBytes)
-      local
-        .update(scheduledTaskOccurrences)
-        .set({ retryAt: Date.now() - 1 })
-        .run()
+      setScheduledOccurrencesRetryAt.runSync(local.sql, { retryAt: Date.now() - 1 })
       await setAlarm(state.storage, 'schedule', Date.now() - 1)
       await instance.alarm()
       return occurrence.id
@@ -351,10 +338,10 @@ describe('pruning', () => {
           start - 1,
         )
         claimOccurrence(local, task, start, undefined, Date.now() + 3_600_000)
-        local
-          .update(scheduledTaskOccurrences)
-          .set({ state: status, admissionStarted: status === 'dispatching' })
-          .run()
+        setScheduledOccurrencesState.runSync(local.sql, {
+          state: status,
+          admissionStarted: status === 'dispatching',
+        })
         expect(await instance.prune({ force: true })).toBe('deferred')
       })
     },
@@ -427,10 +414,7 @@ describe('memory agent pruning', () => {
           { timeout: 10_000 },
         )
         .toBeGreaterThan(0)
-      const segments = await db
-        .select()
-        .from(archiveSegments)
-        .where(eq(archiveSegments.agentId, MEMORY_AGENT_NAME))
+      const segments = await selectArchiveSegmentsByAgent.run(db, { agentId: MEMORY_AGENT_NAME })
       expect(segments).toEqual([])
     } finally {
       await runInDurableObject(stub, (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))

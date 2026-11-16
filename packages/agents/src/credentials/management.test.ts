@@ -1,12 +1,18 @@
 /** Registered callers, write-only registration, and atomic D1 revocation. @module */
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { expect, it } from 'vite-plus/test'
-import { auditLog, credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
-import { newAgentId } from '../testing/management.ts'
-import { uuidv7 } from '../lib/uuid.ts'
 import { createAgentModels } from '../control-plane/models.ts'
+import selectAuditByOpId from '../control-plane/sql/select-audit-by-op-id.sql'
+import { uuidv7 } from '../lib/uuid.ts'
+import { newAgentId } from '../testing/management.ts'
+import selectAllAuditLog from '../testing/sql/select-all-audit-log.sql'
+import selectAllCredentials from '../testing/sql/select-all-credentials.sql'
+import selectAuditByAction from '../testing/sql/select-audit-by-action.sql'
+import selectAuditByTarget from '../testing/sql/select-audit-by-target.sql'
+import setCredentialHealthFields from '../testing/sql/set-credential-health-fields.sql'
+import setCredentialLease from '../testing/sql/set-credential-lease.sql'
+import { credentialFingerprint } from './encryption.ts'
 import {
   credentialCoverage,
   credentialRow,
@@ -14,7 +20,8 @@ import {
   putCredential,
   revokeCredential,
 } from './management.ts'
-import { credentialFingerprint } from './encryption.ts'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import selectCredentialGrantsByCredential from './sql/select-credential-grants-by-credential.sql'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
@@ -41,12 +48,9 @@ it('returns only metadata through RPC and records a secret-free registration aud
   expect(result).not.toHaveProperty('wrappedDek')
   expect(await exports.default.putCredential(request)).toEqual(result)
   expect(JSON.stringify(await exports.default.listCredentials())).not.toContain(request.secret)
-  const rows = await db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.credentialId, result.credentialId))
-  expect(JSON.stringify(rows)).not.toContain(request.secret)
-  const audits = await db.select().from(auditLog).where(eq(auditLog.targetId, result.credentialId))
+  const row = await selectCredentialById.run(db, { credentialId: result.credentialId })
+  expect(JSON.stringify(row)).not.toContain(request.secret)
+  const audits = await selectAuditByTarget.run(db, { targetId: result.credentialId })
   expect(audits).toHaveLength(1)
   expect(audits[0]?.detailJson).toContain(result.fingerprint)
   expect(JSON.stringify(audits)).not.toContain(request.secret)
@@ -70,18 +74,16 @@ it('lists credential health from metadata without decrypting the envelope', asyn
     lastRefreshedAt: null,
     refreshFailures: 0,
   })
-  await db
-    .update(credentials)
-    .set({
-      ciphertext: 'unreadable-envelope',
-      wrappedDek: 'unreadable-envelope',
-      lastUsedAt: 1000,
-      lastRefreshedAt: 2000,
-      refreshFailures: 2,
-      lastRefreshFailureAt: 3000,
-      lastRefreshFailureCategory: 'transient',
-    })
-    .where(eq(credentials.credentialId, value.credentialId))
+  await setCredentialHealthFields.run(db, {
+    credentialId: value.credentialId,
+    ciphertext: 'unreadable-envelope',
+    wrappedDek: 'unreadable-envelope',
+    lastUsedAt: 1000,
+    lastRefreshedAt: 2000,
+    refreshFailures: 2,
+    lastRefreshFailureAt: 3000,
+    lastRefreshFailureCategory: 'transient',
+  })
   const metadata = (await exports.default.listCredentials()).find(
     (entry) => entry.credentialId === value.credentialId,
   )
@@ -101,36 +103,36 @@ it('lists credential health from metadata without decrypting the envelope', asyn
 
 it('replays credential-shaped request IDs without changing their identity', async () => {
   const { call } = caller()
-  const before = await db.select().from(credentials)
-  const audits = await db.select().from(auditLog)
+  const before = await selectAllCredentials.run(db)
+  const audits = await selectAllAuditLog.run(db)
   const requestId = `sk-${'x'.repeat(32)}`
   const input = { requestId, provider: 'openai', secret: 'safe-test-key' }
   const first = await putCredential(call, env, input)
   expect(await putCredential(call, env, input)).toEqual(first)
-  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
-  expect(await db.select().from(auditLog)).toHaveLength(audits.length + 1)
+  expect(await selectAllCredentials.run(db)).toHaveLength(before.length + 1)
+  expect(await selectAllAuditLog.run(db)).toHaveLength(audits.length + 1)
 })
 
 it('replays identical concurrent registrations without extra credentials or audits', async () => {
   const { call } = caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
-  const before = await db.select().from(credentials)
-  const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put'))
+  const before = await selectAllCredentials.run(db)
+  const audits = await selectAuditByAction.run(db, { action: 'credential.put' })
   const [first, second] = await Promise.all([
     putCredential(call, env, input),
     putCredential(call, env, input),
   ])
   expect(second).toEqual(first)
-  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
-  expect(
-    await db.select().from(auditLog).where(eq(auditLog.action, 'credential.put')),
-  ).toHaveLength(audits.length + 1)
+  expect(await selectAllCredentials.run(db)).toHaveLength(before.length + 1)
+  expect(await selectAuditByAction.run(db, { action: 'credential.put' })).toHaveLength(
+    audits.length + 1,
+  )
 })
 
 it('reports a credential conflict for concurrent reuse with different content', async () => {
   const { call } = caller()
   const input = { requestId: uuidv7(), provider: 'openai', secret: 'concurrent-secret-key' }
-  const before = await db.select().from(credentials)
+  const before = await selectAllCredentials.run(db)
   const results = await Promise.allSettled([
     putCredential(call, env, input),
     putCredential(call, env, { ...input, secret: 'different-secret-key' }),
@@ -139,7 +141,7 @@ it('reports a credential conflict for concurrent reuse with different content', 
   const failed = results.find((result) => result.status === 'rejected')
   if (failed?.status !== 'rejected') throw new Error('Expected rejected retry')
   expect(String(failed.reason)).toContain('credential_conflict')
-  expect(await db.select().from(credentials)).toHaveLength(before.length + 1)
+  expect(await selectAllCredentials.run(db)).toHaveLength(before.length + 1)
 })
 
 it('names credential IDs in validation errors', async () => {
@@ -164,12 +166,9 @@ it('replays concurrent duplicate grants with a single audit', async () => {
   ])
   expect(results[0]).toEqual(results[1])
   expect(
-    await db
-      .select()
-      .from(credentialGrants)
-      .where(eq(credentialGrants.credentialId, credential.credentialId)),
+    await selectCredentialGrantsByCredential.run(db, { credentialId: credential.credentialId }),
   ).toHaveLength(1)
-  const audits = await db.select().from(auditLog).where(eq(auditLog.action, 'credential.grant'))
+  const audits = await selectAuditByAction.run(db, { action: 'credential.grant' })
   expect(audits.filter((row) => row.detailJson.includes(credential.credentialId))).toHaveLength(1)
 })
 
@@ -184,14 +183,9 @@ it('rejects a grant to an unknown agent without writing a grant or audit', async
     new TypeError('Unknown agent'),
   )
   expect(
-    await db
-      .select()
-      .from(credentialGrants)
-      .where(eq(credentialGrants.credentialId, credential.credentialId)),
+    await selectCredentialGrantsByCredential.run(db, { credentialId: credential.credentialId }),
   ).toEqual([])
-  expect(
-    await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
-  ).toHaveLength(1)
+  expect(await selectAuditByTarget.run(db, { targetId: credential.credentialId })).toHaveLength(1)
 })
 
 it('uses the private operator boundary and does not echo invalid secret inputs', async () => {
@@ -237,26 +231,13 @@ it('preserves the first revocation and one audit for concurrent retries', async 
     revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId),
   ])
   expect(results[0]).toEqual(results[1])
-  const row = await db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.credentialId, credential.credentialId))
-    .get()
+  const row = await selectCredentialById.run(db, { credentialId: credential.credentialId })
   expect([call.now, call.now + 1000]).toContain(row?.revokedAt)
   await revokeCredential({ ...call, now: call.now + 2000 }, credential.credentialId)
+  expect(await selectCredentialById.run(db, { credentialId: credential.credentialId })).toEqual(row)
   expect(
-    await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, credential.credentialId))
-      .get(),
-  ).toEqual(row)
-  expect(
-    await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.opId, `credential.revoke:${credential.credentialId}`)),
-  ).toHaveLength(1)
+    await selectAuditByOpId.run(db, { opId: `credential.revoke:${credential.credentialId}` }),
+  ).not.toBeNull()
 })
 
 it.each(['api_key', 'oauth_subscription'] as const)(
@@ -277,20 +258,17 @@ it.each(['api_key', 'oauth_subscription'] as const)(
               expires: Date.now() + 60000,
             }),
     })
-    await db
-      .update(credentials)
-      .set({ leaseId: 'in-flight-refresh', leaseExpiresAt: call.now + 30000 })
-      .where(eq(credentials.credentialId, credential.credentialId))
+    await setCredentialLease.run(db, {
+      credentialId: credential.credentialId,
+      leaseId: 'in-flight-refresh',
+      leaseExpiresAt: call.now + 30000,
+    })
     expect(await revokeCredential(call, credential.credentialId)).toEqual({
       credentialId: credential.credentialId,
       status: 'revoked',
       affectedAgents: [],
     })
-    const row = await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, credential.credentialId))
-      .get()
+    const row = await selectCredentialById.run(db, { credentialId: credential.credentialId })
     expect(row).toMatchObject({
       status: 'revoked',
       ciphertext: null,
@@ -302,15 +280,9 @@ it.each(['api_key', 'oauth_subscription'] as const)(
       revokedAt: call.now,
     })
     await revokeCredential({ ...call, now: call.now + 1000 }, credential.credentialId)
-    expect(
-      await db
-        .select()
-        .from(credentials)
-        .where(eq(credentials.credentialId, credential.credentialId))
-        .get(),
-    ).toEqual(row)
-    expect(
-      await db.select().from(auditLog).where(eq(auditLog.targetId, credential.credentialId)),
-    ).toHaveLength(2)
+    expect(await selectCredentialById.run(db, { credentialId: credential.credentialId })).toEqual(
+      row,
+    )
+    expect(await selectAuditByTarget.run(db, { targetId: credential.credentialId })).toHaveLength(2)
   },
 )

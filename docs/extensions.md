@@ -26,8 +26,9 @@ transport types. `src/validation.ts` supplies strict binary upload and bounded l
   the owning DO SQLite beside `artifacts`, `contactRequests`, `contactReceipts`, and
   `notifications`.
 
-Generated schema changes live in `drizzle/durable-object/migrations/`; never hand-edit them.
-No new DO class, D1 binding, public HTTP endpoint, or credential fallback is needed.
+Schema migrations live in `sql/durable-object/migrations/` and are applied by
+`src/agent/local-db/local.ts`. No new DO class, D1 binding, public HTTP endpoint, or credential
+fallback is needed.
 
 ## Completion and notification atomicity
 

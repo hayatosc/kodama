@@ -2,31 +2,37 @@
  * Discovery never assigns tools. Each assignment is an explicit operator-selected immutable version.
  * @module
  */
-import { mcpNoticeRecipients, mcpRevocationRecipients } from './notifications.ts'
-import { consumeMcpIntent, mcpIntentAudit } from './intents.ts'
-import type { McpIntent } from './intents.ts'
-import { mcpProposals } from '../../../drizzle/management/schema.ts'
-import { and, eq, exists } from 'drizzle-orm'
-import {
-  agents,
-  credentialGrants,
-  credentials,
-  mcpAssignments,
-  mcpDefinitions,
-  mcpServers,
-  mcpTools,
-} from '../../../drizzle/management/schema.ts'
-import { authorizeMcp } from '../authorization/refresh.ts'
-import { mcpToken } from '../authorization/vault.ts'
-import { inspectMcpTool, mcpDigest } from './definitions.ts'
-import { closeMcpSession, listMcpTools, openMcpSession } from '../connection/transport.ts'
-import { mcpCatalogTools, mcpCommit, mcpServer } from './catalog.ts'
 import { auditStatement } from '../../control-plane/audit.ts'
 import { parseSettings } from '../../control-plane/config.ts'
 import { versionRow, writeVersionStatements } from '../../control-plane/versions.ts'
 import { pushDesired } from '../../control-plane/workflows/agents.ts'
 import type { ManagementCall } from '../../control-plane/workflows/agents.ts'
+import insertCredentialGrantIgnore from '../../credentials/sql/insert-credential-grant-ignore.sql'
+import { prepareQuery, runBatch } from '../../lib/reylo.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import { authorizeMcp } from '../authorization/refresh.ts'
+import { mcpToken } from '../authorization/vault.ts'
+import { closeMcpSession, listMcpTools, openMcpSession } from '../connection/transport.ts'
+import { mcpCatalogTools, mcpServer } from './catalog.ts'
+import { inspectMcpTool, mcpDigest } from './definitions.ts'
+import { consumeMcpIntent, mcpIntentAudit } from './intents.ts'
+import type { McpIntent } from './intents.ts'
+import { mcpNoticeRecipients, mcpRevocationRecipients } from './notifications.ts'
+import commitMcpAssign from './sql/commit-mcp-assign.sql'
+import commitMcpProposal from './sql/commit-mcp-proposal.sql'
+import commitMcpServerRevision from './sql/commit-mcp-server-revision.sql'
+import commitMcpServerState from './sql/commit-mcp-server-state.sql'
+import deleteMcpAssignmentsByServer from './sql/delete-mcp-assignments-by-server.sql'
+import disableMcpServer from './sql/disable-mcp-server.sql'
+import insertMcpAssignment from './sql/insert-mcp-assignment.sql'
+import insertMcpDefinitionIgnore from './sql/insert-mcp-definition-ignore.sql'
+import markMcpToolsAbsent from './sql/mark-mcp-tools-absent.sql'
+import publishMcpServer from './sql/publish-mcp-server.sql'
+import recordMcpInspectionError from './sql/record-mcp-inspection-error.sql'
+import selectMcpProposal from './sql/select-mcp-proposal.sql'
+import selectMcpToolsByServer from './sql/select-mcp-tools-by-server.sql'
+import selectWorkingAgent from './sql/select-working-agent.sql'
+import upsertMcpTool from './sql/upsert-mcp-tool.sql'
 
 /** Reconciliation and mutations project invalid selections into the existing durable inbox. */
 export async function notifyMcpAssignments(call: ManagementCall, serverId?: string) {
@@ -82,23 +88,19 @@ export async function discoverMcp(
       error instanceof Error && /^mcp_[a-z_]+$/u.test(error.message)
         ? error.message
         : 'mcp_unavailable'
-    await call.db
-      .update(mcpServers)
-      .set({ inspectionError: code })
-      .where(
-        and(
-          eq(mcpServers.serverId, serverId),
-          eq(mcpServers.revision, server.revision),
-          eq(mcpServers.catalogVersion, server.catalogVersion),
-        ),
-      )
+    await recordMcpInspectionError.run(call.db, {
+      inspectionError: code,
+      serverId,
+      revision: server.revision,
+      catalogVersion: server.catalogVersion,
+    })
     throw new Error(code)
   }
   if (new Set(inspected.map((tool) => tool.name)).size !== inspected.length)
     throw new Error('mcp_catalog_invalid')
   const current = await mcpServer(call.db, serverId)
   if (current.revision !== server.revision) throw new Error('mcp_server_changed')
-  const previous = await call.db.select().from(mcpTools).where(eq(mcpTools.serverId, serverId))
+  const previous = await selectMcpToolsByServer.run(call.db, { serverId })
   const tools = inspected.map((tool) => {
     const old = previous.find((entry) => entry.remoteName === tool.name)
     const toolId = old?.toolId ?? uuidv7()
@@ -119,46 +121,31 @@ export async function discoverMcp(
       .map(({ toolId, digest, rejection }) => ({ toolId, digest, rejection }))
       .sort((a, b) => a.toolId.localeCompare(b.toolId)),
   )
-  await call.db.batch([
-    mcpCommit(
-      call.db,
-      uuidv7(),
-      exists(
-        call.db
-          .select()
-          .from(mcpServers)
-          .where(
-            and(
-              eq(mcpServers.serverId, serverId),
-              eq(mcpServers.revision, server.revision),
-              eq(mcpServers.catalogVersion, server.catalogVersion),
-            ),
-          ),
-      ),
-    ),
-    call.db.update(mcpTools).set({ present: false }).where(eq(mcpTools.serverId, serverId)),
+  await runBatch(call.db, [
+    prepareQuery(call.db, commitMcpServerState, {
+      operationId: uuidv7(),
+      serverId,
+      revision: server.revision,
+      catalogVersion: server.catalogVersion,
+      createdAt: Date.now(),
+    }),
+    prepareQuery(call.db, markMcpToolsAbsent, { serverId }),
     ...tools.flatMap((tool) => [
-      call.db
-        .insert(mcpDefinitions)
-        .values({ digest: tool.digest, definitionJson: tool.definitionJson })
-        .onConflictDoNothing(),
-      call.db
-        .insert(mcpTools)
-        .values(tool)
-        .onConflictDoUpdate({ target: mcpTools.toolId, set: tool }),
+      prepareQuery(call.db, insertMcpDefinitionIgnore, {
+        digest: tool.digest,
+        definitionJson: tool.definitionJson,
+      }),
+      prepareQuery(call.db, upsertMcpTool, tool),
     ]),
-    call.db
-      .update(mcpServers)
-      .set({
-        catalogDigest,
-        catalogVersion: server.catalogVersion + 1,
-        inspectedAt: call.now,
-        inspectionError: null,
-        stale,
-        updatedAt: call.now,
-        enabled: true,
-      })
-      .where(and(eq(mcpServers.serverId, serverId), eq(mcpServers.revision, server.revision))),
+    prepareQuery(call.db, publishMcpServer, {
+      catalogDigest,
+      catalogVersion: server.catalogVersion + 1,
+      inspectedAt: call.now,
+      stale,
+      updatedAt: call.now,
+      serverId,
+      revision: server.revision,
+    }),
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
@@ -200,11 +187,7 @@ export async function assignMcp(
       JSON.stringify(instruction.toolIds) !== JSON.stringify([...input.toolIds].sort())
     )
       throw new Error('mcp_intent_mismatch')
-    const proposal = await call.db
-      .select()
-      .from(mcpProposals)
-      .where(eq(mcpProposals.proposalId, instruction.proposalId))
-      .get()
+    const proposal = await selectMcpProposal.run(call.db, { proposalId: instruction.proposalId })
     if (
       !proposal ||
       proposal.sourceAgentId !== intent.sourceAgentId ||
@@ -230,11 +213,7 @@ export async function assignMcp(
     new Set(input.toolIds).size !== input.toolIds.length
   )
     throw new TypeError('mcp_selection_invalid')
-  const agent = await call.db
-    .select()
-    .from(agents)
-    .where(and(eq(agents.agentId, input.agentId), eq(agents.kind, 'working')))
-    .get()
+  const agent = await selectWorkingAgent.run(call.db, { agentId: input.agentId })
   if (!agent || agent.status !== 'active') throw new Error('mcp_agent_unavailable')
   const catalog = await mcpCatalogTools(call.db, input.serverId)
   const selected = input.toolIds.map((id) => {
@@ -286,68 +265,28 @@ export async function assignMcp(
     ],
     toolPolicy: Object.keys(nextToolPolicy).length > 0 ? nextToolPolicy : undefined,
   })
-  await call.db.batch([
-    mcpCommit(
-      call.db,
-      uuidv7(),
-      and(
-        exists(
-          call.db
-            .select()
-            .from(mcpServers)
-            .where(
-              and(
-                eq(mcpServers.serverId, server.serverId),
-                eq(mcpServers.enabled, true),
-                eq(mcpServers.revision, server.revision),
-                eq(mcpServers.catalogVersion, server.catalogVersion),
-              ),
-            ),
-        ),
-        exists(
-          call.db
-            .select()
-            .from(agents)
-            .where(
-              and(
-                eq(agents.agentId, agent.agentId),
-                eq(agents.status, 'active'),
-                eq(agents.currentVersion, agent.currentVersion),
-              ),
-            ),
-        ),
-        exists(
-          call.db
-            .select()
-            .from(credentials)
-            .where(
-              and(
-                eq(credentials.credentialId, input.credentialId),
-                eq(credentials.status, 'active'),
-              ),
-            ),
-        ),
-      ),
-    ),
+  const commitNow = Date.now()
+  await runBatch(call.db, [
+    prepareQuery(call.db, commitMcpAssign, {
+      operationId: uuidv7(),
+      serverId: server.serverId,
+      revision: server.revision,
+      catalogVersion: server.catalogVersion,
+      agentId: agent.agentId,
+      currentVersion: agent.currentVersion,
+      credentialId: input.credentialId,
+      createdAt: commitNow,
+    }),
     ...(intent ? consumeMcpIntent(call.db, intent) : []),
     ...(intent?.instruction.operation === 'assign'
       ? [
-          mcpCommit(
-            call.db,
-            `proposal:${intent.instruction.proposalId}`,
-            exists(
-              call.db
-                .select()
-                .from(mcpProposals)
-                .where(
-                  and(
-                    eq(mcpProposals.proposalId, intent.instruction.proposalId),
-                    eq(mcpProposals.sourceAgentId, intent.sourceAgentId),
-                    eq(mcpProposals.conversationId, intent.conversationId),
-                  ),
-                ),
-            ),
-          ),
+          prepareQuery(call.db, commitMcpProposal, {
+            operationId: `proposal:${intent.instruction.proposalId}`,
+            proposalId: intent.instruction.proposalId,
+            sourceAgentId: intent.sourceAgentId,
+            conversationId: intent.conversationId,
+            createdAt: commitNow,
+          }),
         ]
       : []),
     ...writeVersionStatements(
@@ -362,21 +301,17 @@ export async function assignMcp(
           : 'Operator selected write-capable MCP tools',
       },
     ),
-    call.db
-      .delete(mcpAssignments)
-      .where(
-        and(
-          eq(mcpAssignments.agentId, agent.agentId),
-          eq(mcpAssignments.serverId, server.serverId),
-        ),
-      ),
+    prepareQuery(call.db, deleteMcpAssignmentsByServer, {
+      agentId: agent.agentId,
+      serverId: server.serverId,
+    }),
     ...selected.map(({ modelName: _name, readOnly: _readOnly, ...selection }) =>
-      call.db.insert(mcpAssignments).values({ agentId: agent.agentId, ...selection }),
+      prepareQuery(call.db, insertMcpAssignment, { agentId: agent.agentId, ...selection }),
     ),
-    call.db
-      .insert(credentialGrants)
-      .values({ credentialId: input.credentialId, agentId: agent.agentId })
-      .onConflictDoNothing(),
+    prepareQuery(call.db, insertCredentialGrantIgnore, {
+      credentialId: input.credentialId,
+      agentId: agent.agentId,
+    }),
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,
@@ -401,21 +336,19 @@ export async function assignMcp(
 /** Invalidation is immediate at the guard, regardless of pending configuration versions. */
 export async function disableMcp(call: ManagementCall, serverId: string) {
   const server = await mcpServer(call.db, serverId)
-  await call.db.batch([
-    mcpCommit(
-      call.db,
-      uuidv7(),
-      exists(
-        call.db
-          .select()
-          .from(mcpServers)
-          .where(and(eq(mcpServers.serverId, serverId), eq(mcpServers.revision, server.revision))),
-      ),
-    ),
-    call.db
-      .update(mcpServers)
-      .set({ enabled: false, revision: server.revision + 1, updatedAt: call.now })
-      .where(and(eq(mcpServers.serverId, serverId), eq(mcpServers.revision, server.revision))),
+  await runBatch(call.db, [
+    prepareQuery(call.db, commitMcpServerRevision, {
+      operationId: uuidv7(),
+      serverId,
+      revision: server.revision,
+      createdAt: Date.now(),
+    }),
+    prepareQuery(call.db, disableMcpServer, {
+      nextRevision: server.revision + 1,
+      updatedAt: call.now,
+      serverId,
+      expectedRevision: server.revision,
+    }),
     auditStatement(call.db, {
       opId: uuidv7(),
       at: call.now,

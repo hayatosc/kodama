@@ -6,81 +6,89 @@
  * @module
  */
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  lt,
-  max,
-  ne,
-  notInArray,
-  notExists,
-} from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
-import { mcpCalls, pruneRuns } from '../../../drizzle/durable-object/schema.ts'
+import { parseEnum } from '../../lib/reylo.ts'
 import type { LocalDb } from './local.ts'
-import {
-  piConversations,
-  piDocumentRevisions,
-  piDocuments,
-  piEntries,
-  piRecordIds,
-  piTasks,
-} from './pi-tables.ts'
+import countPiConversations from './sql/count-pi-conversations.sql'
+import deleteOrphanPiRecordIdsDocuments from './sql/delete-orphan-pi-record-ids-documents.sql'
+import deleteOrphanPiRecordIdsTasks from './sql/delete-orphan-pi-record-ids-tasks.sql'
+import deletePiEntriesBetween from './sql/delete-pi-entries-between.sql'
+import deletePiRecordIdsEntries from './sql/delete-pi-record-ids-entries.sql'
+import deletePrunedPiDocumentRevisions from './sql/delete-pruned-pi-document-revisions.sql'
+import deletePrunedPiDocuments from './sql/delete-pruned-pi-documents.sql'
+import deletePrunedPiTasks from './sql/delete-pruned-pi-tasks.sql'
+import insertPruneRun from './sql/insert-prune-run.sql'
+import selectLatestPiHead from './sql/select-latest-pi-head.sql'
+import selectPiEntriesBetween from './sql/select-pi-entries-between.sql'
+import selectPiEntriesRange from './sql/select-pi-entries-range.sql'
+import selectPrunablePiEntry from './sql/select-prunable-pi-entry.sql'
+import selectPrunedThrough from './sql/select-pruned-through.sql'
+import selectUnfinishedPruneRun from './sql/select-unfinished-prune-run.sql'
+import updatePruneRun from './sql/update-prune-run.sql'
+
+const PRUNE_STATES = ['prepared', 'exported', 'indexed', 'deleted'] as const
+
+/** Permitted lifecycle state of a pruning run. */
+export type PruneRunState = (typeof PRUNE_STATES)[number]
 
 /** A persisted pruning run and its state. */
-export type Run = typeof pruneRuns.$inferSelect
+export interface Run {
+  id: number
+  firstEntry: number
+  lastEntry: number
+  head: number
+  state: PruneRunState
+  entryCount: number | null
+  bytes: number | null
+  sha256: string | null
+  firstAt: number | null
+  lastAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+function parseRun(row: {
+  id: number
+  firstEntry: number
+  lastEntry: number
+  head: number
+  state: string
+  entryCount: number | null
+  bytes: number | null
+  sha256: string | null
+  firstAt: number | null
+  lastAt: number | null
+  createdAt: number
+  updatedAt: number
+}): Run {
+  return {
+    ...row,
+    state: parseEnum(PRUNE_STATES, row.state, 'prune run state'),
+  }
+}
 
 /** The last entry pruned so far, or 0. */
 export function prunedThrough(local: LocalDb): number {
-  const row = local
-    .select({ last: max(pruneRuns.lastEntry) })
-    .from(pruneRuns)
-    .where(eq(pruneRuns.state, 'deleted'))
-    .get()
-  return row?.last ?? 0
+  return selectPrunedThrough.runSync(local.sql).last ?? 0
 }
 
 /** The run not yet deleted, if any; there is at most one. */
 export function unfinishedRun(local: LocalDb): Run | undefined {
-  return local
-    .select()
-    .from(pruneRuns)
-    .where(ne(pruneRuns.state, 'deleted'))
-    .orderBy(desc(pruneRuns.id))
-    .get()
+  const row = selectUnfinishedPruneRun.runSync(local.sql)
+  return row === null ? undefined : parseRun(row)
 }
 
 /** Whether an unpruned entry precedes the newest root compaction or reset head. */
 export function hasPrunableEntries(storage: DurableObjectStorage, after: number): boolean {
-  const pi = drizzle(storage)
-  const row = pi
-    .select({ head: piEntries.head })
-    .from(piEntries)
-    .where(and(eq(piEntries.conversationId, ROOT_CONVERSATION_ID), isNotNull(piEntries.head)))
-    .orderBy(desc(piEntries.id))
-    .limit(1)
-    .get()
-  const head = row?.head
+  const head = selectLatestPiHead.runSync(storage.sql, {
+    conversationId: ROOT_CONVERSATION_ID,
+  })?.head
   if (head === undefined || head === null) return false
   return (
-    pi
-      .select({ id: piEntries.id })
-      .from(piEntries)
-      .where(
-        and(
-          eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-          gt(piEntries.id, after),
-          lt(piEntries.id, head),
-        ),
-      )
-      .limit(1)
-      .get() !== undefined
+    selectPrunablePiEntry.runSync(storage.sql, {
+      conversationId: ROOT_CONVERSATION_ID,
+      after,
+      head,
+    }) !== null
   )
 }
 
@@ -91,12 +99,22 @@ export function setState(
   change: Partial<Run> & { state: Run['state'] },
   now: number,
 ): Run {
-  return local
-    .update(pruneRuns)
-    .set({ ...change, updatedAt: now })
-    .where(eq(pruneRuns.id, run.id))
-    .returning()
-    .get()
+  const merged = { ...run, ...change, updatedAt: now }
+  const updated = updatePruneRun.runSync(local.sql, {
+    id: run.id,
+    firstEntry: merged.firstEntry,
+    lastEntry: merged.lastEntry,
+    head: merged.head,
+    state: merged.state,
+    entryCount: merged.entryCount,
+    bytes: merged.bytes,
+    sha256: merged.sha256,
+    firstAt: merged.firstAt,
+    lastAt: merged.lastAt,
+    updatedAt: merged.updatedAt,
+  })
+  if (updated === null) throw new Error(`Prune run ${run.id} missing during state transition`)
+  return parseRun(updated)
 }
 
 /** Fix a prepared run's range before external archive work begins. */
@@ -107,18 +125,15 @@ export function createRun(
   head: number,
   now: number,
 ): Run {
-  return local
-    .insert(pruneRuns)
-    .values({
+  return parseRun(
+    insertPruneRun.runSync(local.sql, {
       firstEntry: first,
       lastEntry: last,
       head,
-      state: 'prepared',
       createdAt: now,
       updatedAt: now,
-    })
-    .returning()
-    .get()
+    }),
+  )
 }
 
 const MEASURE_PAGE = 200
@@ -130,25 +145,17 @@ export function measureRange(
   head: number,
   runBytes: number,
 ): { first: number; last: number } | undefined {
-  const pi = drizzle(storage)
   const encoder = new TextEncoder()
   let first: number | undefined
   let last = after
   let bytes = 0
   for (;;) {
-    const page = pi
-      .select({ id: piEntries.id, record: piEntries.record })
-      .from(piEntries)
-      .where(
-        and(
-          eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-          gt(piEntries.id, last),
-          lt(piEntries.id, head),
-        ),
-      )
-      .orderBy(asc(piEntries.id))
-      .limit(MEASURE_PAGE)
-      .all()
+    const page = selectPiEntriesRange.runSync(storage.sql, {
+      conversationId: ROOT_CONVERSATION_ID,
+      after: last,
+      before: head,
+      limit: MEASURE_PAGE,
+    })
     for (const row of page) {
       const size = encoder.encode(row.record).byteLength
       if (first !== undefined && bytes + size > runBytes) return { first, last }
@@ -162,23 +169,16 @@ export function measureRange(
 
 /** Root entry records in a prepared run, oldest first. */
 export function runEntries(storage: DurableObjectStorage, run: Run) {
-  return drizzle(storage)
-    .select({ id: piEntries.id, record: piEntries.record })
-    .from(piEntries)
-    .where(
-      and(
-        eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-        gt(piEntries.id, run.firstEntry - 1),
-        lt(piEntries.id, run.lastEntry + 1),
-      ),
-    )
-    .orderBy(asc(piEntries.id))
-    .all()
+  return selectPiEntriesBetween.runSync(storage.sql, {
+    conversationId: ROOT_CONVERSATION_ID,
+    after: run.firstEntry - 1,
+    before: run.lastEntry + 1,
+  })
 }
 
 /** Whether Pi has exactly one conversation, as required before deleting root history. */
 export function hasSingleConversation(storage: DurableObjectStorage): boolean {
-  return drizzle(storage).select({ n: count() }).from(piConversations).get()?.n === 1
+  return countPiConversations.runSync(storage.sql).n === 1
 }
 
 /**
@@ -192,57 +192,19 @@ export function deleteRows(
   run: Run,
   now: number,
 ): void {
-  const pi = drizzle(storage)
-  pi.delete(piEntries)
-    .where(
-      and(
-        eq(piEntries.conversationId, ROOT_CONVERSATION_ID),
-        gt(piEntries.id, run.firstEntry - 1),
-        lt(piEntries.id, run.lastEntry + 1),
-      ),
-    )
-    .run()
+  const after = run.firstEntry - 1
+  const before = run.lastEntry + 1
+  deletePiEntriesBetween.runSync(storage.sql, {
+    conversationId: ROOT_CONVERSATION_ID,
+    after,
+    before,
+  })
   // Live MCP receipts need Pi's committed outcome even after their transcript is archived.
-  const removableTask = and(
-    eq(piTasks.status, 'terminal'),
-    notExists(
-      pi.select({ id: mcpCalls.callId }).from(mcpCalls).where(eq(mcpCalls.callId, piTasks.id)),
-    ),
-  )
-  const terminalTasks = pi.select({ id: piTasks.id }).from(piTasks).where(removableTask)
-  const taskDocuments = pi
-    .select({ id: piDocuments.id })
-    .from(piDocuments)
-    .where(and(eq(piDocuments.scopeKind, 'task'), inArray(piDocuments.ownerId, terminalTasks)))
-  pi.delete(piDocumentRevisions).where(inArray(piDocumentRevisions.documentId, taskDocuments)).run()
-  pi.delete(piDocuments)
-    .where(and(eq(piDocuments.scopeKind, 'task'), inArray(piDocuments.ownerId, terminalTasks)))
-    .run()
-  pi.delete(piTasks).where(removableTask).run()
-  pi.delete(piRecordIds)
-    .where(
-      and(
-        eq(piRecordIds.recordType, 'entry'),
-        gt(piRecordIds.id, run.firstEntry - 1),
-        lt(piRecordIds.id, run.lastEntry + 1),
-      ),
-    )
-    .run()
-  pi.delete(piRecordIds)
-    .where(
-      and(
-        eq(piRecordIds.recordType, 'task'),
-        notInArray(piRecordIds.id, pi.select({ id: piTasks.id }).from(piTasks)),
-      ),
-    )
-    .run()
-  pi.delete(piRecordIds)
-    .where(
-      and(
-        eq(piRecordIds.recordType, 'document'),
-        notInArray(piRecordIds.id, pi.select({ id: piDocuments.id }).from(piDocuments)),
-      ),
-    )
-    .run()
+  deletePrunedPiDocumentRevisions.runSync(storage.sql)
+  deletePrunedPiDocuments.runSync(storage.sql)
+  deletePrunedPiTasks.runSync(storage.sql)
+  deletePiRecordIdsEntries.runSync(storage.sql, { after, before })
+  deleteOrphanPiRecordIdsTasks.runSync(storage.sql)
+  deleteOrphanPiRecordIdsDocuments.runSync(storage.sql)
   setState(local, run, { state: 'deleted' }, now)
 }

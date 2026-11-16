@@ -1,61 +1,48 @@
 /**
  * Kodama's own tables in each Durable Object's SQLite, beside Pi Durable's tables.
  *
- * @see drizzle/durable-object/schema.ts
+ * @see sql/durable-object/migrations/0000_init.sql
  *
  * @module
  */
-import { drizzle } from 'drizzle-orm/durable-sqlite'
-import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite'
-import { migrate } from 'drizzle-orm/durable-sqlite/migrator'
-import journal from '../../../drizzle/durable-object/migrations/meta/_journal.json'
-import m0000 from '../../../drizzle/durable-object/migrations/0000_curly_mandroid.sql?raw'
-import m0001 from '../../../drizzle/durable-object/migrations/0001_omniscient_agent_brand.sql?raw'
-import m0002 from '../../../drizzle/durable-object/migrations/0002_lovely_carnage.sql?raw'
-import m0003 from '../../../drizzle/durable-object/migrations/0003_bizarre_black_bird.sql?raw'
-import m0004 from '../../../drizzle/durable-object/migrations/0004_hesitant_blink.sql?raw'
-import m0005 from '../../../drizzle/durable-object/migrations/0005_typical_photon.sql?raw'
-import m0006 from '../../../drizzle/durable-object/migrations/0006_jazzy_doctor_doom.sql?raw'
-import m0007 from '../../../drizzle/durable-object/migrations/0007_cool_psylocke.sql?raw'
-import m0008 from '../../../drizzle/durable-object/migrations/0008_complex_yellowjacket.sql?raw'
-import m0009 from '../../../drizzle/durable-object/migrations/0009_certain_shocker.sql?raw'
-import m0010 from '../../../drizzle/durable-object/migrations/0010_chunky_ironclad.sql?raw'
-import m0011 from '../../../drizzle/durable-object/migrations/0011_broad_lilith.sql?raw'
-import m0012 from '../../../drizzle/durable-object/migrations/0012_funny_random.sql?raw'
-import * as schema from '../../../drizzle/durable-object/schema.ts'
+import m0000 from '../../../sql/durable-object/migrations/0000_init.sql?raw'
+import { splitSqlStatements } from '../../lib/reylo.ts'
 
-/** Drizzle handle of one object's local tables. */
-export type LocalDb = DrizzleSqliteDODatabase<typeof schema>
+/** Handle of one object's local SQLite storage and synchronous transaction boundary. */
+export type LocalDb = DurableObjectStorage
 
-/**
- * Generated migrations of `drizzle/durable-object/schema.ts`, keyed as Drizzle's migrator expects.
- *
- * @remarks
- * Add each new migration file here. A migration that the journal lists but this map lacks makes
- * {@link openLocalDb} throw.
- */
-export const localMigrations = {
-  journal,
-  migrations: {
-    m0000,
-    m0001,
-    m0002,
-    m0003,
-    m0004,
-    m0005,
-    m0006,
-    m0007,
-    m0008,
-    m0009,
-    m0010,
-    m0011,
-    m0012,
-  },
-}
+/** Ordered SQL migrations applied synchronously when a Durable Object opens. */
+export const localMigrations = [{ name: '0000_init.sql', sql: m0000 }] as const
 
-/** Open the object's local tables, migrated to the current schema. */
-export async function openLocalDb(storage: DurableObjectStorage): Promise<LocalDb> {
-  const db = drizzle(storage, { schema })
-  await migrate(db, localMigrations)
-  return db
+/** Table recording applied local SQLite migrations in each Durable Object. */
+export const LOCAL_MIGRATIONS_TABLE = '_kodama_migrations'
+
+/** Open the object's local tables, migrated synchronously to the current schema. */
+export function openLocalDb(storage: DurableObjectStorage): Promise<LocalDb> {
+  storage.transactionSync(() => {
+    storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS "${LOCAL_MIGRATIONS_TABLE}" (
+        name TEXT PRIMARY KEY NOT NULL,
+        applied_at INTEGER NOT NULL
+      )`,
+    )
+    const applied = new Set(
+      storage.sql
+        .exec<{ name: string }>(`SELECT name FROM "${LOCAL_MIGRATIONS_TABLE}"`)
+        .toArray()
+        .map((row) => row.name),
+    )
+    for (const migration of localMigrations) {
+      if (applied.has(migration.name)) continue
+      for (const statement of splitSqlStatements(migration.sql)) {
+        storage.sql.exec(statement)
+      }
+      storage.sql.exec(
+        `INSERT INTO "${LOCAL_MIGRATIONS_TABLE}" (name, applied_at) VALUES (?, ?)`,
+        migration.name,
+        Date.now(),
+      )
+    }
+  })
+  return Promise.resolve(storage)
 }

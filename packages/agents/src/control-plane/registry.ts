@@ -5,14 +5,19 @@
  *
  * @module
  */
-import { and, desc, eq, gt, like } from 'drizzle-orm'
 import * as v from 'valibot'
-import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { isUuid } from '../lib/uuid.ts'
 import type { AgentStatus, AgentSummary } from '../protocol.ts'
+import { parseAgentRow } from './db.ts'
 import type { AgentRow, ManagementDb } from './db.ts'
 import { ADMITTED_STATUSES } from './lifecycle.ts'
 import type { AgentUse } from './lifecycle.ts'
+import discoverAgentsQuery from './sql/discover-agents.sql'
+import listAgentsQuery from './sql/list-agents.sql'
+import selectAgentById from './sql/select-agent-by-id.sql'
+import selectAgentByObjectName from './sql/select-agent-by-object-name.sql'
+import selectAgentBySlug from './sql/select-agent-by-slug.sql'
+import selectAgentsByPrefix from './sql/select-agents-by-prefix.sql'
 
 /**
  * The registry row of `agentId`.
@@ -20,14 +25,18 @@ import type { AgentUse } from './lifecycle.ts'
  * @throws {@link TypeError} When the registry has no such agent.
  */
 export async function agentRow(db: ManagementDb, agentId: string): Promise<AgentRow> {
-  const row = await db.select().from(agents).where(eq(agents.agentId, agentId)).get()
-  if (row === undefined) throw new TypeError(`Unknown agent: ${agentId}`)
-  return row
+  const row = await selectAgentById.run(db, { agentId })
+  if (row === null) throw new TypeError(`Unknown agent: ${agentId}`)
+  return parseAgentRow(row)
 }
 
 /** The registry row of the object named `objectName`, if it has one. */
-export function agentRowByObjectName(db: ManagementDb, objectName: string) {
-  return db.select().from(agents).where(eq(agents.objectName, objectName)).get()
+export async function agentRowByObjectName(
+  db: ManagementDb,
+  objectName: string,
+): Promise<AgentRow | undefined> {
+  const row = await selectAgentByObjectName.run(db, { objectName })
+  return row === null ? undefined : parseAgentRow(row)
 }
 
 /** A registry row as `AgentService` returns it. */
@@ -58,12 +67,10 @@ export async function admitAgent(
   agentId: string,
   use: AgentUse,
 ): Promise<string> {
-  const row = await db
-    .select({ objectName: agents.objectName, kind: agents.kind, status: agents.status })
-    .from(agents)
-    .where(eq(agents.agentId, agentId))
-    .get()
-  if (row === undefined || row.kind !== 'working') throw new TypeError(`Unknown agent: ${agentId}`)
+  const raw = await selectAgentById.run(db, { agentId })
+  if (raw === null) throw new TypeError(`Unknown agent: ${agentId}`)
+  const row = parseAgentRow(raw)
+  if (row.kind !== 'working') throw new TypeError(`Unknown agent: ${agentId}`)
   if (!ADMITTED_STATUSES[use].includes(row.status)) {
     throw new Error(`agent_unavailable: ${agentId} is ${row.status}`)
   }
@@ -76,13 +83,12 @@ const MIN_PREFIX_LENGTH = 4
 const MAX_CANDIDATES = 10
 
 /** Agents whose UUID starts with `prefix`, enough of them to tell one from several. */
-function prefixMatches(db: ManagementDb, prefix: string): Promise<AgentRow[]> {
-  return db
-    .select()
-    .from(agents)
-    .where(like(agents.agentId, `${prefix}%`))
-    .orderBy(agents.agentId)
-    .limit(MAX_CANDIDATES + 1)
+async function prefixMatches(db: ManagementDb, prefix: string): Promise<AgentRow[]> {
+  const rows = await selectAgentsByPrefix.run(db, {
+    prefixPattern: `${prefix}%`,
+    limit: MAX_CANDIDATES + 1,
+  })
+  return rows.map(parseAgentRow)
 }
 
 function ambiguous(ref: string, rows: readonly AgentRow[]): TypeError {
@@ -103,7 +109,8 @@ function ambiguous(ref: string, rows: readonly AgentRow[]): TypeError {
  */
 export async function resolveAgentRef(db: ManagementDb, ref: string): Promise<AgentRow> {
   if (isUuid(ref)) return agentRow(db, ref)
-  const bySlug = await db.select().from(agents).where(eq(agents.slug, ref)).get()
+  const bySlugRaw = await selectAgentBySlug.run(db, { slug: ref })
+  const bySlug = bySlugRaw === null ? undefined : parseAgentRow(bySlugRaw)
   const prefix = ref.length >= MIN_PREFIX_LENGTH && /^[0-9a-f-]+$/.test(ref)
   const matches = prefix ? await prefixMatches(db, ref) : []
   if (bySlug !== undefined) {
@@ -122,30 +129,9 @@ export async function discoverAgents(
   db: ManagementDb,
   filter: { query?: string; label?: string; cursor?: string },
 ) {
-  const rows = await db
-    .select({
-      agentId: agents.agentId,
-      displayName: agents.displayName,
-      slug: agents.slug,
-      settingsJson: agentConfigVersions.settingsJson,
-    })
-    .from(agents)
-    .innerJoin(
-      agentConfigVersions,
-      and(
-        eq(agentConfigVersions.agentId, agents.agentId),
-        eq(agentConfigVersions.version, agents.currentVersion),
-      ),
-    )
-    .where(
-      and(
-        eq(agents.kind, 'working'),
-        eq(agents.status, 'active'),
-        filter.cursor ? gt(agents.agentId, filter.cursor) : undefined,
-      ),
-    )
-    .orderBy(agents.agentId)
-    .limit(51)
+  const rows = await discoverAgentsQuery.run(db, {
+    cursor: filter.cursor || null,
+  })
   const query = filter.query?.toLowerCase()
   const found = rows
     .slice(0, 50)
@@ -171,17 +157,13 @@ export async function discoverAgents(
 }
 
 /** Registry rows, newest first, optionally of one kind or state. */
-export function listAgentRows(
+export async function listAgentRows(
   db: ManagementDb,
   filter: { kind?: AgentRow['kind']; status?: AgentStatus },
 ): Promise<AgentRow[]> {
-  const conditions = [
-    filter.kind === undefined ? undefined : eq(agents.kind, filter.kind),
-    filter.status === undefined ? undefined : eq(agents.status, filter.status),
-  ]
-  return db
-    .select()
-    .from(agents)
-    .where(and(...conditions))
-    .orderBy(desc(agents.createdAt), desc(agents.agentId))
+  const rows = await listAgentsQuery.run(db, {
+    kind: filter.kind ?? null,
+    status: filter.status ?? null,
+  })
+  return rows.map(parseAgentRow)
 }

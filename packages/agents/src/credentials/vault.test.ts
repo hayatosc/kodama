@@ -1,15 +1,39 @@
 /** Encrypted persistence and safe outward metadata. @module */
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { expect, it } from 'vite-plus/test'
-import { credentials } from '../../drizzle/management/schema.ts'
 import { managementDb } from '../control-plane/db.ts'
-import { uuidv7 } from '../lib/uuid.ts'
 import { sha256Hex } from '../lib/hash.ts'
-import { credentialInsert, credentialMetadata, parseCredential } from './vault.ts'
+import { runBatch } from '../lib/reylo.ts'
+import { uuidv7 } from '../lib/uuid.ts'
+import clearCredentialEnvelope from '../testing/sql/clear-credential-envelope.sql'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import {
+  credentialInsert,
+  credentialMetadata,
+  parseCredential,
+  parseCredentialRow,
+} from './vault.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 const kek = btoa('01234567890123456789012345678901')
+
+async function insertAndRead(
+  identity: {
+    credentialId: string
+    kind: 'api_key' | 'oauth_subscription'
+    provider: string
+    revision: number
+  },
+  secret: string,
+  key: string,
+  now: number,
+) {
+  const { statement } = await credentialInsert(db, identity, secret, key, now)
+  await runBatch(db, [statement])
+  const row = await selectCredentialById.run(db, { credentialId: identity.credentialId })
+  if (!row) throw new Error('Missing inserted credential')
+  return parseCredentialRow(row)
+}
 
 it.each(['api_key', 'oauth_subscription'] as const)(
   'stores and revokes %s through the same envelope mechanism',
@@ -25,16 +49,12 @@ it.each(['api_key', 'oauth_subscription'] as const)(
             expires: Date.now() + 60000,
             accountId: 'account-1',
           })
-    const { statement } = await credentialInsert(
-      db,
+    const row = await insertAndRead(
       { credentialId, kind, provider: 'openai', revision: 1 },
       secret,
       kek,
       Date.now(),
     )
-    const [rows] = await db.batch([statement])
-    const row = rows[0]
-    if (!row) throw new Error('Missing inserted credential')
     expect(JSON.stringify(row)).not.toContain(secret)
     expect(row).toMatchObject({ status: 'active', leaseId: null, leaseExpiresAt: null })
     for (const value of [row.ciphertext, row.iv, row.wrappedDek, row.wrapIv]) {
@@ -46,13 +66,8 @@ it.each(['api_key', 'oauth_subscription'] as const)(
     expect(metadata.fingerprint).toMatch(/^[a-f0-9]{64}$/)
     expect(metadata).not.toHaveProperty('ciphertext')
     expect(metadata).not.toHaveProperty('wrappedDek')
-    await db
-      .update(credentials)
-      .set({ status: 'revoked', ciphertext: null, iv: null, wrappedDek: null, wrapIv: null })
-      .where(eq(credentials.credentialId, credentialId))
-    expect(
-      await db.select().from(credentials).where(eq(credentials.credentialId, credentialId)).get(),
-    ).toMatchObject({
+    await clearCredentialEnvelope.run(db, { credentialId, status: 'revoked' })
+    expect(await selectCredentialById.run(db, { credentialId })).toMatchObject({
       status: 'revoked',
       ciphertext: null,
       iv: null,
@@ -71,16 +86,12 @@ it('does not expose an offline secret verifier or a suffix of a short OAuth toke
   })
   const fingerprints = []
   for (const key of [kek, btoa('11234567890123456789012345678901')]) {
-    const { statement } = await credentialInsert(
-      db,
+    const row = await insertAndRead(
       { credentialId: uuidv7(), kind: 'oauth_subscription', provider: 'openai', revision: 1 },
       secret,
       key,
       Date.now(),
     )
-    const [rows] = await db.batch([statement])
-    const row = rows[0]
-    if (!row) throw new Error('Missing inserted credential')
     const metadata = credentialMetadata(row)
     expect.soft(metadata.last4).toBe('')
     expect.soft(metadata.fingerprint).not.toBe(await sha256Hex(secret))
@@ -139,20 +150,17 @@ it.each(['access', 'refresh'] as const)(
 )
 
 it('does not expose a suffix of a minimum-length API key', async () => {
-  const { statement } = await credentialInsert(
-    db,
+  const row = await insertAndRead(
     { credentialId: uuidv7(), kind: 'api_key', provider: 'openai', revision: 1 },
     '12345678',
     kek,
     Date.now(),
   )
-  const [rows] = await db.batch([statement])
-  expect(rows[0]?.last4).toBe('')
+  expect(row.last4).toBe('')
 })
 
 it('returns installation credential metadata without user ownership', async () => {
-  const { statement } = await credentialInsert(
-    db,
+  const row = await insertAndRead(
     {
       credentialId: uuidv7(),
       kind: 'api_key',
@@ -163,9 +171,6 @@ it('returns installation credential metadata without user ownership', async () =
     kek,
     Date.now(),
   )
-  const [rows] = await db.batch([statement])
-  const row = rows[0]
-  if (!row) throw new Error('Missing inserted credential')
   expect(credentialMetadata(row)).toMatchObject({
     lastUsedAt: null,
   })

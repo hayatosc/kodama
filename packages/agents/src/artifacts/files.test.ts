@@ -1,15 +1,16 @@
 /** Binary ownership, retention and recoverable R2 transitions against real object SQLite. @module */
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { artifacts } from '../../drizzle/durable-object/schema.ts'
+import { ARTIFACT_UPLOAD_GRACE_MS, artifactRow } from '../agent/local-db/artifacts.ts'
 import { openLocalDb } from '../agent/local-db/local.ts'
 import { setAlarm } from '../agent/runtime/alarms.ts'
-import { artifactRow, ARTIFACT_UPLOAD_GRACE_MS } from '../agent/local-db/artifacts.ts'
 import { EXTENSION_RETENTION_MS, MAX_ARTIFACT_BYTES } from '../extensions.ts'
 import { newAgentId } from '../testing/management.ts'
 import { rejectionInObject } from '../testing/rpc.ts'
+import selectAllArtifacts from '../testing/sql/select-all-artifacts.sql'
+import setArtifactExpiresAt from '../testing/sql/set-artifact-expires-at.sql'
+import setArtifactStorageKey from '../testing/sql/set-artifact-storage-key.sql'
 import {
   cleanupArtifacts,
   deleteArtifact,
@@ -110,7 +111,7 @@ it('collects a hidden reservation after R2 committed but the upload response was
       ),
     ).rejects.toThrow('lost_upload_response')
     failure.mockRestore()
-    const row = db.select().from(artifacts).get()
+    const row = selectAllArtifacts.runSync(db.sql)[0]
     if (!row) throw new Error('Missing reservation')
     id = row.id
     expect(row.state).toBe('uploading')
@@ -168,10 +169,7 @@ it('collects expired bytes through the shared purpose-based object alarm', async
   const stub = env.AGENTS.getByName(owner)
   await runInDurableObject(stub, async (_, state) => {
     const db = await openLocalDb(state.storage)
-    db.update(artifacts)
-      .set({ expiresAt: Date.now() - 1 })
-      .where(eq(artifacts.id, file.artifactId))
-      .run()
+    setArtifactExpiresAt.runSync(db.sql, { id: file.artifactId, expiresAt: Date.now() - 1 })
     await setAlarm(state.storage, 'artifacts', Date.now() - 1)
   })
   await runDurableObjectAlarm(stub)
@@ -188,20 +186,22 @@ it('hides expired artifacts before cleanup and refuses even a local row with a f
   })
   await runInDurableObject(env.AGENTS.getByName(owner), async (_, state) => {
     const db = await openLocalDb(state.storage)
-    db.update(artifacts)
-      .set({ storageKey: `artifacts/another/${file.artifactId}` })
-      .where(eq(artifacts.id, file.artifactId))
-      .run()
+    setArtifactStorageKey.runSync(db.sql, {
+      id: file.artifactId,
+      storageKey: `artifacts/another/${file.artifactId}`,
+      expiresAt: file.expiresAt,
+    })
     await expect(downloadArtifact(db, env.ARCHIVE, owner, file.artifactId)).rejects.toThrow(
       'artifact_unavailable',
     )
     await expect(deleteArtifact(db, env.ARCHIVE, owner, file.artifactId, wake)).rejects.toThrow(
       'artifact_unavailable',
     )
-    db.update(artifacts)
-      .set({ storageKey: `artifacts/${owner}/${file.artifactId}`, expiresAt: Date.now() - 1 })
-      .where(eq(artifacts.id, file.artifactId))
-      .run()
+    setArtifactStorageKey.runSync(db.sql, {
+      id: file.artifactId,
+      storageKey: `artifacts/${owner}/${file.artifactId}`,
+      expiresAt: Date.now() - 1,
+    })
     expect(readArtifacts(db)).toEqual([])
     await expect(downloadArtifact(db, env.ARCHIVE, owner, file.artifactId)).rejects.toThrow(
       'artifact_unavailable',

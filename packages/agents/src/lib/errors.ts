@@ -13,7 +13,7 @@ export function safeFailure(error: unknown): string {
       : 'Unknown failure'
 }
 
-/** Messages of an error and its causes; Drizzle wraps the D1 error in `cause`. */
+/** Messages of an error and its causes (including wrapped D1 causes). */
 export function errorText(error: unknown): string {
   const parts: string[] = []
   for (let current: unknown = error; current instanceof Error; current = current.cause) {

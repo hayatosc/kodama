@@ -5,11 +5,11 @@
  *
  * @module
  */
-import type { MemoryDb, RecordKind, RecordOrigin } from './db.ts'
+import type { MemoryDb, RecordKind, RecordOrigin, Scope } from './db.ts'
 import { planCheckpoint, planDecline } from './progress-plans.ts'
 import { planInvalidate, planSupersede, planWrite } from './record-plans.ts'
-import type { Scope } from '../../../drizzle/memory/schema.ts'
 import { errorText } from '../../lib/errors.ts'
+import { runBatch } from '../../lib/reylo.ts'
 import { appliedResult, insertOp, recordLedger } from './statements.ts'
 import type { OperationContext, OperationResult, Plan } from './statements.ts'
 
@@ -123,7 +123,7 @@ export async function applyPlan(
   const { result, statements } = await makePlan()
   await context.beforeBatch?.()
   try {
-    await db.batch(statements)
+    await runBatch(db, statements)
   } catch (error) {
     const text = errorText(error)
     if (!/constraint/i.test(text)) throw error

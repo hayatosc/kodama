@@ -1,24 +1,24 @@
 /** Pinned dynamic MCP tools through real Durable Object execution and eviction. @module */
-import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
-import { eq, and } from 'drizzle-orm'
-import { credentials, credentialGrants } from '../../../drizzle/management/schema.ts'
+import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vite-plus/test'
-import { mcpCalls } from '../../../drizzle/durable-object/schema.ts'
-import { management, newAgentId, updateSettings } from '../../testing/management.ts'
-import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
-import { textResponse, toolCallResponse } from '../../testing/model.ts'
-import { registerMcpCatalog } from '../registration/catalog.ts'
-import { createAgentModels } from '../../control-plane/models.ts'
-import { assignMcp, discoverMcp } from '../registration/servers.ts'
-import { putMcpBearer } from '../authorization/vault.ts'
-import { disconnectMcp } from '../authorization/refresh.ts'
-import { MCP_PROTOCOL } from '../connection/transport.ts'
-import { uuidv7 } from '../../lib/uuid.ts'
-import { beginMcpCall, finishMcpCall, interruptMcpCalls } from './calls.ts'
-import { piTasks } from '../../agent/local-db/pi-tables.ts'
-import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from '../../testing/conversation.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
+import { createAgentModels } from '../../control-plane/models.ts'
+import deleteCredentialGrant from '../../credentials/sql/delete-credential-grant.sql'
+import selectCredentialById from '../../credentials/sql/select-credential-by-id.sql'
+import { uuidv7 } from '../../lib/uuid.ts'
+import { COMPACT_AFTER_TURN_7, compactedAgent, mockModel } from '../../testing/conversation.ts'
+import { management, newAgentId, updateSettings } from '../../testing/management.ts'
+import { textResponse, toolCallResponse } from '../../testing/model.ts'
+import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
+import { disconnectMcp } from '../authorization/refresh.ts'
+import { putMcpBearer } from '../authorization/vault.ts'
+import { MCP_PROTOCOL } from '../connection/transport.ts'
+import { registerMcpCatalog } from '../registration/catalog.ts'
+import { assignMcp, discoverMcp } from '../registration/servers.ts'
+import { beginMcpCall, finishMcpCall, interruptMcpCalls } from './calls.ts'
+import selectAllMcpCalls from './sql/select-all-mcp-calls.sql'
+import selectPiTaskById from './sql/select-pi-task-by-id.sql'
 
 useMockModel()
 
@@ -127,7 +127,7 @@ it('never resends a failed call when the model asks again in the same run', asyn
   expect(test.observedOutput()).not.toContain('private upstream error')
   await runInDurableObject(env.AGENTS.getByName(test.agentId), async (_agent, state) => {
     const local = await openLocalDb(state.storage)
-    expect(local.select().from(mcpCalls).all()).toMatchObject([{ state: 'failed' }])
+    expect(selectAllMcpCalls.runSync(local.sql)).toMatchObject([{ state: 'failed' }])
   })
 })
 
@@ -157,13 +157,10 @@ it('permits acknowledged repeated reads in one operator epoch and preserves them
   await runInDurableObject(env.AGENTS.getByName(test.agentId), async (_agent, state) => {
     const local = await openLocalDb(state.storage)
     interruptMcpCalls(local)
-    expect(
-      local
-        .select()
-        .from(mcpCalls)
-        .all()
-        .map((call) => call.state),
-    ).toEqual(['succeeded', 'succeeded'])
+    expect(selectAllMcpCalls.runSync(local.sql).map((call) => call.state)).toEqual([
+      'succeeded',
+      'succeeded',
+    ])
   })
 })
 
@@ -183,15 +180,11 @@ it('preserves committed success through actual pruning and harness reopening wit
   const stub = env.AGENTS.getByName(test.agentId)
   const receipt = await runInDurableObject(stub, async (_agent, state) => {
     const local = await openLocalDb(state.storage)
-    const receipt = local.select().from(mcpCalls).get()
+    const receipt = selectAllMcpCalls.runSync(local.sql)[0]
     if (!receipt) throw new Error('Missing call receipt')
-    expect(
-      local
-        .select()
-        .from(piTasks)
-        .where(eq(piTasks.id, Number(receipt.callId)))
-        .get(),
-    ).toMatchObject({ status: 'terminal' })
+    expect(selectPiTaskById.runSync(local.sql, { id: Number(receipt.callId) })).toMatchObject({
+      status: 'terminal',
+    })
     // A separate remote response never committed a Pi result.
     beginMcpCall(local, '999999', receipt.runId, 'uncommitted')
     finishMcpCall(local, '999999')
@@ -200,18 +193,13 @@ it('preserves committed success through actual pruning and harness reopening wit
   expect(await stub.prune({ force: true })).toBe('pruned')
   await runInDurableObject(stub, async (_agent, state) => {
     const local = await openLocalDb(state.storage)
-    expect(
-      local.select().from(mcpCalls).where(eq(mcpCalls.callId, receipt.callId)).get(),
-    ).toMatchObject({ state: 'succeeded' })
-    expect(
-      local
-        .select()
-        .from(piTasks)
-        .where(eq(piTasks.id, Number(receipt.callId)))
-        .get(),
-    ).toMatchObject({ status: 'terminal' })
+    const rows = selectAllMcpCalls.runSync(local.sql)
+    expect(rows.find((row) => row.callId === receipt.callId)).toMatchObject({ state: 'succeeded' })
+    expect(selectPiTaskById.runSync(local.sql, { id: Number(receipt.callId) })).toMatchObject({
+      status: 'terminal',
+    })
     expect(() => beginMcpCall(local, '1000000', receipt.runId, receipt.toolId)).not.toThrow()
-    expect(local.select().from(mcpCalls).where(eq(mcpCalls.callId, '999999')).get()).toMatchObject({
+    expect(rows.find((row) => row.callId === '999999')).toMatchObject({
       state: 'outcome_unknown',
     })
     expect(() => beginMcpCall(local, '1000001', receipt.runId, 'uncommitted')).toThrow(
@@ -241,7 +229,7 @@ it('reconciles a successful remote response as uncertain before Pi commits its r
   try {
     await runInDurableObject(stub, async (_agent, state) => {
       const local = await openLocalDb(state.storage)
-      const receipt = local.select().from(mcpCalls).get()
+      const receipt = selectAllMcpCalls.runSync(local.sql)[0]
       expect(receipt?.state).toBe('succeeded')
       if (!receipt) throw new Error('Missing call receipt')
       expect(() => beginMcpCall(local, 'next-call', receipt.runId, receipt.toolId)).toThrow(
@@ -258,7 +246,7 @@ it('reconciles a successful remote response as uncertain before Pi commits its r
   expect(test.observedOutput()).toContain('mcp_retry_requires_new_operator_input')
   await runInDurableObject(stub, async (_agent, state) => {
     const local = await openLocalDb(state.storage)
-    expect(local.select().from(mcpCalls).all()).toMatchObject([{ state: 'outcome_unknown' }])
+    expect(selectAllMcpCalls.runSync(local.sql)).toMatchObject([{ state: 'outcome_unknown' }])
   })
 })
 
@@ -289,24 +277,16 @@ it('keeps a shared credential active when one agent loses its grant during initi
     content: 'Read the selected source',
   })
   await initialized.promise
-  await management
-    .delete(credentialGrants)
-    .where(
-      and(
-        eq(credentialGrants.agentId, test.agentId),
-        eq(credentialGrants.credentialId, test.credential.credentialId),
-      ),
-    )
+  await deleteCredentialGrant.run(management, {
+    agentId: test.agentId,
+    credentialId: test.credential.credentialId,
+  })
   release.resolve()
   await waitForAnswer(test.agentId, 'mcp-unassigned')
   expect(test.remoteCalls()).toBe(0)
   expect(test.observedOutput()).toContain('mcp_assignment_revoked')
   expect(
-    await management
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, test.credential.credentialId))
-      .get(),
+    await selectCredentialById.run(management, { credentialId: test.credential.credentialId }),
   ).toMatchObject({ status: 'active', revision: 1 })
   // A separate object still uses the same credential, with its own live grant.
   let otherModelCalls = 0

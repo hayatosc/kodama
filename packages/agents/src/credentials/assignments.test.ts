@@ -1,16 +1,18 @@
 /** Assignment and unassignment keep grants, versions, and reverse indexes together. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { and, eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vite-plus/test'
-import { agents, credentialGrants, agentCredentialRefs } from '../../drizzle/management/schema.ts'
 import { Agent } from '../agent/agent.ts'
 import { managementDb } from '../control-plane/db.ts'
+import selectAgentById from '../control-plane/sql/select-agent-by-id.sql'
 import { uuidv7 } from '../lib/uuid.ts'
 import { credentialCall } from '../testing/credentials.ts'
 import { newAgentId } from '../testing/management.ts'
+import selectAllAgentCredentialRefs from '../testing/sql/select-all-agent-credential-refs.sql'
+import selectAllAgents from '../testing/sql/select-all-agents.sql'
 import { assignCredential } from './assignments.ts'
 import { putCredential } from './management.ts'
+import selectCredentialGrant from './sql/select-credential-grant.sql'
 
 it('pushes the committed version even when credential invalidation rejects', async () => {
   const agentId = await newAgentId()
@@ -29,7 +31,7 @@ it('pushes the committed version even when credential invalidation rejects', asy
       vi.spyOn(Agent.prototype, 'invalidateCredentials').mockImplementation(invalidation)
     })
     await assignCredential(call, credential.credentialId, agentId)
-    const row = await call.db.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    const row = await selectAgentById.run(call.db, { agentId })
     expect(row?.appliedVersion).toBe(row?.currentVersion)
     expect(error).toHaveBeenCalled()
     expect(invalidation).toHaveBeenCalledOnce()
@@ -44,7 +46,7 @@ it('pushes the committed version even when credential invalidation rejects', asy
 it('assigns all agents and unassigns one without revoking the shared key', async () => {
   const db = managementDb(env.MANAGEMENT_DB)
   await exports.default.seed()
-  const registered = await db.select().from(agents).get()
+  const registered = (await selectAllAgents.run(db))[0]
   if (!registered) throw new Error('Missing registered agent')
   const credential = await exports.default.putCredential({
     requestId: uuidv7(),
@@ -56,12 +58,11 @@ it('assigns all agents and unassigns one without revoking the shared key', async
   const first = all.agents[0]
   if (!first) throw new Error('Missing seeded agent')
   expect(
-    await db
-      .select()
-      .from(agentCredentialRefs)
-      .where(eq(agentCredentialRefs.credentialId, credential.credentialId)),
+    (await selectAllAgentCredentialRefs.run(db)).filter(
+      (ref) => ref.credentialId === credential.credentialId,
+    ),
   ).toHaveLength(all.agents.length)
-  const before = await db.select().from(agents).where(eq(agents.agentId, first.agentId)).get()
+  const before = await selectAgentById.run(db, { agentId: first.agentId })
   expect(before?.appliedVersion).toBe(before?.currentVersion)
   const assigned = await exports.default.credentialCoverage(credential.credentialId)
   expect(assigned.references.find((ref) => ref.agentId === first.agentId)).toEqual({
@@ -71,20 +72,15 @@ it('assigns all agents and unassigns one without revoking the shared key', async
     version: before?.currentVersion,
   })
   await exports.default.unassignCredential(credential.credentialId, first.agentId)
-  const after = await db.select().from(agents).where(eq(agents.agentId, first.agentId)).get()
+  const after = await selectAgentById.run(db, { agentId: first.agentId })
   expect(after?.currentVersion).toBe((before?.currentVersion ?? 0) + 1)
   expect(after?.appliedVersion).toBe(after?.currentVersion)
   expect(
-    await db
-      .select()
-      .from(credentialGrants)
-      .where(
-        and(
-          eq(credentialGrants.credentialId, credential.credentialId),
-          eq(credentialGrants.agentId, first.agentId),
-        ),
-      ),
-  ).toHaveLength(0)
+    await selectCredentialGrant.run(db, {
+      credentialId: credential.credentialId,
+      agentId: first.agentId,
+    }),
+  ).toBeNull()
   const coverage = await exports.default.credentialCoverage(credential.credentialId)
   expect(coverage.credential.status).toBe('active')
   expect(coverage.agents).toHaveLength(all.agents.length - 1)

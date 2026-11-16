@@ -1,11 +1,15 @@
 /** Completion deduplication and transaction boundaries in real object SQLite. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vite-plus/test'
-import { contactRequests, notifications } from '../../../drizzle/durable-object/schema.ts'
 import { EXTENSION_RETENTION_MS } from '../../extensions.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import deleteAllContactRequests from '../../testing/sql/delete-all-contact-requests.sql'
+import deleteNotificationBySeq from '../../testing/sql/delete-notification-by-seq.sql'
+import insertContactRequestRaw from '../../testing/sql/insert-contact-request-raw.sql'
+import selectAllNotifications from '../../testing/sql/select-all-notifications.sql'
+import setNotificationsReadAt from '../../testing/sql/set-notifications-read-at.sql'
+import { contactRequest } from './contacts.ts'
 import { openLocalDb } from './local.ts'
 import {
   dispatchDueOutbox,
@@ -57,7 +61,7 @@ describe('inbox operations', () => {
       ])
       expect(listNotifications(db, { before: 1 }, 1500)).toEqual({ notifications: [] })
       expect(readNotification(db, 3, 1600)).toBe(true)
-      expect(db.select().from(notifications).where(eq(notifications.seq, 3)).get()?.readAt).toBe(
+      expect(selectAllNotifications.runSync(db.sql).find((item) => item.seq === 3)?.readAt).toBe(
         1400,
       )
       expect(readNotification(db, 999, 1600)).toBe(false)
@@ -67,28 +71,31 @@ describe('inbox operations', () => {
   it('bounds pages, explicitly describes missing or expired results, and retains results on read', async () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const db = await openLocalDb(state.storage)
-      db.insert(contactRequests)
-        .values({
-          id: 'contact-1',
-          sourceTask: 'task',
-          sourceEntry: 1,
-          arguments: '{}',
-          targetAgentId: uuidv7(),
-          requestId: 'request',
-          content: 'Work',
-          hop: 1,
-          state: 'settled',
-          retryAt: 1000,
-          result: { outcome: 'succeeded', text: 'Answer', truncated: false, artifactIds: [] },
-          createdAt: 1,
-          settledAt: 1000,
-          expiresAt: 1500,
-        })
-        .run()
+      insertContactRequestRaw.runSync(db.sql, {
+        id: 'contact-1',
+        sourceTask: 'task',
+        sourceEntry: 1,
+        arguments: '{}',
+        targetAgentId: uuidv7(),
+        requestId: 'request',
+        content: 'Work',
+        hop: 1,
+        state: 'settled',
+        retryAt: 1000,
+        result: JSON.stringify({
+          outcome: 'succeeded',
+          text: 'Answer',
+          truncated: false,
+          artifactIds: [],
+        }),
+        createdAt: 1,
+        settledAt: 1000,
+        expiresAt: 1500,
+      })
       recordNotification(db, completion(), 1000)
       expect(listNotifications(db, {}, 1200).notifications[0]?.referenceState).toBe('available')
       expect(readNotification(db, 1, 1250)).toBe(true)
-      expect(db.select().from(contactRequests).get()?.result?.text).toBe('Answer')
+      expect(contactRequest(db, 'contact-1')?.result?.text).toBe('Answer')
       expect(listNotifications(db, {}, 1500).notifications[0]?.referenceState).toBe('expired')
       for (const query of [
         { limit: 0 },
@@ -100,7 +107,7 @@ describe('inbox operations', () => {
         { after: 1 },
       ])
         expect(() => listNotifications(db, query, 1500)).toThrow(TypeError)
-      db.delete(contactRequests).run()
+      deleteAllContactRequests.runSync(db.sql)
       expect(listNotifications(db, {}, 1600).notifications[0]?.referenceState).toBe('expired')
     })
   })
@@ -113,7 +120,7 @@ describe('inbox operations', () => {
       readNotification(db, 1, 2000)
       expect(nextNotificationExpiry(db)).toBe(1000 + EXTENSION_RETENTION_MS)
       retainNotifications(db, 999 + EXTENSION_RETENTION_MS)
-      expect(db.select().from(notifications).all()).toHaveLength(2)
+      expect(selectAllNotifications.runSync(db.sql)).toHaveLength(2)
       expect(readNotification(db, 1, 1000 + EXTENSION_RETENTION_MS)).toBe(false)
       expect(
         listNotifications(db, {}, 1000 + EXTENSION_RETENTION_MS).notifications.map(
@@ -138,14 +145,17 @@ describe('recordNotification', () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const db = await openLocalDb(state.storage)
       const first = recordNotification(db, completion(), 1000)
+      if (!first) throw new Error('Missing notification')
       expect(first).toMatchObject({ ...notice, createdAt: 1000, readAt: null })
-      expect(first?.expiresAt).toBe(1000 + EXTENSION_RETENTION_MS)
-      db.update(notifications).set({ readAt: 2000 }).run()
+      expect(first.expiresAt).toBe(1000 + EXTENSION_RETENTION_MS)
+      setNotificationsReadAt.runSync(db.sql, { readAt: 2000 })
       const reopened = await openLocalDb(state.storage)
       expect(
         recordNotification(reopened, { ...completion(), summary: 'Retry' }, 3000),
       ).toBeUndefined()
-      expect(reopened.select().from(notifications).all()).toEqual([{ ...first, readAt: 2000 }])
+      expect(selectAllNotifications.runSync(reopened.sql)).toEqual([
+        { ...first, artifactIds: JSON.stringify(first.artifactIds), readAt: 2000 },
+      ])
     })
   })
 
@@ -156,7 +166,7 @@ describe('recordNotification', () => {
       const second = recordNotification(db, { ...completion(), source: 'schedule' }, 1000)
       expect(first?.seq).toBe(1)
       expect(second?.seq).toBe(2)
-      db.delete(notifications).where(eq(notifications.seq, 2)).run()
+      deleteNotificationBySeq.runSync(db.sql, { seq: 2 })
       const third = recordNotification(db, { ...completion(), sourceId: 'contact-2' }, 1000)
       expect(third?.seq).toBe(3)
     })
@@ -166,12 +176,12 @@ describe('recordNotification', () => {
     await runInDurableObject(env.AGENTS.getByName(uuidv7()), async (_instance, state) => {
       const db = await openLocalDb(state.storage)
       expect(() =>
-        db.transaction((tx) => {
-          recordNotification(tx, completion(), 1000)
+        state.storage.transactionSync(() => {
+          recordNotification(db, completion(), 1000)
           throw new Error('Producer failed')
         }),
       ).toThrow('Producer failed')
-      expect(db.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(db.sql)).toEqual([])
       expect(recordNotification(db, completion(), 1000)).toBeDefined()
     })
   })
@@ -192,7 +202,7 @@ describe('recordNotification', () => {
       expect(() => recordNotification(db, { ...completion(), artifactIds: [''] }, 1000)).toThrow(
         'Invalid notification artifact references',
       )
-      expect(db.select().from(notifications).all()).toEqual([])
+      expect(selectAllNotifications.runSync(db.sql)).toEqual([])
       expect(
         recordNotification(db, { ...completion(), summary: 'a'.repeat(2048) }, 1000),
       ).toBeDefined()
@@ -260,11 +270,9 @@ describe('outbox pacing and coalescing', () => {
         artifactIds: ['a2', 'a3'],
         referenceState: 'available',
       })
-      const secondRow = db
-        .select()
-        .from(notifications)
-        .where(eq(notifications.sourceId, 'outbox-2'))
-        .get()
+      const secondRow = selectAllNotifications
+        .runSync(db.sql)
+        .find((item) => item.sourceId === 'outbox-2')
       expect(secondRow?.deliveryState).toBe('suppressed')
       expect(recentOutboxSummaries(db, 5).map((item) => item.summary)).toEqual([
         'Build failed on main',

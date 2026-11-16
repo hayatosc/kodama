@@ -1,11 +1,11 @@
 /** Validation of immutable credential references before configuration writes. @module */
 import * as v from 'valibot'
-import { UUID_PATTERN } from '../lib/uuid.ts'
-import { parseInput } from '../validation.ts'
-import { and, eq } from 'drizzle-orm'
-import { credentials, credentialGrants } from '../../drizzle/management/schema.ts'
 import type { ManagementDb } from '../control-plane/db.ts'
+import { UUID_PATTERN } from '../lib/uuid.ts'
 import type { AgentSettings, CredentialRefs } from '../protocol.ts'
+import { parseInput } from '../validation.ts'
+import selectCredentialById from './sql/select-credential-by-id.sql'
+import selectCredentialGrant from './sql/select-credential-grant.sql'
 
 /** Resolve explicitly supplied credential IDs from metadata; never choose an implicit credential. */
 export function selectedCredentialRefs(
@@ -39,11 +39,7 @@ export async function validateCredentialRefs(
       `credential_unavailable: missing credential reference for ${settings.model.provider}`,
     )
   for (const [provider, credentialId] of Object.entries(settings.credentials?.primary ?? {})) {
-    const row = await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.credentialId, credentialId))
-      .get()
+    const row = await selectCredentialById.run(db, { credentialId })
     if (!row)
       throw new TypeError(
         'credential_unavailable: invalid credential reference (Unknown credential)',
@@ -51,16 +47,7 @@ export async function validateCredentialRefs(
     if (row.purpose !== 'model_provider' || row.status !== 'active' || row.provider !== provider)
       throw new TypeError('credential_unavailable: invalid credential reference')
     if (agentId) {
-      const grant = await db
-        .select()
-        .from(credentialGrants)
-        .where(
-          and(
-            eq(credentialGrants.agentId, agentId),
-            eq(credentialGrants.credentialId, credentialId),
-          ),
-        )
-        .get()
+      const grant = await selectCredentialGrant.run(db, { agentId, credentialId })
       if (!grant)
         throw new TypeError('credential_unavailable: credential is not granted to the agent')
     }

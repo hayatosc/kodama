@@ -1,12 +1,11 @@
 /** Provider content and request identities pass through without credential redaction. @module */
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { drizzle } from 'drizzle-orm/durable-sqlite'
 import { expect, it, vi } from 'vite-plus/test'
-import { piEntries } from './local-db/pi-tables.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, toolCallResponse, toolResults } from '../testing/model.ts'
+import selectPiEntryRecords from '../testing/sql/select-pi-entry-records.sql'
 import { currentTimeTool } from '../tools/current-time.ts'
 
 useMockModel()
@@ -177,7 +176,7 @@ it.each([
       ]),
     })
     const rows = await runInDurableObject(env.AGENTS.getByName(id), (_instance, state) =>
-      drizzle(state.storage).select({ record: piEntries.record }).from(piEntries).all(),
+      selectPiEntryRecords.runSync(state.storage.sql),
     )
     const result = rows.find((row) => row.record.includes('"kind":"pi.tool-result"'))
     expect(result).toBeDefined()

@@ -5,11 +5,16 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import { sha256Hex } from '../../lib/hash.ts'
+import { prepareQuery } from '../../lib/reylo.ts'
+import { SEARCH_VERSION } from '../../lib/search-text.ts'
+import { parseMemoryRecord } from './db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
 import type { NewRecord, Operation, RecordEvidence } from './records.ts'
-import { memoryRecords } from '../../../drizzle/memory/schema.ts'
-import { SEARCH_VERSION } from '../../lib/search-text.ts'
+import insertMemoryRecord from './sql/insert-memory-record.sql'
+import selectMemoryRecordById from './sql/select-memory-record-by-id.sql'
+import updateMemoryRecordInvalid from './sql/update-memory-record-invalid.sql'
+import updateMemoryRecordSuperseded from './sql/update-memory-record-superseded.sql'
 import {
   bumpScope,
   claimRevision,
@@ -25,7 +30,6 @@ import type {
   Statement,
   Statements,
 } from './statements.ts'
-import { sha256Hex } from '../../lib/hash.ts'
 
 /**
  * A record's ID: a hash of its scope, kind, content, source agent, and first source entry.
@@ -85,7 +89,7 @@ function insertRecord(
   record: NewRecord,
 ): Statement[] {
   validateRecord(record)
-  const row = db.insert(memoryRecords).values({
+  const row = prepareQuery(db, insertMemoryRecord, {
     id,
     scope: record.scope,
     kind: record.kind,
@@ -93,12 +97,12 @@ function insertRecord(
     searchVersion: SEARCH_VERSION,
     origin: record.origin,
     sourceAgentId: record.sourceAgentId,
-    sourceEntryFrom: record.sourceEntries?.from,
-    sourceEntryTo: record.sourceEntries?.to,
+    sourceEntryFrom: record.sourceEntries?.from ?? null,
+    sourceEntryTo: record.sourceEntries?.to ?? null,
     runId: context.runId,
-    importance: record.importance,
-    required: record.required,
-    overrides: record.overrides,
+    importance: record.importance ?? 0.5,
+    required: record.required ?? false,
+    overrides: record.overrides ?? null,
     observedAt: record.observedAt,
     createdAt: context.now,
     updatedAt: context.now,
@@ -114,23 +118,28 @@ function guardedStatusUpdate(
   revision: number,
   change: { status: 'superseded'; supersededBy: string } | { status: 'invalid' },
 ): Statement[] {
-  return [
-    db
-      .update(memoryRecords)
-      .set({ ...change, revision: revision + 1, updatedAt: context.now })
-      .where(
-        and(
-          eq(memoryRecords.id, id),
-          eq(memoryRecords.status, 'active'),
-          eq(memoryRecords.revision, revision),
-        ),
-      ),
-    claimRevision(db, context, 'record', id, revision + 1),
-  ]
+  const nextRevision = revision + 1
+  const update =
+    change.status === 'superseded'
+      ? prepareQuery(db, updateMemoryRecordSuperseded, {
+          id,
+          revision,
+          supersededBy: change.supersededBy,
+          nextRevision,
+          updatedAt: context.now,
+        })
+      : prepareQuery(db, updateMemoryRecordInvalid, {
+          id,
+          revision,
+          nextRevision,
+          updatedAt: context.now,
+        })
+  return [update, claimRevision(db, context, 'record', id, nextRevision)]
 }
 
-function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
-  return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
+async function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
+  const row = await selectMemoryRecordById.run(db, { id })
+  return row === null ? undefined : parseMemoryRecord(row)
 }
 
 /**
