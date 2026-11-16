@@ -11,13 +11,13 @@ and has no routes beyond a placeholder page.
 
 Run these from `packages/ui`:
 
-- `vp run storybook`: start Storybook on port 6006.
-- `vp run build-storybook`: build the static Storybook into `storybook-static/`.
-- `vp run typecheck`: run `svelte-kit sync` and `rsvelte-check --tsgo`.
-- `vp run typecheck:compat`: run the same UI check when CI checks agents with `tsc`.
-- `vp run test`: run the unit tests, such as the check that the token copy matches `design/`.
+- `pnpm storybook`: start Storybook on port 6006.
+- `pnpm build-storybook`: build the static Storybook into `storybook-static/`.
+- `pnpm typecheck`: run `svelte-kit sync` and `rsvelte-check --tsgo`.
+- `pnpm typecheck:compat`: run the same UI check when CI checks agents with `tsc`.
+- `pnpm test`: run the unit tests, such as the check that the token copy matches `design/`.
 
-Format from the repository root with `vp run format`. Vite+ formats non-Svelte files;
+Format from the repository root with `pnpm format`. Vite+ formats non-Svelte files;
 `scripts/format-svelte.ts` passes the same settings from the root `vite.config.ts` to `rsvelte-fmt`.
 
 ## Layout
@@ -54,7 +54,7 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   shown in the Command stories. Variant tables and their types live in a `variants.ts` next to
   the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
   `components.json` is written by hand because `shadcn-svelte init` asks for a preset
-  interactively; `vp dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
+  interactively; `pnpm dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
   restyle, where no native element fits; rename its files to PascalCase after the component
   (`accordion-item.svelte` becomes `AccordionItem.svelte`), as every component here is named.
 - `src/shared/styles/native.css`: the styles those native elements need beyond utilities: the

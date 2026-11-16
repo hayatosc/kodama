@@ -26,20 +26,20 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Typecheck compatibility (tsc)
-        run: vp run typecheck:compat
+        run: pnpm typecheck:compat
       - name: Lint
-        run: vp run lint
+        run: pnpm lint
       - name: Check formatting
-        run: vp run format:check
+        run: pnpm format:check
       - name: Build agents
         working-directory: packages/agents
-        run: vp run build
+        run: pnpm build
       - name: Test UI
         working-directory: packages/ui
-        run: vp run test
+        run: pnpm test
       - name: Build Storybook
         working-directory: packages/ui
-        run: vp run build-storybook
+        run: pnpm build-storybook
 
   test:
     name: Test (${{ matrix.shard }}/4)
@@ -56,7 +56,7 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Test
         working-directory: packages/agents
-        run: vp run test --shard=${{ matrix.shard }}/4
+        run: pnpm test --shard=${{ matrix.shard }}/4
 
   # Keeps a single status for branch protection: it passes only when every job above passed.
   check:

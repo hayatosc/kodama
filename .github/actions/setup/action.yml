@@ -1,9 +1,9 @@
 name: Set up the toolchain
-description: Install the tools pinned in mise.toml and the workspace dependencies through vp.
+description: Install the tools pinned in mise.toml and the workspace dependencies through pnpm.
 runs:
   using: composite
   steps:
-    # Node.js, pnpm and the Vite+ CLI (vp) come from mise.toml.
+    # Node.js and pnpm come from mise.toml.
     - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
     - name: Locate the pnpm store
       id: pnpm-store
@@ -16,4 +16,4 @@ runs:
         restore-keys: pnpm-store-${{ runner.os }}-
     - name: Install dependencies
       shell: bash
-      run: vp install --frozen-lockfile
+      run: pnpm install --frozen-lockfile

@@ -29,7 +29,7 @@ it('the newest local migration snapshot has the tables and columns of the Drizzl
     ]),
   )
   // A mismatch means drizzle/durable-object/schema.ts changed without
-  // `vp run db:generate:durable-object`.
+  // `pnpm db:generate:durable-object`.
   expect(migrated).toEqual(declared)
 })
 

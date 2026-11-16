@@ -79,15 +79,15 @@ is never bypassed.
 With the local development Worker and an existing `assistant` agent:
 
 ```sh
-vp run agent artifacts upload assistant ./photo.png --media-type image/png
-vp run agent artifacts upload assistant ./bundle.zip --media-type application/zip
-vp run agent artifacts list assistant --limit 20
+pnpm agent artifacts upload assistant ./photo.png --media-type image/png
+pnpm agent artifacts upload assistant ./bundle.zip --media-type application/zip
+pnpm agent artifacts list assistant --limit 20
 # This replaces the optional tool selection; include any other tools you wish to retain.
-vp run agent tools assistant execute_code list_artifacts delete_artifact
-vp run agent send assistant 'Use execute_code with files containing <artifact-id> to copy the selected file. Return its bytes as a new artifact named copy.png; do not parse the file.'
-vp run agent artifacts list assistant
-vp run agent artifacts download assistant <new-artifact-id> ./copy.png
-vp run agent artifacts delete assistant <artifact-id>
+pnpm agent tools assistant execute_code list_artifacts delete_artifact
+pnpm agent send assistant 'Use execute_code with files containing <artifact-id> to copy the selected file. Return its bytes as a new artifact named copy.png; do not parse the file.'
+pnpm agent artifacts list assistant
+pnpm agent artifacts download assistant <new-artifact-id> ./copy.png
+pnpm agent artifacts delete assistant <artifact-id>
 ```
 
 Uploads default to `application/octet-stream` when `--media-type` is omitted. Downloads require a
@@ -106,8 +106,8 @@ are untrusted evidence, never instructions, owner approval, or permission grants
 For short text without code execution, enable only the text tools (retain other names as needed):
 
 ```sh
-vp run agent tools assistant create_artifact read_artifact
-vp run agent send assistant 'Use create_artifact to save a UTF-8 note named notes.md, then read_artifact to inspect the saved note.'
+pnpm agent tools assistant create_artifact read_artifact
+pnpm agent send assistant 'Use create_artifact to save a UTF-8 note named notes.md, then read_artifact to inspect the saved note.'
 ```
 
 The exact tool arguments are:
@@ -342,9 +342,9 @@ cleanup, or both expire, a stale settlement cannot recreate the notice.
 Local CLI commands return JSON through the existing token-authenticated development adapter:
 
 ```sh
-vp run agent notifications assistant --unread --limit 20
-vp run agent notifications assistant --before 42 --limit 20
-vp run agent notification-read assistant 41
+pnpm agent notifications assistant --unread --limit 20
+pnpm agent notifications assistant --before 42 --limit 20
+pnpm agent notification-read assistant 41
 ```
 
 Notification insertion alone is storage-only: contact producers use the shared transaction helper
@@ -362,7 +362,7 @@ competing platform alarms: extend the existing purpose-based scheduler. Do not a
 schemas or regenerate migrations in parallel without coordination; report a concrete missing
 field to the coordinator first.
 
-Each PR must pass `vp run check` and, from `packages/agents`, `vp run build`. PRs report remaining runtime
+Each PR must pass `pnpm check` and, from `packages/agents`, `pnpm build`. PRs report remaining runtime
 limits. Final combined validation additionally covers simultaneous scheduled/contact completion,
 pruning with pending receipts, and artifact references that have expired or are unauthorized.
 Review all PRs before merging; opening them does not imply the combined changes were validated.

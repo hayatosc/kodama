@@ -58,7 +58,7 @@ it('the newest management migration snapshot has the tables and columns of the D
       [...columns].sort(byCodeUnit),
     ]),
   )
-  // A mismatch means drizzle/management/schema.ts changed without `vp run db:generate:management`.
+  // A mismatch means drizzle/management/schema.ts changed without `pnpm db:generate:management`.
   expect(migrated).toEqual(declared)
 })
 

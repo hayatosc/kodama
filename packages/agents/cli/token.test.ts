@@ -39,11 +39,11 @@ it('rotates the token and restricts an existing file with loose permissions', ()
 })
 
 it('asks to start the local Worker when no token exists yet', () => {
-  expect(() => readLocalToken(path)).toThrow('Start the local Worker first: vp run dev:agents')
+  expect(() => readLocalToken(path)).toThrow('Start the local Worker first: pnpm dev:agents')
 })
 
 it('rejects an empty token rather than sending an empty bearer credential', () => {
   createLocalToken(path)
   writeFileSync(path, ' \n')
-  expect(() => readLocalToken(path)).toThrow('Start the local Worker first: vp run dev:agents')
+  expect(() => readLocalToken(path)).toThrow('Start the local Worker first: pnpm dev:agents')
 })

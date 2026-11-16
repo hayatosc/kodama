@@ -116,7 +116,7 @@ describe('CLI entrypoint', () => {
         )
         expect(process.exitCode).toBe(1)
         expect(console.error).toHaveBeenCalledWith(
-          'Cannot upload file. Choose a readable regular file of at most 10 MiB. See vp run agent --help.',
+          'Cannot upload file. Choose a readable regular file of at most 10 MiB. See pnpm agent --help.',
         )
         expect(fetchMock).not.toHaveBeenCalled()
         expect(console.log).not.toHaveBeenCalled()
@@ -210,7 +210,7 @@ describe('CLI entrypoint', () => {
   it('does not echo an accidentally supplied key argument', async () => {
     await run('credentials', 'add', '--provider', 'openai', '--key', 'private-test-api-key')
     expect(console.error).toHaveBeenCalledWith(
-      'Invalid arguments. See vp run agent --help; never pass credentials as arguments.',
+      'Invalid arguments. See pnpm agent --help; never pass credentials as arguments.',
     )
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -234,10 +234,10 @@ describe('CLI entrypoint', () => {
 
   it('reports a missing token without connecting', async () => {
     vi.mocked(readLocalToken).mockImplementation(() => {
-      throw new Error('Start the local Worker first: vp run dev:agents')
+      throw new Error('Start the local Worker first: pnpm dev:agents')
     })
     await run('seed')
-    expect(console.error).toHaveBeenCalledWith('Start the local Worker first: vp run dev:agents')
+    expect(console.error).toHaveBeenCalledWith('Start the local Worker first: pnpm dev:agents')
     expect(process.exitCode).toBe(1)
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -261,7 +261,7 @@ describe('CLI entrypoint', () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'))
     await run('seed')
     expect(console.error).toHaveBeenCalledWith(
-      'Cannot reach the local Worker. Start vp run dev:agents first.',
+      'Cannot reach the local Worker. Start pnpm dev:agents first.',
     )
     expect(process.exitCode).toBe(1)
   })
@@ -292,9 +292,7 @@ describe('CLI entrypoint', () => {
       }),
     )
     expect(writeMock).toHaveBeenCalledWith(`${JSON.stringify(event)}\n`)
-    expect(console.error).toHaveBeenCalledWith(
-      'Completed. History: vp run agent snapshot assistant',
-    )
+    expect(console.error).toHaveBeenCalledWith('Completed. History: pnpm agent snapshot assistant')
     expect(process.exitCode).toBeUndefined()
   })
 })

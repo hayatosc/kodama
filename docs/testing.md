@@ -2,7 +2,7 @@
 
 This document covers the tests of `packages/agents`; paths are relative to that package.
 
-`vp run check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
+`pnpm check` still runs every test, in addition to TypeScript, type-aware lint and formatting.
 The Vitest projects use different runtimes rather than different levels of coverage:
 
 - `vitest.node.config.ts` lists portable unit tests and native CLI tests. They do not load
@@ -72,7 +72,7 @@ Workers integration suite; isolation and storage checks were not disabled to red
 
 ## CI sharding
 
-On a GitHub-hosted runner the whole `vp run check` took about 7 minutes, of which the tests took
+On a GitHub-hosted runner the whole `pnpm check` took about 7 minutes, of which the tests took
 386 seconds. The test bodies take about 173 seconds in total; the rest is per-file setup in the
 workerd project. With isolation, every test file starts its own Miniflare runtime, and the main
 Vitest process serializes and sends the file's whole module graph to it (`transform` is about
@@ -84,7 +84,7 @@ full suite took 497 s in one process and 341 s as two concurrent `--shard` proce
 machine. CI therefore runs the tests as four `--shard` jobs on separate runners, beside one job
 for TypeScript, lint, formatting and the build. The `Check and build` job passes only when all of
 them pass, so it remains the single status to require. The test list and timeouts are unchanged.
-Locally, `vp run check` still runs everything in one process.
+Locally, `pnpm check` still runs everything in one process.
 
 ## Shared workerd runtime
 
@@ -124,22 +124,20 @@ usually depends on state another test or file left behind.
 
 ## Test scripts and Vite+
 
-The `test` and `test:coverage` scripts call `vitest` directly rather than `vp test`. `vp run`
-executes a script's `vp` with the CLI that started it, and the `vp` that mise installs carries
-its own copy of Vitest. Test files import `vite-plus/test`, which re-exports the workspace's
-Vitest, so `vp test` from the mise CLI loaded two Vitest instances, and every workerd file failed
-with "Vitest failed to find the current suite". The workspace `vitest` is the same version that
-`vite-plus` bundles (pinned in the pnpm catalog).
+`vite-plus` is managed solely as a workspace dependency in `pnpm-workspace.yaml`, rather than
+installing `vp` globally via mise. The `test` and `test:coverage` scripts call `vitest` directly
+from the workspace `node_modules` (pinned in the pnpm catalog to the version `vite-plus` bundles),
+while `lint` and `format` invoke the project-local `vp` binary through `pnpm`.
 
 ## Targeted runs and measurement
 
 From the workspace root:
 
 ```sh
-vp run --filter @kodama/agents test --project node
-vp run --filter @kodama/agents test --project workerd
-vp run --filter @kodama/agents test src/agent/contact.test.ts
-vp run --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
+pnpm --filter @kodama/agents test --project node
+pnpm --filter @kodama/agents test --project workerd
+pnpm --filter @kodama/agents test src/agent/contact.test.ts
+pnpm --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
 ```
 
 Use the JSON report's per-file and per-case durations to find expensive fixtures. Compare

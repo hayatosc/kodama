@@ -25,7 +25,7 @@ it('the newest D1 migration snapshot has the tables and columns of the Drizzle s
       [...columns].sort(byCodeUnit),
     ]),
   )
-  // A mismatch means drizzle/memory/schema.ts changed without `vp run db:generate:memory`.
+  // A mismatch means drizzle/memory/schema.ts changed without `pnpm db:generate:memory`.
   expect(migrated).toEqual(declared)
 })
 

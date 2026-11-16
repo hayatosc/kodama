@@ -45,23 +45,23 @@ their sections by name, so keep the headings and the code in step when either ch
 
 ## Build, Test, and Development Commands
 
-mise installs the toolchain pinned in `mise.toml`: Node.js, pnpm 12.14.0, and the Vite+ CLI `vp`. Run `mise install` once, then use `vp`: `vp install` for dependencies and `vp run <script>` for `package.json` scripts. `vp build` and `vp test` are Vite+ built-ins, not the scripts of those names.
+mise installs the toolchain pinned in `mise.toml`: Node.js and pnpm 12.14.0. Run `mise install` once, then use `pnpm`: `pnpm install` for dependencies and `pnpm <script>` for `package.json` scripts. `vite-plus` (`vp`) is managed solely as a workspace dependency in `pnpm-workspace.yaml` and invoked through `package.json` scripts (`pnpm lint`, `pnpm format`, `pnpm dev`).
 
-- `vp install`: install workspace dependencies.
+- `pnpm install`: install workspace dependencies.
 - Copy `packages/agents/.dev.vars.example` to `packages/agents/.dev.vars` and set a development `CREDENTIAL_KEK_V1` (base64 of 32 random bytes).
-- `vp run dev:agents`: start the local Worker; it exposes RPC, not a browser page.
-- `vp run agent dev seed-credentials < /secure/path/provider-keys.json` registers provider keys into local D1 and assigns both agent kinds; then `vp run agent seed` and `vp run agent send assistant "Hello"`: create the starting rows, then send to the first agent by its slug through the development adapter to Durable Object RPC; see `vp run agent --help` for history and cancellation.
-- `vp run check`: run the type checks (`tsrs` for agents and `rsvelte-check --tsgo` for UI), type-aware Oxlint with rsvelte's Svelte rules, Oxfmt and Svelte formatting checks, and tests. If `tsrs` fails, try `vp run typecheck:compat` to check agents with TypeScript's own `tsc` (which CI runs); the UI uses `rsvelte-check --tsgo` in both commands.
-- From `packages/ui`, `vp run storybook` starts the Storybook mockups and `vp run build-storybook` builds them.
-- `vp run test`: run workspace tests.
-- From `packages/agents`, `vp run test:coverage` runs the tests with Istanbul coverage (text summary and `coverage/` HTML report).
-- `vp run format`: format the repository through Vite+ and `.svelte` files through `rsvelte-fmt`, sharing the root `vite.config.ts` settings via `scripts/format-svelte.ts`; review resulting changes.
-- From `packages/agents`, `vp run build` builds without deploying, and `vp run cf:types` regenerates runtime types.
-- From `packages/agents`, `vp run db:generate:memory` writes a D1 migration after `drizzle/memory/schema.ts` changes, `vp run db:generate:management` one after `drizzle/management/schema.ts` changes, and `vp run db:generate:durable-object` a local migration after `drizzle/durable-object/schema.ts` changes (add it to `src/agent/local-db/local.ts`); tests fail when they differ.
+- `pnpm dev:agents`: start the local Worker; it exposes RPC, not a browser page.
+- `pnpm agent dev seed-credentials < /secure/path/provider-keys.json` registers provider keys into local D1 and assigns both agent kinds; then `pnpm agent seed` and `pnpm agent send assistant "Hello"`: create the starting rows, then send to the first agent by its slug through the development adapter to Durable Object RPC; see `pnpm agent --help` for history and cancellation.
+- `pnpm check`: run the type checks (`tsrs` for agents and `rsvelte-check --tsgo` for UI), type-aware Oxlint with rsvelte's Svelte rules, Oxfmt and Svelte formatting checks, and tests. If `tsrs` fails, try `pnpm typecheck:compat` to check agents with TypeScript's own `tsc` (which CI runs); the UI uses `rsvelte-check --tsgo` in both commands.
+- From `packages/ui`, `pnpm storybook` starts the Storybook mockups and `pnpm build-storybook` builds them.
+- `pnpm test`: run workspace tests.
+- From `packages/agents`, `pnpm test:coverage` runs the tests with Istanbul coverage (text summary and `coverage/` HTML report).
+- `pnpm format`: format the repository through Vite+ and `.svelte` files through `rsvelte-fmt`, sharing the root `vite.config.ts` settings via `scripts/format-svelte.ts`; review resulting changes.
+- From `packages/agents`, `pnpm build` builds without deploying, and `pnpm cf:types` regenerates runtime types.
+- From `packages/agents`, `pnpm db:generate:memory` writes a D1 migration after `drizzle/memory/schema.ts` changes, `pnpm db:generate:management` one after `drizzle/management/schema.ts` changes, and `pnpm db:generate:durable-object` a local migration after `drizzle/durable-object/schema.ts` changes (add it to `src/agent/local-db/local.ts`); tests fail when they differ.
 
 ## Coding Style & Naming Conventions
 
-Use strict TypeScript with two-space indentation, single quotes, no semicolons, trailing commas, and a 100-column formatting width. Vite+ runs Oxfmt (`vp fmt`) for formatting and type-aware Oxlint (`vp lint`) for type safety, both configured in the root `vite.config.ts`; `rsvelte-fmt` adds `.svelte` formatting with the same settings, and `@rsvelte/oxlint-plugin` adds Svelte lint rules. Use type-only imports and handle promises explicitly. Never use `any`, type assertions (`as Type` or `<Type>`), non-null assertions, or TypeScript suppression comments (`@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`). Const assertions (`as const`) are allowed. Fix the types and implementation instead of disabling lint rules, weakening checks, or using an equivalent workaround.
+Use strict TypeScript with two-space indentation, single quotes, no semicolons, trailing commas, and a 100-column formatting width. Vite+ runs Oxfmt (`vp fmt` via `pnpm format`) for formatting and type-aware Oxlint (`vp lint` via `pnpm lint`) for type safety, both configured in the root `vite.config.ts`; `rsvelte-fmt` adds `.svelte` formatting with the same settings, and `@rsvelte/oxlint-plugin` adds Svelte lint rules. Use type-only imports and handle promises explicitly. Never use `any`, type assertions (`as Type` or `<Type>`), non-null assertions, or TypeScript suppression comments (`@ts-expect-error`, `@ts-ignore`, `@ts-nocheck`). Const assertions (`as const`) are allowed. Fix the types and implementation instead of disabling lint rules, weakening checks, or using an equivalent workaround.
 
 Document with TSDoc: every file opens with a module comment ending in `@module`, and every export has a `/** */` comment that states intent and non-obvious constraints without restating the types. Cite the docs with `@see docs/memory.md — Section`, and use `@param name - text`, `@returns`, `@throws {@link TypeError} When …`, and `@remarks` only where they add something.
 
@@ -69,7 +69,7 @@ Follow existing camelCase functions, PascalCase types/classes, and lowercase hyp
 
 ## Testing Guidelines
 
-Use Vitest through Vite+ (import test APIs from `vite-plus/test`) with the Cloudflare plugin in workerd. Put each test next to the module it tests as `<module>.test.ts` (not in a separate `test/` folder) and describe observable behavior. Put shared mocks and helpers in `src/helper/` instead of copying them; do not add other test-only folders or files that are not `*.test.ts`, and split a test file by `describe` before it grows past a few hundred lines. Mock external model requests while exercising real RPC, SQLite persistence, eviction, and alarms. Tests require no real API keys. No numerical coverage threshold is configured; add regression tests for changed behavior and run `vp run check` before submitting.
+Use Vitest through Vite+ (import test APIs from `vite-plus/test`) with the Cloudflare plugin in workerd. Put each test next to the module it tests as `<module>.test.ts` (not in a separate `test/` folder) and describe observable behavior. Put shared mocks and helpers in `src/helper/` instead of copying them; do not add other test-only folders or files that are not `*.test.ts`, and split a test file by `describe` before it grows past a few hundred lines. Mock external model requests while exercising real RPC, SQLite persistence, eviction, and alarms. Tests require no real API keys. No numerical coverage threshold is configured; add regression tests for changed behavior and run `pnpm check` before submitting.
 
 ## Commit & Pull Request Guidelines
 

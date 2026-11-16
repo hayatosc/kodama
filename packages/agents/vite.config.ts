@@ -1,5 +1,5 @@
 /**
- * Vite configuration of the local Worker (`vp run dev:agents`).
+ * Vite configuration of the local Worker (`pnpm dev:agents`).
  *
  * @module
  */

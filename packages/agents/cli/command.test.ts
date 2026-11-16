@@ -255,9 +255,9 @@ describe('toCommand', () => {
   })
 
   it.each([
-    [['deploy'], /Invalid command or arguments; see vp run agent --help/],
-    [['notifications'], /Invalid command or arguments; see vp run agent --help/],
-    [['notification-read', 'assistant'], /Invalid command or arguments; see vp run agent --help/],
+    [['deploy'], /Invalid command or arguments; see pnpm agent --help/],
+    [['notifications'], /Invalid command or arguments; see pnpm agent --help/],
+    [['notification-read', 'assistant'], /Invalid command or arguments; see pnpm agent --help/],
     [['seed', 'assistant'], /Unexpected arguments/],
     [['send', 'assistant'], /Unexpected arguments/],
     [['snapshot', 'Not A Ref!'], TypeError],
