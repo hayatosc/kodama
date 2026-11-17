@@ -3,12 +3,15 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
+import {
+  findExtractionCheckpointRow,
+  insertExtractionCheckpointStatement,
+  updateExtractionCheckpointStatement,
+} from './checkpoint.repository.ts'
 import type { MemoryDb } from './db.ts'
-import type { Operation } from './records.ts'
-import { extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
-import { claimRevision, insertOp, recordLedger } from './statements.ts'
-import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
+import type { Operation } from './records.service.ts'
+import { claimRevision, insertOp, recordLedger } from './statements.repository.ts'
+import type { OperationContext, OperationResult, Plan, Statement } from './statements.repository.ts'
 
 /** Plan advancing an agent's extraction checkpoint; a checkpoint already past it stays. */
 export async function planCheckpoint(
@@ -16,38 +19,22 @@ export async function planCheckpoint(
   context: OperationContext,
   op: Extract<Operation, { type: 'checkpoint' }>,
 ): Promise<Plan> {
-  const current = await db
-    .select()
-    .from(extractionCheckpoints)
-    .where(eq(extractionCheckpoints.agentId, op.agentId))
-    .get()
+  const current = await findExtractionCheckpointRow(db, op.agentId)
   const result: OperationResult = { status: 'applied', recordId: op.agentId }
   if (current !== undefined && current.lastEntryId >= op.lastEntryId) {
     return { result, statements: [insertOp(db, context, op.type, result)] }
   }
   const advance: Statement[] =
     current === undefined
-      ? [
-          db.insert(extractionCheckpoints).values({
+      ? [insertExtractionCheckpointStatement(db, op.agentId, op.lastEntryId, context.now)]
+      : [
+          updateExtractionCheckpointStatement(db, {
             agentId: op.agentId,
             lastEntryId: op.lastEntryId,
+            nextRevision: current.revision + 1,
+            revision: current.revision,
             updatedAt: context.now,
           }),
-        ]
-      : [
-          db
-            .update(extractionCheckpoints)
-            .set({
-              lastEntryId: op.lastEntryId,
-              revision: current.revision + 1,
-              updatedAt: context.now,
-            })
-            .where(
-              and(
-                eq(extractionCheckpoints.agentId, op.agentId),
-                eq(extractionCheckpoints.revision, current.revision),
-              ),
-            ),
           claimRevision(db, context, 'checkpoint', op.agentId, current.revision + 1),
         ]
   return {

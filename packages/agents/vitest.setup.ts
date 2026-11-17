@@ -7,12 +7,7 @@
 import { applyD1Migrations, runInDurableObject } from 'cloudflare:test'
 import type { D1Migration } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
-import { is } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/d1'
-import { SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { afterAll, vi } from 'vite-plus/test'
-import * as managementSchema from './drizzle/management/schema.ts'
-import * as memorySchema from './drizzle/memory/schema.ts'
 import { MEMORY_AGENT_NAME } from './src/memory/jobs.ts'
 import { forgetSeed } from './src/testing/management.ts'
 import { stopAgentObject } from './src/testing/rpc.ts'
@@ -22,7 +17,7 @@ declare global {
     interface Env {
       /** Migrations read by vitest.config.ts; applied once, then skipped as already applied. */
       TEST_MIGRATIONS: D1Migration[]
-      /** Columns per table in the newest drizzle-kit snapshots, read by vitest.config.ts. */
+      /** Columns per table in the SQL migrations, read by vitest.config.ts. */
       TEST_MIGRATED_COLUMNS: Record<string, string[]>
       TEST_LOCAL_MIGRATED_COLUMNS: Record<string, string[]>
       TEST_MANAGEMENT_MIGRATIONS: D1Migration[]
@@ -31,12 +26,16 @@ declare global {
   }
 }
 
-/** Delete every row of the schema's tables, checking foreign keys only at the end. */
-async function clearTables(database: D1Database, schema: Record<string, unknown>): Promise<void> {
-  const db = drizzle(database)
-  const deletes = Object.values(schema)
-    .filter((value) => is(value, SQLiteTable))
-    .map((table) => database.prepare(db.delete(table).toSQL().sql))
+/** Delete every row of the database's user tables, checking foreign keys only at the end. */
+async function clearTables(database: D1Database): Promise<void> {
+  const { results } = await database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != 'd1_migrations'",
+    )
+    .all<{ name: string }>()
+  const deletes = results.map(({ name }) =>
+    database.prepare(`DELETE FROM "${name.replaceAll('"', '""')}"`),
+  )
   await database.batch([database.prepare('PRAGMA defer_foreign_keys = on'), ...deletes])
 }
 
@@ -74,8 +73,8 @@ async function clearMemoryAgent(attempts = 3): Promise<void> {
 // firing after it.
 await applyD1Migrations(env.MEMORY_DB, env.TEST_MIGRATIONS)
 await applyD1Migrations(env.MANAGEMENT_DB, env.TEST_MANAGEMENT_MIGRATIONS)
-await clearTables(env.MEMORY_DB, memorySchema)
-await clearTables(env.MANAGEMENT_DB, managementSchema)
+await clearTables(env.MEMORY_DB)
+await clearTables(env.MANAGEMENT_DB)
 await clearArchive()
 await clearMemoryAgent()
 forgetSeed()

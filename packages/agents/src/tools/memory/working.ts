@@ -12,18 +12,18 @@ import { currentRunInputs, operatorInput } from '../../agent/runtime/inputs.ts'
 import { searchHistory } from '../../memory/archive/history.ts'
 import type { HistoryResult } from '../../memory/archive/history.ts'
 import { isSkillName } from '../../memory/skills.ts'
-import { useSkill } from '../../memory/store/skills.ts'
+import { useSkill } from '../../memory/store/skills.service.ts'
 import { isTaskSlug } from '../../memory/tasks.ts'
 import {
   listTaskProgress,
   readTaskProgress,
   visibleTasks,
   writeTaskProgress,
-} from '../../memory/store/tasks.ts'
-import { updateLocalTasks } from '../../memory/working/always-loaded.ts'
+} from '../../memory/store/tasks.service.ts'
+import { updateLocalTasks } from '../../memory/working/always-loaded.service.ts'
 import { memoryDb, readableScopes } from '../../memory/store/db.ts'
-import { searchMemory } from '../../memory/store/search.ts'
-import { requestRemember } from '../../memory/working/remember.ts'
+import { searchMemory } from '../../memory/store/search.service.ts'
+import { requestRemember } from '../../memory/working/remember.service.ts'
 import type { WorkingMemoryDeps } from '../../memory/working/deps.ts'
 
 /** `memory_search`: searches the agent's records and its shared spaces. */

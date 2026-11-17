@@ -1,13 +1,12 @@
 /** Chat authority from ordinary Pi conversation inputs, without separate intake receipts. @module */
-import { env, exports } from 'cloudflare:workers'
 import { evictDurableObject } from 'cloudflare:test'
-import { eq } from 'drizzle-orm'
+import { env, exports } from 'cloudflare:workers'
 import { expect, it, vi } from 'vite-plus/test'
-import { mcpRequests } from '../../../drizzle/management/schema.ts'
-import { management, newAgentId, updateSettings } from '../../testing/management.ts'
-import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
-import { toolCallResponse } from '../../testing/model.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
+import { management, newAgentId, updateSettings } from '../../testing/management.ts'
+import { toolCallResponse } from '../../testing/model.ts'
+import { useMockModel, waitForAnswer } from '../../testing/rpc.ts'
+import { listMcpRequestsBySourceAgent } from '../../testing/test-db.repository.ts'
 
 useMockModel()
 
@@ -32,10 +31,7 @@ it('uses ordinary submission provenance and deduplicates retries after eviction'
     content: `/mcp register ${name}`,
   })
   await waitForAnswer(agentId, requestId)
-  const rows = await management
-    .select()
-    .from(mcpRequests)
-    .where(eq(mcpRequests.sourceAgentId, agentId))
+  const rows = await listMcpRequestsBySourceAgent(management, { sourceAgentId: agentId })
   expect(rows).toHaveLength(1)
   expect(rows[0]).toMatchObject({
     name,
@@ -49,9 +45,7 @@ it('uses ordinary submission provenance and deduplicates retries after eviction'
     content: '/mcp register invented https://invented.example.com/mcp',
   })
   expect(replay.submissionId).toBe(first.submissionId)
-  expect(
-    await management.select().from(mcpRequests).where(eq(mcpRequests.sourceAgentId, agentId)),
-  ).toEqual(rows)
+  expect(await listMcpRequestsBySourceAgent(management, { sourceAgentId: agentId })).toEqual(rows)
 })
 
 it('does not turn peer data or a model-invented endpoint into operator authority', async () => {
@@ -66,9 +60,7 @@ it('does not turn peer data or a model-invented endpoint into operator authority
     content: `/mcp register ${name}`,
   })
   await waitForAnswer(agentId, peerId)
-  expect(
-    await management.select().from(mcpRequests).where(eq(mcpRequests.sourceAgentId, agentId)),
-  ).toEqual([])
+  expect(await listMcpRequestsBySourceAgent(management, { sourceAgentId: agentId })).toEqual([])
   vi.mocked(fetch).mockImplementationOnce(async () =>
     toolCallResponse({
       name: 'mcp_registration',
@@ -78,7 +70,5 @@ it('does not turn peer data or a model-invented endpoint into operator authority
   const requestId = uuidv7()
   await exports.default.sendMessage(agentId, { requestId, content: `/mcp register ${name}` })
   await waitForAnswer(agentId, requestId)
-  expect(
-    await management.select().from(mcpRequests).where(eq(mcpRequests.sourceAgentId, agentId)),
-  ).toEqual([])
+  expect(await listMcpRequestsBySourceAgent(management, { sourceAgentId: agentId })).toEqual([])
 })

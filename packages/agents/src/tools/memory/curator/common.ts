@@ -11,8 +11,8 @@ import type { MemoryJobDeps } from '../../../memory/extraction/context.ts'
 import { executeJobOperation } from '../../../memory/extraction/operations.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
 import type { MemoryRecord } from '../../../memory/store/db.ts'
-import type { Operation } from '../../../memory/store/records.ts'
-import type { OperationResult } from '../../../memory/store/statements.ts'
+import type { Operation } from '../../../memory/store/records.service.ts'
+import type { OperationResult } from '../../../memory/store/statements.repository.ts'
 
 /** The kind of a record. */
 export const KIND = Type.Union([

@@ -11,10 +11,10 @@ import {
   toolCallResponse,
 } from '../../testing/model.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
-import type { Operation } from '../../memory/store/records.ts'
+import type { Operation } from '../../memory/store/records.service.ts'
 import { activeContents } from '../../testing/memory.ts'
-import { knownUrls } from '../../../drizzle/durable-object/schema.ts'
-import { contactBoundary, markContact } from '../../agent/local-db/external-data.ts'
+import { listAllKnownUrls } from '../../testing/test-db.repository.ts'
+import { contactBoundary, markContact } from '../../agent/local-db/external-data.repository.ts'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context'
 import { withHarness } from '../../testing/harness.ts'
@@ -103,7 +103,7 @@ it.each([
           interruption === 'paused' ? 'agent_restricted' : 'aborted',
         )
         expect(fetch).toHaveBeenCalledOnce() // only the harness model request
-        expect(local.select().from(knownUrls).all()).toEqual([])
+        expect(listAllKnownUrls(local.sql)).toEqual([])
         expect(webState.keylessAttempts).toHaveLength(0)
         expect(webState.searchAdmissions).toHaveLength(0)
         expect(webState.inFlight).toBe(0)

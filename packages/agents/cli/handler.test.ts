@@ -1,7 +1,7 @@
 /** Authenticated local adapter routes registry references without implicit seeding. @module */
 import { env, exports } from 'cloudflare:workers'
 import { runInDurableObject } from 'cloudflare:test'
-import { recordNotification } from '../src/agent/local-db/notifications.ts'
+import { recordNotification } from '../src/agent/notifications.service.ts'
 import { openLocalDb } from '../src/agent/local-db/local.ts'
 import { expect, it } from 'vite-plus/test'
 import { newAgentId } from '../src/testing/management.ts'

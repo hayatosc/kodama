@@ -4,20 +4,22 @@
  *
  * @module
  */
-import { uuidv7 } from './lib/uuid.ts'
 import { createExecutionContext, createScheduledController } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import { agentConfigVersions, agents } from '../drizzle/management/schema.ts'
 import { defaultAgentSettings } from './control-plane/config.ts'
+import { findAgentById } from './control-plane/registry.repository.ts'
+import { insertConfigVersionStatement } from './control-plane/versions.repository.ts'
+import AgentService, * as entrypoint from './index.ts'
+import { runBatch } from './lib/reylo.ts'
+import { uuidv7 } from './lib/uuid.ts'
+import { consolidationDay } from './memory/consolidation.service.ts'
+import type { MemoryJob } from './memory/jobs.ts'
+import { jobId } from './memory/jobs.ts'
 import { management, newAgentId, seedOnce } from './testing/management.ts'
 import { memoryAgent, write } from './testing/memory.ts'
-import { textResponse, toolCallResponse, toolResults, requestBody } from './testing/model.ts'
-import AgentService, * as entrypoint from './index.ts'
-import { consolidationDay } from './memory/consolidation.ts'
-import { jobId } from './memory/jobs.ts'
-import type { MemoryJob } from './memory/jobs.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from './testing/model.ts'
+import { updateAgentVersionsStatement } from './testing/test-db.repository.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -36,16 +38,21 @@ function runCron(now: number): Promise<void> {
 /** An agent whose version 1 is in the registry but never reached its object. */
 async function agentWithLostVersion(systemPrompt: string): Promise<string> {
   const agentId = await newAgentId(undefined, false)
-  await management.batch([
-    management.insert(agentConfigVersions).values({
+  await runBatch(management, [
+    insertConfigVersionStatement(management, {
       agentId,
       version: 1,
       settingsJson: JSON.stringify({ ...defaultAgentSettings(env), systemPrompt }),
       schemaVersion: 1,
       source: 'system',
+      comment: null,
       createdAt: Date.now(),
     }),
-    management.update(agents).set({ currentVersion: 1 }).where(eq(agents.agentId, agentId)),
+    updateAgentVersionsStatement(management, {
+      agentId,
+      currentVersion: 1,
+      appliedVersion: 0,
+    }),
   ])
   return agentId
 }
@@ -124,7 +131,7 @@ describe('AgentService', () => {
 
     await runCron(now)
 
-    const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+    const row = await findAgentById(management, agentId)
     expect(row).toMatchObject({ currentVersion: 1, appliedVersion: 1 })
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe(
       'Pushed by the cron',

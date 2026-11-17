@@ -9,9 +9,6 @@ import { uuidv7 } from '../../../lib/uuid.ts'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { exports } from 'cloudflare:workers'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
-import { and, eq } from 'drizzle-orm'
-import { memoryLedger } from '../../../../drizzle/memory/schema.ts'
-import { memoryJobs, usage } from '../../../../drizzle/durable-object/schema.ts'
 import { MEMORY_AGENT_ID } from '../../../memory/jobs.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
 import { JOB_RETRY_DELAYS_MS } from './runner.ts'
@@ -29,10 +26,16 @@ import {
   context,
   db,
 } from '../../../testing/memory.ts'
-import { applyOperation } from '../../../memory/store/records.ts'
+import { applyOperation } from '../../../memory/store/records.service.ts'
 import { setAlarm } from '../../runtime/alarms.ts'
 import { openLocalDb } from '../../local-db/local.ts'
-import { settleJob } from '../../local-db/memory-jobs.ts'
+import { jobRow, settleJob } from '../../local-db/memory-jobs.repository.ts'
+import {
+  listAllUsage,
+  listMemoryLedgerByAction,
+  updateMemoryJobNotBefore,
+  updateReopenRunningMemoryJobRaw,
+} from '../../../testing/test-db.repository.ts'
 import { waitForAnswer } from '../../../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -66,7 +69,7 @@ describe('usage attribution', () => {
         .toBe('settled')
     }
     const rows = await runInDurableObject(memoryAgent(), async (_, state) =>
-      (await openLocalDb(state.storage)).select().from(usage).all(),
+      listAllUsage((await openLocalDb(state.storage)).sql),
     )
     for (const [i, status] of statuses.entries()) {
       const recorded = rows.filter((row) => row.jobId === status.jobId)
@@ -84,7 +87,7 @@ describe('usage attribution', () => {
     }
     await evictDurableObject(memoryAgent())
     const restored = await runInDurableObject(memoryAgent(), async (_, state) =>
-      (await openLocalDb(state.storage)).select().from(usage).all(),
+      listAllUsage((await openLocalDb(state.storage)).sql),
     )
     expect(restored).toEqual(rows)
   })
@@ -264,11 +267,11 @@ describe('retries', () => {
       // Make the delayed retry due now rather than waiting for its delay.
       await runInDurableObject(memoryAgent(), async (_instance, state) => {
         const local = await openLocalDb(state.storage)
-        const row = local.select().from(memoryJobs).where(eq(memoryJobs.jobId, jobId)).get()
+        const row = jobRow(local, jobId)
         const delay = JOB_RETRY_DELAYS_MS[attempt - 1] ?? 0
         expect(row?.notBefore).toBeGreaterThan(Date.now() + delay - 10_000)
         expect(row?.notBefore).toBeLessThanOrEqual(Date.now() + delay)
-        local.update(memoryJobs).set({ notBefore: 0 }).where(eq(memoryJobs.jobId, jobId)).run()
+        updateMemoryJobNotBefore(local.sql, { jobId, notBefore: 0 })
         await setAlarm(state.storage, 'jobs', Date.now())
       })
       await runDurableObjectAlarm(memoryAgent())
@@ -277,11 +280,9 @@ describe('retries', () => {
     await expect
       .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
       .toMatchObject({ status: 'settled', outcome: 'failed', attempts })
-    const failure = await db
-      .select()
-      .from(memoryLedger)
-      .where(and(eq(memoryLedger.targetId, jobId), eq(memoryLedger.action, 'job_failed')))
-      .get()
+    const failure = (await listMemoryLedgerByAction(db, { action: 'job_failed' })).find(
+      (row) => row.targetId === jobId,
+    )
     expect(failure?.detailJson).toBe(JSON.stringify({ kind: 'remember', attempts }))
   })
 })
@@ -314,11 +315,7 @@ describe('memory job recovery', () => {
     // Recreate a stop after Pi committed its result but before Kodama settled the job.
     await runInDurableObject(stub, async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      local
-        .update(memoryJobs)
-        .set({ status: 'running', outcome: null, settledAt: null })
-        .where(eq(memoryJobs.jobId, jobId))
-        .run()
+      updateReopenRunningMemoryJobRaw(local.sql, { jobId })
       await setAlarm(state.storage, 'jobs', Date.now() + 60_000)
     })
     await evictDurableObject(stub)

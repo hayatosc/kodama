@@ -1,0 +1,32 @@
+INSERT INTO credentials (
+  credential_id,
+  kind,
+  purpose,
+  provider,
+  status,
+  revision,
+  ciphertext,
+  iv,
+  wrapped_dek,
+  wrap_iv,
+  fingerprint,
+  last4,
+  created_at,
+  expires_at
+)
+VALUES (
+  :credentialId,
+  :kind,
+  :purpose,
+  :provider,
+  :status,
+  :revision,
+  :ciphertext,
+  :iv,
+  :wrappedDek,
+  :wrapIv,
+  :fingerprint,
+  :last4,
+  :createdAt,
+  :expiresAt::nullable(int)
+);

@@ -1,4 +1,5 @@
 /** Portable unit tests and native CLI tests, without Worker bindings or database setup. @module */
+import reylo from 'reylo/vite'
 import { defineConfig } from 'vite-plus'
 
 /** Reviewed portable tests; unlisted tests default to the real Workers integration project. */
@@ -29,6 +30,7 @@ export const nodeTestFiles = [
 ]
 
 export default defineConfig({
+  plugins: [reylo()],
   test: {
     name: 'node',
     environment: 'node',

@@ -1,44 +1,110 @@
 /**
- * The memory database: its Drizzle handle, record types, scopes, and extraction checkpoints.
+ * The memory database: its D1 handle, record types, and scopes.
  *
  * @see docs/memory.md — D1 schema, Scopes
  *
  * @module
  */
-import * as schema from '../../../drizzle/memory/schema.ts'
-import { eq } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/d1'
-import type { DrizzleD1Database } from 'drizzle-orm/d1'
-import { extractionCheckpoints } from '../../../drizzle/memory/schema.ts'
-import type { memoryRecords, Scope } from '../../../drizzle/memory/schema.ts'
+import { parseEnum } from '../../lib/reylo.ts'
 
-/** Every table of the D1 schema, for Drizzle's relational queries. */
-export { schema }
+/** Whose a record is: one agent's (`agent:<id>`) or a shared space's (`shared:<space>`). */
+export type Scope = `agent:${string}` | `shared:${string}`
 
-/** Drizzle handle of the memory database. */
-export type MemoryDb = DrizzleD1Database<typeof schema>
-/** A memory record row. */
-export type MemoryRecord = typeof memoryRecords.$inferSelect
+/** What a record holds; only facts and instructions are always loaded. */
+export const RECORD_KINDS = ['fact', 'event', 'instruction', 'task'] as const
+/** Only `active` records are searched and loaded; the others are kept for the ledger. */
+export const RECORD_STATUSES = ['active', 'superseded', 'invalid', 'archived'] as const
+/** How a record came to be written. */
+export const RECORD_ORIGINS = ['remember', 'extraction', 'consolidation', 'shared'] as const
+
 /** A record's kind: `fact`, `instruction`, `event`, or `task`. */
-export type RecordKind = MemoryRecord['kind']
+export type RecordKind = (typeof RECORD_KINDS)[number]
+/** A record's lifecycle status. */
+export type RecordStatus = (typeof RECORD_STATUSES)[number]
 /**
  * Where a record came from: a request, the agent's judgment, extraction, consolidation, or a shared write.
  */
-export type RecordOrigin = MemoryRecord['origin']
+export type RecordOrigin = (typeof RECORD_ORIGINS)[number]
+
+/** Handle of the memory database. */
+export type MemoryDb = D1Database
+
+/** A memory record row with narrowed scope and enum fields. */
+export interface MemoryRecord {
+  id: string
+  scope: Scope
+  kind: RecordKind
+  content: string
+  searchVersion: number
+  status: RecordStatus
+  supersededBy: string | null
+  origin: RecordOrigin
+  sourceAgentId: string
+  sourceEntryFrom: number | null
+  sourceEntryTo: number | null
+  runId: string
+  importance: number
+  pinned: boolean
+  overrides: string | null
+  required: boolean
+  useCount: number
+  lastUsedAt: number | null
+  observedAt: number
+  createdAt: number
+  updatedAt: number
+  revision: number
+}
+
+const SCOPE_PATTERN = /^(?:agent|shared):[a-zA-Z0-9_-]{1,64}$/
+
+/** Whether `value` is `agent:<id>` or `shared:<space>`. */
+export function isScope(value: unknown): value is Scope {
+  return typeof value === 'string' && SCOPE_PATTERN.test(value)
+}
+
+/** Narrow a string read from SQLite into a validated {@link Scope}. */
+export function parseScope(value: string): Scope {
+  if (!isScope(value)) throw new TypeError(`Unexpected memory scope: ${value}`)
+  return value
+}
+
+/** Narrow a raw SQL row from `memory_records` into a {@link MemoryRecord}. */
+export function parseMemoryRecord(row: {
+  id: string
+  scope: string
+  kind: string
+  content: string
+  searchVersion: number
+  status: string
+  supersededBy: string | null
+  origin: string
+  sourceAgentId: string
+  sourceEntryFrom: number | null
+  sourceEntryTo: number | null
+  runId: string
+  importance: number
+  pinned: boolean
+  overrides: string | null
+  required: boolean
+  useCount: number
+  lastUsedAt: number | null
+  observedAt: number
+  createdAt: number
+  updatedAt: number
+  revision: number
+}): MemoryRecord {
+  return {
+    ...row,
+    scope: parseScope(row.scope),
+    kind: parseEnum(RECORD_KINDS, row.kind, 'record kind'),
+    status: parseEnum(RECORD_STATUSES, row.status, 'record status'),
+    origin: parseEnum(RECORD_ORIGINS, row.origin, 'record origin'),
+  }
+}
 
 /** The memory database on a D1 binding. */
 export function memoryDb(d1: D1Database): MemoryDb {
-  return drizzle(d1, { schema })
-}
-
-/** The last entry of an agent that extraction has covered, or 0. */
-export async function extractionCheckpoint(db: MemoryDb, agentId: string): Promise<number> {
-  const row = await db
-    .select({ lastEntryId: extractionCheckpoints.lastEntryId })
-    .from(extractionCheckpoints)
-    .where(eq(extractionCheckpoints.agentId, agentId))
-    .get()
-  return row?.lastEntryId ?? 0
+  return d1
 }
 
 /** The scope of an agent's own memory. */
@@ -49,11 +115,4 @@ export function agentScope(agentId: string): Scope {
 /** The scopes an agent reads: its own first, then its shared spaces in order. */
 export function readableScopes(agentId: string, sharedSpaces: readonly string[]): Scope[] {
   return [agentScope(agentId), ...sharedSpaces.map((space): Scope => `shared:${space}`)]
-}
-
-const SCOPE_PATTERN = /^(?:agent|shared):[a-zA-Z0-9_-]{1,64}$/
-
-/** Whether `value` is `agent:<id>` or `shared:<space>`. */
-export function isScope(value: unknown): value is Scope {
-  return typeof value === 'string' && SCOPE_PATTERN.test(value)
 }

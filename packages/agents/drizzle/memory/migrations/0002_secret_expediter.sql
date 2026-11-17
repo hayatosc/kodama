@@ -1,1 +1,0 @@
-ALTER TABLE `memory_records` ADD `external` integer DEFAULT false NOT NULL;

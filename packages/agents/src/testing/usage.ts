@@ -1,6 +1,6 @@
 /** Public-metadata-only usage fixtures for ingestion and RPC tests. @module */
 import { uuidv7 } from '../lib/uuid.ts'
-import type { UsageRow } from '../agent/local-db/usage.ts'
+import type { UsageRow } from '../agent/local-db/usage.repository.ts'
 
 /** One fully measured invocation with overridable attribution, outcome and counters. */
 export function usageRecord(overrides: Partial<UsageRow> = {}): UsageRow {

@@ -1,14 +1,13 @@
-import { uuidv7 } from '../lib/uuid.ts'
-import { describe, expect, it, vi } from 'vite-plus/test'
-import { agentSettingsSchema, defaultAgentSettings, parseSettings } from './config.ts'
-import { createAgentModels } from './models.ts'
-import { parseInput } from '../validation.ts'
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
+import { describe, expect, it, vi } from 'vite-plus/test'
+import { uuidv7 } from '../lib/uuid.ts'
+import { desiredSettings, management, newAgentId, updateSettings } from '../testing/management.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
-import { management, desiredSettings, newAgentId, updateSettings } from '../testing/management.ts'
-import { agentConfigVersions } from '../../drizzle/management/schema.ts'
-import { eq } from 'drizzle-orm'
+import { parseInput } from '../validation.ts'
+import { agentSettingsSchema, defaultAgentSettings, parseSettings } from './config.ts'
+import { createAgentModels } from './models.ts'
+import { listConfigVersionRows } from './versions.repository.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -145,10 +144,7 @@ describe('agent configuration', () => {
     ]) {
       await expect(updateSettings(agentId, invalid)).rejects.toThrow()
     }
-    const versions = await management
-      .select()
-      .from(agentConfigVersions)
-      .where(eq(agentConfigVersions.agentId, agentId))
+    const versions = await listConfigVersionRows(management, agentId, { limit: 50 })
     expect(versions.map((row) => row.version)).toEqual([1])
     expect(await env.AGENTS.getByName(agentId).getConfig()).toEqual(before)
   })

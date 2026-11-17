@@ -1,0 +1,41 @@
+INSERT INTO kodama_scheduled_tasks (
+  id,
+  source_task,
+  source_entry,
+  arguments,
+  instruction,
+  rule,
+  category,
+  followup_hop,
+  session_mode,
+  state,
+  next_due,
+  created_at
+) VALUES (
+  :id,
+  :sourceTask,
+  :sourceEntry,
+  :arguments,
+  :instruction,
+  :ruleJson,
+  :category,
+  :followupHop,
+  :sessionMode,
+  'active',
+  :nextDue,
+  :createdAt
+)
+RETURNING
+  id,
+  source_task AS sourceTask,
+  source_entry AS sourceEntry,
+  arguments,
+  instruction,
+  rule AS ruleJson,
+  category,
+  followup_hop AS followupHop,
+  session_mode AS sessionMode,
+  state,
+  next_due AS nextDue,
+  cursor,
+  created_at AS createdAt;

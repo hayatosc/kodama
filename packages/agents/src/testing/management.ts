@@ -4,14 +4,15 @@
  * @module
  */
 import { env, exports } from 'cloudflare:workers'
-import { eq } from 'drizzle-orm'
-import { agents, agentConfigVersions } from '../../drizzle/management/schema.ts'
 import { defaultAgentSettings } from '../control-plane/config.ts'
 import { managementDb } from '../control-plane/db.ts'
-import { grantTestCredentials, testCredentialRefs } from './credentials.ts'
-import { referenceStatements } from '../credentials/references.ts'
+import { findAgentById, insertAgentStatement } from '../control-plane/registry.repository.ts'
+import { insertConfigVersionStatement } from '../control-plane/versions.repository.ts'
+import { referenceStatements } from '../credentials/grants.repository.ts'
+import { runBatch } from '../lib/reylo.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { AgentSettings, ConfigWriteResult, SeedResult } from '../protocol.ts'
+import { grantTestCredentials, testCredentialRefs } from './credentials.ts'
 
 /** The management database of the tests. */
 export const management = managementDb(env.MANAGEMENT_DB)
@@ -48,28 +49,30 @@ export async function newAgentId(
 ): Promise<string> {
   await seedOnce()
   const now = Date.now()
-  await management.insert(agents).values({
+  await insertAgentStatement(management, {
     agentId,
     objectName: agentId,
     kind: 'working',
     displayName: `test ${agentId.slice(0, 8)}`,
+    slug: null,
     status: 'active',
     currentVersion: withCredentials ? 1 : 0,
     createdAt: now,
     updatedAt: now,
-  })
+  }).run()
   if (!withCredentials) return agentId
   const settings = {
     ...defaultAgentSettings(env),
     credentials: await grantTestCredentials(agentId),
   }
-  await management.batch([
-    management.insert(agentConfigVersions).values({
+  await runBatch(management, [
+    insertConfigVersionStatement(management, {
       agentId,
       version: 1,
       settingsJson: JSON.stringify(settings),
       schemaVersion: 1,
       source: 'system',
+      comment: null,
       createdAt: now,
     }),
     ...referenceStatements(management, agentId, settings),
@@ -79,7 +82,7 @@ export async function newAgentId(
 
 /** The agent's desired settings, or the defaults before its first version. */
 export async function desiredSettings(agentId: string): Promise<AgentSettings> {
-  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await findAgentById(management, agentId)
   if (row === undefined || row.currentVersion === 0) return defaultAgentSettings(env)
   return (await agentService().getConfig(agentId)).settings
 }
@@ -89,7 +92,7 @@ export async function updateSettings(
   agentId: string,
   change: Partial<AgentSettings>,
 ): Promise<ConfigWriteResult> {
-  const row = await management.select().from(agents).where(eq(agents.agentId, agentId)).get()
+  const row = await findAgentById(management, agentId)
   return agentService().updateConfig(agentId, {
     requestId: uuidv7(),
     settings: { ...(await desiredSettings(agentId)), ...change },

@@ -9,8 +9,8 @@
  */
 import * as v from 'valibot'
 import { AgentIdSchema } from '../validation.ts'
-import type { Scope } from '../../drizzle/memory/schema.ts'
 import { isScope } from './store/db.ts'
+import type { Scope } from './store/db.ts'
 import { sha256Hex } from '../lib/hash.ts'
 
 const ScopeSchema = v.custom<Scope>(isScope, 'scope must be agent:<id> or shared:<space>')

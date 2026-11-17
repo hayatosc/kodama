@@ -27,8 +27,9 @@ export default defineConfig({
       '.agents/**',
       '.codex/**',
       '.aws/**',
-      '.mise/**',
+      '**/.mise/**',
       '**/.wrangler/**',
+      '**/.reylo/**',
     ],
   },
   lint: {
@@ -36,22 +37,9 @@ export default defineConfig({
     categories: {
       correctness: 'error',
     },
-    ignorePatterns: ['**/.cloudflare/**', '**/.wrangler/**'],
+    ignorePatterns: ['**/.cloudflare/**', '**/.wrangler/**', '**/.reylo/**'],
     rules: {
       ...svelteRules,
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: 'drizzle-orm',
-              importNames: ['sql'],
-              message: 'Use the typed helpers in packages/agents/src/lib/sql.ts.',
-            },
-          ],
-          patterns: ['drizzle-orm/sql', 'drizzle-orm/sql/*'],
-        },
-      ],
       'typescript/no-explicit-any': 'error',
       'typescript/ban-ts-comment': [
         'error',
@@ -75,14 +63,6 @@ export default defineConfig({
       'typescript/no-non-null-assertion': 'error',
       'vite-plus/prefer-vite-plus-imports': 'error',
     },
-    overrides: [
-      {
-        files: ['packages/agents/src/lib/sql.ts'],
-        rules: {
-          'no-restricted-imports': 'off',
-        },
-      },
-    ],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -92,6 +72,72 @@ export default defineConfig({
       {
         name: 'vite-plus',
         specifier: 'vite-plus/oxlint-plugin',
+      },
+    ],
+    overrides: [
+      {
+        files: ['packages/agents/src/**/*.ts', 'packages/agents/cli/**/*.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql(?:\\?.*)?$',
+                  message: 'Import .sql query files only from feature queries/index.ts barrels.',
+                },
+                {
+                  regex: '(?:^|/)queries(?:/index\\.ts)?$',
+                  message: 'Import queries/index.ts barrels only from *.repository.ts modules.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ['packages/agents/**/*.repository.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql(?:\\?.*)?$',
+                  message:
+                    'Repositories must import queries from their feature queries/index.ts barrel rather than .sql files directly.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ['packages/agents/**/queries/index.ts'],
+        rules: {
+          'no-restricted-imports': 'off',
+        },
+      },
+      {
+        files: ['packages/agents/src/agent/local-db/local.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql$',
+                  message:
+                    'local.ts may only import raw migration SQL files (?raw), never typed Reylo queries.',
+                },
+                {
+                  regex: '(?:^|/)queries(?:/index\\.ts)?$',
+                  message: 'Import queries/index.ts barrels only from *.repository.ts modules.',
+                },
+              ],
+            },
+          ],
+        },
       },
     ],
   },

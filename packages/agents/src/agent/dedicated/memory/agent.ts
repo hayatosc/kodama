@@ -21,7 +21,7 @@ import type {
 import { appliedSettings } from '../../runtime/config-apply.ts'
 import { toolGuardExtension } from '../../runtime/restrictions.ts'
 import { memoryAgentChange, memoryAgentConfig, memoryHarnessOptions } from './config.ts'
-import { jobStatus, runningJob } from '../../local-db/memory-jobs.ts'
+import { jobStatus, runningJob } from '../../local-db/memory-jobs.repository.ts'
 import { consolidate, drainJobs, enqueueJob, HEARTBEAT_MS, stopOverdueJob } from './runner.ts'
 import type { MemoryAgentContext } from './runner.ts'
 

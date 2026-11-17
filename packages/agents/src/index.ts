@@ -9,13 +9,16 @@
 import { safeFailure } from './lib/errors.ts'
 import type { ArtifactMetadata, ArtifactUpload } from './extensions.ts'
 import type { CredentialRefs } from './protocol.ts'
-import { notifyMcpAssignments } from './mcp/registration/servers.ts'
-import { manageMcp } from './mcp/registration/operations.ts'
-import { completeMcpRegistration, recoverMcpRegistrations } from './mcp/registration/chat.ts'
-import { manageMcpOAuth, recoverMcpOAuth } from './mcp/authorization/operations.ts'
+import { notifyMcpAssignments } from './mcp/registration/servers.service.ts'
+import { manageMcp } from './mcp/registration/operations.service.ts'
+import {
+  completeMcpRegistration,
+  recoverMcpRegistrations,
+} from './mcp/registration/chat.service.ts'
+import { manageMcpOAuth, recoverMcpOAuth } from './mcp/authorization/operations.service.ts'
 import { WorkerEntrypoint } from 'cloudflare:workers'
-import * as credentialFlows from './credentials/management.ts'
-import { assignCredential } from './credentials/assignments.ts'
+import * as credentialFlows from './credentials/management.service.ts'
+import { assignCredential } from './credentials/assignments.service.ts'
 import type { AgentEnv } from './env.ts'
 import type {
   AgentSnapshotResponse,
@@ -40,21 +43,21 @@ import type {
   SeedResult,
   UpdateConfigRequest,
 } from './protocol.ts'
-import { reconcileAgents } from './control-plane/workflows/reconcile.ts'
-import { aggregateUsage } from './control-plane/workflows/usage.ts'
-import { readUsage } from './control-plane/usage.ts'
+import { reconcileAgents } from './control-plane/workflows/reconcile.service.ts'
+import { aggregateUsage } from './control-plane/workflows/usage.service.ts'
+import { readUsage } from './control-plane/usage.service.ts'
 import { UsageQuerySchema, AuditQuerySchema } from './validation.ts'
 import type { UsageQuery, AuditQuery } from './protocol.ts'
-import { readAudit } from './control-plane/audit.ts'
+import { readAudit } from './control-plane/audit.service.ts'
 import { managementDb } from './control-plane/db.ts'
 import type { AgentUse } from './control-plane/lifecycle.ts'
-import { admitAgent } from './control-plane/registry.ts'
+import { admitAgent } from './control-plane/registry.service.ts'
 import { MEMORY_AGENT_NAME } from './memory/jobs.ts'
 import { createAgentModels } from './control-plane/models.ts'
-import * as flows from './control-plane/workflows/agents.ts'
-import type { ManagementCall } from './control-plane/workflows/agents.ts'
-import { seed } from './control-plane/workflows/seed.ts'
-import { installationId } from './control-plane/installation.ts'
+import * as flows from './control-plane/workflows/agents.service.ts'
+import type { ManagementCall } from './control-plane/workflows/agents.service.ts'
+import { seed } from './control-plane/workflows/seed.service.ts'
+import { installationId } from './control-plane/installation.service.ts'
 import {
   CreateAgentSchema,
   UpdateConfigSchema,

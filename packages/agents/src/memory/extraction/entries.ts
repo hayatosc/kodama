@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { advanceExtractionProgress } from '../../agent/local-db/memory.ts'
+import { advanceExtractionProgress } from '../../agent/local-db/memory.repository.ts'
 import type { MemoryJobDeps } from './context.ts'
 import { extractionReadThrough } from './operations.ts'
 

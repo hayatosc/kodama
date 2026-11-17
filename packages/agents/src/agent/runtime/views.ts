@@ -13,8 +13,8 @@ import type {
   AttentionItem,
 } from '../../protocol.ts'
 import type { LocalDb } from '../local-db/local.ts'
-import { pendingContacts } from '../local-db/contacts.ts'
-import { pendingDeferredCalls } from '../local-db/deferred.ts'
+import { pendingContacts } from '../local-db/contacts.repository.ts'
+import { pendingDeferredCalls } from '../local-db/deferred.repository.ts'
 
 const context = BACKGROUND_CONTEXT
 

@@ -13,23 +13,23 @@ of the RPC transport.
 packages/
   agents/                 @kodama/agents: RPC Worker and Durable Objects
     cloudflare.config.ts  cf bindings, secrets, Durable Object exports, cron trigger
-    drizzle/              Drizzle schemas and their generated migrations, per database
+    sql/                  SQL migrations per database and pi-tables.sql for Reylo typechecking
     src/index.ts          Service-binding RPC entrypoint (AgentService)
-    src/control-plane/    The management database: registry, admission, versions, lifecycle, config, models
+    src/control-plane/    The management database: queries/, *.repository.ts, *.service.ts, config, models
     src/control-plane/workflows/
                           AgentService management: registry, configuration versions, seed, reconciliation
-    src/credentials/      Encrypted vault, OAuth token refresh, assignments, and resolution
+    src/credentials/      Encrypted vault (queries/, *.repository.ts, *.service.ts), OAuth refresh, grants
     src/lib/              Generic helpers that import nothing else from src/
-    src/agent/            Agent RPC and Durable Object runtime
+    src/agent/            Agent RPC, working-agent options, and domain services (*.service.ts)
       runtime/            Shared execution: Pi harness, SSE, alarms, configuration, pruning
-      local-db/           Object SQLite: prompt cache, quotas, job queue, pruning, and migrations
+      local-db/           Object SQLite: queries/, *.repository.ts, and migrations
       dedicated/          Internal agents that support Kodama; memory/ manages long-term memory
     src/agent-object.ts   Selects the working or dedicated agent in the single AGENTS namespace
     src/tools/            Model-facing tool schemas, descriptions, and result formatting
       memory/             Memory tools for working and dedicated agents
       web/                Web search and page fetch tools and external providers
     src/memory/           Memory workflows: extraction permissions, prompts, pruning, archive, skill rules
-      store/              D1 queries and writes for memory, skills, and the archive catalog
+      store/              D1 queries/, *.repository.ts, and *.service.ts for memory, skills, and archive
       extraction/         Entry reads, record evidence, and permission-checked writes
     src/protocol.ts       Transport data types (safe to import as types in a UI)
     src/testing/          Shared test helpers; tests sit next to their modules as *.test.ts

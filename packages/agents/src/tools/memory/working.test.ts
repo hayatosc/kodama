@@ -5,12 +5,12 @@
  * @module
  */
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { contactBoundary } from '../../agent/local-db/external-data.ts'
+import { contactBoundary } from '../../agent/local-db/external-data.repository.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
-import { memoryJobs } from '../../../drizzle/durable-object/schema.ts'
 import { MEMORY_AGENT_NAME, parseMemoryJob } from '../../memory/jobs.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
+import { listAllMemoryJobs } from '../../testing/test-db.repository.ts'
 import { waitForAnswer, modelResponse } from '../../testing/rpc.ts'
 import { uuidv7 } from '../../lib/uuid.ts'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
@@ -19,7 +19,7 @@ import { mockModel, say } from '../../testing/conversation.ts'
 import { record, write } from '../../testing/memory.ts'
 import { isMemoryAgentRequest, requestBody, toolCallResponse } from '../../testing/model.ts'
 import type { ToolCall } from '../../testing/model.ts'
-import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.ts'
+import { REMEMBER_LIMIT_PER_TURN } from '../../memory/working/remember.service.ts'
 import { taskWriteTool } from './working.ts'
 
 // The memory agent needs the seeded installation and its credentials.
@@ -56,7 +56,7 @@ it('accepts a peer-influenced remember request with an earlier human input', asy
   )
   const jobs = await runInDurableObject(
     env.AGENTS.getByName(MEMORY_AGENT_NAME),
-    async (_instance, state) => (await openLocalDb(state.storage)).select().from(memoryJobs).all(),
+    async (_instance, state) => listAllMemoryJobs((await openLocalDb(state.storage)).sql),
   )
   const job = jobs
     .map((row) => parseMemoryJob(JSON.parse(row.payloadJson)))

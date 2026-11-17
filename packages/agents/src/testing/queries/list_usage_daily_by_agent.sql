@@ -1,0 +1,25 @@
+SELECT
+  bucket,
+  day,
+  charged_agent_id AS chargedAgentId,
+  credential_id AS credentialId,
+  credential_kind AS credentialKind,
+  provider,
+  model,
+  actor_kind AS actorKind,
+  usage_state AS usageState,
+  attempts,
+  failed,
+  rate_limited AS rateLimited,
+  input,
+  output,
+  cache_read AS cacheRead,
+  cache_write AS cacheWrite,
+  total_tokens AS totalTokens,
+  reasoning,
+  cache_write_1h AS cacheWrite1h,
+  reasoning_reported AS reasoningReported,
+  cache_write_1h_reported AS cacheWrite1hReported,
+  cost_usd AS costUsd
+FROM usage_daily
+WHERE charged_agent_id = :chargedAgentId;

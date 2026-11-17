@@ -44,34 +44,35 @@ and, while pruning, the archive catalog of their own entries.
 
 ### Code layout
 
-| Path               | Contents                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| `store/`           | D1 queries and writes: records, search, archive catalog, skills, maintenance, job results |
-| `job-*.ts`         | job context, entry reads, evidence, permissions, and operation workflows                  |
-| `consolidation.ts` | daily consolidation: retention, curation, and the consolidate jobs it queues              |
-| `working/`         | always-loaded prompt assembly and refresh, remember-request workflow                      |
-| `archive/`         | archived segments in R2: building, reading, and `history_search`                          |
-| `prune/`           | the pruning state machine and its limits                                                  |
-| `skills.ts`        | pure skill types, naming rules, limits, and validation                                    |
-| `shared.ts`        | checked writes to shared spaces                                                           |
-| `jobs.ts`          | the memory agent's input contract: job kinds, their validation, and the object's name     |
-| `transcript.ts`    | the text of Pi entries that extraction and archives read, and paged entry reads           |
+| Path                       | Contents                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `store/`                   | D1 `queries/`, `*.repository.ts`, and `*.service.ts` for records, search, archive, skills, etc. |
+| `extraction/`              | job context, entry reads, evidence, permissions, and operation workflows                        |
+| `consolidation.service.ts` | daily consolidation: retention, curation, and the consolidate jobs it queues                    |
+| `working/`                 | always-loaded prompt assembly and refresh, remember-request workflow                            |
+| `archive/`                 | archived segments in R2: building, reading, and `history_search`                                |
+| `prune/`                   | the pruning state machine and its limits                                                        |
+| `skills.ts`                | pure skill types, naming rules, limits, and validation                                          |
+| `shared.service.ts`        | checked writes to shared spaces                                                                 |
+| `jobs.ts`                  | the memory agent's input contract: job kinds, their validation, and the object's name           |
+| `transcript.ts`            | the text of Pi entries that extraction and archives read, and paged entry reads                 |
 
 Paths in the table are relative to `src/memory/`. Model-facing schemas, descriptions, and result
 formatting are separated by audience: `src/tools/memory/working.ts` serves working agents,
 while `src/tools/memory/curator/` contains only the memory agent's dedicated adapters and helpers.
-Neither tool set imports the other's adapters; shared behavior lives in memory workflows or stores. Tools call workflows or store functions without constructing queries.
+Neither tool set imports the other's adapters; shared behavior lives in memory workflows, services, or repositories. Tools call workflows, services, or repository functions without constructing queries.
 `src/agent/memory-extension.ts` wires the working-agent tools and Pi hooks. Object SQLite
-queries live in `src/agent/local-db/memory.ts`, `src/agent/local-db/memory-jobs.ts`, and
-`src/agent/local-db/pruning.ts`, separately from memory workflows. D1 queries live only in `store/`.
+repositories live in `src/agent/local-db/memory.repository.ts`, `src/agent/local-db/memory-jobs.repository.ts`, and
+`src/agent/local-db/pruning.repository.ts` (consuming `src/agent/local-db/queries/`), separately from memory workflows.
+D1 `.sql` queries live in `store/queries/` behind `store/queries/index.ts`, wrapped by `store/*.repository.ts` and
+orchestrated by `store/*.service.ts`.
 R2 encoding and IO remain in `archive/`.
 
 The memory agent itself, the `MemoryAgent` class, is in `src/agent/dedicated/memory/` (see [Memory agent](#memory-agent)). It is an internal agent that manages memory; `src/memory/` holds the memory capabilities it and working agents use.
 
-The schemas live next to their migrations under
-[`packages/agents/drizzle/`](../packages/agents/drizzle/), one folder per database (see
+The schemas live as SQL migrations under [`packages/agents/sql/`](../packages/agents/sql/), one folder per database (see
 [D1 schema](#d1-schema)). Kodama's own tables in each Durable Object's SQLite are in
-[`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): the
+[`sql/durable-object/migrations/`](../packages/agents/sql/durable-object/migrations/): the
 memory agent's job queue, the per-turn `remember` count, the always-loaded copy, and pruning runs.
 The search-text function is a generic helper in [`src/lib/`](../packages/agents/src/lib/). How the folders may depend on each other is described
 in [agents.md](agents.md#dependencies).
@@ -109,9 +110,8 @@ deletion is an operator action.
 
 ### D1 schema
 
-The schema is defined with Drizzle in
-[`drizzle/memory/schema.ts`](../packages/agents/drizzle/memory/schema.ts): one schema file for the one
-database.
+The schema is defined directly in SQL migrations under
+[`sql/memory/migrations/`](../packages/agents/sql/memory/migrations/):
 
 | Table                    | Rows                                                                              |
 | ------------------------ | --------------------------------------------------------------------------------- |
@@ -125,31 +125,27 @@ database.
 | `skills`                 | one skill of one agent, with its body and use counters                            |
 | `memory_ledger`          | append-only log of every change, including declined items                         |
 
-Kodama writes no SQL by hand. Queries use Drizzle's query builder, and migrations come only from
-`drizzle-kit generate`. Each database has one folder under `packages/agents/drizzle/`, with its
-schema beside the migrations generated from it:
+Queries live in `.sql` files under `store/queries/` (`get_*`, `list_*`, `insert_*`, `update_*`,
+`delete_*.sql`) behind `store/queries/index.ts`, called only by `store/*.repository.ts`, and are statically checked against the
+migrations by Reylo (via `pnpm db:prepare`). Each database has one migrations folder under
+`packages/agents/sql/`:
 
 ```text
-drizzle/
-  memory/
-    schema.ts        the long-term memory D1 schema
-    migrations/      generated by `pnpm db:generate:memory`; applied with `cf d1 migrations apply`
-  durable-object/
-    schema.ts        kodama's tables in each Durable Object's SQLite
-    migrations/      generated by `pnpm db:generate:durable-object`; applied by src/agent/local-db/local.ts
+sql/
+  memory/migrations/          the long-term memory D1 migrations; applied with `cf d1 migrations apply`
+  durable-object/migrations/  kodama's tables in each Durable Object's SQLite; applied by src/agent/local-db/local.ts
 ```
 
-The schemas are written by hand. The `migrations/` folders are drizzle-kit output and are never
-edited by hand. Tests fail when a schema and its generated migrations differ. drizzle-kit 0.31
-does not inline the values of check constraints, so the typed columns and the code that writes them enforce allowed values. The
-constraints in the schema are keys and relations between columns.
+Tests verify that migrated schemas match the runtime D1 and Durable Object SQLite tables. The code
+that writes them enforces allowed enum values, and the constraints in the schema are keys and
+relations between columns.
 
 ### Applying a write
 
 Every change the memory agent makes is an operation with an `op_id`. For a tool call, the `op_id`
 is the SHA-256 of the job ID and Pi's tool call ID, so running a recorded tool call again yields
 the same `op_id`. For code steps, such as curation, it is built from the step and its target.
-[`store/records.ts`](../packages/agents/src/memory/store/records.ts) applies it; `applyPlan` there
+[`store/records.service.ts`](../packages/agents/src/memory/store/records.service.ts) applies it; `applyPlan` there
 applies a batch that another module plans the same way, such as a skill write:
 
 1. Look up `memory_ops` by `op_id`. If a row exists, return its stored result and change nothing.
@@ -236,7 +232,7 @@ records that say 「使います」, 「リポジトリ」, and 「サーバー�
   its budget (one line takes at least four characters), then is cut to the budget in code. See
   [Always-loaded memory](#always-loaded-memory).
 - **`memory_search`**
-  ([`store/search.ts`](../packages/agents/src/memory/store/search.ts)):
+  ([`store/search.service.ts`](../packages/agents/src/memory/store/search.service.ts)):
   1. For each word, join the active records of the allowed scopes that have it from
      `memory_terms`.
   2. Rank the records that have every word by importance and use, and events also by recency.
@@ -260,9 +256,9 @@ role adds to an agent:
 | `config.ts` | its model, configuration, harness options, tool set, and prompts            |
 | `runner.ts` | enqueueing, the drain that runs one job at a time, retries, and consolidate |
 
-Queue persistence lives in `src/agent/local-db/memory-jobs.ts`.
+Queue persistence lives in `src/agent/local-db/memory-jobs.repository.ts`.
 Its dedicated model-facing tools live in `src/tools/memory/curator/`; daily consolidation is a memory workflow
-in `src/memory/consolidation.ts`, backed by queries in `src/memory/store/maintenance.ts`.
+in `src/memory/consolidation.service.ts`, backed by `src/memory/store/maintenance.service.ts` and `src/memory/store/maintenance.repository.ts`.
 
 - It inherits every method of `Agent`, including `subscribe`, `snapshot`, `submission`, and
   `getConfig`, so its work can be watched like any agent's.
@@ -310,7 +306,7 @@ job changes the space only through `shared_write` and its checks.
 
 `enqueue(job)` validates the job with valibot and inserts it into `kodama_memory_jobs`, a table in
 the memory agent's own SQLite outside Pi's tables
-([`src/agent/local-db/memory-jobs.ts`](../packages/agents/src/agent/local-db/memory-jobs.ts)):
+([`src/agent/local-db/memory-jobs.repository.ts`](../packages/agents/src/agent/local-db/memory-jobs.repository.ts)):
 
 | Column                        | Meaning                                                       |
 | ----------------------------- | ------------------------------------------------------------- |
@@ -382,7 +378,7 @@ one-off requests in `remember`.
 
 ### Task progress
 
-[`tasks.ts`](../packages/agents/src/memory/tasks.ts) and [`store/tasks.ts`](../packages/agents/src/memory/store/tasks.ts)
+[`tasks.ts`](../packages/agents/src/memory/tasks.ts) and [`store/tasks.service.ts`](../packages/agents/src/memory/store/tasks.service.ts)
 manage durable task checkpoints in the D1 `task_progress` table so ongoing multi-step investigations
 and follow-up loops survive `session_mode: 'new'` context resets:
 
@@ -446,7 +442,7 @@ another attempt without resetting the automatic retry budget.
 ### Consolidate
 
 The cron trigger (`17 3 * * *`, UTC) calls `consolidate()` on the memory agent
-([`consolidation.ts`](../packages/agents/src/memory/consolidation.ts)).
+([`consolidation.service.ts`](../packages/agents/src/memory/consolidation.service.ts)).
 
 In code, it does the following, deleting in small batches:
 
@@ -481,7 +477,7 @@ then does the following:
 
 ## Always-loaded memory
 
-[`working/always-loaded.ts`](../packages/agents/src/memory/working/always-loaded.ts) renders two
+[`working/always-loaded.service.ts`](../packages/agents/src/memory/working/always-loaded.service.ts) renders two
 capped blocks from the always-loaded query (using fixed labels without shifting timestamps for
 prompt-cache stability):
 
@@ -635,8 +631,8 @@ scratch work of finished jobs, and its records are already in D1. It prunes afte
 before taking the next, because closing the harness mid-job would fail the job, and waiting for
 an empty queue would let the session grow without bound under a steady stream of jobs.
 
-Pruning writes to Pi's internal tables, described in
-[`src/agent/local-db/pi-tables.ts`](../packages/agents/src/agent/local-db/pi-tables.ts). The Pi Durable version
+Pruning writes to Pi's internal tables, declared for Reylo typechecking in
+[`sql/pi-tables.sql`](../packages/agents/sql/pi-tables.sql). The Pi Durable version
 is pinned. Re-run `prune/prune.test.ts` and `src/agent/runtime/harness.test.ts` on every Pi upgrade.
 
 ### Archive index
@@ -683,7 +679,7 @@ A skill is a procedure the memory agent saved for one agent: a name, a descripti
 it, and a Markdown body with the steps. Skills are kept apart from facts so that only their names
 and descriptions occupy the prompt; the body is read when a task needs it.
 [`skills.ts`](../packages/agents/src/memory/skills.ts) holds the pure rules and types;
-[`store/skills.ts`](../packages/agents/src/memory/store/skills.ts) holds D1 reads and writes.
+[`store/skills.service.ts`](../packages/agents/src/memory/store/skills.service.ts) holds D1 reads and writes.
 
 ### Storage
 
@@ -738,7 +734,7 @@ daily consolidation in code, logged in `memory_ledger`.
 
 No person approves or reviews a change. During a `consolidate` job, the memory agent writes a
 shared record with `shared_write`, and code checks it before applying it
-([`shared.ts`](../packages/agents/src/memory/shared.ts)):
+([`shared.service.ts`](../packages/agents/src/memory/shared.service.ts)):
 
 - A record that comes into a space needs active records of at least two agents among its sources.
   Two agents are independent evidence that it is not one agent's quirk or one poisoned
@@ -759,18 +755,18 @@ tool tells the memory agent why. Shared records are never rewritten in place.
 | ---------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | memory agent model                 | its configuration versions; version 1 from `MEMORY_MODEL_PROVIDER` / `MEMORY_MODEL_ID` | the management database, `cloudflare.config.ts` |
 | `sharedSpaces`                     | `["global"]`, at most 8                                                                | configuration versions                          |
-| idle delay before `extract`        | 10 minutes                                                                             | `src/agent/memory.ts`                           |
-| always-loaded budget               | 2,200 characters (agent), 1,000 (shared)                                               | `working/always-loaded.ts`                      |
-| revision check before input        | every 60 seconds at most                                                               | `working/always-loaded.ts`                      |
-| `remember` calls per user entry    | 3                                                                                      | `working/remember.ts`                           |
+| idle delay before `extract`        | 10 minutes                                                                             | `src/agent/memory.service.ts`                   |
+| always-loaded budget               | 2,200 characters (agent), 1,000 (shared)                                               | `working/always-loaded.service.ts`              |
+| revision check before input        | every 60 seconds at most                                                               | `working/always-loaded.service.ts`              |
+| `remember` calls per user entry    | 3                                                                                      | `working/remember.service.ts`                   |
 | `remember` content                 | at most 2,000 characters                                                               | `jobs.ts`                                       |
-| event half-life                    | 30 days                                                                                | `store/search.ts`                               |
+| event half-life                    | 30 days                                                                                | `store/search.service.ts`                       |
 | job retries                        | 1 minute, 10 minutes, 1 hour                                                           | `src/agent/dedicated/memory/runner.ts`          |
 | job attempt time limit             | 15 minutes                                                                             | `src/agent/dedicated/memory/runner.ts`          |
-| job starvation limit               | 1 hour past its due time                                                               | `src/agent/local-db/memory-jobs.ts`             |
-| consolidation job size             | one scope, 200 records; 200 scopes a day                                               | `consolidation.ts`                              |
-| ledger and claim retention         | 90 days                                                                                | `consolidation.ts`                              |
-| settled job retention              | 30 days                                                                                | `consolidation.ts`                              |
+| job starvation limit               | 1 hour past its due time                                                               | `src/agent/local-db/memory-jobs.repository.ts`  |
+| consolidation job size             | one scope, 200 records; 200 scopes a day                                               | `consolidation.service.ts`                      |
+| ledger and claim retention         | 90 days                                                                                | `consolidation.service.ts`                      |
+| settled job retention              | 30 days                                                                                | `consolidation.service.ts`                      |
 | pruning threshold / hard limit     | 1 GiB / 8 GiB                                                                          | `prune/runs.ts`                                 |
 | entries per pruning run            | at most 16 MiB                                                                         | `prune/runs.ts`                                 |
 | pruning retry after a failed check | 10 minutes                                                                             | `prune/runs.ts`                                 |
@@ -779,7 +775,7 @@ tool tells the memory agent why. Shared records are never rewritten in place.
 | skill body / description           | 50,000 / 1,024 characters                                                              | `skills.ts`                                     |
 | skills listed per agent            | 50                                                                                     | `skills.ts`                                     |
 | skill archived when unused         | 30 days                                                                                | `skills.ts`                                     |
-| agents needed for a shared record  | 2                                                                                      | `shared.ts`                                     |
+| agents needed for a shared record  | 2                                                                                      | `shared.service.ts`                             |
 
 ## Testing
 
@@ -790,20 +786,21 @@ setup lives in `src/testing/memory.ts`. Paths below are relative to
 
 | Test file                                   | Covers                                                             |
 | ------------------------------------------- | ------------------------------------------------------------------ |
-| `store/records.test.ts`                     | operations: replays, conflicts, freshness, revision claims, checks |
-| `store/search.test.ts`                      | Japanese and English queries, scopes, precedence, usage counts     |
+| `store/records.service.test.ts`             | operations: replays, conflicts, freshness, revision claims, checks |
+| `store/search.service.test.ts`              | Japanese and English queries, scopes, precedence, usage counts     |
 | `src/agent/dedicated/memory/runner.test.ts` | jobs, `remember`, redelivery, retries, recovery after eviction     |
 | `src/agent/dedicated/memory/agent.test.ts`  | the role's RPC limits, the default model, its class                |
-| `consolidation.test.ts`                     | merging duplicates and dropping old ledger rows                    |
-| `src/agent/memory.test.ts`                  | extraction, the always-loaded copy, revision checks                |
+| `consolidation.service.test.ts`             | merging duplicates and dropping old ledger rows                    |
+| `src/agent/memory.service.test.ts`          | extraction, the always-loaded copy, revision checks                |
 | `src/agent/runtime/alarms.test.ts`          | purposes coexist in one alarm                                      |
 | `prune/prune.test.ts`                       | pruning states, stops, delete checks, the hard limit; evaluation   |
 | `archive/history.test.ts`                   | `history_search` pages, time bounds, and continuation cursors      |
-| `store/skills.test.ts`                      | writes and conflicts, `skill_read`, curation, the consolidate job  |
-| `shared.test.ts`                            | shared spaces, overrides, required records, checked shared writes  |
+| `store/skills.service.test.ts`              | writes and conflicts, `skill_read`, curation, the consolidate job  |
+| `shared.service.test.ts`                    | shared spaces, overrides, required records, checked shared writes  |
 | `src/agent/runtime/harness.test.ts`         | behavior of Pi Durable that this design relies on                  |
-| `store/db.test.ts`                          | behavior of D1 that this design relies on                          |
-| `drizzle/*/schema.test.ts`                  | each schema matches its generated migrations                       |
+| `store/db.test.ts`                          | behavior of D1 and migrated memory schema parity                   |
+| `src/control-plane/db.test.ts`              | behavior of D1 and migrated management schema parity               |
+| `src/agent/local-db/local.test.ts`          | Durable Object local SQLite migration parity                       |
 
 ### Evaluation
 
@@ -912,8 +909,7 @@ every time, and one writer makes the database guarantee they would give unnecess
 
 ### Search is a word index, not FTS5 or vectors
 
-FTS5 needs a virtual table and triggers that Drizzle cannot describe, and kodama writes no SQL by
-hand. Its trigram tokenizer also misses two-character Japanese words such as 「使う」. A word table
+FTS5 needs virtual table and trigger configuration not supported uniformly in D1 migrations, and its trigram tokenizer misses two-character Japanese words such as 「使う」. A word table
 loses BM25's term-frequency ranking, which matters little for records of one or two sentences.
 
 Vectors may be added once measurements show what word search misses.

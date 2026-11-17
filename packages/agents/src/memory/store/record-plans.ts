@@ -5,11 +5,16 @@
  *
  * @module
  */
-import { and, eq } from 'drizzle-orm'
-import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
-import type { NewRecord, Operation, RecordEvidence } from './records.ts'
-import { memoryRecords } from '../../../drizzle/memory/schema.ts'
+import { sha256Hex } from '../../lib/hash.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
+import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
+import {
+  findMemoryRecordById,
+  insertMemoryRecordStatement,
+  invalidateMemoryRecordStatement,
+  supersedeMemoryRecordStatement,
+} from './records.repository.ts'
+import type { NewRecord, Operation, RecordEvidence } from './records.service.ts'
 import {
   bumpScope,
   claimRevision,
@@ -17,15 +22,14 @@ import {
   insertOp,
   recordLedger,
   termStatements,
-} from './statements.ts'
+} from './statements.repository.ts'
 import type {
   OperationContext,
   OperationResult,
   Plan,
   Statement,
   Statements,
-} from './statements.ts'
-import { sha256Hex } from '../../lib/hash.ts'
+} from './statements.repository.ts'
 
 /**
  * A record's ID: a hash of its scope, kind, content, source agent, and first source entry.
@@ -85,7 +89,7 @@ function insertRecord(
   record: NewRecord,
 ): Statement[] {
   validateRecord(record)
-  const row = db.insert(memoryRecords).values({
+  const row = insertMemoryRecordStatement(db, {
     id,
     scope: record.scope,
     kind: record.kind,
@@ -93,12 +97,12 @@ function insertRecord(
     searchVersion: SEARCH_VERSION,
     origin: record.origin,
     sourceAgentId: record.sourceAgentId,
-    sourceEntryFrom: record.sourceEntries?.from,
-    sourceEntryTo: record.sourceEntries?.to,
+    sourceEntryFrom: record.sourceEntries?.from ?? null,
+    sourceEntryTo: record.sourceEntries?.to ?? null,
     runId: context.runId,
-    importance: record.importance,
-    required: record.required,
-    overrides: record.overrides,
+    importance: record.importance ?? 0.5,
+    required: record.required ?? false,
+    overrides: record.overrides ?? null,
     observedAt: record.observedAt,
     createdAt: context.now,
     updatedAt: context.now,
@@ -114,23 +118,23 @@ function guardedStatusUpdate(
   revision: number,
   change: { status: 'superseded'; supersededBy: string } | { status: 'invalid' },
 ): Statement[] {
-  return [
-    db
-      .update(memoryRecords)
-      .set({ ...change, revision: revision + 1, updatedAt: context.now })
-      .where(
-        and(
-          eq(memoryRecords.id, id),
-          eq(memoryRecords.status, 'active'),
-          eq(memoryRecords.revision, revision),
-        ),
-      ),
-    claimRevision(db, context, 'record', id, revision + 1),
-  ]
-}
-
-function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
-  return db.select().from(memoryRecords).where(eq(memoryRecords.id, id)).get()
+  const nextRevision = revision + 1
+  const update =
+    change.status === 'superseded'
+      ? supersedeMemoryRecordStatement(db, {
+          id,
+          revision,
+          supersededBy: change.supersededBy,
+          nextRevision,
+          updatedAt: context.now,
+        })
+      : invalidateMemoryRecordStatement(db, {
+          id,
+          revision,
+          nextRevision,
+          updatedAt: context.now,
+        })
+  return [update, claimRevision(db, context, 'record', id, nextRevision)]
 }
 
 /**
@@ -167,7 +171,7 @@ export async function planSupersede(
   context: OperationContext,
   op: Extract<Operation, { type: 'supersede' }>,
 ): Promise<Plan> {
-  const old = await readRecord(db, op.oldId)
+  const old = await findMemoryRecordById(db, op.oldId)
   if (old === undefined || old.status !== 'active' || old.revision !== op.oldRevision) {
     return conflict(db, context, op.oldId, 'target_changed')
   }
@@ -221,7 +225,7 @@ export async function planInvalidate(
   context: OperationContext,
   op: Extract<Operation, { type: 'invalidate' }>,
 ): Promise<Plan> {
-  const old = await readRecord(db, op.id)
+  const old = await findMemoryRecordById(db, op.id)
   if (old === undefined || old.status !== 'active' || old.revision !== op.revision) {
     return conflict(db, context, op.id, 'target_changed')
   }

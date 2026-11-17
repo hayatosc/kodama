@@ -119,7 +119,7 @@ module-level state in tests and helpers resettable from `vitest.setup.ts`, as `f
 A test whose agent keeps working after it ends (a turn retried in the background, for example)
 can reach the next test's fetch mock, which shows up more often with the faster shared runtime.
 Stop such agents in `afterEach` with `stopAgentObject` from `src/testing/rpc.ts`, as
-`src/mcp/registration/chat.test.ts` does. A test that passes alone but fails in the full run
+`src/mcp/registration/chat.service.test.ts` does. A test that passes alone but fails in the full run
 usually depends on state another test or file left behind.
 
 ## Test scripts and Vite+
@@ -136,7 +136,7 @@ From the workspace root:
 ```sh
 pnpm --filter @kodama/agents test --project node
 pnpm --filter @kodama/agents test --project workerd
-pnpm --filter @kodama/agents test src/agent/contact.test.ts
+pnpm --filter @kodama/agents test src/agent/contact.service.test.ts
 pnpm --filter @kodama/agents test --reporter=json --outputFile=/tmp/kodama-tests.json
 ```
 

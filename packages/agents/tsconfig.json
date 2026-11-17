@@ -11,12 +11,19 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "allowArbitraryExtensions": true,
+    "rootDirs": [".", ".reylo/types"],
     "types": ["@cloudflare/vitest-plugin/types", "node", "vite/client"]
   },
+  "contentMappers": [
+    {
+      "package": "reylo",
+      "extensions": [".sql", ".reylo.yaml", ".reylo.yml"]
+    }
+  ],
   "include": [
     "src/**/*.ts",
     "cli/**/*.ts",
-    "drizzle/**/*.ts",
     "*.config.ts",
     "vitest.setup.ts",
     ".cloudflare/types/**/*.d.ts"

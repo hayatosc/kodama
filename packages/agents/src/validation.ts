@@ -6,7 +6,7 @@
  */
 import * as v from 'valibot'
 import { validate } from 'uuid'
-import { AGENT_KINDS, AGENT_STATUSES } from '../drizzle/management/schema.ts'
+import { AGENT_KINDS, AGENT_STATUSES } from './control-plane/db.ts'
 import { UUID_PATTERN } from './lib/uuid.ts'
 import { MAX_ARTIFACT_BYTES } from './extensions.ts'
 import type {

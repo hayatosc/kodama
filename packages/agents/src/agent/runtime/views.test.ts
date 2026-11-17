@@ -9,7 +9,7 @@ import {
   contactRequest,
   reserveContact,
   settleContact,
-} from '../local-db/contacts.ts'
+} from '../local-db/contacts.repository.ts'
 import { attentionOf } from './views.ts'
 import '@earendil-works/pi-ai/api/openai-responses'
 
@@ -133,7 +133,8 @@ it('reports dispatch and result waits without changing peer state', async () => 
 })
 
 it('reports pending deferred tool approvals and omits expired or decided rows', async () => {
-  const { createDeferredCall, decideDeferredCall } = await import('../local-db/deferred.ts')
+  const { createDeferredCall, decideDeferredCall } =
+    await import('../local-db/deferred.repository.ts')
   await withHarness({}, async (harness, state) => {
     const db = await openLocalDb(state.storage)
     const now = Date.now()

@@ -7,7 +7,7 @@
  */
 import * as v from 'valibot'
 import type { MemoryDb } from '../store/db.ts'
-import { historySegments } from '../store/archive.ts'
+import { historySegments } from '../store/archive.repository.ts'
 import { searchWords } from '../../lib/search-text.ts'
 import { entryText } from '../transcript.ts'
 import { indexSchema, readJson, readSegment } from './reader.ts'

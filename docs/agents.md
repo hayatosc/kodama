@@ -23,37 +23,40 @@ planned and not implemented.
 ```text
 packages/agents/
   cloudflare.config.ts      Worker, Durable Object exports, bindings, secrets, cron trigger
-  drizzle.memory.config.ts  drizzle-kit config for the long-term memory D1 schema (drizzle/memory/)
-  drizzle.management.config.ts
-                            drizzle-kit config for the management D1 schema (drizzle/management/)
-  drizzle.durable-object.config.ts
-                            drizzle-kit config for kodama's tables in each Durable Object
-                            (drizzle/durable-object/)
-  drizzle/
-    memory/                 long-term memory D1 schema (schema.ts) and its migrations (migrations/)
-    management/             management D1 schema: registry, versions, principals, audit; migrations
-    durable-object/         schema of kodama's tables in each object, and their migrations
+  sql/
+    memory/migrations/      long-term memory D1 SQL migrations
+    management/migrations/  management D1 SQL migrations: registry, versions, principals, audit
+    durable-object/migrations/
+                            migrations of kodama's tables in each object's SQLite
+    pi-tables.sql           Pi Durable table schema for Reylo static typechecking
   cli/                      local development CLI and its token-authenticated adapter
   src/
     index.ts                AgentService: the service-binding RPC entrypoint and cron handler
-    management/             the management database: registry, admission, versions, lifecycle, audit
-      service/              registry, configuration versions, seed, reconciliation flows
+    control-plane/          management D1: queries/, *.repository.ts, *.service.ts, config, models
+      workflows/            registry, configuration versions, seed, reconciliation, usage flows
+    credentials/            encrypted vault (queries/, *.repository.ts, *.service.ts), OAuth, grants
+    artifacts/              artifact files service (files.service.ts)
+    mcp/                    MCP client authorization, connection, registration, and invocation
     env.ts                  the Worker's bindings, as a type
     protocol.ts             transport types; consumers import them with `import type`
     validation.ts           valibot schemas for untrusted RPC input
-    lib/                    generic helpers that import nothing else from src/
-    agent/                  Agent RPC, working-agent options, and memory integration
-    runtime/                shared harness, alarms, streams, configuration, and pruning control
-    system-agents/          internal agents that support Kodama, under reserved object names
-      memory/               MemoryAgent: its class, configuration, queue, and runner
-    agent-object.ts         AgentObject, which selects a working or system agent by the object's name
-    configuration/          per-agent configuration: validation and persistence
-    models/                 Pi provider catalog with explicit D1 credentials only
+    lib/                    generic helpers that import nothing else from src/ (incl. reylo.ts)
+    agent/                  Agent RPC, working-agent options, and domain services (*.service.ts)
+      runtime/              shared harness, alarms, streams, configuration, and pruning control
+      local-db/             object SQLite: local.ts, queries/, *.repository.ts, and Pi-table reads
+      dedicated/            internal agents that support Kodama, under reserved object names
+        memory/             MemoryAgent: its class, configuration, queue, and runner
+    agent-object.ts         AgentObject, which selects a working or dedicated agent by object name
     tools/                  tool implementations and their registry
     memory/                 long-term memory (see memory.md)
-    storage/                opening kodama's tables in each object's SQLite, and Pi's tables
-    helper/                 shared test helpers; tests sit next to their modules
+    testing/                shared test helpers (queries/, test-db.repository.ts); tests sit next to modules
 ```
+
+Each storage-backed domain colocates Reylo `.sql` files in `<domain>/queries/` (`get_*`, `list_*`,
+`insert_*`, `update_*`, `delete_*.sql`) behind `<domain>/queries/index.ts`. Only `queries/index.ts`
+imports `.sql` files (except `src/agent/local-db/local.ts` loading DDL `0000_init.sql?raw`), and only
+`*.repository.ts` modules import `queries/index.ts`; services (`*.service.ts`), runtime, tools, CLI,
+and tests never import `.sql` or `queries/`. Oxlint enforces these boundaries in `vite.config.ts`.
 
 ### The Agent Durable Object
 
@@ -67,7 +70,7 @@ files (paths relative to `src/`):
 | File                            | Responsibility                                                     |
 | ------------------------------- | ------------------------------------------------------------------ |
 | `agent/config.ts`               | Working-agent model and optional tool registration                 |
-| `agent/memory.ts`               | Working-agent memory refresh and extraction                        |
+| `agent/memory.service.ts`       | Working-agent memory refresh and extraction                        |
 | `agent/memory-extension.ts`     | Working-agent memory tools and prompt hooks                        |
 | `agent/runtime/harness.ts`      | Shared Pi settings, opening the harness, and its exclusive section |
 | `agent/runtime/views.ts`        | `snapshot()` and `submission()` results, mapped from Pi state      |
@@ -115,7 +118,7 @@ Each system agent has a folder under `src/agent/dedicated/` with only what it ad
 The one today is the memory agent, `MemoryAgent`, named `kodama:memory`
 ([memory.md](memory.md#memory-agent)): its class (`agent.ts`), its configuration and prompts
 (`config.ts`), and the runner that drains its queue (`runner.ts`). The queue's SQLite operations
-live in `src/agent/local-db/memory-jobs.ts`; its dedicated model-facing tools live in `src/tools/memory/curator/`, and memory
+live in `src/agent/local-db/memory-jobs.repository.ts`; its dedicated model-facing tools live in `src/tools/memory/curator/`, and memory
 workflows, including daily consolidation, live in `src/memory/`.
 
 To add a system agent, create its folder with a subclass, reserve a name with `:`, and add the
@@ -144,30 +147,30 @@ If Pi's storage fails, the object aborts and is recreated on the next request.
 Code in `src/` is split into layers. A layer imports only itself and the layers below it, so a file's
 imports say where it sits.
 
-| Layer              | Paths                                                                                                                                                                | May import                                                                              |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| lib                | `src/lib/`                                                                                                                                                           | nothing in `src/`                                                                       |
-| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                                 | lib                                                                                     |
-| settings           | `src/control-plane/config.ts`, `src/control-plane/models.ts`                                                                                                         | lib, contracts, tool registry                                                           |
-| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                         | lib                                                                                     |
-| storage            | `drizzle/`, `src/agent/local-db/`                                                                                                                                    | lib, memory contracts                                                                   |
-| management         | `src/control-plane/`, except `service/`                                                                                                                              | lib, contracts, settings, storage                                                       |
-| credential storage | `src/credentials/`, except the management flows below                                                                                                                | lib, contracts, settings, storage, management                                           |
-| memory store       | `src/memory/store/`                                                                                                                                                  | lib, storage, memory contracts                                                          |
-| memory             | the rest of `src/memory/`                                                                                                                                            | lib, contracts, storage, memory store                                                   |
-| runtime            | `src/agent/runtime/`                                                                                                                                                 | lib, contracts, settings, storage, management, credential storage, memory store, memory |
-| tools              | `src/tools/`                                                                                                                                                         | all of the above                                                                        |
-| agent              | `src/agent/`                                                                                                                                                         | all of the above                                                                        |
-| system agents      | `src/agent/dedicated/`                                                                                                                                               | all of the above, including Agent                                                       |
-| management service | `src/control-plane/workflows/`, `src/credentials/management.ts`, `src/credentials/assignments.ts`, `src/credentials/invalidation.ts`, `src/credentials/bootstrap.ts` | all of the above                                                                        |
-| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                                | all of the above                                                                        |
+| Layer              | Paths                                                                                                                                                                                                | May import                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| lib                | `src/lib/`                                                                                                                                                                                           | nothing in `src/`                                                                       |
+| contracts          | `src/env.ts`, `src/protocol.ts`, `src/validation.ts`                                                                                                                                                 | lib                                                                                     |
+| settings           | `src/control-plane/config.ts`, `src/control-plane/models.ts`                                                                                                                                         | lib, contracts, tool registry                                                           |
+| memory contracts   | `src/memory/jobs.ts`, `src/memory/skills.ts`                                                                                                                                                         | lib                                                                                     |
+| storage            | `sql/`, `src/agent/local-db/`                                                                                                                                                                        | lib, memory contracts                                                                   |
+| management         | `src/control-plane/`, except `workflows/`                                                                                                                                                            | lib, contracts, settings, storage                                                       |
+| credential storage | `src/credentials/`, except the management flows below                                                                                                                                                | lib, contracts, settings, storage, management                                           |
+| memory store       | `src/memory/store/`                                                                                                                                                                                  | lib, storage, memory contracts                                                          |
+| memory             | the rest of `src/memory/`                                                                                                                                                                            | lib, contracts, storage, memory store                                                   |
+| runtime            | `src/agent/runtime/`                                                                                                                                                                                 | lib, contracts, settings, storage, management, credential storage, memory store, memory |
+| tools              | `src/tools/`                                                                                                                                                                                         | all of the above                                                                        |
+| agent              | `src/agent/`                                                                                                                                                                                         | all of the above                                                                        |
+| system agents      | `src/agent/dedicated/`                                                                                                                                                                               | all of the above, including Agent                                                       |
+| management service | `src/control-plane/workflows/`, `src/credentials/management.service.ts`, `src/credentials/assignments.service.ts`, `src/credentials/invalidation.service.ts`, `src/credentials/bootstrap.service.ts` | all of the above                                                                        |
+| entrypoint         | `src/index.ts`, `src/agent-object.ts`                                                                                                                                                                | all of the above                                                                        |
 
 Some consequences:
 
 - `src/lib/` holds helpers with no knowledge of agents or memory: hashing (`hash.ts`), search
-  words (`search-text.ts`), UUIDs (`uuid.ts`), error text (`errors.ts`), and the two ordering
-  helpers the `Agent` class uses (`serial.ts`).
-- `src/control-plane/`, except `service/`, knows the management database and nothing of objects; the
+  words (`search-text.ts`), UUIDs (`uuid.ts`), error text (`errors.ts`), Reylo query execution
+  (`reylo.ts`), and the two ordering helpers the `Agent` class uses (`serial.ts`).
+- `src/control-plane/`, except `workflows/`, knows the management database and nothing of objects; the
   agent runtime uses it to report applied versions and to admit `sendTo`. Only
   management-service-layer flows and the entrypoint push to objects, because the seed needs the
   memory agent's configuration. Credential queries and helpers stay in `src/credentials/`;
@@ -178,10 +181,10 @@ Some consequences:
 - `src/tools/` owns model-facing definitions and tool-specific execution: names, schemas,
   descriptions, admission orchestration, external transport, and result formatting. Web definitions,
   execution, and provider protocols live together in `src/tools/web/`; `contact.ts` resolves
-  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.ts`.
+  contact tool arguments; durable delivery and receipt collection live in `src/agent/contact.service.ts`.
   `src/tools/memory/working.ts` serves working agents; `src/tools/memory/curator/` serves only
-  the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows or
-  store functions, never construct Drizzle queries or import agent classes. Agents supply shared
+  the memory agent. Neither tool set imports the other's adapters. Tools call memory workflows,
+  services, or repository functions, never construct database queries or import agent classes. Agents supply shared
   state and operations; prompt refresh, extraction scheduling, and peer delivery remain outside tools.
   Pure argument normalization in `src/tools/web/url.ts` is also used by RPC validation.
   `src/tools/index.ts` registers optional general tools; memory tools are wired by the working agent's
@@ -320,9 +323,9 @@ KODAMA_CODE_NPM_SMOKE=1 pnpm test src/tools/code/execute.test.ts
 
 ## Management database
 
-Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `drizzle/memory/`) holds long-term
+Kodama has two D1 databases. `kodama-memory` (`MEMORY_DB`, schema in `sql/memory/migrations/`) holds long-term
 memory ([memory.md](memory.md)). `kodama-management` (`MANAGEMENT_DB`, schema in
-[`drizzle/management/schema.ts`](../packages/agents/drizzle/management/schema.ts)) holds the source of
+[`sql/management/migrations/`](../packages/agents/sql/management/migrations/)) holds the source of
 truth for agents:
 
 | Table                   | Contents                                                                        |
@@ -352,7 +355,7 @@ rows are never deleted, so an agent ID is never reused.
   `AGENTS.getByName(object_name)` read from the registry.
 
 `AgentService` admits a call right before it reaches the object
-([`src/control-plane/registry.ts`](../packages/agents/src/control-plane/registry.ts)). It rejects an ID that is
+([`src/control-plane/registry.service.ts`](../packages/agents/src/control-plane/registry.service.ts)). It rejects an ID that is
 not a UUID, a UUID not in the registry, and a dedicated agent's UUID with a `TypeError`, before
 any harness or storage is opened, so an unknown ID never creates an object. A known agent whose
 state does not allow the call is refused with `agent_unavailable:`. `sendTo` admits its target the
@@ -384,7 +387,7 @@ here and carried out by later work.
 
 ### Seed
 
-`AgentService.seed(credentials?)` ([`src/control-plane/workflows/seed.ts`](../packages/agents/src/control-plane/workflows/seed.ts))
+`AgentService.seed(credentials?)` ([`src/control-plane/workflows/seed.service.ts`](../packages/agents/src/control-plane/workflows/seed.service.ts))
 creates the initial agents idempotently. Fresh agents require explicit credential references.
 The stable `install_id` UUID v7 is initialized lazily on first use by registration, login or seed;
 it does not imply any agents exist. Seed ensures these rows:
@@ -482,7 +485,7 @@ and `send_outbox` enabled, `sharedSpaces` `["global"]`, and both memory policies
 
 ### Configuration versions
 
-[`src/control-plane/versions.ts`](../packages/agents/src/control-plane/versions.ts) writes versions:
+[`src/control-plane/versions.service.ts`](../packages/agents/src/control-plane/versions.service.ts) writes versions:
 
 - `updateConfig(actor, agentId, { requestId, settings, expectedVersion, comment })` writes version
   `expectedVersion + 1`. One `batch()` inserts the version, moves `current_version`, and appends the
@@ -527,7 +530,7 @@ be lost ([`src/agent/runtime/config-apply.ts`](../packages/agents/src/agent/runt
 4. Missed versions converge: the object compares the registry's desired version with its own when
    the harness opens, and the daily cron pushes every row where `current_version ≠ applied_version`
    again and finishes agents stuck in `provisioning`
-   ([`src/control-plane/workflows/reconcile.ts`](../packages/agents/src/control-plane/workflows/reconcile.ts)). Each run takes up to 100
+   ([`src/control-plane/workflows/reconcile.service.ts`](../packages/agents/src/control-plane/workflows/reconcile.service.ts)). Each run takes up to 100
    agents in ID order, starting after the agent the previous run stopped at
    (`system_settings.reconcile_cursor`) and wrapping around, so agents that keep failing cannot keep
    the others from being reached.
@@ -605,8 +608,8 @@ Omit tool names to disable all optional tools.
 
 ### Tool approvals
 
-[`src/agent/permissions.ts`](../packages/agents/src/agent/permissions.ts) and
-[`src/agent/local-db/deferred.ts`](../packages/agents/src/agent/local-db/deferred.ts) enforce
+[`src/agent/permissions.service.ts`](../packages/agents/src/agent/permissions.service.ts) and
+[`src/agent/local-db/deferred.repository.ts`](../packages/agents/src/agent/local-db/deferred.repository.ts) enforce
 `settings.toolPolicy` (`allow`, `ask`, `auto`, `deny`) across optional, memory, and MCP tools
 without blocking the conversation loop:
 
@@ -991,8 +994,8 @@ not duplicate provider billing.
 
 `AgentService.ingestEvent(agentId, { requestId, source, content, sessionMode?, whenBusy?, metadata? })`
 provides a fast-ack ingestion boundary backed by object-local SQLite (`kodama_event_inbox`,
-[`src/agent/local-db/inbox.ts`](../packages/agents/src/agent/local-db/inbox.ts),
-[`src/agent/inbox.ts`](../packages/agents/src/agent/inbox.ts)):
+[`src/agent/local-db/inbox.repository.ts`](../packages/agents/src/agent/local-db/inbox.repository.ts),
+[`src/agent/inbox.service.ts`](../packages/agents/src/agent/inbox.service.ts)):
 
 - `ingestEvent` persists the event inside `#serial` and arms the `inbox` alarm purpose without
   awaiting Pi admission, D1 revision catch-up, or OAuth refresh. Duplicate `requestId` values return
@@ -1047,8 +1050,8 @@ Temporal. Once native support is available, switch the implementation at this bo
 changing each caller.
 No cron parser dependency, Luxon, handwritten timezone tables, or system-timezone inference is used.
 
-The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.ts`, queries in
-`agent/local-db/scheduled-tasks.ts`, and model adapters in `tools/scheduled-tasks.ts`. Definitions store
+The pure rules live in `agent/schedule-spec.ts`, orchestration in `agent/scheduling.service.ts`, queries in
+`agent/local-db/scheduled-tasks.repository.ts`, and model adapters in `tools/scheduled-tasks.ts`. Definitions store
 next-time/cursor progress, `category` (`schedule` or autonomous `followup`), `followupHop`,
 `sessionMode`, and mutable status (`active` / `paused`) alongside uniquely addressed occurrence
 receipts. No future occurrence queue is pre-generated. At most 100 active or paused/unsettled
@@ -1116,19 +1119,18 @@ delivery, and UI management are outside this version.
 Each object's SQLite holds two sets of tables:
 
 - **Pi Durable's tables**: entries, tasks, documents, submissions, and their metadata. Pi creates
-  and migrates them. Pruning deletes old rows through the column definitions in
-  [`src/agent/local-db/pi-tables.ts`](../packages/agents/src/agent/local-db/pi-tables.ts), which must be checked
-  on every Pi upgrade.
+  and migrates them. Pruning reads and deletes old rows using Reylo `.sql` queries checked against
+  [`sql/pi-tables.sql`](../packages/agents/sql/pi-tables.sql), which must be checked on every Pi
+  upgrade.
 - **Kodama's tables**, prefixed `kodama_`, defined in
-  [`drizzle/durable-object/schema.ts`](../packages/agents/drizzle/durable-object/schema.ts): model
+  [`sql/durable-object/migrations/`](../packages/agents/sql/durable-object/migrations/): model
   invocation usage (`kodama_usage`), the memory agent's job queue (`kodama_memory_jobs`), the
   `remember` count per turn (`kodama_remember_turns`), the always-loaded memory copy
   (`kodama_always_loaded`), pruning runs (`kodama_prune_runs`), legacy contact metadata
   (`kodama_external_data`), the known URLs checked on every fetch (`kodama_known_urls`), scheduled
   definitions/occurrences (`kodama_scheduled_tasks`, `kodama_scheduled_occurrences`), event inbox
   rows (`kodama_event_inbox`), deferred tool call approvals (`kodama_deferred_calls`), artifacts,
-  contacts, and notifications. Their
-  migrations are generated into `drizzle/durable-object/migrations` and applied by
+  contacts, and notifications. Their SQL migrations are applied synchronously by
   `src/agent/local-db/local.ts` before the harness opens.
 
 Small values use the object's key-value storage under `kodama:` keys: alarm times, prune limits,
@@ -1159,26 +1161,27 @@ cp packages/agents/.dev.vars.example packages/agents/.dev.vars
 pnpm dev:agents
 ```
 
-`pnpm dev:agents` first applies both D1 databases' Drizzle migrations locally, then runs `cf dev`,
-which starts the Vite-powered Worker with local D1, R2, and Durable Objects. It exposes RPC, not a
-browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3` persistence root and the binding
-names as local D1 IDs. It requires no Cloudflare account or remote database ID; `cf d1 list --local`
-uses a different local resource catalog and is not needed. Repeated starts preserve existing data,
-and migration failure prevents the Worker from starting. Stop the dev server before restarting it
-so only one process is using its local storage.
+`pnpm dev:agents` first prepares Reylo SQL types and applies both D1 databases' SQL migrations
+locally, then runs `cf dev`, which starts the Vite-powered Worker with local D1, R2, and Durable
+Objects. It exposes RPC, not a browser page. `cli/migrate.ts` uses Vite's `.wrangler/state/v3`
+persistence root and the binding names as local D1 IDs. It requires no Cloudflare account or remote
+database ID; `cf d1 list --local` uses a different local resource catalog and is not needed.
+Repeated starts preserve existing data, and migration failure prevents the Worker from starting.
+Stop the dev server before restarting it so only one process is using its local storage. To
+discard disposable local D1, R2, and Durable Object state (including pre-Reylo dev databases), stop
+the dev server, run `rm -rf packages/agents/.wrangler`, and restart `pnpm dev:agents` (then re-register
+credentials and re-run `pnpm agent seed`).
 
-| Command                                                  | Effect                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `pnpm check`                                             | `tsrs` type check, type-aware Oxlint, Oxfmt check, and tests              |
-| `pnpm typecheck`                                         | type check with `tsrs`, the Rust port of the TypeScript compiler          |
-| `pnpm typecheck:compat`                                  | compatibility type check with TypeScript's `tsc` (used in CI)             |
-| `pnpm test`                                              | workspace tests                                                           |
-| `pnpm format`                                            | format the repository                                                     |
-| `pnpm build` (in `packages/agents`)                      | `cf build` into `.cloudflare/output/v0/`, no deploy                       |
-| `pnpm cf:types` (in `packages/agents`)                   | regenerate runtime types                                                  |
-| `pnpm db:generate:memory` (in `packages/agents`)         | write a D1 migration after `drizzle/memory/schema.ts` changes             |
-| `pnpm db:generate:durable-object` (in `packages/agents`) | write a local migration after `drizzle/durable-object/schema.ts` changes  |
-| `pnpm db:generate:management` (in `packages/agents`)     | write a management migration after `drizzle/management/schema.ts` changes |
+| Command                                  | Effect                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| `pnpm check`                             | `tsrs` type check, type-aware Oxlint, Oxfmt check, and tests            |
+| `pnpm typecheck`                         | type check with `tsrs`, the Rust port of the TypeScript compiler        |
+| `pnpm typecheck:compat`                  | compatibility type check with TypeScript's `tsc` (used in CI)           |
+| `pnpm test`                              | workspace tests                                                         |
+| `pnpm format`                            | format the repository                                                   |
+| `pnpm build` (in `packages/agents`)      | `cf build` into `.cloudflare/output/v0/`, no deploy                     |
+| `pnpm cf:types` (in `packages/agents`)   | regenerate runtime types                                                |
+| `pnpm db:prepare` (in `packages/agents`) | rebuild Reylo `.reylo/typecheck.sqlite` and `.reylo/types/` from `sql/` |
 
 ### Local agent CLI
 
@@ -1274,9 +1277,9 @@ server if another configuration evaluation replaces it.
 
 Tests use Vitest with the Cloudflare plugin, so they run inside workerd with real RPC, Pi Durable,
 SQLite, D1, R2, eviction, and alarms. Only the external model request is mocked, and no API key is
-needed. `vitest.worker.config.ts` reads the generated migrations of both D1 databases for the setup.
-It also passes the columns from the drizzle-kit snapshots, so a test fails when a schema and its
-migrations differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
+needed. `vitest.worker.config.ts` reads the SQL migrations of both D1 databases and Durable Object
+local storage, computing expected column snapshots in SQLite so tests fail when migrated schemas
+differ. `vitest.config.ts` runs this project alongside a Node project for the CLI
 entrypoint and token filesystem tests. Both projects run with `pnpm check` and share the Istanbul
 coverage report from `pnpm test:coverage`. The entrypoint tests mock token access and HTTP transport,
 not argument parsing or stream output; the token tests use temporary directories and remove them.
@@ -1297,27 +1300,27 @@ management RPC without these diagnostics and continues serving snapshot, cancel,
 This is evidence for the tested paths, not a guarantee about every RPC failure. Do not generalize
 this allowance to new errors or timeouts; keep rejection assertions and the object-eviction tests.
 
-| Path                                         | Contents                                                      |
-| -------------------------------------------- | ------------------------------------------------------------- |
-| `src/testing/model.ts`                       | mocked OpenAI Responses streams: text, tool calls, inspection |
-| `src/testing/rpc.ts`                         | a scripted model, `waitForAnswer`, SSE readers, rejections    |
-| `src/testing/conversation.ts`                | a long conversation that compacts, for pruning tests          |
-| `src/testing/memory.ts`                      | the memory database, records, and the memory agent            |
-| `src/testing/management.ts`                  | the seed, the owner, registry rows, and configuration changes |
-| `src/control-plane/workflows/agents.test.ts` | creation, renames, listing, versions, conflicts, rollback     |
-| `src/control-plane/workflows/seed.test.ts`   | the seed, the first agent, the memory agent's versions        |
-| `src/control-plane/registry.test.ts`         | admission without object storage, and resolving references    |
-| `src/control-plane/principals.test.ts`       | every kind of caller as a principal and actor; disabled ones  |
-| `src/control-plane/db.test.ts`               | the D1 behaviors the management database relies on            |
-| `src/agent/runtime/config-apply.test.ts`     | applying at idle, convergence, partial failures, restrictions |
-| `src/index.test.ts`                          | the entrypoint's HTTP refusal and the daily cron              |
-| `src/agent/agent.test.ts`                    | the Agent RPC and input validation                            |
-| `src/agent/runtime/events.test.ts`           | `send` and `subscribe` streams                                |
-| `src/agent/runtime/alarms.test.ts`           | alarm purposes; failures, cancellation, and recovery          |
-| `src/control-plane/config.test.ts`           | the settings schema, and versions applied across eviction     |
-| `src/control-plane/models.test.ts`           | provider credentials                                          |
-| `cli/*.test.ts`                              | the CLI's commands, token, stream output, and adapter Worker  |
-| `drizzle/*/schema.test.ts`                   | each schema matches its generated migrations                  |
+| Path                                                 | Contents                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------- |
+| `src/testing/model.ts`                               | mocked OpenAI Responses streams: text, tool calls, inspection |
+| `src/testing/rpc.ts`                                 | a scripted model, `waitForAnswer`, SSE readers, rejections    |
+| `src/testing/conversation.ts`                        | a long conversation that compacts, for pruning tests          |
+| `src/testing/memory.ts`                              | the memory database, records, and the memory agent            |
+| `src/testing/management.ts`                          | the seed, the owner, registry rows, and configuration changes |
+| `src/control-plane/workflows/agents.service.test.ts` | creation, renames, listing, versions, conflicts, rollback     |
+| `src/control-plane/workflows/seed.service.test.ts`   | the seed, the first agent, the memory agent's versions        |
+| `src/control-plane/registry.service.test.ts`         | admission without object storage, and resolving references    |
+| `src/control-plane/audit.service.test.ts`            | principal actors, audit pagination, and metadata filtering    |
+| `src/control-plane/db.test.ts`                       | D1 behavior and migrated management schema parity             |
+| `src/agent/local-db/local.test.ts`                   | Durable Object local SQLite migration parity                  |
+| `src/agent/runtime/config-apply.test.ts`             | applying at idle, convergence, partial failures, restrictions |
+| `src/index.test.ts`                                  | the entrypoint's HTTP refusal and the daily cron              |
+| `src/agent/agent.test.ts`                            | the Agent RPC and input validation                            |
+| `src/agent/runtime/events.test.ts`                   | `send` and `subscribe` streams                                |
+| `src/agent/runtime/alarms.test.ts`                   | alarm purposes; failures, cancellation, and recovery          |
+| `src/control-plane/config.test.ts`                   | the settings schema, and versions applied across eviction     |
+| `src/control-plane/models.test.ts`                   | provider credentials                                          |
+| `cli/*.test.ts`                                      | the CLI's commands, token, stream output, and adapter Worker  |
 
 The memory tests are listed in [memory.md](memory.md#testing). Name every test file
 `<module>.test.ts` after the module it tests, in the same folder; describe the observable behavior it checks, and run `pnpm check` before submitting.
@@ -1331,8 +1334,8 @@ From `packages/agents`:
    `kodama-archive` that `cloudflare.config.ts` binds.
 3. Find the database IDs with `pnpm cf d1 list`; the pinned CLI requires IDs, not database or
    binding names. Apply the migrations with
-   `pnpm cf d1 migrations apply <memory-database-id> --dir drizzle/memory/migrations` and
-   `pnpm cf d1 migrations apply <management-database-id> --dir drizzle/management/migrations`, then
+   `pnpm cf d1 migrations apply <memory-database-id> --dir sql/memory/migrations` and
+   `pnpm cf d1 migrations apply <management-database-id> --dir sql/management/migrations`, then
    check that `pnpm cf d1 execute <management-database-id> --command "PRAGMA foreign_keys"` returns 1.
 4. Provision `CREDENTIAL_KEK_V1` externally as a base64-encoded random 32-byte key. The Worker
    reads it only; it cannot manage Worker Secrets. See the operational policy in
