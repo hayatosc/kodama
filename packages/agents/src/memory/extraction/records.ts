@@ -5,7 +5,7 @@
  */
 import type { MemoryJob } from '../jobs.ts'
 import type { RecordKind, Scope } from '../store/db.ts'
-import type { NewRecord, RecordEvidence } from '../store/records.ts'
+import type { NewRecord, RecordEvidence } from '../store/records.service.ts'
 
 /** The scope a job may write: the source agent's own scope, or the scope it consolidates. */
 export function jobScope(job: MemoryJob): Scope {

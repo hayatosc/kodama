@@ -14,15 +14,15 @@ import {
   readArtifacts,
   rearmArtifacts,
   uploadArtifact,
-} from '../artifacts/files.ts'
+} from '../artifacts/files.service.ts'
 import type { ArtifactUpload } from '../extensions.ts'
 import { createWebState, executeWeb } from '../tools/web/execute.ts'
-import { grantUrls } from './local-db/external-data.ts'
+import { grantUrls } from './local-db/external-data.repository.ts'
 import { urlsInText } from '../tools/web/url.ts'
 import type { MemoryJob } from '../memory/jobs.ts'
-import { applyOperation } from '../memory/store/records.ts'
-import type { Operation } from '../memory/store/records.ts'
-import type { OperationContext } from '../memory/store/statements.ts'
+import { applyOperation } from '../memory/store/records.service.ts'
+import type { Operation } from '../memory/store/records.service.ts'
+import type { OperationContext } from '../memory/store/statements.repository.ts'
 import { safeFailure } from '../lib/errors.ts'
 import { deadline } from '../lib/deadline.ts'
 import { DurableObject } from 'cloudflare:workers'
@@ -32,8 +32,8 @@ import {
   withAbortSignal,
 } from '@earendil-works/chord/context'
 import { createRegistry, defineExtension, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { createMcpCall, mcpExtension } from '../mcp/invocation/execution.ts'
-import { interruptMcpCalls } from '../mcp/invocation/calls.ts'
+import { createMcpCall, mcpExtension } from '../mcp/invocation/execution.service.ts'
+import { interruptMcpCalls } from '../mcp/invocation/calls.service.ts'
 import type {
   AgentChange,
   Harness,
@@ -66,12 +66,12 @@ import {
   agentRowByObjectName,
   discoverAgents,
   resolveAgentRef,
-} from '../control-plane/registry.ts'
-import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.ts'
-import type { UsagePage } from './local-db/usage.ts'
-import type { UsageAttribution } from './local-db/usage.ts'
+} from '../control-plane/registry.service.ts'
+import { interruptUsage, usageSince, acknowledgeUsage } from './local-db/usage.repository.ts'
+import type { UsagePage } from './local-db/usage.repository.ts'
+import type { UsageAttribution } from './local-db/usage.repository.ts'
 import { usageModels, USAGE_CONTEXT_KEY } from './runtime/usage.ts'
-import { reportApplied } from '../control-plane/versions.ts'
+import { reportApplied } from '../control-plane/versions.service.ts'
 import { applyOrHold, applyPending, appliedSettings, pullIfBehind } from './runtime/config-apply.ts'
 import type { ApplyDeps, PushedConfig } from './runtime/config-apply.ts'
 import {
@@ -83,7 +83,7 @@ import {
   toolGuardExtension,
 } from './runtime/restrictions.ts'
 import type { Refusal } from './runtime/restrictions.ts'
-import { refreshAlwaysLoaded } from '../memory/working/always-loaded.ts'
+import { refreshAlwaysLoaded } from '../memory/working/always-loaded.service.ts'
 import type { AgentEnv } from '../env.ts'
 import { serialQueue } from '../lib/serial.ts'
 import { sendEvents, subscribeEvents } from './runtime/events.ts'
@@ -100,7 +100,7 @@ import {
   CONTACT_ATTEMPT_MS,
   CONTACT_ALARM_BUDGET_MS,
   MAX_CONTACT_FLIGHTS,
-} from './contact.ts'
+} from './contact.service.ts'
 import { CONTACT_WAIT_MS } from '../tools/contact.ts'
 import {
   actionableContacts,
@@ -116,7 +116,7 @@ import {
   retainContacts,
   deferContact,
   retryContact,
-} from './local-db/contacts.ts'
+} from './local-db/contacts.repository.ts'
 import type { AgentOrigin } from '../protocol.ts'
 import { memoryDb } from '../memory/store/db.ts'
 import type { PruneDeps, PruneOutcome } from '../memory/prune/prune.ts'
@@ -125,7 +125,7 @@ import type { JobStatus } from '../memory/jobs.ts'
 import { createWorkingMemoryExtension } from './memory-extension.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
 import { createAgentModels } from '../control-plane/models.ts'
-import { agentCredentialStore } from '../credentials/runtime.ts'
+import { agentCredentialStore } from '../credentials/runtime.service.ts'
 import type {
   AgentConfig,
   AgentSettings,
@@ -146,13 +146,12 @@ import type {
   SubmissionStatus,
 } from '../protocol.ts'
 import { openLocalDb } from './local-db/local.ts'
-import { mcpCatalogNotices, mcpCredentialNotice } from '../mcp/registration/notifications.ts'
-import { mcpRegistrationNotice } from '../mcp/registration/chat.ts'
 import {
-  listNotifications,
-  readNotification,
-  recordNotification,
-} from './local-db/notifications.ts'
+  mcpCatalogNotices,
+  mcpCredentialNotice,
+} from '../mcp/registration/notifications.service.ts'
+import { mcpRegistrationNotice } from '../mcp/registration/chat.service.ts'
+import { listNotifications, readNotification, recordNotification } from './notifications.service.ts'
 import type { LocalDb } from './local-db/local.ts'
 import {
   parseAgentId,
@@ -176,26 +175,26 @@ import {
   refreshMemory,
   runExtraction,
   scheduleExtraction,
-} from './memory.ts'
+} from './memory.service.ts'
 import { snapshotOf, submissionOf, attentionOf } from './runtime/views.ts'
 import { currentRunInputs } from './runtime/inputs.ts'
 
-import { processOutbox, rearmOutbox, sendAgentOutbox } from './outbox.ts'
-import { armInbox, busyForNewSessionError, dispatchInbox, rearmInbox } from './inbox.ts'
-import type { AdmitOptions } from './inbox.ts'
+import { processOutbox, rearmOutbox, sendAgentOutbox } from './outbox.service.ts'
+import { armInbox, busyForNewSessionError, dispatchInbox, rearmInbox } from './inbox.service.ts'
+import type { AdmitOptions } from './inbox.service.ts'
 import {
   enqueueInboxEvent,
   enqueueInboxEventInTx,
   inboxEventByRequest,
   pendingInboxEvents,
-} from './local-db/inbox.ts'
+} from './local-db/inbox.repository.ts'
 import {
   decideDeferredCallInTx,
   getDeferredCall,
   invalidateMcpDeferredCalls,
   listDeferredCalls,
-} from './local-db/deferred.ts'
-import type { PermissionDeps } from './permissions.ts'
+} from './local-db/deferred.repository.ts'
+import type { PermissionDeps } from './permissions.service.ts'
 import {
   armScheduling,
   dispatchSchedules,
@@ -203,8 +202,8 @@ import {
   readSchedules,
   rearmScheduling,
   reconcileSchedules,
-} from './scheduling.ts'
-import { deferOccurrence, pendingOccurrences } from './local-db/scheduled-tasks.ts'
+} from './scheduling.service.ts'
+import { deferOccurrence, pendingOccurrences } from './local-db/scheduled-tasks.repository.ts'
 
 const context = BACKGROUND_CONTEXT
 

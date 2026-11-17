@@ -32,7 +32,7 @@ fallback is needed.
 
 ## Completion and notification atomicity
 
-`src/agent/local-db/notifications.ts` exports `recordNotification(db, notice, now)` and
+`src/agent/notifications.service.ts` exports `recordNotification(db, notice, now)` and
 `enqueueOutboxNotification(db, notice, now)`. Producers pass
 an existing SQLite transaction so that terminal state and its notification commit together. The
 first `(source, sourceId)` wins, regardless of later summary or outcome changes (except when two
@@ -207,7 +207,7 @@ hooks: each branch connects its own implementation in the existing composition b
 
 ### A: artifacts
 
-Own `src/artifacts/`, `src/agent/local-db/artifacts.ts`, `src/tools/artifacts.ts`, and the file adapter
+Own `src/artifacts/` (`files.service.ts`), `src/agent/local-db/artifacts.repository.ts`, `src/tools/artifacts.ts`, and the file adapter
 in `src/tools/code/execute.ts`. Wire artifact RPC and tools in the composition files. Use an
 agent-scoped `artifacts/` prefix in the existing ARCHIVE bucket, isolated from archive retention.
 Reserve metadata before upload, mark ready only after R2 succeeds, and make deletion and orphan
@@ -218,7 +218,7 @@ round-trip tests, code input/output tests, limits, ownership checks, and interru
 
 ### B: tracked contacts
 
-Own `src/agent/contact.ts`, `src/agent/local-db/contacts.ts`, and `src/tools/contact.ts`, plus necessary
+Own `src/agent/contact.service.ts`, `src/agent/local-db/contacts.repository.ts`, and `src/tools/contact.ts`, plus necessary
 registry discovery. Preserve immediate answers and the existing 30-second wait. Add contact IDs,
 list/status/result tools, and recoverable result collection. Use description/labels for discovery,
 without exposing credentials or unrelated settings. Capture replay identity from the actual Pi
@@ -277,7 +277,7 @@ No new public service-binding contact-result API is introduced.
 
 Working agents can enable `send_outbox` (`DEFAULT_AGENT_CONFIG` enables it by default) to separate
 internal background reasoning from operator-facing alerts (`src/tools/outbox.ts`,
-`src/agent/outbox.ts`):
+`src/agent/outbox.service.ts`):
 
 - Autonomous scheduled turns run **silently by default**: completing normally without invoking
   `send_outbox` records no inbox notification (`silence = no anomaly`). Terminal model failures or
@@ -296,7 +296,7 @@ internal background reasoning from operator-facing alerts (`src/tools/outbox.ts`
 ### C: durable inbox
 
 Own notification list/read/retention operations, the notification RPC/CLI, and scheduled completion
-integration in `src/agent/scheduling.ts` and its store. Reuse `recordNotification`; do not create a
+integration in `src/agent/scheduling.service.ts` and its store. Reuse `recordNotification`; do not create a
 second contact tracker. Exercise the inbox using scheduled completion, independently of B.
 Use exact sequence acknowledgements and bounded pagination. Add stop/retry/deduplication/unread
 and schedule failure tests. Do not wake a model, inject owner messages, or add Slack/email delivery.

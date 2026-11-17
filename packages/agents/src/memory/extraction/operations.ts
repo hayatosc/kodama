@@ -3,15 +3,15 @@
  *
  * @module
  */
-import { extractionProgress } from '../../agent/local-db/memory.ts'
+import { extractionProgress } from '../../agent/local-db/memory.repository.ts'
 import { jobOperationContext, requireMemoryJob } from './context.ts'
 import type { MemoryJobDeps, RunningJob } from './context.ts'
 import type { MemoryJob } from '../jobs.ts'
 import { memoryDb } from '../store/db.ts'
-import { applyOperation } from '../store/records.ts'
-import type { Operation } from '../store/records.ts'
-import { writeShared } from '../shared.ts'
-import type { SharedWrite } from '../shared.ts'
+import { applyOperation } from '../store/records.service.ts'
+import type { Operation } from '../store/records.service.ts'
+import { writeShared } from '../shared.service.ts'
+import type { SharedWrite } from '../shared.service.ts'
 
 /** Read evidence survives eviction, but cannot leak from a different job. */
 export async function extractionReadThrough(

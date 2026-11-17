@@ -6,15 +6,15 @@
  * @module
  */
 import { sha256Hex } from '../../lib/hash.ts'
-import { prepareQuery } from '../../lib/reylo.ts'
 import { SEARCH_VERSION } from '../../lib/search-text.ts'
-import { parseMemoryRecord } from './db.ts'
 import type { MemoryDb, MemoryRecord, RecordKind } from './db.ts'
-import type { NewRecord, Operation, RecordEvidence } from './records.ts'
-import insertMemoryRecord from './sql/insert-memory-record.sql'
-import selectMemoryRecordById from './sql/select-memory-record-by-id.sql'
-import updateMemoryRecordInvalid from './sql/update-memory-record-invalid.sql'
-import updateMemoryRecordSuperseded from './sql/update-memory-record-superseded.sql'
+import {
+  findMemoryRecordById,
+  insertMemoryRecordStatement,
+  invalidateMemoryRecordStatement,
+  supersedeMemoryRecordStatement,
+} from './records.repository.ts'
+import type { NewRecord, Operation, RecordEvidence } from './records.service.ts'
 import {
   bumpScope,
   claimRevision,
@@ -22,14 +22,14 @@ import {
   insertOp,
   recordLedger,
   termStatements,
-} from './statements.ts'
+} from './statements.repository.ts'
 import type {
   OperationContext,
   OperationResult,
   Plan,
   Statement,
   Statements,
-} from './statements.ts'
+} from './statements.repository.ts'
 
 /**
  * A record's ID: a hash of its scope, kind, content, source agent, and first source entry.
@@ -89,7 +89,7 @@ function insertRecord(
   record: NewRecord,
 ): Statement[] {
   validateRecord(record)
-  const row = prepareQuery(db, insertMemoryRecord, {
+  const row = insertMemoryRecordStatement(db, {
     id,
     scope: record.scope,
     kind: record.kind,
@@ -121,25 +121,20 @@ function guardedStatusUpdate(
   const nextRevision = revision + 1
   const update =
     change.status === 'superseded'
-      ? prepareQuery(db, updateMemoryRecordSuperseded, {
+      ? supersedeMemoryRecordStatement(db, {
           id,
           revision,
           supersededBy: change.supersededBy,
           nextRevision,
           updatedAt: context.now,
         })
-      : prepareQuery(db, updateMemoryRecordInvalid, {
+      : invalidateMemoryRecordStatement(db, {
           id,
           revision,
           nextRevision,
           updatedAt: context.now,
         })
   return [update, claimRevision(db, context, 'record', id, nextRevision)]
-}
-
-async function readRecord(db: MemoryDb, id: string): Promise<MemoryRecord | undefined> {
-  const row = await selectMemoryRecordById.run(db, { id })
-  return row === null ? undefined : parseMemoryRecord(row)
 }
 
 /**
@@ -176,7 +171,7 @@ export async function planSupersede(
   context: OperationContext,
   op: Extract<Operation, { type: 'supersede' }>,
 ): Promise<Plan> {
-  const old = await readRecord(db, op.oldId)
+  const old = await findMemoryRecordById(db, op.oldId)
   if (old === undefined || old.status !== 'active' || old.revision !== op.oldRevision) {
     return conflict(db, context, op.oldId, 'target_changed')
   }
@@ -230,7 +225,7 @@ export async function planInvalidate(
   context: OperationContext,
   op: Extract<Operation, { type: 'invalidate' }>,
 ): Promise<Plan> {
-  const old = await readRecord(db, op.id)
+  const old = await findMemoryRecordById(db, op.id)
   if (old === undefined || old.status !== 'active' || old.revision !== op.revision) {
     return conflict(db, context, op.id, 'target_changed')
   }

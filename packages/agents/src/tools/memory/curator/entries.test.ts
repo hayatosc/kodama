@@ -16,7 +16,7 @@ import {
   toolCallResponse,
   toolResults,
 } from '../../../testing/model.ts'
-import { extractionCheckpoint } from '../../../memory/store/db.ts'
+import { extractionCheckpoint } from '../../../memory/store/checkpoint.repository.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)

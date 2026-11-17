@@ -3,14 +3,15 @@
  *
  * @module
  */
-import { prepareQuery } from '../../lib/reylo.ts'
+import {
+  findExtractionCheckpointRow,
+  insertExtractionCheckpointStatement,
+  updateExtractionCheckpointStatement,
+} from './checkpoint.repository.ts'
 import type { MemoryDb } from './db.ts'
-import type { Operation } from './records.ts'
-import insertExtractionCheckpoint from './sql/insert-extraction-checkpoint.sql'
-import selectExtractionCheckpointRow from './sql/select-extraction-checkpoint-row.sql'
-import updateExtractionCheckpoint from './sql/update-extraction-checkpoint.sql'
-import { claimRevision, insertOp, recordLedger } from './statements.ts'
-import type { OperationContext, OperationResult, Plan, Statement } from './statements.ts'
+import type { Operation } from './records.service.ts'
+import { claimRevision, insertOp, recordLedger } from './statements.repository.ts'
+import type { OperationContext, OperationResult, Plan, Statement } from './statements.repository.ts'
 
 /** Plan advancing an agent's extraction checkpoint; a checkpoint already past it stays. */
 export async function planCheckpoint(
@@ -18,22 +19,16 @@ export async function planCheckpoint(
   context: OperationContext,
   op: Extract<Operation, { type: 'checkpoint' }>,
 ): Promise<Plan> {
-  const current = await selectExtractionCheckpointRow.run(db, { agentId: op.agentId })
+  const current = await findExtractionCheckpointRow(db, op.agentId)
   const result: OperationResult = { status: 'applied', recordId: op.agentId }
-  if (current !== null && current.lastEntryId >= op.lastEntryId) {
+  if (current !== undefined && current.lastEntryId >= op.lastEntryId) {
     return { result, statements: [insertOp(db, context, op.type, result)] }
   }
   const advance: Statement[] =
-    current === null
-      ? [
-          prepareQuery(db, insertExtractionCheckpoint, {
-            agentId: op.agentId,
-            lastEntryId: op.lastEntryId,
-            updatedAt: context.now,
-          }),
-        ]
+    current === undefined
+      ? [insertExtractionCheckpointStatement(db, op.agentId, op.lastEntryId, context.now)]
       : [
-          prepareQuery(db, updateExtractionCheckpoint, {
+          updateExtractionCheckpointStatement(db, {
             agentId: op.agentId,
             lastEntryId: op.lastEntryId,
             nextRevision: current.revision + 1,

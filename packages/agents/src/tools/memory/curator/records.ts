@@ -7,8 +7,8 @@ import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolRegistration, ToolExecutionApi } from '@earendil-works/pi-durable'
 import { memoryDb } from '../../../memory/store/db.ts'
-import { searchMemory } from '../../../memory/store/search.ts'
-import { consolidationRecords } from '../../../memory/store/maintenance.ts'
+import { searchMemory } from '../../../memory/store/search.service.ts'
+import { consolidationRecords } from '../../../memory/store/maintenance.service.ts'
 import { recordFor, recordEvidence, searchScopes } from '../../../memory/extraction/records.ts'
 import { executeSharedWrite } from '../../../memory/extraction/operations.ts'
 import {
@@ -23,7 +23,7 @@ import {
   describe,
 } from './common.ts'
 import type { MemoryJobDeps } from '../../../memory/extraction/context.ts'
-import { MIN_SOURCE_AGENTS } from '../../../memory/shared.ts'
+import { MIN_SOURCE_AGENTS } from '../../../memory/shared.service.ts'
 
 /** The record tools every job gets: search, write, supersede, invalidate, decline, and list. */
 export function recordTools(deps: MemoryJobDeps): ToolRegistration[] {

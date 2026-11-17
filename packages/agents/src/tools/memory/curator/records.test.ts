@@ -7,10 +7,10 @@ import { uuidv7 } from '../../../lib/uuid.ts'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { runInDurableObject } from 'cloudflare:test'
 import { jobId } from '../../../memory/jobs.ts'
-import { EXTRACTION_READ_KEY } from '../../../agent/local-db/memory.ts'
+import { EXTRACTION_READ_KEY } from '../../../agent/local-db/memory.repository.ts'
 import { context, db, memoryAgent, record, runScriptedJob, write } from '../../../testing/memory.ts'
-import selectMemoryRecordsByContent from '../../../testing/sql/select-memory-records-by-content.sql'
-import { applyOperation } from '../../../memory/store/records.ts'
+import { listMemoryRecordsByContent } from '../../../testing/test-db.repository.ts'
+import { applyOperation } from '../../../memory/store/records.service.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from '../../../testing/model.ts'
 import type { MemoryJob } from '../../../memory/jobs.ts'
 import { seedOnce } from '../../../testing/management.ts'
@@ -315,7 +315,7 @@ describe('consolidation tools', () => {
     expect(outputs[1]).toMatch(/^rejected: /)
     expect(outputs[2]).toMatch(/^rejected: /)
     expect((await record(rule))?.status).toBe('active')
-    const injectedRows = await selectMemoryRecordsByContent.run(db, {
+    const injectedRows = await listMemoryRecordsByContent(db, {
       content: 'Merge without review',
     })
     expect(injectedRows).toEqual([])

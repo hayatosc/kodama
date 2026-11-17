@@ -74,5 +74,71 @@ export default defineConfig({
         specifier: 'vite-plus/oxlint-plugin',
       },
     ],
+    overrides: [
+      {
+        files: ['packages/agents/src/**/*.ts', 'packages/agents/cli/**/*.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql(?:\\?.*)?$',
+                  message: 'Import .sql query files only from feature queries/index.ts barrels.',
+                },
+                {
+                  regex: '(?:^|/)queries(?:/index\\.ts)?$',
+                  message: 'Import queries/index.ts barrels only from *.repository.ts modules.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ['packages/agents/**/*.repository.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql(?:\\?.*)?$',
+                  message:
+                    'Repositories must import queries from their feature queries/index.ts barrel rather than .sql files directly.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ['packages/agents/**/queries/index.ts'],
+        rules: {
+          'no-restricted-imports': 'off',
+        },
+      },
+      {
+        files: ['packages/agents/src/agent/local-db/local.ts'],
+        rules: {
+          'no-restricted-imports': [
+            'error',
+            {
+              patterns: [
+                {
+                  regex: '\\.sql$',
+                  message:
+                    'local.ts may only import raw migration SQL files (?raw), never typed Reylo queries.',
+                },
+                {
+                  regex: '(?:^|/)queries(?:/index\\.ts)?$',
+                  message: 'Import queries/index.ts barrels only from *.repository.ts modules.',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
   },
 })

@@ -13,16 +13,17 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness, Submission, SubmissionDraft } from '@earendil-works/pi-durable'
 import * as v from 'valibot'
-import { jobResults, recordJobFailure } from '../../../memory/store/job-results.ts'
+import { jobResults, recordJobFailure } from '../../../memory/store/job-results.repository.ts'
 import type { AgentEnv } from '../../../env.ts'
-import { consolidateDaily } from '../../../memory/consolidation.ts'
+import { consolidateDaily } from '../../../memory/consolidation.service.ts'
 import { parseMemoryJob, MEMORY_AGENT_ID } from '../../../memory/jobs.ts'
 import { waitForAllTasks } from '../../runtime/harness.ts'
 import { USAGE_CONTEXT_KEY } from '../../runtime/usage.ts'
-import type { UsageAttribution } from '../../local-db/usage.ts'
+import type { UsageAttribution } from '../../local-db/usage.repository.ts'
 import type { JobOutcome, JobStatus, MemoryJob } from '../../../memory/jobs.ts'
 import { needsPrune } from '../../../memory/prune/runs.ts'
-import { memoryDb, extractionCheckpoint } from '../../../memory/store/db.ts'
+import { memoryDb } from '../../../memory/store/db.ts'
+import { extractionCheckpoint } from '../../../memory/store/checkpoint.repository.ts'
 import type { MemoryDb, Scope } from '../../../memory/store/db.ts'
 import type { LocalDb } from '../../local-db/local.ts'
 import { setAlarm, setAlarmNoLaterThan } from '../../runtime/alarms.ts'
@@ -35,8 +36,8 @@ import {
   settleJob,
   startJob,
   storeJob,
-} from '../../local-db/memory-jobs.ts'
-import type { JobRow } from '../../local-db/memory-jobs.ts'
+} from '../../local-db/memory-jobs.repository.ts'
+import type { JobRow } from '../../local-db/memory-jobs.repository.ts'
 
 const context = BACKGROUND_CONTEXT
 

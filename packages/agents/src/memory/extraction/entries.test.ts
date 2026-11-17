@@ -1,6 +1,6 @@
 /** Learning remains usable after web or peer input; read evidence still bounds writes. @module */
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
-import { markContact } from '../../agent/local-db/external-data.ts'
+import { markContact } from '../../agent/local-db/external-data.repository.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
 import { context, record, renderedAlwaysLoaded } from '../../testing/memory.ts'
 import { runInDurableObject } from 'cloudflare:test'

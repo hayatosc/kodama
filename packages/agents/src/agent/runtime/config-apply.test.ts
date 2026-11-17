@@ -1,9 +1,9 @@
 import { evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { reconcileAgents } from '../../control-plane/workflows/reconcile.ts'
+import { reconcileAgents } from '../../control-plane/workflows/reconcile.service.ts'
 import { managementDb } from '../../control-plane/db.ts'
-import selectAgentById from '../../control-plane/sql/select-agent-by-id.sql'
+import { findAgentById } from '../../control-plane/registry.repository.ts'
 import {
   agentService,
   management,
@@ -22,7 +22,7 @@ import '@earendil-works/pi-ai/api/openai-responses'
 afterEach(() => vi.restoreAllMocks())
 
 async function versions(agentId: string) {
-  const row = await selectAgentById.run(management, { agentId })
+  const row = await findAgentById(management, agentId)
   return { desired: row?.currentVersion, applied: row?.appliedVersion }
 }
 

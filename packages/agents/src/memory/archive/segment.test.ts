@@ -3,15 +3,15 @@
  *
  * @module
  */
-import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { beforeAll, describe, expect, it } from 'vite-plus/test'
-import { db } from '../../testing/memory.ts'
-import insertArchiveSegment from '../store/sql/insert-archive-segment.sql'
-import { searchHistory } from './history.ts'
-import { indexSchema, readJson, readSegment, readArchivedText } from './reader.ts'
-import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import { seedOnce } from '../../testing/management.ts'
+import { db } from '../../testing/memory.ts'
+import { catalogSegment } from '../store/archive.repository.ts'
+import { searchHistory } from './history.ts'
+import { indexSchema, readArchivedText, readJson, readSegment } from './reader.ts'
+import { buildSegment, exportSegment, segmentId, segmentPrefix } from './segment.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -26,7 +26,7 @@ async function archive(content: string, kind = 'pi.user') {
   const files = await buildSegment(agentId, [{ id: 1, record: JSON.stringify(record) }], 1_000)
   const prefix = segmentPrefix(agentId, 1, 1)
   await exportSegment(env.ARCHIVE, prefix, files)
-  await insertArchiveSegment.run(db, {
+  await catalogSegment(db, {
     id: segmentId(agentId, 1, 1),
     agentId,
     firstEntry: 1,

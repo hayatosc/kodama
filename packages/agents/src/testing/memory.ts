@@ -7,18 +7,20 @@ import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { vi } from 'vite-plus/test'
 import { openLocalDb } from '../agent/local-db/local.ts'
-import { storedMemoryCopy } from '../agent/local-db/memory.ts'
+import { storedMemoryCopy } from '../agent/local-db/memory.repository.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import { MEMORY_AGENT_NAME } from '../memory/jobs.ts'
 import type { MemoryJob } from '../memory/jobs.ts'
-import { memoryDb, parseMemoryRecord } from '../memory/store/db.ts'
+import { agentScope, memoryDb } from '../memory/store/db.ts'
 import type { MemoryDb, MemoryRecord } from '../memory/store/db.ts'
-import { applyOperation } from '../memory/store/records.ts'
-import type { NewRecord } from '../memory/store/records.ts'
-import selectActiveRecordContents from '../memory/store/sql/select-active-record-contents.sql'
-import selectMemoryRecordById from '../memory/store/sql/select-memory-record-by-id.sql'
-import type { OperationContext } from '../memory/store/statements.ts'
-import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.ts'
+import {
+  findMemoryRecordById,
+  listActiveRecordContents,
+} from '../memory/store/records.repository.ts'
+import { applyOperation } from '../memory/store/records.service.ts'
+import type { NewRecord } from '../memory/store/records.service.ts'
+import type { OperationContext } from '../memory/store/statements.repository.ts'
+import { refreshAlwaysLoaded, storedMemoryText } from '../memory/working/always-loaded.service.ts'
 import {
   isMemoryAgentRequest,
   requestBody,
@@ -101,15 +103,13 @@ export async function write(record: Omit<NewRecord, 'origin' | 'observedAt'>): P
 }
 
 /** A record by ID, in any status. */
-export async function record(id: string): Promise<MemoryRecord | undefined> {
-  const row = await selectMemoryRecordById.run(db, { id })
-  return row === null ? undefined : parseMemoryRecord(row)
+export function record(id: string): Promise<MemoryRecord | undefined> {
+  return findMemoryRecordById(db, id)
 }
 
 /** The contents of an agent's active records. */
-export async function activeContents(agentId: string): Promise<string[]> {
-  const rows = await selectActiveRecordContents.run(db, { scope: `agent:${agentId}` })
-  return rows.map((row) => row.content)
+export function activeContents(agentId: string): Promise<string[]> {
+  return listActiveRecordContents(db, agentScope(agentId))
 }
 
 /** The always-loaded text an agent object has stored. */

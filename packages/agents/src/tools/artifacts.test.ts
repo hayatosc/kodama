@@ -8,7 +8,7 @@ import { EXTENSION_RETENTION_MS } from '../extensions.ts'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { requestBody, toolCallResponse } from '../testing/model.ts'
 import { useMockModel, waitForAnswer } from '../testing/rpc.ts'
-import setArtifactExpiresAt from '../testing/sql/set-artifact-expires-at.sql'
+import { updateArtifactExpiresAt } from '../testing/test-db.repository.ts'
 import { artifactReadResult, createArtifactTools } from './artifacts.ts'
 import { isRegisteredTool } from './index.ts'
 
@@ -256,7 +256,7 @@ it('refuses foreign, expired and missing IDs through the read tool without leaki
   )
   await runInDurableObject(env.AGENTS.getByName(owner), async (_, state) => {
     const db = await openLocalDb(state.storage)
-    setArtifactExpiresAt.runSync(db.sql, { id: file.artifactId, expiresAt: Date.now() - 1 })
+    updateArtifactExpiresAt(db.sql, { id: file.artifactId, expiresAt: Date.now() - 1 })
   })
   const result = await invoke(owner, 'read_artifact', { artifactId: file.artifactId })
   expect(result).toContain('artifact_unavailable')

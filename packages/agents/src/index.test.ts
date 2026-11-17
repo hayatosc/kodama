@@ -8,18 +8,18 @@ import { createExecutionContext, createScheduledController } from 'cloudflare:te
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
 import { defaultAgentSettings } from './control-plane/config.ts'
-import insertConfigVersion from './control-plane/sql/insert-config-version.sql'
-import selectAgentById from './control-plane/sql/select-agent-by-id.sql'
+import { findAgentById } from './control-plane/registry.repository.ts'
+import { insertConfigVersionStatement } from './control-plane/versions.repository.ts'
 import AgentService, * as entrypoint from './index.ts'
-import { prepareQuery, runBatch } from './lib/reylo.ts'
+import { runBatch } from './lib/reylo.ts'
 import { uuidv7 } from './lib/uuid.ts'
-import { consolidationDay } from './memory/consolidation.ts'
+import { consolidationDay } from './memory/consolidation.service.ts'
 import type { MemoryJob } from './memory/jobs.ts'
 import { jobId } from './memory/jobs.ts'
 import { management, newAgentId, seedOnce } from './testing/management.ts'
 import { memoryAgent, write } from './testing/memory.ts'
 import { requestBody, textResponse, toolCallResponse, toolResults } from './testing/model.ts'
-import setAgentVersions from './testing/sql/set-agent-versions.sql'
+import { updateAgentVersionsStatement } from './testing/test-db.repository.ts'
 
 // The memory agent needs the seeded installation and its credentials.
 beforeAll(seedOnce)
@@ -39,7 +39,7 @@ function runCron(now: number): Promise<void> {
 async function agentWithLostVersion(systemPrompt: string): Promise<string> {
   const agentId = await newAgentId(undefined, false)
   await runBatch(management, [
-    prepareQuery(management, insertConfigVersion, {
+    insertConfigVersionStatement(management, {
       agentId,
       version: 1,
       settingsJson: JSON.stringify({ ...defaultAgentSettings(env), systemPrompt }),
@@ -48,7 +48,7 @@ async function agentWithLostVersion(systemPrompt: string): Promise<string> {
       comment: null,
       createdAt: Date.now(),
     }),
-    prepareQuery(management, setAgentVersions, {
+    updateAgentVersionsStatement(management, {
       agentId,
       currentVersion: 1,
       appliedVersion: 0,
@@ -131,7 +131,7 @@ describe('AgentService', () => {
 
     await runCron(now)
 
-    const row = await selectAgentById.run(management, { agentId })
+    const row = await findAgentById(management, agentId)
     expect(row).toMatchObject({ currentVersion: 1, appliedVersion: 1 })
     expect((await env.AGENTS.getByName(agentId).getConfig()).systemPrompt).toBe(
       'Pushed by the cron',

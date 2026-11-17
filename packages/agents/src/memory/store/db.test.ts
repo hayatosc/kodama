@@ -6,10 +6,10 @@
 import { uuidv7 } from '../../lib/uuid.ts'
 import { env } from 'cloudflare:workers'
 import { expect, it } from 'vite-plus/test'
-import { prepareQuery, runBatch } from '../../lib/reylo.ts'
+import { runBatch } from '../../lib/reylo.ts'
+import { listMemoryOpsByIds } from '../../testing/test-db.repository.ts'
 import { memoryDb } from './db.ts'
-import insertMemoryOp from './sql/insert-memory-op.sql'
-import selectMemoryOpsByIds from '../../testing/sql/select-memory-ops-by-ids.sql'
+import { insertOp } from './statements.repository.ts'
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -17,17 +17,13 @@ it('rolls back every statement of a D1 batch when one statement fails', async ()
   const db = memoryDb(env.MEMORY_DB)
   const [a, b] = [uuidv7(), uuidv7()]
   const op = (opId: string) =>
-    prepareQuery(db, insertMemoryOp, {
-      opId,
-      jobId: 'batch',
-      op: 'test',
-      resultJson: '{}',
-      appliedAt: 0,
+    insertOp(db, { opId, jobId: 'batch', runId: 'batch', actor: 'test', now: 0 }, 'test', {
+      status: 'declined',
     })
 
   await expect(runBatch(db, [op(a), op(b), op(a)])).rejects.toThrow()
 
-  const stored = await selectMemoryOpsByIds.run(db, { opIdsJson: JSON.stringify([a, b]) })
+  const stored = await listMemoryOpsByIds(db, { opIdsJson: JSON.stringify([a, b]) })
   expect(stored).toEqual([])
 })
 

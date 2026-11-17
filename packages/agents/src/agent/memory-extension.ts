@@ -9,11 +9,15 @@ import { defineExtension, section } from '@earendil-works/pi-durable'
 import type { Extension, Harness } from '@earendil-works/pi-durable'
 import type { VisibleSkill } from '../memory/skills.ts'
 import type { VisibleTask } from '../memory/tasks.ts'
-import { storedMemoryText, storedSkills, storedTasks } from '../memory/working/always-loaded.ts'
+import {
+  storedMemoryText,
+  storedSkills,
+  storedTasks,
+} from '../memory/working/always-loaded.service.ts'
 import type { WorkingMemoryDeps } from '../memory/working/deps.ts'
-import { recentOutboxSummaries } from './local-db/notifications.ts'
-import { wrapToolsWithPermissions } from './permissions.ts'
-import type { PermissionDeps } from './permissions.ts'
+import { recentOutboxSummaries } from './notifications.service.ts'
+import { wrapToolsWithPermissions } from './permissions.service.ts'
+import type { PermissionDeps } from './permissions.service.ts'
 import {
   historySearchTool,
   memorySearchTool,

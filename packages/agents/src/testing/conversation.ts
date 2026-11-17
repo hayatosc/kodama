@@ -16,8 +16,7 @@ import {
   toolResults,
 } from './model.ts'
 import { waitForAnswer } from './rpc.ts'
-import selectPiEntryHeads from './sql/select-pi-entry-heads.sql'
-import selectPiEntryIds from './sql/select-pi-entry-ids.sql'
+import { listPiEntryHeads, listPiEntryIds } from './test-db.repository.ts'
 
 const contextWindow =
   createAgentModels().getModel(env.DEFAULT_MODEL_PROVIDER, env.DEFAULT_MODEL_ID)?.contextWindow ?? 0
@@ -79,9 +78,7 @@ export async function compactedAgent(agentId: string, codename: string) {
 /** The `head` of the newest head marker in the agent's entries, if any. */
 export function headOf(agentId: string): Promise<number | undefined> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) => {
-    const row = selectPiEntryHeads
-      .runSync(state.storage.sql)
-      .findLast((entry) => entry.head !== null)
+    const row = listPiEntryHeads(state.storage.sql).findLast((entry) => entry.head !== null)
     return row?.head ?? undefined
   })
 }
@@ -89,6 +86,6 @@ export function headOf(agentId: string): Promise<number | undefined> {
 /** The IDs of the entries the agent still stores. */
 export function storedEntryIds(agentId: string): Promise<number[]> {
   return runInDurableObject(env.AGENTS.getByName(agentId), (_instance, state) =>
-    selectPiEntryIds.runSync(state.storage.sql).map((row) => row.id),
+    listPiEntryIds(state.storage.sql).map((row) => row.id),
   )
 }

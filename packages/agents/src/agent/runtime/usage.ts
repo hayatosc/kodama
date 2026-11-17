@@ -2,11 +2,11 @@
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream'
 import type { CredentialStore } from '@earendil-works/pi-ai'
 import type { Models } from '@earendil-works/pi-ai'
-import type { ObserveCredential } from '../../credentials/store.ts'
+import type { ObserveCredential } from '../../credentials/store.service.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import type { LocalDb } from '../local-db/local.ts'
-import { startUsage, finishUsage, selectUsageCredential } from '../local-db/usage.ts'
-import type { UsageAttribution } from '../local-db/usage.ts'
+import { startUsage, finishUsage, selectUsageCredential } from '../local-db/usage.repository.ts'
+import type { UsageAttribution } from '../local-db/usage.repository.ts'
 
 /** Store key shared with the memory runner; restored before any resumed model request. */
 export const USAGE_CONTEXT_KEY = 'kodama:usage-context'

@@ -17,11 +17,12 @@ import {
   prunedThrough,
   runEntries,
   setState,
-} from '../../agent/local-db/pruning.ts'
-import type { Run } from '../../agent/local-db/pruning.ts'
+} from '../../agent/local-db/pruning.repository.ts'
+import type { Run } from '../../agent/local-db/pruning.repository.ts'
 import { buildSegment, exportSegment, segmentId, segmentPrefix } from '../archive/segment.ts'
-import { extractionCheckpoint, memoryDb } from '../store/db.ts'
-import { catalogSegment } from '../store/archive.ts'
+import { catalogSegment } from '../store/archive.repository.ts'
+import { extractionCheckpoint } from '../store/checkpoint.repository.ts'
+import { memoryDb } from '../store/db.ts'
 import type { PruneLimits } from './runs.ts'
 import type { PruneDeps } from './prune.ts'
 

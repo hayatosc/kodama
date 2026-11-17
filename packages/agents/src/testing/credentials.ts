@@ -2,9 +2,9 @@
 import { env } from 'cloudflare:workers'
 import { managementDb } from '../control-plane/db.ts'
 import { createAgentModels } from '../control-plane/models.ts'
-import { putCredential, grantCredential } from '../credentials/management.ts'
+import { putCredential, grantCredential } from '../credentials/management.service.ts'
 import { defaultAgentSettings } from '../control-plane/config.ts'
-import { createCredentialStore } from '../credentials/store.ts'
+import { createCredentialStore } from '../credentials/store.service.ts'
 import type { CredentialRefs } from '../protocol.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)

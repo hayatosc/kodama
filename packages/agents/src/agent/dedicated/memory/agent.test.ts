@@ -8,7 +8,7 @@ import { uuidv7 } from '../../../lib/uuid.ts'
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { setAlarm } from '../../runtime/alarms.ts'
 import { openLocalDb } from '../../local-db/local.ts'
-import setMemoryJobStartedAt from '../../../testing/sql/set-memory-job-started-at.sql'
+import { updateMemoryJobStartedAt } from '../../../testing/test-db.repository.ts'
 import { JOB_TIME_LIMIT_MS } from './runner.ts'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vite-plus/test'
@@ -94,7 +94,7 @@ describe('the memory agent', () => {
       await runInDurableObject(memoryAgent(), async (_instance, state) => {
         if (startedAt !== undefined) {
           const local = await openLocalDb(state.storage)
-          setMemoryJobStartedAt.runSync(local.sql, { jobId, startedAt })
+          updateMemoryJobStartedAt(local.sql, { jobId, startedAt })
         }
         await setAlarm(state.storage, 'jobs', Date.now())
       })

@@ -1,12 +1,11 @@
 /**
- * The memory database: its D1 handle, record types, scopes, and extraction checkpoints.
+ * The memory database: its D1 handle, record types, and scopes.
  *
  * @see docs/memory.md — D1 schema, Scopes
  *
  * @module
  */
 import { parseEnum } from '../../lib/reylo.ts'
-import selectExtractionCheckpoint from './sql/select-extraction-checkpoint.sql'
 
 /** Whose a record is: one agent's (`agent:<id>`) or a shared space's (`shared:<space>`). */
 export type Scope = `agent:${string}` | `shared:${string}`
@@ -106,12 +105,6 @@ export function parseMemoryRecord(row: {
 /** The memory database on a D1 binding. */
 export function memoryDb(d1: D1Database): MemoryDb {
   return d1
-}
-
-/** The last entry of an agent that extraction has covered, or 0. */
-export async function extractionCheckpoint(db: MemoryDb, agentId: string): Promise<number> {
-  const row = await selectExtractionCheckpoint.run(db, { agentId })
-  return row?.lastEntryId ?? 0
 }
 
 /** The scope of an agent's own memory. */

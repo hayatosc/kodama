@@ -6,11 +6,10 @@
 import { env, exports } from 'cloudflare:workers'
 import { defaultAgentSettings } from '../control-plane/config.ts'
 import { managementDb } from '../control-plane/db.ts'
-import insertAgent from '../control-plane/sql/insert-agent.sql'
-import insertConfigVersion from '../control-plane/sql/insert-config-version.sql'
-import selectAgentById from '../control-plane/sql/select-agent-by-id.sql'
-import { referenceStatements } from '../credentials/references.ts'
-import { prepareQuery, runBatch } from '../lib/reylo.ts'
+import { findAgentById, insertAgentStatement } from '../control-plane/registry.repository.ts'
+import { insertConfigVersionStatement } from '../control-plane/versions.repository.ts'
+import { referenceStatements } from '../credentials/grants.repository.ts'
+import { runBatch } from '../lib/reylo.ts'
 import { uuidv7 } from '../lib/uuid.ts'
 import type { AgentSettings, ConfigWriteResult, SeedResult } from '../protocol.ts'
 import { grantTestCredentials, testCredentialRefs } from './credentials.ts'
@@ -50,7 +49,7 @@ export async function newAgentId(
 ): Promise<string> {
   await seedOnce()
   const now = Date.now()
-  await insertAgent.run(management, {
+  await insertAgentStatement(management, {
     agentId,
     objectName: agentId,
     kind: 'working',
@@ -60,14 +59,14 @@ export async function newAgentId(
     currentVersion: withCredentials ? 1 : 0,
     createdAt: now,
     updatedAt: now,
-  })
+  }).run()
   if (!withCredentials) return agentId
   const settings = {
     ...defaultAgentSettings(env),
     credentials: await grantTestCredentials(agentId),
   }
   await runBatch(management, [
-    prepareQuery(management, insertConfigVersion, {
+    insertConfigVersionStatement(management, {
       agentId,
       version: 1,
       settingsJson: JSON.stringify(settings),
@@ -83,8 +82,8 @@ export async function newAgentId(
 
 /** The agent's desired settings, or the defaults before its first version. */
 export async function desiredSettings(agentId: string): Promise<AgentSettings> {
-  const row = await selectAgentById.run(management, { agentId })
-  if (row === null || row.currentVersion === 0) return defaultAgentSettings(env)
+  const row = await findAgentById(management, agentId)
+  if (row === undefined || row.currentVersion === 0) return defaultAgentSettings(env)
   return (await agentService().getConfig(agentId)).settings
 }
 
@@ -93,7 +92,7 @@ export async function updateSettings(
   agentId: string,
   change: Partial<AgentSettings>,
 ): Promise<ConfigWriteResult> {
-  const row = await selectAgentById.run(management, { agentId })
+  const row = await findAgentById(management, agentId)
   return agentService().updateConfig(agentId, {
     requestId: uuidv7(),
     settings: { ...(await desiredSettings(agentId)), ...change },

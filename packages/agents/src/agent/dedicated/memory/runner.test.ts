@@ -26,15 +26,16 @@ import {
   context,
   db,
 } from '../../../testing/memory.ts'
-import { applyOperation } from '../../../memory/store/records.ts'
+import { applyOperation } from '../../../memory/store/records.service.ts'
 import { setAlarm } from '../../runtime/alarms.ts'
 import { openLocalDb } from '../../local-db/local.ts'
-import { settleJob } from '../../local-db/memory-jobs.ts'
-import selectMemoryJobById from '../../local-db/sql/select-memory-job-by-id.sql'
-import reopenRunningMemoryJobRaw from '../../../testing/sql/reopen-running-memory-job-raw.sql'
-import selectAllUsage from '../../../testing/sql/select-all-usage.sql'
-import selectMemoryLedgerByAction from '../../../testing/sql/select-memory-ledger-by-action.sql'
-import setMemoryJobNotBefore from '../../../testing/sql/set-memory-job-not-before.sql'
+import { jobRow, settleJob } from '../../local-db/memory-jobs.repository.ts'
+import {
+  listAllUsage,
+  listMemoryLedgerByAction,
+  updateMemoryJobNotBefore,
+  updateReopenRunningMemoryJobRaw,
+} from '../../../testing/test-db.repository.ts'
 import { waitForAnswer } from '../../../testing/rpc.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
@@ -68,7 +69,7 @@ describe('usage attribution', () => {
         .toBe('settled')
     }
     const rows = await runInDurableObject(memoryAgent(), async (_, state) =>
-      selectAllUsage.runSync((await openLocalDb(state.storage)).sql),
+      listAllUsage((await openLocalDb(state.storage)).sql),
     )
     for (const [i, status] of statuses.entries()) {
       const recorded = rows.filter((row) => row.jobId === status.jobId)
@@ -86,7 +87,7 @@ describe('usage attribution', () => {
     }
     await evictDurableObject(memoryAgent())
     const restored = await runInDurableObject(memoryAgent(), async (_, state) =>
-      selectAllUsage.runSync((await openLocalDb(state.storage)).sql),
+      listAllUsage((await openLocalDb(state.storage)).sql),
     )
     expect(restored).toEqual(rows)
   })
@@ -266,11 +267,11 @@ describe('retries', () => {
       // Make the delayed retry due now rather than waiting for its delay.
       await runInDurableObject(memoryAgent(), async (_instance, state) => {
         const local = await openLocalDb(state.storage)
-        const row = selectMemoryJobById.runSync(local.sql, { jobId })
+        const row = jobRow(local, jobId)
         const delay = JOB_RETRY_DELAYS_MS[attempt - 1] ?? 0
         expect(row?.notBefore).toBeGreaterThan(Date.now() + delay - 10_000)
         expect(row?.notBefore).toBeLessThanOrEqual(Date.now() + delay)
-        setMemoryJobNotBefore.runSync(local.sql, { jobId, notBefore: 0 })
+        updateMemoryJobNotBefore(local.sql, { jobId, notBefore: 0 })
         await setAlarm(state.storage, 'jobs', Date.now())
       })
       await runDurableObjectAlarm(memoryAgent())
@@ -279,7 +280,7 @@ describe('retries', () => {
     await expect
       .poll(() => memoryAgent().jobStatus(jobId), { timeout: 10_000 })
       .toMatchObject({ status: 'settled', outcome: 'failed', attempts })
-    const failure = (await selectMemoryLedgerByAction.run(db, { action: 'job_failed' })).find(
+    const failure = (await listMemoryLedgerByAction(db, { action: 'job_failed' })).find(
       (row) => row.targetId === jobId,
     )
     expect(failure?.detailJson).toBe(JSON.stringify({ kind: 'remember', attempts }))
@@ -314,7 +315,7 @@ describe('memory job recovery', () => {
     // Recreate a stop after Pi committed its result but before Kodama settled the job.
     await runInDurableObject(stub, async (_instance, state) => {
       const local = await openLocalDb(state.storage)
-      reopenRunningMemoryJobRaw.runSync(local.sql, { jobId })
+      updateReopenRunningMemoryJobRaw(local.sql, { jobId })
       await setAlarm(state.storage, 'jobs', Date.now() + 60_000)
     })
     await evictDurableObject(stub)

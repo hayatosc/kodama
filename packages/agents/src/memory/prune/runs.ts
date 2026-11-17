@@ -7,7 +7,11 @@
  */
 import * as v from 'valibot'
 import type { LocalDb } from '../../agent/local-db/local.ts'
-import { hasPrunableEntries, prunedThrough, unfinishedRun } from '../../agent/local-db/pruning.ts'
+import {
+  hasPrunableEntries,
+  prunedThrough,
+  unfinishedRun,
+} from '../../agent/local-db/pruning.repository.ts'
 
 /**
  * Whether a run is unfinished, or the database is over the threshold and entries before the newest

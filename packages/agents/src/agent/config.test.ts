@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vite-plus/test'
 import { newAgentId, updateSettings } from '../testing/management.ts'
 import { modelResponse, useMockModel, waitForAnswer } from '../testing/rpc.ts'
 import { requestBody, toolCallResponse, toolResults } from '../testing/model.ts'
-import selectPiEntryRecords from '../testing/sql/select-pi-entry-records.sql'
+import { listPiEntryRecords } from '../testing/test-db.repository.ts'
 import { currentTimeTool } from '../tools/current-time.ts'
 
 useMockModel()
@@ -176,7 +176,7 @@ it.each([
       ]),
     })
     const rows = await runInDurableObject(env.AGENTS.getByName(id), (_instance, state) =>
-      selectPiEntryRecords.runSync(state.storage.sql),
+      listPiEntryRecords(state.storage.sql),
     )
     const result = rows.find((row) => row.record.includes('"kind":"pi.tool-result"'))
     expect(result).toBeDefined()

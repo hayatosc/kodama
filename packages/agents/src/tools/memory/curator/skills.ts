@@ -7,7 +7,12 @@ import { Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import type { ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import { MAX_SKILL_BODY, MAX_SKILL_DESCRIPTION } from '../../../memory/skills.ts'
-import { listSkills, readSkill, setSkillStatus, writeSkill } from '../../../memory/store/skills.ts'
+import {
+  listSkills,
+  readSkill,
+  setSkillStatus,
+  writeSkill,
+} from '../../../memory/store/skills.service.ts'
 import { memoryDb } from '../../../memory/store/db.ts'
 import { skillJobContext } from '../../../memory/extraction/operations.ts'
 import { describe, text } from './common.ts'

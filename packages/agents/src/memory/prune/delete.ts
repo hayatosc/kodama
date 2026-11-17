@@ -8,8 +8,8 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import type { Harness } from '@earendil-works/pi-durable'
-import { hasSingleConversation } from '../../agent/local-db/pruning.ts'
-import type { Run } from '../../agent/local-db/pruning.ts'
+import { hasSingleConversation } from '../../agent/local-db/pruning.repository.ts'
+import type { Run } from '../../agent/local-db/pruning.repository.ts'
 
 const context = BACKGROUND_CONTEXT
 

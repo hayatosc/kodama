@@ -2,11 +2,11 @@
 import { runInDurableObject, evictDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { createCredentialStore } from '../../credentials/store.ts'
+import { createCredentialStore } from '../../credentials/store.service.ts'
 import { newAgentId, desiredSettings } from '../../testing/management.ts'
 import { textResponse, toolCallResponse } from '../../testing/model.ts'
 import { waitForAnswer } from '../../testing/rpc.ts'
-import selectAllUsage from '../../testing/sql/select-all-usage.sql'
+import { listAllUsage } from '../../testing/test-db.repository.ts'
 import { managementDb } from '../../control-plane/db.ts'
 import { createAgentModels } from '../../control-plane/models.ts'
 import { openLocalDb } from '../local-db/local.ts'
@@ -25,7 +25,7 @@ it('records real working turns once with selected credentials across eviction', 
   }
   const rows = await runInDurableObject(env.AGENTS.getByName(id), async (_, state) => {
     const local = await openLocalDb(state.storage)
-    return selectAllUsage.runSync(local.sql)
+    return listAllUsage(local.sql)
   })
   expect(rows).toHaveLength(2)
   for (const row of rows)
@@ -50,7 +50,7 @@ it('charges peer contact to the receiver rather than the sender', async () => {
   await env.AGENTS.getByName(sender).sendTo(receiver, { requestId: 'usage-peer', content: 'Hello' })
   await waitForAnswer(receiver, 'usage-peer')
   const rows = await runInDurableObject(env.AGENTS.getByName(receiver), async (_, state) =>
-    selectAllUsage.runSync((await openLocalDb(state.storage)).sql),
+    listAllUsage((await openLocalDb(state.storage)).sql),
   )
   expect(rows).toHaveLength(1)
   expect(rows[0]).toMatchObject({ chargedAgentId: receiver, actorKind: 'agent' })
@@ -88,7 +88,7 @@ it('keeps peer attribution when a completed user request is replayed during its 
   }
   await waitForAnswer(receiver, 'peer-loop')
   const rows = await runInDurableObject(env.AGENTS.getByName(receiver), async (_, state) =>
-    selectAllUsage.runSync((await openLocalDb(state.storage)).sql),
+    listAllUsage((await openLocalDb(state.storage)).sql),
   )
   expect(rows.map((row) => row.actorKind)).toEqual(['user', 'agent', 'agent'])
 })
@@ -127,7 +127,7 @@ it('counts completeSimple once and separate outer retries separately, preserving
     expect(events).toContain('text_delta')
     expect(events.at(-1)).toBe('done')
     expect((await stream.result()).usage.input).toBe(20)
-    const rows = selectAllUsage.runSync(local.sql)
+    const rows = listAllUsage(local.sql)
     expect(rows).toHaveLength(2)
     expect(rows.map((row) => row.input)).toEqual([20, 20])
     expect(rows.every((row) => row.credentialId && row.totalCost !== null)).toBe(true)

@@ -6,7 +6,7 @@
 import type { AgentEnv } from '../../env.ts'
 import { sha256Hex } from '../../lib/hash.ts'
 import type { MemoryJob } from '../jobs.ts'
-import type { OperationContext } from '../store/statements.ts'
+import type { OperationContext } from '../store/statements.repository.ts'
 
 /** The job the memory agent is running, and its ID. */
 export interface RunningJob {

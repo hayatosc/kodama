@@ -1,33 +1,18 @@
-import { uuidv7 } from '../../lib/uuid.ts'
+import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { refuseWhenFull, STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
-import { setAlarm } from '../../agent/runtime/alarms.ts'
-import {
-  insertReservation,
-  claimOccurrence,
-  listReservations,
-} from '../../agent/local-db/scheduled-tasks.ts'
-import { waitForAnswer } from '../../testing/rpc.ts'
-import { searchHistory } from '../archive/history.ts'
-import { applyOperation } from '../store/records.ts'
-import type { NewRecord } from '../store/records.ts'
-import type { ToolCall } from '../../testing/model.ts'
-import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
-import { PRUNE_LIMITS_KEY } from './runs.ts'
-import { prunedThrough } from '../../agent/local-db/pruning.ts'
-import { memoryDb } from '../store/db.ts'
-import { MEMORY_AGENT_NAME } from '../jobs.ts'
-import insertPruneRun from '../../agent/local-db/sql/insert-prune-run.sql'
+import { markContact } from '../../agent/local-db/external-data.repository.ts'
 import { openLocalDb } from '../../agent/local-db/local.ts'
-import { markContact } from '../../agent/local-db/external-data.ts'
-import selectAllMemoryJobs from '../../testing/sql/select-all-memory-jobs.sql'
-import selectAllPruneRuns from '../../testing/sql/select-all-prune-runs.sql'
-import selectArchiveSegmentsByAgent from '../../testing/sql/select-archive-segments-by-agent.sql'
-import setScheduledOccurrencesRetryAt from '../../testing/sql/set-scheduled-occurrences-retry-at.sql'
-import setScheduledOccurrencesState from '../../testing/sql/set-scheduled-occurrences-state.sql'
-import { ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable'
+import { createRun, prunedThrough } from '../../agent/local-db/pruning.repository.ts'
+import {
+  claimOccurrence,
+  insertReservation,
+  listReservations,
+} from '../../agent/local-db/scheduled-tasks.repository.ts'
+import { setAlarm } from '../../agent/runtime/alarms.ts'
+import { refuseWhenFull, STORAGE_MAINTENANCE_ERROR } from '../../agent/runtime/pruning.ts'
+import { uuidv7 } from '../../lib/uuid.ts'
 import {
   BACKGROUND_USAGE,
   COMPACT_AFTER_TURN_7,
@@ -38,6 +23,22 @@ import {
   say,
   storedEntryIds,
 } from '../../testing/conversation.ts'
+import type { ToolCall } from '../../testing/model.ts'
+import { requestBody, textResponse, toolCallResponse, toolResults } from '../../testing/model.ts'
+import { waitForAnswer } from '../../testing/rpc.ts'
+import {
+  listAllMemoryJobs,
+  listAllPruneRuns,
+  listArchiveSegmentsByAgent,
+  updateScheduledOccurrencesRetryAt,
+  updateScheduledOccurrencesState,
+} from '../../testing/test-db.repository.ts'
+import { searchHistory } from '../archive/history.ts'
+import { MEMORY_AGENT_NAME } from '../jobs.ts'
+import { memoryDb } from '../store/db.ts'
+import type { NewRecord } from '../store/records.service.ts'
+import { applyOperation } from '../store/records.service.ts'
+import { PRUNE_LIMITS_KEY } from './runs.ts'
 // Load the provider before RPC calls so Vite's module fetch is outside a short-lived DO request.
 import '@earendil-works/pi-ai/api/openai-responses'
 import { newAgentId, updateSettings } from '../../testing/management.ts'
@@ -68,7 +69,7 @@ describe('pruning', () => {
 
     const ids = await storedEntryIds(agentId)
     expect(ids.every((id) => id >= (head ?? 0))).toBe(true)
-    const segments = await selectArchiveSegmentsByAgent.run(db, { agentId })
+    const segments = await listArchiveSegmentsByAgent(db, { agentId })
     expect(segments).toHaveLength(1)
     expect(segments[0]?.lastEntry).toBeLessThan(head ?? 0)
     const segment = segments[0]
@@ -76,7 +77,7 @@ describe('pruning', () => {
     expect(segment.firstEntry).toBeLessThanOrEqual(segment.lastEntry)
     const runs = await runInDurableObject(stub, async (_i, state) => {
       const local = await openLocalDb(state.storage)
-      return selectAllPruneRuns.runSync(local.sql)
+      return listAllPruneRuns(local.sql)
     })
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ firstEntry: segment.firstEntry, lastEntry: segment.lastEntry })
@@ -113,7 +114,7 @@ describe('pruning', () => {
       env.AGENTS.getByName(MEMORY_AGENT_NAME),
       async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return selectAllMemoryJobs.runSync(local.sql)
+        return listAllMemoryJobs(local.sql)
       },
     )
     expect(jobs.filter((job) => job.payloadJson.includes(agentId)).map((job) => job.kind)).toEqual([
@@ -145,8 +146,7 @@ describe('pruning', () => {
     const jobsOf = (agentId: string) =>
       runInDurableObject(env.AGENTS.getByName(MEMORY_AGENT_NAME), async (_i, state) => {
         const local = await openLocalDb(state.storage)
-        return selectAllMemoryJobs
-          .runSync(local.sql)
+        return listAllMemoryJobs(local.sql)
           .filter((job) => job.payloadJson.includes(agentId))
           .map((job) => job.kind)
       })
@@ -221,14 +221,7 @@ describe('pruning', () => {
     const stub = env.AGENTS.getByName(agentId)
     await runInDurableObject(stub, async (_i, state) => {
       const local = await openLocalDb(state.storage)
-      const now = Date.now()
-      insertPruneRun.runSync(local.sql, {
-        firstEntry: 1,
-        lastEntry: head - 1,
-        head,
-        createdAt: now,
-        updatedAt: now,
-      })
+      createRun(local, 1, head - 1, head, Date.now())
     })
 
     // Without force and under the threshold, only the unfinished run is carried on.
@@ -297,7 +290,7 @@ describe('pruning', () => {
       await expect(refuseWhenFull(state.storage)).rejects.toThrow(STORAGE_MAINTENANCE_ERROR)
       expect(await instance.prune({ force: true })).toBe('pruned')
       expect(state.storage.sql.databaseSize).toBeLessThanOrEqual(hardBytes)
-      setScheduledOccurrencesRetryAt.runSync(local.sql, { retryAt: Date.now() - 1 })
+      updateScheduledOccurrencesRetryAt(local.sql, { retryAt: Date.now() - 1 })
       await setAlarm(state.storage, 'schedule', Date.now() - 1)
       await instance.alarm()
       return occurrence.id
@@ -338,7 +331,7 @@ describe('pruning', () => {
           start - 1,
         )
         claimOccurrence(local, task, start, undefined, Date.now() + 3_600_000)
-        setScheduledOccurrencesState.runSync(local.sql, {
+        updateScheduledOccurrencesState(local.sql, {
           state: status,
           admissionStarted: status === 'dispatching',
         })
@@ -414,7 +407,7 @@ describe('memory agent pruning', () => {
           { timeout: 10_000 },
         )
         .toBeGreaterThan(0)
-      const segments = await selectArchiveSegmentsByAgent.run(db, { agentId: MEMORY_AGENT_NAME })
+      const segments = await listArchiveSegmentsByAgent(db, { agentId: MEMORY_AGENT_NAME })
       expect(segments).toEqual([])
     } finally {
       await runInDurableObject(stub, (_i, state) => state.storage.delete(PRUNE_LIMITS_KEY))

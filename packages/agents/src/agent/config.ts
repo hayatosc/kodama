@@ -22,8 +22,8 @@ import type { ScheduleTools } from '../tools/scheduled-tasks.ts'
 import { harnessSettings } from './runtime/harness.ts'
 import { guardedModels } from './runtime/restrictions.ts'
 import type { Refusal } from './runtime/restrictions.ts'
-import { wrapToolsWithPermissions } from './permissions.ts'
-import type { PermissionDeps } from './permissions.ts'
+import { wrapToolsWithPermissions } from './permissions.service.ts'
+import type { PermissionDeps } from './permissions.service.ts'
 
 /**
  * Register the working agent's optional tools alongside its always-enabled extensions.

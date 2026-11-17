@@ -1,25 +1,28 @@
 /** Management D1 constraints and atomic batches for a single-operator installation. @module */
 import { env } from 'cloudflare:workers'
 import { describe, expect, it } from 'vite-plus/test'
-import insertAgentCredentialRef from '../credentials/sql/insert-agent-credential-ref.sql'
-import insertCredential from '../credentials/sql/insert-credential.sql'
+import { insertAgentCredentialRefStatement } from '../credentials/grants.repository.ts'
+import { insertCredentialStatement } from '../credentials/vault.repository.ts'
 import { errorText } from '../lib/errors.ts'
-import { prepareQuery, runBatch } from '../lib/reylo.ts'
+import { runBatch } from '../lib/reylo.ts'
 import { uuidv7 } from '../lib/uuid.ts'
-import selectAllAgentCredentialRefs from '../testing/sql/select-all-agent-credential-refs.sql'
-import selectAllAgents from '../testing/sql/select-all-agents.sql'
-import setAgentVersions from '../testing/sql/set-agent-versions.sql'
-import updateAgentStatusReturning from '../testing/sql/update-agent-status-returning.sql'
+import {
+  listAllAgentCredentialRefs,
+  listAllAgents,
+  updateAgentStatusReturning,
+  updateAgentVersionsStatement,
+} from '../testing/test-db.repository.ts'
 import { managementDb } from './db.ts'
-import insertAgent from './sql/insert-agent.sql'
-import insertConfigVersion from './sql/insert-config-version.sql'
-import selectAgentById from './sql/select-agent-by-id.sql'
+import { findAgentById, insertAgentStatement } from './registry.repository.ts'
+import type { InsertAgentParams } from './registry.repository.ts'
+import { insertConfigVersionStatement } from './versions.repository.ts'
+import type { InsertConfigVersionParams } from './versions.repository.ts'
 
 const db = managementDb(env.MANAGEMENT_DB)
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 
-function registryRow(agentId: string) {
+function registryRow(agentId: string): InsertAgentParams {
   return {
     agentId,
     objectName: agentId,
@@ -33,7 +36,7 @@ function registryRow(agentId: string) {
   }
 }
 
-function versionRow(agentId: string, version: number) {
+function versionRow(agentId: string, version: number): InsertConfigVersionParams {
   return {
     agentId,
     version,
@@ -49,8 +52,8 @@ function versionRow(agentId: string, version: number) {
 // these are the D1 behaviors that relies on. Run them again on D1 emulator or runtime upgrades.
 describe('D1 behavior the management database relies on', () => {
   it('enforces foreign keys by default', async () => {
-    const error = await insertConfigVersion
-      .run(db, versionRow(uuidv7(), 1))
+    const error = await insertConfigVersionStatement(db, versionRow(uuidv7(), 1))
+      .run()
       .catch((caught: unknown) => caught)
     expect(errorText(error)).toMatch(/FOREIGN KEY constraint failed/)
   })
@@ -58,8 +61,8 @@ describe('D1 behavior the management database relies on', () => {
   it('rejects credential references labeled as a different provider', async () => {
     const agentId = uuidv7()
     const credentialId = uuidv7()
-    await insertAgent.run(db, registryRow(agentId))
-    await insertCredential.run(db, {
+    await insertAgentStatement(db, registryRow(agentId)).run()
+    await insertCredentialStatement(db, {
       credentialId,
       kind: 'api_key',
       purpose: 'model_provider',
@@ -74,47 +77,47 @@ describe('D1 behavior the management database relies on', () => {
       last4: '',
       createdAt: 1,
       expiresAt: null,
-    })
+    }).run()
 
     await expect(
-      insertAgentCredentialRef.run(db, { agentId, credentialId, provider: 'anthropic' }),
+      insertAgentCredentialRefStatement(db, { agentId, credentialId, provider: 'anthropic' }).run(),
     ).rejects.toThrow()
-    expect(await selectAllAgentCredentialRefs.run(db)).toEqual([])
+    expect(await listAllAgentCredentialRefs(db)).toEqual([])
 
-    await insertAgentCredentialRef.run(db, { agentId, credentialId, provider: 'openai' })
-    expect(await selectAllAgentCredentialRefs.run(db)).toHaveLength(1)
+    await insertAgentCredentialRefStatement(db, { agentId, credentialId, provider: 'openai' }).run()
+    expect(await listAllAgentCredentialRefs(db)).toHaveLength(1)
   })
 
   it('rolls back the whole batch when a later statement breaks a foreign key', async () => {
     const agentId = uuidv7()
     await expect(
       runBatch(db, [
-        prepareQuery(db, insertAgent, registryRow(agentId)),
-        prepareQuery(db, insertConfigVersion, versionRow(uuidv7(), 1)),
+        insertAgentStatement(db, registryRow(agentId)),
+        insertConfigVersionStatement(db, versionRow(uuidv7(), 1)),
       ]),
     ).rejects.toThrow()
-    expect(await selectAgentById.run(db, { agentId })).toBeNull()
+    expect(await findAgentById(db, agentId)).toBeUndefined()
   })
 
   it('rolls back the whole batch when a later statement breaks a primary key', async () => {
     const agentId = uuidv7()
     await runBatch(db, [
-      prepareQuery(db, insertAgent, registryRow(agentId)),
-      prepareQuery(db, insertConfigVersion, versionRow(agentId, 1)),
+      insertAgentStatement(db, registryRow(agentId)),
+      insertConfigVersionStatement(db, versionRow(agentId, 1)),
     ])
     await expect(
       runBatch(db, [
-        prepareQuery(db, setAgentVersions, { agentId, currentVersion: 2, appliedVersion: 0 }),
-        prepareQuery(db, insertConfigVersion, versionRow(agentId, 1)),
+        updateAgentVersionsStatement(db, { agentId, currentVersion: 2, appliedVersion: 0 }),
+        insertConfigVersionStatement(db, versionRow(agentId, 1)),
       ]),
     ).rejects.toSatisfy((error) => /UNIQUE constraint failed/.test(errorText(error)))
-    const row = await selectAgentById.run(db, { agentId })
+    const row = await findAgentById(db, agentId)
     expect(row?.currentVersion).toBe(1)
-    expect(await selectAllAgents.run(db)).toContainEqual(expect.objectContaining({ agentId }))
+    expect(await listAllAgents(db)).toContainEqual(expect.objectContaining({ agentId }))
   })
 
   it('returns no row from an UPDATE … RETURNING that matches nothing', async () => {
-    const row = await updateAgentStatusReturning.run(db, { agentId: uuidv7(), status: 'paused' })
+    const row = await updateAgentStatusReturning(db, { agentId: uuidv7(), status: 'paused' })
     expect(row).toBeNull()
   })
 
