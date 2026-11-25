@@ -46,7 +46,8 @@
     function oncommand(event: Event): void {
       if (!(event instanceof CommandEvent) || event.source !== button) return
       if (!(event.target instanceof HTMLElement)) return
-      void copy(event.target.innerText.trim())
+      // Untrimmed, so a code block keeps its first line's indentation.
+      void copy(event.target.innerText)
     }
     document.addEventListener('command', oncommand, true)
     return () => {

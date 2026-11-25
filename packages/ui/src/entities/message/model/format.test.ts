@@ -24,6 +24,13 @@ describe('formatElapsed', () => {
   })
 })
 
+/** An array of `length` holes, with `values` set at their indexes. */
+function sparse(length: number, values: Record<number, unknown>): unknown[] {
+  const array: unknown[] = []
+  array.length = length
+  return Object.assign(array, values)
+}
+
 describe('jsonTokens', () => {
   const text = (value: unknown) =>
     jsonTokens(value)
@@ -53,11 +60,14 @@ describe('jsonTokens', () => {
     ])
   })
 
-  test('prints empty containers, nulls, and what JSON drops as JSON.stringify does', () => {
+  test('prints empty containers, nulls, holes, and what JSON drops as JSON.stringify does', () => {
     expect(text({})).toBe('{}')
     expect(text([])).toBe('[]')
     expect(text({ gone: undefined, kept: null })).toBe('{ "kept": null }')
     expect(text([undefined])).toBe('[null]')
+    expect(text(sparse(2, {}))).toBe('[null, null]')
+    expect(text(sparse(2, { 1: 1 }))).toBe('[null, 1]')
+    expect(text(sparse(2, { 0: 1 }))).toBe('[1, null]')
     expect(text('"quoted"')).toBe('"\\"quoted\\""')
   })
 })

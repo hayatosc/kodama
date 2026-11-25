@@ -43,7 +43,8 @@ export function jsonTokens(value: unknown): JsonToken[] {
 
 function print(value: unknown, tokens: JsonToken[]): void {
   if (Array.isArray(value)) {
-    printList('[', ']', value, tokens, (item) => print(item, tokens))
+    // Array.from turns holes into undefined, which prints as null, as JSON.stringify does.
+    printList('[', ']', Array.from(value), tokens, (item) => print(item, tokens))
     return
   }
   if (typeof value === 'object' && value !== null) {

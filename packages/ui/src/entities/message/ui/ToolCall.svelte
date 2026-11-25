@@ -35,8 +35,11 @@
 
   let { open = $bindable(false), ...props }: Props = $props()
 
-  /** Results longer than this many lines are clipped until 「すべて表示」. */
-  const clampLines = 5
+  /**
+   * A result taller than five 20px lines and its 16px padding, wrapped lines included, is clipped
+   * to 104px until 「すべて表示」 (design/components/ToolCall).
+   */
+  const longAfterPx = 5 * 20 + 16
 
   const id = $props.id()
   const argsId = `${id}-args`
@@ -77,7 +80,17 @@
   })
 
   let showAll = $state(false)
-  const long = $derived(props.state === 'done' && props.result.split('\n').length > clampLines)
+  let resultHeight = $state(0)
+  const long = $derived(resultHeight > longAfterPx)
+
+  /** Follows the result's rendered height, which changes with the width it wraps at. */
+  function measure(pre: HTMLPreElement): () => void {
+    const observer = new ResizeObserver(() => {
+      resultHeight = pre.offsetHeight
+    })
+    observer.observe(pre)
+    return () => observer.disconnect()
+  }
 </script>
 
 <!--
@@ -162,6 +175,7 @@
         <div class={cn(long && !showAll && 'clamp')}>
           <pre
             id={resultId}
+            {@attach measure}
             class="m-0 px-3 pt-1.5 pb-2.5 font-mono text-sm leading-5 wrap-anywhere whitespace-pre-wrap">{props.result}</pre>
         </div>
         {#if long}

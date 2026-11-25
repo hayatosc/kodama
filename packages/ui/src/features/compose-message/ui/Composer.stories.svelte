@@ -59,21 +59,32 @@
     timer = setTimeout(finish, 2600)
   }
 
-  /** Ends the run, then sends the front of the queue. */
+  /** Ends the run with a reply, then sends the front of the queue. */
   function finish(): void {
     log = log.filter((entry) => entry.role !== 'thinking')
     log.push({ id: nextId++, role: 'assistant', text: '了解しました。' })
     running = false
-    const [next, ...rest] = queue
-    if (next === undefined) return
-    queue = rest
-    timer = setTimeout(() => send(next), 400)
+    sendNextQueued()
   }
 
+  /** Stop: ends the run without a reply, then sends the front of the queue. */
   function cancel(): void {
     clearTimeout(timer)
     log = log.filter((entry) => entry.role !== 'thinking')
     running = false
+    sendNextQueued()
+  }
+
+  /**
+   * Sends the front of the queue after a moment. The message stays queued until then, so one sent
+   * by hand in the meantime keeps it waiting for the next run, and one removed is not sent.
+   */
+  function sendNextQueued(): void {
+    if (queue.length === 0) return
+    timer = setTimeout(() => {
+      const next = queue.shift()
+      if (next !== undefined) send(next)
+    }, 400)
   }
 </script>
 
