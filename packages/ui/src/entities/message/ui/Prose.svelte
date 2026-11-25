@@ -36,16 +36,46 @@
     overflow-wrap: anywhere;
   }
 
-  .prose :global(:is(h1, h2, h3, h4, p, ul, ol, blockquote, figure, table, hr)) {
+  .prose :global(:where(h1, h2, h3, h4, p, ul, ol, blockquote, figure, table, hr)) {
     margin-block: 0;
   }
 
-  .prose > :global(* + *) {
+  /*
+   * The rhythm between blocks. Text follows text 8px apart. Code blocks, quotes, tables, and
+   * rules stand apart from the text, 16px on each side. A heading opens a section: 24px (h3) or
+   * 16px (h4) from what comes before, and 4px above its own text (8px above a boxed block), so it
+   * reads with what follows.
+   * The selectors are in :where() so the rules weigh the same and the later one wins.
+   */
+  .prose > :global(:where(* + *)) {
+    margin-block-start: var(--spacing-2);
+  }
+
+  .prose > :global(:where(* + :is(figure, blockquote, [data-slot='prose-table'], hr))),
+  .prose > :global(:where(:is(figure, blockquote, [data-slot='prose-table'], hr) + *)) {
+    margin-block-start: var(--spacing-4);
+  }
+
+  .prose > :global(:where(* + :is(h1, h2, h3))) {
+    margin-block-start: var(--spacing-6);
+  }
+
+  .prose > :global(:where(* + h4)) {
+    margin-block-start: var(--spacing-4);
+  }
+
+  .prose > :global(:where(:is(h1, h2, h3, h4) + *)) {
+    margin-block-start: var(--spacing-1);
+  }
+
+  .prose
+    > :global(
+      :where(:is(h1, h2, h3, h4) + :is(figure, blockquote, [data-slot='prose-table'], hr))
+    ) {
     margin-block-start: var(--spacing-2);
   }
 
   .prose :global(:is(h1, h2, h3)) {
-    padding-block-start: 4px;
     font-size: 18px;
     font-weight: 600;
     line-height: 28px;
@@ -70,7 +100,7 @@
   }
 
   .prose :global(li + li) {
-    margin-block-start: 2px;
+    margin-block-start: var(--spacing-1);
   }
 
   .prose :global(strong) {
