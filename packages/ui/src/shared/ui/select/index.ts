@@ -1,7 +1,6 @@
 /**
  * Select in the shape of shadcn-svelte's, built on the native customizable <select>, styled as
- * design/components/Select. For a searchable list, compose Popover and Command instead (see the
- * Combobox stories).
+ * design/components/Select. For a searchable list, use the Combobox instead.
  *
  * @module
  */
