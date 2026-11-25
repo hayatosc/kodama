@@ -34,6 +34,12 @@ renders a page from `pages`. Imports go through the `#app/*` and `#shared/*` ali
   token-to-utility mapping (`@theme inline`).
 - `src/shared/styles/tokens.css`: a copy of `design/tokens.css` without its CDN font imports.
   `tokens.test.ts` fails when the two differ; copy the file again after exporting the design.
+- `src/entities/agent/`: the agent entity. `ui/AgentAvatar.svelte` is the avatar, a bird in a
+  circle tinted with the agent's color (`ui/Bird.svelte`), or its birdhouse while it sleeps or is
+  paused; `ui/Birdhouse.svelte` is also the shared birdhouse of the workspace; `model/avatar.ts`
+  holds the colors, poses, and props and how each pose is drawn. Each pose's motion is CSS that
+  stops under a reduced-motion request; leaving, entering, and flying between birdhouses come with
+  the live screen in stage 7.
 - `src/shared/lib/utils.ts`: `cn`, the prop helper types the components import, and
   `focusRing`, the shared focus style (an outline, so it survives forced colors mode).
 - `src/shared/ui/`: the UI kit, general-purpose parts in the shape of shadcn-svelte's
@@ -118,7 +124,7 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    Empty) under **Patterns**; each Default story shows the part on its own. Native elements come first (see Layout);
    Baseline features are used without polyfills, and features short of Baseline get the fallback
    the guide gives.
-3. **AgentAvatar**: the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
+3. **AgentAvatar** (done): the bird and birdhouse SVG, its poses, sizes, badge, and motion, ported from
    `design/components/bundle.js` and `bundle.css`.
 4. **Conversation parts**: Message (user, assistant, thinking, peer), Prose (static Markdown),
    ToolCall, and Composer with its queue.
