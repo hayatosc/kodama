@@ -24,7 +24,12 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <svg viewBox="10 10 100 112" class="h-32 w-28" role="img" aria-label="research の巣箱">
+    <svg
+      viewBox="10 10 100 112"
+      class="h-32 w-28"
+      role="img"
+      aria-label={`${args.color} birdhouse`}
+    >
       <Birdhouse {...args} />
     </svg>
   {/snippet}

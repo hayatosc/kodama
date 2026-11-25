@@ -6,6 +6,7 @@
     isHome,
     scaleOf,
     type AgentColor,
+    type AgentMark,
     type AgentPose,
     type AgentProp,
   } from '../model/avatar.js'
@@ -28,13 +29,16 @@
     pose?: AgentPose
     /** Defaults by pose (`work` holds the lens, `write` the pen); `null` holds nothing. */
     prop?: AgentProp | null
-    /** `?` or `!`, above the head. */
-    mark?: string
+    mark?: AgentMark
     /** 72 profile, 56 main row, 40 phone list, 36 list rows, 32 phone app bar, 20 inline. */
     size?: 20 | 32 | 36 | 40 | 56 | 72
     /** The lower-right status badge; hidden at 20px and while the bird holds something. */
     badge?: boolean
-    /** The accessible name, such as the agent's slug; without it the avatar is decorative. */
+    /**
+     * The accessible name; without it the avatar is decorative. Name the agent (its slug) when
+     * the text beside the avatar already says what it is doing, as a list row's second line does;
+     * when the avatar stands alone, include the state too, such as `research: 書いています`.
+     */
     label?: string
     class?: string
   } = $props()
@@ -42,8 +46,11 @@
   const discClip = $props.id()
 
   const home = $derived(isHome(pose))
-  const tiny = $derived(size <= 28)
-  /** At 20px the face alone has to carry the pose: no prop, no mark, no badge. */
+  /**
+   * At 20px the face alone has to carry the pose: no fine detail (the design's 28px-and-below
+   * rule, and 20 is the only size that small), no prop, no mark, no badge.
+   */
+  const tiny = $derived(size <= 20)
   const held = $derived(
     size <= 20 ? undefined : prop === undefined ? defaultProp(pose) : (prop ?? undefined),
   )

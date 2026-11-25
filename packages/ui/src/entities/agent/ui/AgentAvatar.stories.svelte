@@ -1,7 +1,13 @@
 <script module lang="ts">
   import { defineMeta } from '@storybook/addon-svelte-csf'
   import AgentAvatar from './AgentAvatar.svelte'
-  import { POSES, WORKING_COLORS, type AgentColor, type AgentPose } from '../model/avatar.js'
+  import {
+    POSES,
+    WORKING_COLORS,
+    type AgentColor,
+    type AgentMark,
+    type AgentPose,
+  } from '../model/avatar.js'
 
   const colors: AgentColor[] = [...WORKING_COLORS, 'ink', 'system']
 
@@ -23,7 +29,7 @@
   }
 
   /** Marks the design pairs with poses. */
-  const poseMarks: Partial<Record<AgentPose, string>> = { tilt: '?', surprised: '!' }
+  const poseMarks: Partial<Record<AgentPose, AgentMark>> = { tilt: '?', surprised: '!' }
 
   const { Story } = defineMeta({
     title: 'Kodama/AgentAvatar',
@@ -119,7 +125,7 @@
     docs: {
       description: {
         story:
-          '72px for the profile panel, 56px for the main agent’s card, 36px for list rows, and 20px inline. At 28px and below the fine lines drop out; at 20px the prop, mark, and badge drop out too, so the face alone carries the pose.',
+          '72px for the profile panel, 56px for the main agent’s card, 36px for list rows, and 20px inline. At 20px the fine lines, the prop, the mark, and the badge drop out, so the face alone carries the pose.',
       },
     },
   }}

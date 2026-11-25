@@ -19,6 +19,7 @@ export {
   isHome,
   scaleOf,
   type AgentColor,
+  type AgentMark,
   type AgentPose,
   type AgentProp,
 } from './model/avatar.js'

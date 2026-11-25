@@ -48,6 +48,9 @@ export type AgentPose = (typeof POSES)[number]
 /** Something the bird holds: a magnifier, a pen over a sheet, or a letter. */
 export type AgentProp = 'lens' | 'pen' | 'letter'
 
+/** A mark above the head: `?` while a question waits, `!` when the run was cancelled. */
+export type AgentMark = '?' | '!'
+
 /** The eye shapes the poses use. */
 export type EyeKind = 'open' | 'closed' | 'happy' | 'wide' | 'cross' | 'worried'
 
@@ -73,11 +76,16 @@ export function liftsWings(pose: AgentPose): boolean {
   return pose === 'happy' || pose === 'live' || pose === 'stretch'
 }
 
-/** The bird's scale inside the circle, small enough that no pose clips its wings or tail. */
+/**
+ * The bird's scale inside the circle, small enough that no pose clips its head, wings, or tail,
+ * including at the far end of its motion: `surprised` hops, so it needs the same room as
+ * `listen`, and `work` sways and `worried` fidgets, so they sit a little smaller than `idle`.
+ */
 export function scaleOf(pose: AgentPose): number {
   if (liftsWings(pose)) return 0.84
-  if (pose === 'listen') return 0.85
+  if (pose === 'listen' || pose === 'surprised') return 0.85
   if (pose === 'tilt') return 0.8
+  if (pose === 'work' || pose === 'worried') return 0.88
   return 0.93
 }
 

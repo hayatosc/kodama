@@ -32,15 +32,16 @@
     color,
     pose = 'idle',
     prop,
-    mark,
     tiny = false,
   }: {
     color: AgentColor
     pose?: AgentPose
     /** Already resolved by the caller: no default is applied here. */
     prop?: AgentProp
-    mark?: string
-    /** At 28px and below: no feather lines, highlights, bill seam, or cheeks; thicker feet. */
+    /**
+     * At 20px (the design drops the detail at 28px and below, and 20 is the only such size): no
+     * feather lines, highlights, bill seam, or cheeks; thicker feet.
+     */
     tiny?: boolean
   } = $props()
 
@@ -138,9 +139,6 @@
       </g>
     </g>
   </g>
-  {#if mark}
-    <text class="mark" x="13" y="-17">{mark}</text>
-  {/if}
 </g>
 
 <style>
@@ -232,10 +230,6 @@
     stroke-width: 2.2;
     stroke-linecap: round;
   }
-  .mark {
-    font: 600 9px var(--font-sans);
-    fill: var(--foreground);
-  }
   .tiny .featherlines,
   .tiny .hl,
   .tiny .bill-line,
@@ -246,7 +240,11 @@
     stroke-width: 1.8;
   }
 
-  /* Motion (design/components/bundle.css, kd-p-*). Origins are in the bird's units; feet at y 16. */
+  /*
+   * Motion (design/components/bundle.css, kd-p-*). Origins are in the bird's units; feet at y 16.
+   * The jumps, squashes, and stretch reach less far than the design's, so the head and the far
+   * wing stay inside the circle at the top of the motion.
+   */
   .breath,
   .bod {
     transform-origin: 0 16px;
@@ -397,13 +395,13 @@
       transform: translateY(0) scale(1, 1);
     }
     20% {
-      transform: translateY(0) scale(1.1, 0.88);
+      transform: translateY(0) scale(1.02, 0.9);
     }
     40% {
-      transform: translateY(-4px) scale(0.95, 1.07);
+      transform: translateY(-2px) scale(0.96, 1.05);
     }
     62% {
-      transform: translateY(0) scale(1.06, 0.93);
+      transform: translateY(0) scale(1.02, 0.94);
     }
     80% {
       transform: translateY(-1.6px) scale(0.98, 1.02);
@@ -420,21 +418,21 @@
   }
   @keyframes jump {
     40% {
-      transform: translateY(-6px) scale(0.96, 1.06);
+      transform: translateY(-3px) scale(0.97, 1.04);
     }
   }
   @keyframes stretch {
     30% {
-      transform: scale(0.9, 1.14);
+      transform: scale(0.92, 1.1);
     }
     50% {
-      transform: scale(0.9, 1.14) rotate(-4deg);
+      transform: scale(0.92, 1.1) rotate(-4deg);
     }
     70% {
-      transform: scale(0.9, 1.14) rotate(4deg);
+      transform: scale(0.92, 1.1) rotate(4deg);
     }
     88% {
-      transform: scale(1.05, 0.95);
+      transform: scale(1.01, 0.96);
     }
   }
   @keyframes fidget {
