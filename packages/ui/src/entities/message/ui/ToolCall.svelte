@@ -96,7 +96,7 @@
 >
   <summary
     class={cn(
-      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base transition-colors duration-[120ms] hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
+      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base [contain:inline-size] transition-colors duration-[120ms] hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
       focusRing,
     )}
   >
@@ -109,8 +109,11 @@
         aria-hidden="true"
       />
     {/if}
-    <span class={cn('font-semibold text-foreground', props.state === 'error' && 'text-destructive')}
-      >{props.name}</span
+    <span
+      class={cn(
+        'min-w-0 truncate font-semibold text-foreground',
+        props.state === 'error' && 'text-destructive',
+      )}>{props.name}</span
     >
     {#if props.state === 'running'}
       <span class="sr-only">実行中</span>
@@ -118,7 +121,7 @@
       <span class="sr-only">失敗</span>
     {/if}
     {#if props.summary}
-      <span class="min-w-0 truncate">· {props.summary}</span>
+      <span class="min-w-0 flex-1 basis-0 truncate">· {props.summary}</span>
     {/if}
     <span
       class={cn(
@@ -134,7 +137,7 @@
     </div>
     <pre
       id={argsId}
-      class="m-0 px-3 pt-1.5 pb-2.5 font-mono text-sm leading-5 break-words whitespace-pre-wrap text-foreground">{#each tokens as token (token.start)}<span
+      class="m-0 px-3 pt-1.5 pb-2.5 font-mono text-sm leading-5 wrap-anywhere whitespace-pre-wrap text-foreground">{#each tokens as token (token.start)}<span
           class={tokenClass[token.kind]}>{token.text}</span
         >{/each}</pre>
     {#if props.state === 'running'}
@@ -159,7 +162,7 @@
         <div class={cn(long && !showAll && 'clamp')}>
           <pre
             id={resultId}
-            class="m-0 px-3 pt-1.5 pb-2.5 font-mono text-sm leading-5 break-words whitespace-pre-wrap">{props.result}</pre>
+            class="m-0 px-3 pt-1.5 pb-2.5 font-mono text-sm leading-5 wrap-anywhere whitespace-pre-wrap">{props.result}</pre>
         </div>
         {#if long}
           <div class="flex justify-center pb-2">

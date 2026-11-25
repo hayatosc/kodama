@@ -37,7 +37,7 @@
   </figcaption>
   <pre
     id={codeId}
-    class="m-0 px-3 py-2.5 font-mono text-sm leading-5 break-words whitespace-pre-wrap text-foreground"><code
+    class="m-0 px-3 py-2.5 font-mono text-sm leading-5 wrap-anywhere whitespace-pre-wrap text-foreground"><code
       >{@render children?.()}</code
     ></pre>
 </figure>

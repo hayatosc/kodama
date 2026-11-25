@@ -31,8 +31,9 @@
 </div>
 
 <style>
+  /* Long URLs and code break where they must, so a reply never widens a phone screen. */
   .prose {
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
   }
 
   .prose :global(:is(h1, h2, h3, h4, p, ul, ol, blockquote, figure, table, hr)) {
