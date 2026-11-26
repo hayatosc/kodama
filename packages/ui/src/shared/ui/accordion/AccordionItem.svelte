@@ -26,7 +26,7 @@
   data-slot="accordion-item"
   class={cn(
     'border-b border-border details-content:overflow-clip details-content:[contain:layout] details-content:[interpolate-size:allow-keywords] not-open:details-content:[block-size:0]',
-    'motion-safe:details-content:transition-[block-size,content-visibility] motion-safe:details-content:duration-200 motion-safe:details-content:ease-in-out motion-safe:details-content:transition-discrete',
+    'motion-safe:details-content:transition-[block-size,content-visibility] motion-safe:details-content:duration-200 motion-safe:details-content:ease-[ease-in-out] motion-safe:details-content:transition-discrete',
     className,
   )}
   {...restProps}

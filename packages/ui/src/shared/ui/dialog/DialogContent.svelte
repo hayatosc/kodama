@@ -38,7 +38,7 @@
    * with its slide.
    */
   const motion = [
-    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 ease-out transition-discrete motion-reduce:duration-100',
+    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 transition-discrete motion-reduce:duration-100',
     'open:not-data-closing:opacity-100 starting:open:not-data-closing:opacity-0',
     'motion-safe:scale-96 motion-safe:open:not-data-closing:scale-100 motion-safe:starting:open:not-data-closing:scale-96',
   ]
@@ -49,7 +49,7 @@
    */
   const scrim = [
     '[&:modal]:overscroll-contain',
-    'backdrop:overflow-hidden backdrop:overscroll-contain backdrop:bg-transparent backdrop:transition-[background-color,display,overlay] backdrop:duration-150 backdrop:ease-out backdrop:transition-discrete',
+    'backdrop:overflow-hidden backdrop:overscroll-contain backdrop:bg-transparent backdrop:transition-[background-color,display,overlay] backdrop:duration-150 backdrop:transition-discrete',
     'open:not-data-closing:backdrop:bg-[rgb(0_0_0/0.32)] starting:open:not-data-closing:backdrop:bg-transparent',
   ]
 

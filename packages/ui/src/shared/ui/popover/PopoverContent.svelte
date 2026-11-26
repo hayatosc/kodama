@@ -76,7 +76,7 @@
   style={`position-anchor: --${popover.id}`}
   class={cn(
     'min-w-[220px] rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
-    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 ease-out transition-discrete motion-reduce:duration-100',
+    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 transition-discrete motion-reduce:duration-100',
     'open:not-data-closing:opacity-100 starting:open:not-data-closing:opacity-0',
     'motion-safe:scale-96 motion-safe:open:not-data-closing:scale-100 motion-safe:starting:open:not-data-closing:scale-96',
     'anchored:inset-auto anchored:my-1 anchored:[position-try-fallbacks:flip-block,flip-inline,flip-block_flip-inline] unanchored:fixed unanchored:inset-auto unanchored:m-0',

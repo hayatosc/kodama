@@ -51,7 +51,7 @@
    * side has more room, which puts it above a trigger in the lower half for no reason.
    */
   const picker =
-    '[&::picker(select)]:my-1 [&::picker(select)]:max-h-[260px] [&::picker(select)]:rounded-xl [&::picker(select)]:border [&::picker(select)]:border-border [&::picker(select)]:bg-popover [&::picker(select)]:p-1 [&::picker(select)]:text-foreground [&::picker(select)]:opacity-0 [&::picker(select)]:shadow-lg [&::picker(select)]:transition-[opacity,display,overlay] [&::picker(select)]:duration-150 [&::picker(select)]:ease-out [&::picker(select)]:transition-discrete [&::picker(select)]:[appearance:base-select] [&::picker(select)]:[min-inline-size:anchor-size(width)] [&::picker(select)]:[position-try-order:normal] open:[&::picker(select)]:opacity-100 starting:open:[&::picker(select)]:opacity-0'
+    '[&::picker(select)]:my-1 [&::picker(select)]:max-h-[260px] [&::picker(select)]:rounded-xl [&::picker(select)]:border [&::picker(select)]:border-border [&::picker(select)]:bg-popover [&::picker(select)]:p-1 [&::picker(select)]:text-foreground [&::picker(select)]:opacity-0 [&::picker(select)]:shadow-lg [&::picker(select)]:transition-[opacity,display,overlay] [&::picker(select)]:duration-150 [&::picker(select)]:transition-discrete [&::picker(select)]:[appearance:base-select] [&::picker(select)]:[min-inline-size:anchor-size(width)] [&::picker(select)]:[position-try-order:normal] open:[&::picker(select)]:opacity-100 starting:open:[&::picker(select)]:opacity-0'
 </script>
 
 <!--

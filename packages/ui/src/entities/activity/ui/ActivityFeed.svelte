@@ -40,8 +40,9 @@
 <ol
   data-slot="activity-feed"
   class={cn(
-    'm-0 list-none p-0 leading-6',
+    'm-0 list-none p-0',
     compact ? 'text-sm [--time-column:44px]' : 'text-base [--time-column:52px]',
+    'leading-6',
     className,
   )}
 >

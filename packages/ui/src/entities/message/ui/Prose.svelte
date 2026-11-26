@@ -42,7 +42,7 @@
     '[&_strong]:font-semibold',
     '[&_a]:text-live [&_a]:underline [&_a]:decoration-1 [&_a]:underline-offset-2',
     '[&_:not(pre)>code]:rounded-sm [&_:not(pre)>code]:bg-accent [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[14px]',
-    '[&_blockquote]:border-s-2 [&_blockquote]:border-input [&_blockquote]:ps-3 [&_blockquote]:text-muted-foreground',
+    '[&_blockquote]:border-s-2 [&_blockquote]:border-s-input [&_blockquote]:ps-3 [&_blockquote]:text-muted-foreground',
     '[&_table]:w-full [&_table]:border-collapse [&_table]:text-[14px] [&_table]:leading-5',
     '[&_th]:text-start [&_th]:font-normal [&_th]:text-muted-foreground',
     '[&_:is(th,td)]:border-b [&_:is(th,td)]:border-border [&_:is(th,td)]:px-2 [&_:is(th,td)]:py-1.5',

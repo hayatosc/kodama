@@ -113,14 +113,6 @@
   --animate-bird-stretch: bird-stretch 1s ease-in-out;
   --animate-bird-fidget: bird-fidget 2.4s ease-in-out infinite;
   --animate-bird-sleep: bird-sleep 3.6s ease-in-out infinite;
-  /*
-   * Progress's indeterminate fill, which exists only through this animation (progress guide), and
-   * Spinner's turn. Under a reduced-motion request both slow down rather than stop, through
-   * --progress-duration and --spinner-duration.
-   */
-  --animate-progress: progress-indeterminate var(--progress-duration) infinite linear
-    var(--progress-direction, normal);
-  --animate-spinner: spinner-turn var(--spinner-duration) linear infinite;
   /* While asleep, z's rise from the birdhouse's hole one after another and fade. */
   --animate-avatar-z: avatar-z 3s ease-out infinite;
 
@@ -303,6 +295,17 @@
       transform: translate(1px, -1.5px) scale(1);
     }
   }
+}
+
+/*
+ * Progress's indeterminate fill, which exists only through this animation (progress guide), and
+ * Spinner's turn. Under a reduced-motion request both slow down rather than stop, through
+ * --progress-duration and --spinner-duration. Inline, so those resolve on the element itself.
+ */
+@theme inline {
+  --animate-progress: progress-indeterminate var(--progress-duration) infinite linear
+    var(--progress-direction, normal);
+  --animate-spinner: spinner-turn var(--spinner-duration) linear infinite;
 }
 
 @theme inline {

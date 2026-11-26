@@ -16,5 +16,5 @@ export const choiceControl = [
   'user-invalid:border-destructive aria-invalid:border-destructive',
   'disabled:cursor-not-allowed disabled:opacity-40',
   'before:size-2.5 before:scale-0 before:bg-primary-foreground checked:before:scale-100 indeterminate:before:scale-100 forced-colors:before:bg-[CanvasText]',
-  'motion-safe:before:transition-[scale] motion-safe:before:duration-[120ms] motion-safe:before:ease-out',
+  'motion-safe:before:transition-[scale] motion-safe:before:duration-[120ms]',
 ].join(' ')
