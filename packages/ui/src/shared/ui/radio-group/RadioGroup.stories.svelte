@@ -31,7 +31,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <Field.Set class="w-64 gap-0">
+  <Field.Set class="w-64 max-w-full gap-0">
     <Field.Legend id="radio-interval">実行の間隔</Field.Legend>
     <RadioGroup.Root bind:value={interval} name="interval" aria-labelledby="radio-interval">
       {#each intervals as option (option.value)}
@@ -51,7 +51,7 @@
     docs: { description: { story: 'Each option with a line that says what it means.' } },
   }}
 >
-  <Field.Set class="w-80 gap-0">
+  <Field.Set class="w-80 max-w-full gap-0">
     <Field.Legend id="radio-density">表示の密度</Field.Legend>
     <RadioGroup.Root bind:value={density} name="density" aria-labelledby="radio-density">
       <Field.Root orientation="horizontal">
@@ -79,7 +79,7 @@
     docs: { description: { story: 'The whole group disabled, at 40% opacity.' } },
   }}
 >
-  <Field.Set class="w-64 gap-0" disabled>
+  <Field.Set class="w-64 max-w-full gap-0" disabled>
     <Field.Legend id="radio-region">リージョン</Field.Legend>
     <RadioGroup.Root value="tokyo" name="region" aria-labelledby="radio-region" disabled>
       <Field.Root orientation="horizontal">

@@ -31,7 +31,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Callout.Root {...args} class="w-96">
+    <Callout.Root {...args} class="w-96 max-w-full">
       <Callout.Title>メンテナンスのお知らせ</Callout.Title>
       <Callout.Description>11 月 15 日 2:00〜4:00 は返信できません</Callout.Description>
     </Callout.Root>
@@ -40,7 +40,7 @@
 
 <Story name="With an icon">
   {#snippet template(args)}
-    <Callout.Root {...args} class="w-96">
+    <Callout.Root {...args} class="w-96 max-w-full">
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>メンテナンスのお知らせ</Callout.Title>
       <Callout.Description
@@ -62,7 +62,7 @@
     },
   }}
 >
-  <div class="flex w-96 flex-col gap-3">
+  <div class="flex w-96 max-w-full flex-col gap-3">
     <Callout.Root variant="live">
       <InfoIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>新しいモデルを使えます</Callout.Title>
@@ -86,7 +86,7 @@
   asChild
   parameters={{ docs: { description: { story: 'A description without a title.' } } }}
 >
-  <Callout.Root class="w-96">
+  <Callout.Root class="w-96 max-w-full">
     <Callout.Description>この会話は 30 日後に自動で整理されます</Callout.Description>
   </Callout.Root>
 </Story>
@@ -103,7 +103,7 @@
     },
   }}
 >
-  <div role="status" class="w-96">
+  <div role="status" class="w-96 max-w-full">
     <Callout.Root>
       <LoaderIcon strokeWidth={1.75} aria-hidden="true" />
       <Callout.Title>同期しています</Callout.Title>

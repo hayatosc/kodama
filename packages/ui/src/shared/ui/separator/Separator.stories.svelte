@@ -23,7 +23,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <div class="flex w-72 flex-col gap-3 text-sm">
+  <div class="flex w-72 max-w-full flex-col gap-3 text-sm">
     <p>アカウント</p>
     <Separator />
     <p>通知</p>

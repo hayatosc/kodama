@@ -39,7 +39,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <Field.Label>エージェントの名前</Field.Label>
     <Input name="agent-name" />
     <Field.Description>一覧と会話の見出しに表示されます</Field.Description>
@@ -58,7 +58,12 @@
     },
   }}
 >
-  <form class="flex w-80 flex-col gap-6" novalidate onsubmit={submit} aria-labelledby="form-title">
+  <form
+    class="flex w-80 max-w-full flex-col gap-6"
+    novalidate
+    onsubmit={submit}
+    aria-labelledby="form-title"
+  >
     <h2 id="form-title" class="type-lg">エージェントを作成</h2>
     <Field.Group>
       <Field.Root invalid={nameError !== undefined}>
@@ -91,7 +96,7 @@
     },
   }}
 >
-  <Field.Group class="w-80 gap-2">
+  <Field.Group class="w-80 max-w-full gap-2">
     <Field.Root orientation="horizontal">
       <Checkbox name="terms" />
       <Field.Content>
@@ -121,7 +126,7 @@
     },
   }}
 >
-  <Field.Set class="w-80">
+  <Field.Set class="w-80 max-w-full">
     <Field.Legend id="plan-legend">プラン</Field.Legend>
     <RadioGroup.Root bind:value={plan} name="plan" aria-labelledby="plan-legend" class="gap-1">
       {#each [{ value: 'free', label: '無料', note: 'エージェント 1 体まで' }, { value: 'pro', label: 'プロ', note: 'エージェント 10 体まで' }, { value: 'team', label: 'チーム', note: 'メンバーと共有できます' }] as option (option.value)}

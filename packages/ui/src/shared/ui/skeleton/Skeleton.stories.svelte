@@ -22,7 +22,7 @@
 </Story>
 
 <Story name="Loading a list" asChild>
-  <div class="flex w-80 flex-col gap-4">
+  <div class="flex w-80 max-w-full flex-col gap-4">
     <p role="status" class="sr-only">会話を読み込んでいます</p>
     {#each [0, 1, 2] as row (row)}
       <div class="flex items-center gap-3">

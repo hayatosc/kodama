@@ -24,11 +24,11 @@ Format from the repository root with `pnpm format`. Vite+ formats non-Svelte fil
 
 The source follows [Feature-Sliced Design](https://feature-sliced.design/): layers from `app`
 down to `shared`, where a layer imports only the layers below it, and slices in one layer do not
-import each other except through an `@x` file named after the slice that uses it. `entities` and
-`features` hold Kodama's own components so far; `pages` and `widgets` come with the panels and
-screens. SvelteKit keeps its own `src/routes/`, `src/app.html`, and `src/app.d.ts`, and a route
-renders a page from `pages`. Imports go through the `#app/*`, `#features/*`, `#entities/*`, and
-`#shared/*` aliases.
+import each other except through an `@x` file named after the slice that uses it. `widgets`,
+`features`, and `entities` hold Kodama's own components so far; `pages` comes with the screens.
+SvelteKit keeps its own `src/routes/`, `src/app.html`, and `src/app.d.ts`, and a route renders a
+page from `pages`. Imports go through the `#app/*`, `#widgets/*`, `#features/*`, `#entities/*`,
+and `#shared/*` aliases.
 
 - `src/app/styles/index.css`: the app layer's global stylesheet: kiso.css (the reset, in place of
   Tailwind Preflight), Tailwind's theme and utilities, the fonts from npm (`gen-interface-jp`,
@@ -41,7 +41,12 @@ renders a page from `pages`. Imports go through the `#app/*`, `#features/*`, `#e
   paused; `ui/Birdhouse.svelte` is also the shared birdhouse of the workspace; `model/avatar.ts`
   holds the colors, poses, and props and how each pose is drawn. Each pose's motion is CSS that
   stops under a reduced-motion request; leaving, entering, and flying between birdhouses come with
-  the live screen in stage 7. `@x/message.ts` lends the avatar to the message entity.
+  the live screen in stage 7. `ui/StatusBadge.svelte` shows a run state as a dot and a word, and
+  `model/status.ts` holds the states' words and how a registry lifecycle state maps onto one.
+  `@x/message.ts` lends the avatar to the message entity.
+- `src/entities/activity/`: the activity entity. `ui/ActivityFeed.svelte` is the timeline of what
+  an agent did, with a compact form for the right pane; `model/activity.ts` holds its events and
+  how it writes their times.
 - `src/entities/message/`: the message entity, the parts a conversation is made of.
   `ui/Message.svelte` is one utterance (the user's pill, a thinking pill, the agent's bubble, or
   a peer agent's message); `ui/Prose.svelte` is the look of the Markdown inside a reply, with
@@ -52,6 +57,13 @@ renders a page from `pages`. Imports go through the `#app/*`, `#features/*`, `#e
 - `src/features/compose-message/`: `ui/Composer.svelte`, the input at the bottom of a
   conversation. Enter sends; while the agent runs, Tab adds the message to a queue that this
   screen holds and sends in order once the run ends.
+- `src/widgets/agent-sidebar/`: `ui/Sidebar.svelte`, the agent list in the left pane: the main
+  agent, the working agents, and the system agents. Its rows are buttons that choose an agent
+  until the app has a route for each agent, when they become links through `resolve()`.
+  `model/sidebar.ts` orders the agents and writes a row's time and unread count.
+- `src/widgets/profile-panel/`: `ui/ProfilePanel.svelte`, an agent's profile in the right pane,
+  with its 詳細, 記憶, and ツール tabs; `model/profile.ts` holds its routines, memories, and tools,
+  and the memory search.
 - `src/shared/lib/utils.ts`: `cn`, the prop helper types the components import, and
   `focusRing`, the shared focus style (an outline, so it survives forced colors mode).
 - `src/shared/ui/`: the UI kit, general-purpose parts in the shape of shadcn-svelte's
@@ -68,8 +80,9 @@ renders a page from `pages`. Imports go through the `#app/*`, `#features/*`, `#e
   a manual popover announced with `ariaNotify`. Field links a control to its label, description,
   and error without hand-written ids. Tabs and
   Command (the searchable list) stay on bits-ui, which the platform has no element for. Button
-  and Badge are shadcn-svelte's own. A searchable select is a composition, Popover with Command,
-  shown in the Command stories. Variant tables and their types live in a `variants.ts` next to
+  and Badge are shadcn-svelte's own. Combobox, the searchable select, is Popover with Command.
+  SettingsList is a card of label and value rows whose destructive action asks first in an
+  AlertDialog. Variant tables and their types live in a `variants.ts` next to
   the component, because type-aware Oxlint cannot read named exports from `.svelte` files.
   `components.json` is written by hand because `shadcn-svelte init` asks for a preset
   interactively; `pnpm dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
@@ -140,7 +153,8 @@ The mockups are built in small steps, each reviewed in Storybook before the next
    `design/components/bundle.js` and `bundle.css`.
 4. **Conversation parts** (done): Message (user, assistant, thinking, peer), Prose (the look of rendered Markdown),
    ToolCall, and Composer with its queue.
-5. **Panel parts**: Sidebar, ActivityFeed, SettingsList, and ProfilePanel.
+5. **Panel parts** (done): Sidebar, ActivityFeed, SettingsList, and ProfilePanel, with
+   StatusBadge and the searchable Combobox they use.
 6. **Screens**: Workspace (three panes) and Mobile (list, conversation, sheet).
 7. **Live screen**: WorkspaceLive, which replays an event sequence.
 

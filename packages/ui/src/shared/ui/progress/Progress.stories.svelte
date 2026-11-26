@@ -21,13 +21,13 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Progress {...args} aria-label="アップロード" class="w-72" />
+    <Progress {...args} aria-label="アップロード" class="w-72 max-w-full" />
   {/snippet}
 </Story>
 
 <Story name="With a label">
   {#snippet template(args)}
-    <Field.Root class="w-72">
+    <Field.Root class="w-72 max-w-full">
       <div class="flex items-center justify-between">
         <Field.Label>記憶を整理しています</Field.Label>
         <span class="text-sm tabular-nums text-muted-foreground">{args.value}%</span>
@@ -49,7 +49,7 @@
     },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <Field.Label>ファイルを準備しています</Field.Label>
     <Progress />
   </Field.Root>

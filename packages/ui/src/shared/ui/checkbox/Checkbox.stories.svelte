@@ -55,7 +55,7 @@
     docs: { description: { story: 'A second line under the label, read after it.' } },
   }}
 >
-  <Field.Root orientation="horizontal" class="w-80">
+  <Field.Root orientation="horizontal" class="w-80 max-w-full">
     <Checkbox name="share" checked />
     <Field.Content>
       <Field.Label>会話を共有する</Field.Label>
@@ -76,7 +76,7 @@
     },
   }}
 >
-  <Field.Set class="w-64 gap-0">
+  <Field.Set class="w-64 max-w-full gap-0">
     <Field.Legend class="sr-only">有効にするツール</Field.Legend>
     <Field.Root orientation="horizontal">
       <Checkbox checked={allChecked} indeterminate={someChecked} onchange={toggleAll} />

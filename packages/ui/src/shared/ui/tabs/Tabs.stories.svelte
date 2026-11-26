@@ -21,7 +21,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <Tabs.Root value="account" class="w-80">
+  <Tabs.Root value="account" class="w-80 max-w-full">
     <Tabs.List aria-label="アカウントの設定">
       <Tabs.Trigger value="account">アカウント</Tabs.Trigger>
       <Tabs.Trigger value="password">パスワード</Tabs.Trigger>
@@ -48,7 +48,7 @@
     },
   }}
 >
-  <Tabs.Root value="overview" class="w-80">
+  <Tabs.Root value="overview" class="w-80 max-w-full">
     <Tabs.List aria-label="プロジェクト">
       <Tabs.Trigger value="overview">概要</Tabs.Trigger>
       <Tabs.Trigger value="reports" disabled>レポート</Tabs.Trigger>
@@ -77,7 +77,7 @@
     },
   }}
 >
-  <Tabs.Root value="profile" class="w-80">
+  <Tabs.Root value="profile" class="w-80 max-w-full">
     <Tabs.List aria-label="設定">
       <Tabs.Trigger value="profile">
         <UserIcon strokeWidth={1.75} aria-hidden="true" />プロフィール

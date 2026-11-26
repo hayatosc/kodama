@@ -4,4 +4,19 @@
   body {
     background: var(--background);
   }
+
+  /*
+   * On a narrow screen the centered canvas and the docs previews grow no wider than the screen,
+   * so a story's max-w-full wrapper can narrow with them; Storybook's own props table scrolls sideways in its
+   * block instead of widening the docs page.
+   */
+  .sb-main-centered #storybook-root,
+  .docs-story > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :has(> .docblock-argstable) {
+    overflow-x: auto;
+  }
 </style>

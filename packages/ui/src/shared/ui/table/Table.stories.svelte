@@ -40,7 +40,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <div class="w-80">
+  <div class="w-80 max-w-full">
     <Table.Root label="エージェントごとの実行回数">
       <Table.Header>
         <Table.Row>
@@ -61,7 +61,7 @@
 </Story>
 
 <Story name="Usage" asChild>
-  <div class="w-[560px]">
+  <div class="w-[560px] max-w-full">
     <Table.Root label="エージェントごとの利用状況">
       <Table.Caption>11 月 1 日〜11 月 10 日の利用状況</Table.Caption>
       <Table.Header>
@@ -116,7 +116,7 @@
     },
   }}
 >
-  <div class="w-[280px]">
+  <div class="w-[280px] max-w-full">
     <Table.Root label="エージェントごとの利用状況（狭い列）">
       <Table.Caption>利用状況</Table.Caption>
       <Table.Header>

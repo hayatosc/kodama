@@ -25,7 +25,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Field.Root class="w-80">
+    <Field.Root class="w-80 max-w-full">
       <Field.Label>メモ</Field.Label>
       <Textarea {...args} name="note" />
     </Field.Root>
@@ -43,7 +43,7 @@
     },
   }}
 >
-  <Field.Root class="w-80">
+  <Field.Root class="w-80 max-w-full">
     <Field.Label>エージェントへの指示</Field.Label>
     <Textarea name="instructions" maxlength={500} bind:value={note} />
     <Field.Description>500 文字まで（{note.length} / 500）</Field.Description>
@@ -52,7 +52,7 @@
 
 <Story name="Disabled" args={{ disabled: true, value: '管理者が設定した指示です' }}>
   {#snippet template(args)}
-    <Field.Root class="w-80">
+    <Field.Root class="w-80 max-w-full">
       <Field.Label>共通の指示</Field.Label>
       <Textarea {...args} name="shared" />
     </Field.Root>
