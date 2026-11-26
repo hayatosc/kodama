@@ -36,7 +36,7 @@
    */
   const dots: Record<RunState, string> = {
     live: 'bg-live',
-    running: 'running bg-running',
+    running: 'bg-running motion-safe:animate-running',
     queued: 'border-[1.5px] border-muted-foreground',
     paused: 'rounded-[2px] border-[1.5px] border-muted-foreground',
     error: 'bg-destructive',
@@ -71,17 +71,3 @@
     {@render dot()}{word}
   </span>
 {/if}
-
-<style>
-  @media (prefers-reduced-motion: no-preference) {
-    .running {
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-  }
-
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
-</style>

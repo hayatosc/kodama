@@ -30,6 +30,29 @@
 
   const dialog = getDialogState()
 
+  /**
+   * Entry and exit (animate-to-from-top-layer): the closed state is the base, and the open state
+   * transitions from @starting-style. `overlay` and discrete `display` keep the dialog in the top
+   * layer while it fades out, and `data-closing` plays the exit where `overlay` is missing (see
+   * closeDialog). It scales only without a reduced-motion request. A drawer replaces the scale
+   * with its slide.
+   */
+  const motion = [
+    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 ease-out transition-discrete motion-reduce:duration-100',
+    'open:not-data-closing:opacity-100 starting:open:not-data-closing:opacity-0',
+    'motion-safe:scale-96 motion-safe:open:not-data-closing:scale-100 motion-safe:starting:open:not-data-closing:scale-96',
+  ]
+
+  /**
+   * The scrim fades with the dialog. overflow and overscroll-behavior keep scrolling over the scrim
+   * or inside the dialog from moving the page behind it (prevent-page-scroll-under-modal-dialog).
+   */
+  const scrim = [
+    '[&:modal]:overscroll-contain',
+    'backdrop:overflow-hidden backdrop:overscroll-contain backdrop:bg-transparent backdrop:transition-[background-color,display,overlay] backdrop:duration-150 backdrop:ease-out backdrop:transition-discrete',
+    'open:not-data-closing:backdrop:bg-[rgb(0_0_0/0.32)] starting:open:not-data-closing:backdrop:bg-transparent',
+  ]
+
   function close(): void {
     dialog.open = false
   }
@@ -88,7 +111,7 @@
   A native modal <dialog> (dialog guide): the browser makes the page inert, traps and returns
   focus, puts the dialog in the top layer, and closes it on Esc. It is named by Title and
   described by Description. design/components/Dialog: 400px wide, 24px padding, rounded-xl,
-  the large shadow; the scrim and the transitions are in src/shared/styles/native.css.
+  the large shadow, and a 32% black scrim.
 -->
 <dialog
   bind:this={ref}
@@ -102,6 +125,8 @@
     'rounded-xl border border-border bg-popover p-6 text-foreground shadow-lg',
     'open:flex open:flex-col open:gap-6',
     showCloseButton && '[&>[data-slot=dialog-header]]:pr-8',
+    motion,
+    scrim,
     className,
   )}
   onclose={(event) => {

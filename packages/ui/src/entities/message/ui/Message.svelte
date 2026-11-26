@@ -60,7 +60,16 @@
   >
     <span>{@render props.children()}</span>
     {#if props.typing}
-      <span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="inline-flex gap-[3px]" aria-hidden="true">
+        {#each ['', 'motion-safe:[animation-delay:0.2s]', 'motion-safe:[animation-delay:0.4s]'] as delay (delay)}
+          <i
+            class={[
+              'size-[5px] rounded-full bg-muted-foreground forced-colors:bg-[CanvasText] motion-safe:animate-typing',
+              delay,
+            ]}
+          ></i>
+        {/each}
+      </span>
     {/if}
   </div>
 {:else if props.role === 'assistant'}
@@ -90,43 +99,3 @@
     <Prose streaming={props.streaming}>{@render props.children()}</Prose>
   </div>
 {/if}
-
-<style>
-  .typing {
-    display: inline-flex;
-    gap: 3px;
-  }
-
-  .typing i {
-    inline-size: 5px;
-    block-size: 5px;
-    border-radius: var(--radius-full);
-    background: var(--muted-foreground);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .typing i {
-      animation: pulse 1.2s ease-in-out infinite;
-    }
-
-    .typing i:nth-child(2) {
-      animation-delay: 0.2s;
-    }
-
-    .typing i:nth-child(3) {
-      animation-delay: 0.4s;
-    }
-  }
-
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
-
-  @media (forced-colors: active) {
-    .typing i {
-      background: CanvasText;
-    }
-  }
-</style>

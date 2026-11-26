@@ -12,10 +12,64 @@
 @import '@fontsource/geist-mono/600.css';
 /* In the base layer so utilities still override the type-* classes it declares. */
 @import '../../shared/styles/tokens.css' layer(base);
-/* After the reset, so the native dialog, popover, and select styles build on it. */
-@import '../../shared/styles/native.css' layer(components);
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Anchor positioning (viewport-aware-dropdowns) and its absence. Popovers, menus, and tooltips are
+ * tethered to their trigger with anchored:; where it is missing, placeWithoutAnchor
+ * (src/shared/lib/top-layer.ts) sets fixed coordinates by the trigger as it opens.
+ */
+@custom-variant anchored {
+  @supports (position-area: block-end) {
+    @slot;
+  }
+}
+
+@custom-variant unanchored {
+  @supports not (position-area: block-end) {
+    @slot;
+  }
+}
+
+/*
+ * The customizable select (branded-select-styling). Where appearance: base-select is missing, the
+ * select keeps its trigger styles and opens the system menu.
+ */
+@custom-variant base-select {
+  @supports (appearance: base-select) {
+    @slot;
+  }
+}
+
+/*
+ * Icons painted through a mask, so they take the element's background color: the theme's color,
+ * and CanvasText in forced colors mode. The paths are lucide's (check, minus, chevron-down).
+ */
+@utility mask-check {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+@utility mask-check-heavy {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+@utility mask-dash {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round'%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+@utility mask-dot {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+@utility mask-chevron-down {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
 
 @theme {
   /* One easing for every transition that names none (unslop — Motion): ease-out. */
@@ -27,10 +81,226 @@
    * with motion-safe: so it never runs under a reduced-motion request.
    */
   --animate-blink: blink 1.6s ease-in-out 3;
+  /* The dot of a run in progress (StatusBadge, ToolCall, ActivityFeed): it blinks while it runs. */
+  --animate-running: blink 1.6s ease-in-out infinite;
+  /* Message's typing dots, each started 0.2s after the one before. */
+  --animate-typing: blink 1.2s ease-in-out infinite;
+  /* Prose's streaming caret. */
+  --animate-caret: blink 1s steps(2) infinite;
 
   @keyframes blink {
     50% {
       opacity: 0.35;
+    }
+  }
+
+  /*
+   * The avatar's poses (design/components/bundle.css, kd-p-*), in the bird's own units. The jumps,
+   * squashes, and stretch reach less far than the design's, so the head and the far wing stay
+   * inside the circle at the top of the motion. Bird applies them with motion-safe:, so under a
+   * reduced-motion request the pose alone carries the state.
+   */
+  --animate-bird-breathe: bird-breathe 3.2s ease-in-out infinite;
+  --animate-bird-blink: bird-blink 5.2s infinite;
+  --animate-bird-tail: bird-tail 3.2s ease-in-out infinite;
+  --animate-bird-write-head: bird-write-head 1.2s ease-in-out infinite;
+  --animate-bird-write: bird-write 1.2s ease-in-out infinite;
+  --animate-bird-ink: bird-ink 2.4s linear infinite;
+  --animate-bird-search: bird-search 2.4s ease-in-out infinite;
+  --animate-bird-cheer: bird-cheer 0.62s ease-in-out;
+  --animate-bird-wing-wave: bird-wing-wave 1.4s ease-in-out infinite;
+  --animate-bird-jump: bird-jump 0.45s cubic-bezier(0.3, 1.6, 0.5, 1);
+  --animate-bird-stretch: bird-stretch 1s ease-in-out;
+  --animate-bird-fidget: bird-fidget 2.4s ease-in-out infinite;
+  --animate-bird-sleep: bird-sleep 3.6s ease-in-out infinite;
+  /*
+   * Progress's indeterminate fill, which exists only through this animation (progress guide), and
+   * Spinner's turn. Under a reduced-motion request both slow down rather than stop, through
+   * --progress-duration and --spinner-duration.
+   */
+  --animate-progress: progress-indeterminate var(--progress-duration) infinite linear
+    var(--progress-direction, normal);
+  --animate-spinner: spinner-turn var(--spinner-duration) linear infinite;
+  /* While asleep, z's rise from the birdhouse's hole one after another and fade. */
+  --animate-avatar-z: avatar-z 3s ease-out infinite;
+
+  @keyframes bird-breathe {
+    0%,
+    100% {
+      transform: scale(1, 1);
+    }
+    50% {
+      transform: scale(1.015, 1.03);
+    }
+  }
+  @keyframes bird-blink {
+    0%,
+    88%,
+    92%,
+    95%,
+    100% {
+      transform: scaleY(1);
+    }
+    90%,
+    93.5% {
+      transform: scaleY(0.08);
+    }
+  }
+  @keyframes bird-tail {
+    0%,
+    100% {
+      transform: rotate(0);
+    }
+    50% {
+      transform: rotate(-6deg);
+    }
+  }
+  @keyframes bird-write-head {
+    0%,
+    100% {
+      transform: rotate(0);
+    }
+    50% {
+      transform: rotate(2.5deg);
+    }
+  }
+  @keyframes bird-write {
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    20% {
+      transform: translate(-1.2px, 0.5px);
+    }
+    40% {
+      transform: translate(-2.4px, -0.3px);
+    }
+    60% {
+      transform: translate(-3.4px, 0.5px);
+    }
+    80% {
+      transform: translate(-1.6px, 0.1px);
+    }
+  }
+  @keyframes bird-ink {
+    0% {
+      stroke-dashoffset: 6;
+    }
+    50%,
+    100% {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes bird-search {
+    0%,
+    100% {
+      transform: rotate(0) translateX(0);
+    }
+    30% {
+      transform: rotate(6deg) translateX(0.6px);
+    }
+    60% {
+      transform: rotate(-3deg) translateX(-0.4px);
+    }
+  }
+  @keyframes bird-cheer {
+    0%,
+    100% {
+      transform: translateY(0) scale(1, 1);
+    }
+    20% {
+      transform: translateY(0) scale(1.02, 0.9);
+    }
+    40% {
+      transform: translateY(-2px) scale(0.96, 1.05);
+    }
+    62% {
+      transform: translateY(0) scale(1.02, 0.94);
+    }
+    80% {
+      transform: translateY(-1.6px) scale(0.98, 1.02);
+    }
+  }
+  @keyframes bird-wing-wave {
+    0%,
+    100% {
+      transform: rotate(0deg);
+    }
+    50% {
+      transform: rotate(7deg);
+    }
+  }
+  @keyframes bird-jump {
+    40% {
+      transform: translateY(-3px) scale(0.97, 1.04);
+    }
+  }
+  @keyframes bird-stretch {
+    30% {
+      transform: scale(0.92, 1.1);
+    }
+    50% {
+      transform: scale(0.92, 1.1) rotate(-4deg);
+    }
+    70% {
+      transform: scale(0.92, 1.1) rotate(4deg);
+    }
+    88% {
+      transform: scale(1.01, 0.96);
+    }
+  }
+  @keyframes bird-fidget {
+    0%,
+    70%,
+    100% {
+      transform: translateX(0);
+    }
+    78% {
+      transform: translateX(-1.2px);
+    }
+    86% {
+      transform: translateX(1.2px);
+    }
+  }
+  @keyframes bird-sleep {
+    0%,
+    100% {
+      transform: scale(1, 1);
+    }
+    50% {
+      transform: scale(1.03, 0.97);
+    }
+  }
+  @keyframes progress-indeterminate {
+    from,
+    to {
+      inline-size: 30%;
+      margin-right: auto;
+    }
+    from {
+      translate: -100%;
+    }
+    to {
+      translate: 100cqi;
+    }
+  }
+  @keyframes spinner-turn {
+    to {
+      rotate: 1turn;
+    }
+  }
+  @keyframes avatar-z {
+    0% {
+      opacity: 0;
+      transform: translate(-3px, 4px) scale(0.6);
+    }
+    20%,
+    75% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(1px, -1.5px) scale(1);
     }
   }
 }
@@ -78,6 +348,16 @@
 }
 
 @layer base {
+  /* Native controls, scrollbars, and the fallback select menu follow the theme. */
+  :root,
+  [data-theme='light'] {
+    color-scheme: light;
+  }
+
+  [data-theme='dark'] {
+    color-scheme: dark;
+  }
+
   /* kiso gives form controls a 1px border; Kodama controls opt into borders with utilities. */
   :where(button, input, select, textarea, ::file-selector-button) {
     border-width: 0;

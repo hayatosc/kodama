@@ -1,5 +1,6 @@
 <script lang="ts">
   import { cn, focusRing, type WithElementRef } from '#shared/lib/utils.js'
+  import { choiceControl } from '../checkbox/control.js'
   import { fieldControlAttributes, getFieldState } from '../field/context.js'
   import { getRadioGroupState } from './context.js'
   import type { HTMLInputAttributes } from 'svelte/elements'
@@ -27,7 +28,7 @@
 </script>
 
 <!--
-  A native radio; the dot is drawn in src/shared/styles/native.css. Put it before its label, or in a
+  A native radio with the checkbox's look, round and with a dot. Put it before its label, or in a
   horizontal Field, which links the label and description to it.
 -->
 <input
@@ -40,6 +41,12 @@
   checked={group.value === value}
   disabled={disabled ?? group.disabled}
   onchange={() => (group.value = value)}
-  class={cn('peer', focusRing, className)}
+  class={cn(
+    'peer',
+    choiceControl,
+    'rounded-full before:size-1.5 before:mask-dot',
+    focusRing,
+    className,
+  )}
   {...restProps}
 />

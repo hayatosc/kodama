@@ -19,6 +19,13 @@
 
   const popover = getPopoverState()
 
+  /** Where it opens below the trigger, and the corner it scales from. */
+  const placement = {
+    start: 'anchored:[position-area:block-end_span-inline-end] anchored:origin-top-left',
+    center: 'anchored:[position-area:block-end] anchored:origin-top',
+    end: 'anchored:[position-area:block-end_span-inline-start] anchored:origin-top-right',
+  }
+
   /**
    * Shows or hides the popover when `open` changes in code. Closing from code while focus is
    * inside, such as after a choice, returns focus to the trigger; the browser already does that
@@ -55,8 +62,9 @@
 
 <!--
   A native auto popover (dialog guide, rule 3): the browser puts it in the top layer and closes
-  it on Esc and on a click outside. It sits below the trigger and flips at the viewport's edges;
-  the placement and the transitions are in src/shared/styles/native.css. The menu surface of
+  it on Esc and on a click outside. It sits just below the trigger, tethered with anchor
+  positioning, and flips when it would overflow the viewport (viewport-aware-dropdowns,
+  natural-interactions). It fades in and out like a dialog. The menu surface of
   design/components/Select: popover, 1px border, rounded-xl, shadow-lg.
 -->
 <div
@@ -68,6 +76,11 @@
   style={`position-anchor: --${popover.id}`}
   class={cn(
     'min-w-[220px] rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
+    'opacity-0 transition-[opacity,scale,display,overlay] duration-150 ease-out transition-discrete motion-reduce:duration-100',
+    'open:not-data-closing:opacity-100 starting:open:not-data-closing:opacity-0',
+    'motion-safe:scale-96 motion-safe:open:not-data-closing:scale-100 motion-safe:starting:open:not-data-closing:scale-96',
+    'anchored:inset-auto anchored:my-1 anchored:[position-try-fallbacks:flip-block,flip-inline,flip-block_flip-inline] unanchored:fixed unanchored:inset-auto unanchored:m-0',
+    placement[align],
     className,
   )}
   {ontoggle}

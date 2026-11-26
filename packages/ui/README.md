@@ -88,11 +88,13 @@ and `#shared/*` aliases.
   interactively; `pnpm dlx shadcn-svelte@1.7.2 add <name>` still adds a bits-ui component to
   restyle, where no native element fits; rename its files to PascalCase after the component
   (`accordion-item.svelte` becomes `AccordionItem.svelte`), as every component here is named.
-- `src/shared/styles/native.css`: the styles those native elements need beyond utilities: the
-  dialog and popover transitions and backdrop, popover placement, the select's menu, the
-  checkbox, radio, and slider drawn on their native inputs, the `<details>` chevron and slide,
-  the progress bar and spinner, the drawer's slide, and the menu's and tooltip's placement and
-  check marks.
+- Styles are Tailwind utilities in the components themselves, including what the native elements
+  need: the dialog and popover transitions and backdrop, the select's menu, the checkbox, radio,
+  and slider drawn on their native inputs, the `<details>` chevron and slide, and the progress
+  bar and spinner. `src/app/styles/index.css` holds what utilities cannot express alone: the
+  keyframes and their `--animate-*` names in `@theme`, the `anchored:`, `unanchored:`, and
+  `base-select:` variants for anchor positioning and the customizable select, and the `mask-*`
+  icon utilities that paint check marks and chevrons in the current color.
 - `src/shared/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
 - `src/shared/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit

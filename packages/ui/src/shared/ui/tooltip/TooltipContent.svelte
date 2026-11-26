@@ -25,9 +25,10 @@
 
 <!--
   A hint popover: opening it closes other hints but no menu or dialog, Esc dismisses it, and the
-  pointer can move onto it without closing it (WCAG 1.4.13). It sits above the trigger and flips
-  below at the viewport's edge; the placement is in src/shared/styles/native.css. It holds a short
-  phrase only, never anything the user must read or operate: that belongs in a Popover.
+  pointer can move onto it without closing it (WCAG 1.4.13). It sits above the trigger, its
+  implicit anchor (interestfor sets it), and flips below at the viewport's edge
+  (interest-triggered-tooltips); it fades in and out. It holds a short phrase only, never anything
+  the user must read or operate: that belongs in a Popover.
 -->
 <div
   bind:this={ref}
@@ -37,6 +38,9 @@
   class={cn(
     'max-w-[280px] rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md',
     'forced-colors:border forced-colors:border-[CanvasText]',
+    'anchored:inset-auto anchored:my-1.5 anchored:[position-area:block-start] anchored:[position-try-fallbacks:flip-block] unanchored:fixed unanchored:inset-auto unanchored:m-0',
+    'opacity-0 transition-[opacity,translate,display,overlay] duration-150 ease-out transition-discrete',
+    'open:opacity-100 open:duration-100 starting:open:opacity-0',
     className,
   )}
   {ontoggle}

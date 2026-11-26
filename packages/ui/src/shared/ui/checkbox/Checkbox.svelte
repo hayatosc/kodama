@@ -1,6 +1,7 @@
 <script lang="ts">
   import { cn, focusRing, type WithElementRef } from '#shared/lib/utils.js'
   import { fieldControlAttributes, getFieldState } from '../field/context.js'
+  import { choiceControl } from './control.js'
   import type { HTMLInputAttributes } from 'svelte/elements'
 
   let {
@@ -26,8 +27,8 @@
 
 <!--
   A native checkbox with a custom look (checkbox guide): 16px, a check or a dash drawn through a
-  mask, which turns CanvasText in forced colors mode; see src/shared/styles/native.css. Put it
-  before its label, and give the label a 44px-high row so the whole row is the target.
+  mask, which turns CanvasText in forced colors mode. Put it before its label, and give the label
+  a 44px-high row so the whole row is the target.
 -->
 <input
   bind:this={ref}
@@ -36,6 +37,12 @@
   type="checkbox"
   data-slot="checkbox"
   {...attributes}
-  class={cn('peer', focusRing, className)}
+  class={cn(
+    'peer',
+    choiceControl,
+    'rounded-sm checked:before:mask-check-heavy indeterminate:before:mask-dash',
+    focusRing,
+    className,
+  )}
   {...restProps}
 />

@@ -26,6 +26,9 @@
     peer: ArrowLeftRight,
     memory: BookOpen,
   }
+
+  /** A node's dot; the transparent border is what forced colors mode draws. */
+  const dot = 'size-2 rounded-full border border-transparent'
 </script>
 
 <!--
@@ -34,20 +37,37 @@
   progress has the running dot, and says so to screen readers; a failure has the destructive dot
   and subject.
 -->
-<ol data-slot="activity-feed" class={cn('feed', compact && 'compact', className)}>
+<ol
+  data-slot="activity-feed"
+  class={cn(
+    'm-0 list-none p-0 leading-6',
+    compact ? 'text-sm [--time-column:44px]' : 'text-base [--time-column:52px]',
+    className,
+  )}
+>
   {#each items as item (item.id)}
     {@const Icon = icons[item.kind]}
-    <li>
-      <time datetime={item.at}>{formatActivityTime(item.at, now)}</time>
-      <span class="node" aria-hidden="true">
+    <!-- The ::before line runs through the nodes, from the first node to the last. -->
+    <li
+      class={[
+        'relative grid grid-cols-[var(--time-column)_16px_minmax(0,1fr)] items-start gap-x-3',
+        'before:absolute before:inset-y-0 before:start-[calc(var(--time-column)+var(--spacing-3)+7.5px)] before:w-px before:bg-border first:before:top-3.5 last:before:bottom-[calc(100%-14px)] forced-colors:before:bg-[CanvasText]',
+        compact ? 'py-1' : 'py-1.5',
+      ]}
+    >
+      <time datetime={item.at} class="text-end font-mono text-xs leading-6 text-muted-foreground"
+        >{formatActivityTime(item.at, now)}</time
+      >
+      <!-- The node covers the line with the page's own background. -->
+      <span class="relative z-1 grid h-6 w-4 place-items-center bg-background" aria-hidden="true">
         {#if item.active}
-          <span class="dot running bg-running"></span>
+          <span class={[dot, 'bg-running motion-safe:animate-running']}></span>
         {:else if item.kind === 'error'}
-          <span class="dot bg-destructive"></span>
+          <span class={[dot, 'bg-destructive']}></span>
         {:else if Icon}
           <Icon class="size-4 text-muted-foreground" strokeWidth={1.75} />
         {:else}
-          <span class="dot bg-muted-foreground"></span>
+          <span class={[dot, 'bg-muted-foreground']}></span>
         {/if}
       </span>
       <span class="min-w-0">
@@ -61,94 +81,3 @@
     </li>
   {/each}
 </ol>
-
-<style>
-  .feed {
-    --time-column: 52px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    font-size: 16px;
-    line-height: 24px;
-  }
-
-  .compact {
-    --time-column: 44px;
-    font-size: 14px;
-  }
-
-  li {
-    position: relative;
-    display: grid;
-    grid-template-columns: var(--time-column) 16px minmax(0, 1fr);
-    column-gap: var(--spacing-3);
-    align-items: start;
-    padding-block: 6px;
-  }
-
-  .compact li {
-    padding-block: 4px;
-  }
-
-  /* The line through the nodes, from the first node to the last. */
-  li::before {
-    content: '';
-    position: absolute;
-    inset-block: 0;
-    inset-inline-start: calc(var(--time-column) + var(--spacing-3) + 7.5px);
-    inline-size: 1px;
-    background: var(--border);
-  }
-
-  li:first-child::before {
-    inset-block-start: 14px;
-  }
-
-  li:last-child::before {
-    inset-block-end: calc(100% - 14px);
-  }
-
-  time {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 24px;
-    text-align: end;
-    color: var(--muted-foreground);
-  }
-
-  /* The node covers the line with the page's own background. */
-  .node {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    place-items: center;
-    inline-size: 16px;
-    block-size: 24px;
-    background: var(--background);
-  }
-
-  .dot {
-    inline-size: 8px;
-    block-size: 8px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-full);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .running {
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-  }
-
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
-
-  @media (forced-colors: active) {
-    li::before {
-      background: CanvasText;
-    }
-  }
-</style>

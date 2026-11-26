@@ -57,412 +57,177 @@
   const lifted = $derived(liftsWings(pose))
   const wing = $derived(pose === 'stretch' ? WING_STRETCHED : lifted ? WING_RAISED : WING_FOLDED)
   const eyes = $derived(eyesOf(pose))
+
+  /*
+   * Parts. Colors come from the bird-* tokens, which are the same in both themes. At 20px the
+   * feather lines, highlights, bill seam, and cheeks are hidden and the feet drawn thicker.
+   */
+  const lid = 'fill-none stroke-(--bird-eye) [stroke-linecap:round] [stroke-width:1.3]'
+  const paper = 'fill-card stroke-input [stroke-width:0.8]'
+  const ink =
+    'fill-none stroke-muted-foreground [stroke-dasharray:6] [stroke-dashoffset:0] [stroke-linecap:round] [stroke-width:0.9]'
+  const hidden = $derived(tiny && 'hidden')
+
+  /*
+   * Motion: each pose animates its own parts, with origins in the bird's units (the feet at y 16).
+   * Every animation is motion-safe:, so under a reduced-motion request the pose alone carries the
+   * state; listen and tilt are still poses either way.
+   */
+  const breath = $derived(
+    pose === 'idle' || pose === 'live' || pose === 'worried'
+      ? 'motion-safe:animate-bird-breathe'
+      : pose === 'sleep'
+        ? 'motion-safe:animate-bird-sleep'
+        : undefined,
+  )
+  const body: Partial<Record<AgentPose, string>> = {
+    listen: 'transform-[rotate(-7deg)]',
+    tilt: 'transform-[rotate(-13deg)]',
+    write: 'motion-safe:animate-bird-write-head',
+    work: 'motion-safe:animate-bird-search',
+    happy: 'motion-safe:animate-bird-cheer',
+    surprised: 'motion-safe:animate-bird-jump',
+    stretch: 'motion-safe:animate-bird-stretch',
+    worried: 'motion-safe:animate-bird-fidget',
+  }
+  const waves = $derived(pose === 'happy' || pose === 'live')
 </script>
 
 {#snippet eye(mirrored: boolean)}
   {#if eyes === 'closed'}
-    <path class="lid" d="M-1.3 0q1.3 1.4 2.6 0" />
+    <path class={lid} d="M-1.3 0q1.3 1.4 2.6 0" />
   {:else if eyes === 'happy'}
-    <path class="lid" d="M-1.3 .35q1.3-2.2 2.6 0" />
+    <path class={lid} d="M-1.3 .35q1.3-2.2 2.6 0" />
   {:else if eyes === 'wide'}
-    <ellipse rx="1.65" ry="2" class="eye" />
-    <circle cx="-.45" cy="-.7" r=".46" class="hl" />
+    <ellipse rx="1.65" ry="2" class="fill-(--bird-eye)" />
+    <circle cx="-.45" cy="-.7" r=".46" class={['fill-(--bird-face)', hidden]} />
   {:else if eyes === 'cross'}
-    <path class="lid" d="M-1.2-1.2 1.2 1.2M1.2-1.2-1.2 1.2" />
+    <path class={lid} d="M-1.2-1.2 1.2 1.2M1.2-1.2-1.2 1.2" />
   {:else if eyes === 'worried'}
-    <circle cy=".4" r="1.25" class="eye" />
-    <path class="lid" d={mirrored ? 'M1.5-2.9l-2.8 .9' : 'M-1.5-2.9l2.8 .9'} />
+    <circle cy=".4" r="1.25" class="fill-(--bird-eye)" />
+    <path class={lid} d={mirrored ? 'M1.5-2.9l-2.8 .9' : 'M-1.5-2.9l2.8 .9'} />
   {:else}
-    <ellipse rx="1.35" ry="1.65" class="eye" />
-    <circle cx="-.4" cy="-.6" r=".36" class="hl" />
+    <ellipse rx="1.35" ry="1.65" class="fill-(--bird-eye)" />
+    <circle cx="-.4" cy="-.6" r=".36" class={['fill-(--bird-face)', hidden]} />
   {/if}
 {/snippet}
 
-<g class={['bird', `p-${pose}`, tiny && 'tiny']} style:--hue-dark={dark} style:--hue-edge={edge}>
-  <g class="breath">
-    <g class="bod">
-      <g class="tail">
+<g style:--hue-dark={dark} style:--hue-edge={edge}>
+  <g class={['origin-[0_16px]', breath]}>
+    <g class={['origin-[0_16px]', body[pose]]}>
+      <g class={['origin-[-13px_8px]', pose === 'idle' && 'motion-safe:animate-bird-tail']}>
         <path d={TAIL} fill={cap} />
         <path d={TAIL} fill={dark} opacity=".4" />
       </g>
-      <path class="feet" d={FEET} />
+      <path
+        class={[
+          'fill-none stroke-(--bird-feet) [stroke-linecap:round] [stroke-linejoin:round]',
+          tiny ? '[stroke-width:1.8]' : '[stroke-width:1.35]',
+        ]}
+        d={FEET}
+      />
       {#if lifted}
         <path d={FAR_WING} fill={dark} />
       {/if}
-      <path class="body-edge" d={BODY} fill={cap} />
+      <path
+        class="stroke-(--hue-edge) [stroke-linejoin:round] [stroke-width:0.4]"
+        d={BODY}
+        fill={cap}
+      />
       <defs>
         <clipPath id={faceClip}><path d={BODY} /></clipPath>
       </defs>
-      <path class="facewhite" clip-path={`url(#${faceClip})`} d={FACE} />
-      <g class="wing">
+      <path class="fill-(--bird-face)" clip-path={`url(#${faceClip})`} d={FACE} />
+      <g class={['origin-[-4px_-1px]', waves && 'motion-safe:animate-bird-wing-wave']}>
         <path d={wing} fill={cap} />
         <path d={wing} fill={dark} opacity=".3" />
         {#if !lifted}
-          <path class="featherlines" d="M-12.1 5.8q-.7 2.1-2 3.2M-8.6 6.2q-1 2.2-2.8 3.3" />
+          <path
+            class={[
+              'fill-none stroke-(--hue-dark) opacity-60 [stroke-linecap:round] [stroke-width:1.05]',
+              hidden,
+            ]}
+            d="M-12.1 5.8q-.7 2.1-2 3.2M-8.6 6.2q-1 2.2-2.8 3.3"
+          />
         {/if}
       </g>
       {#if prop === 'pen'}
         <g>
-          <rect x=".5" y="3.8" width="10" height="8" rx="1.3" class="paper" />
-          <path class="ink" d="M2.2 6.5H8" />
-          <path class="ink ink-2" d="M2.2 9h4" />
+          <rect x=".5" y="3.8" width="10" height="8" rx="1.3" class={paper} />
+          <path class={[ink, pose === 'write' && 'motion-safe:animate-bird-ink']} d="M2.2 6.5H8" />
+          <path
+            class={[
+              ink,
+              pose === 'write' && 'motion-safe:animate-bird-ink motion-safe:[animation-delay:1.2s]',
+            ]}
+            d="M2.2 9h4"
+          />
         </g>
       {/if}
       <g>
-        <ellipse class="blush" cx="-3.3" cy="-.8" rx="1.65" ry="1.1" />
-        <ellipse class="blush" cx="11.2" cy="-1.1" rx="1.4" ry=".95" />
-        <g class="eyes">
+        <ellipse
+          class={['fill-(--bird-blush) opacity-60', hidden]}
+          cx="-3.3"
+          cy="-.8"
+          rx="1.65"
+          ry="1.1"
+        />
+        <ellipse
+          class={['fill-(--bird-blush) opacity-60', hidden]}
+          cx="11.2"
+          cy="-1.1"
+          rx="1.4"
+          ry=".95"
+        />
+        <g class={['origin-[4px_-4px]', pose === 'idle' && 'motion-safe:animate-bird-blink']}>
           <g transform="translate(-2.2,-3.8)">{@render eye(false)}</g>
           <g transform="translate(10.2,-4) scale(.92)">{@render eye(true)}</g>
         </g>
         <g transform="translate(0,.65)">
-          <path class="beak" d="M1.4-2.3 6.5-3 8.3-2.1Q7.6 .5 5 .6 2.7 .8 1.4-2.3Z" />
-          <path class="beak-top" d="M1.4-2.3Q1.9-4.7 4.2-5.2 6.1-5.3 8.3-2.1L5.2-1.1Z" />
-          <path class="bill-line" d="M1.6-2.2 5.2-1.1 8.1-2" />
+          <path class="fill-(--bird-beak)" d="M1.4-2.3 6.5-3 8.3-2.1Q7.6 .5 5 .6 2.7 .8 1.4-2.3Z" />
+          <path
+            class="fill-(--bird-beak-top)"
+            d="M1.4-2.3Q1.9-4.7 4.2-5.2 6.1-5.3 8.3-2.1L5.2-1.1Z"
+          />
+          <path
+            class={[
+              'fill-none stroke-(--bird-bill-line) [stroke-linecap:round] [stroke-width:0.45]',
+              hidden,
+            ]}
+            d="M1.6-2.2 5.2-1.1 8.1-2"
+          />
         </g>
         {#if prop === 'letter'}
           <g transform="translate(1.5,3.5) rotate(-8)">
-            <rect width="12" height="8.4" rx="1.6" class="paper" />
-            <path d="M1 1.2l5 3.4 5-3.4" class="fold" />
+            <rect width="12" height="8.4" rx="1.6" class={paper} />
+            <path
+              d="M1 1.2l5 3.4 5-3.4"
+              class="fill-none stroke-muted-foreground [stroke-linecap:round] [stroke-width:0.9]"
+            />
           </g>
         {:else if prop === 'lens'}
           <g transform="translate(-.6,.3)">
-            <path d="M-4.3 -.4l-3.6 4.5" class="handle" />
-            <circle cx="-1.6" cy="-4.1" r="4.4" class="glass" />
+            <path
+              d="M-4.3 -.4l-3.6 4.5"
+              class="stroke-foreground [stroke-linecap:round] [stroke-width:2.2]"
+            />
+            <circle
+              cx="-1.6"
+              cy="-4.1"
+              r="4.4"
+              class="fill-(--bird-face) stroke-foreground [fill-opacity:0.25] [stroke-width:1.4]"
+            />
           </g>
         {:else if prop === 'pen'}
-          <g class="pen">
-            <path class="pen-body" d="M12.4 1.4L7.6 7.6" />
-            <path class="pen-tip" d="M7.6 7.6l-.9 1.5 1.6-.6z" />
+          <g class={[pose === 'write' && 'motion-safe:animate-bird-write']}>
+            <path
+              class="fill-none stroke-foreground [stroke-linecap:round] [stroke-width:1.5]"
+              d="M12.4 1.4L7.6 7.6"
+            />
+            <path class="fill-foreground" d="M7.6 7.6l-.9 1.5 1.6-.6z" />
           </g>
         {/if}
       </g>
     </g>
   </g>
 </g>
-
-<style>
-  /* Parts. Colors come from the bird-* tokens, which are the same in both themes. */
-  .facewhite,
-  .hl {
-    fill: var(--bird-face);
-  }
-  .eye {
-    fill: var(--bird-eye);
-  }
-  .lid {
-    fill: none;
-    stroke: var(--bird-eye);
-    stroke-width: 1.3;
-    stroke-linecap: round;
-  }
-  .blush {
-    fill: var(--bird-blush);
-    opacity: 0.6;
-  }
-  .beak {
-    fill: var(--bird-beak);
-  }
-  .beak-top {
-    fill: var(--bird-beak-top);
-  }
-  .bill-line {
-    fill: none;
-    stroke: var(--bird-bill-line);
-    stroke-width: 0.45;
-    stroke-linecap: round;
-  }
-  .feet {
-    fill: none;
-    stroke: var(--bird-feet);
-    stroke-width: 1.35;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .body-edge {
-    stroke: var(--hue-edge);
-    stroke-width: 0.4;
-    stroke-linejoin: round;
-  }
-  .featherlines {
-    fill: none;
-    stroke: var(--hue-dark);
-    stroke-width: 1.05;
-    stroke-linecap: round;
-    opacity: 0.6;
-  }
-  .paper {
-    fill: var(--card);
-    stroke: var(--input);
-    stroke-width: 0.8;
-  }
-  .fold {
-    fill: none;
-    stroke: var(--muted-foreground);
-    stroke-width: 0.9;
-    stroke-linecap: round;
-  }
-  .ink {
-    fill: none;
-    stroke: var(--muted-foreground);
-    stroke-width: 0.9;
-    stroke-linecap: round;
-    stroke-dasharray: 6;
-    stroke-dashoffset: 0;
-  }
-  .pen-body {
-    fill: none;
-    stroke: var(--foreground);
-    stroke-width: 1.5;
-    stroke-linecap: round;
-  }
-  .pen-tip {
-    fill: var(--foreground);
-  }
-  .glass {
-    fill: var(--bird-face);
-    fill-opacity: 0.25;
-    stroke: var(--foreground);
-    stroke-width: 1.4;
-  }
-  .handle {
-    stroke: var(--foreground);
-    stroke-width: 2.2;
-    stroke-linecap: round;
-  }
-  .tiny .featherlines,
-  .tiny .hl,
-  .tiny .bill-line,
-  .tiny .blush {
-    display: none;
-  }
-  .tiny .feet {
-    stroke-width: 1.8;
-  }
-
-  /*
-   * Motion (design/components/bundle.css, kd-p-*). Origins are in the bird's units; feet at y 16.
-   * The jumps, squashes, and stretch reach less far than the design's, so the head and the far
-   * wing stay inside the circle at the top of the motion.
-   */
-  .breath,
-  .bod {
-    transform-origin: 0 16px;
-  }
-  .wing {
-    transform-origin: -4px -1px;
-  }
-  .tail {
-    transform-origin: -13px 8px;
-  }
-  .eyes {
-    transform-origin: 4px -4px;
-  }
-  .p-idle .breath,
-  .p-live .breath,
-  .p-worried .breath {
-    animation: breathe 3.2s ease-in-out infinite;
-  }
-  .p-idle .eyes {
-    animation: blink 5.2s infinite;
-  }
-  .p-idle .tail {
-    animation: tail 3.2s ease-in-out infinite;
-  }
-  .p-listen .bod {
-    transform: rotate(-7deg);
-  }
-  .p-write .bod {
-    animation: write-head 1.2s ease-in-out infinite;
-  }
-  .p-write .pen {
-    animation: write 1.2s ease-in-out infinite;
-  }
-  .p-write .ink {
-    animation: ink 2.4s linear infinite;
-  }
-  .p-write .ink-2 {
-    animation-delay: 1.2s;
-  }
-  .p-work .bod {
-    animation: search 2.4s ease-in-out infinite;
-  }
-  .p-happy .bod {
-    animation: cheer 0.62s ease-in-out;
-  }
-  .p-happy .wing,
-  .p-live .wing {
-    animation: wing-wave 1.4s ease-in-out infinite;
-  }
-  .p-surprised .bod {
-    animation: jump 0.45s cubic-bezier(0.3, 1.6, 0.5, 1);
-  }
-  .p-stretch .bod {
-    animation: stretch 1s ease-in-out;
-  }
-  .p-tilt .bod {
-    transform: rotate(-13deg);
-  }
-  .p-worried .bod {
-    animation: fidget 2.4s ease-in-out infinite;
-  }
-  .p-sleep .breath {
-    animation: sleep 3.6s ease-in-out infinite;
-  }
-
-  @keyframes breathe {
-    0%,
-    100% {
-      transform: scale(1, 1);
-    }
-    50% {
-      transform: scale(1.015, 1.03);
-    }
-  }
-  @keyframes blink {
-    0%,
-    88%,
-    92%,
-    95%,
-    100% {
-      transform: scaleY(1);
-    }
-    90%,
-    93.5% {
-      transform: scaleY(0.08);
-    }
-  }
-  @keyframes tail {
-    0%,
-    100% {
-      transform: rotate(0);
-    }
-    50% {
-      transform: rotate(-6deg);
-    }
-  }
-  @keyframes write-head {
-    0%,
-    100% {
-      transform: rotate(0);
-    }
-    50% {
-      transform: rotate(2.5deg);
-    }
-  }
-  @keyframes write {
-    0%,
-    100% {
-      transform: translate(0, 0);
-    }
-    20% {
-      transform: translate(-1.2px, 0.5px);
-    }
-    40% {
-      transform: translate(-2.4px, -0.3px);
-    }
-    60% {
-      transform: translate(-3.4px, 0.5px);
-    }
-    80% {
-      transform: translate(-1.6px, 0.1px);
-    }
-  }
-  @keyframes ink {
-    0% {
-      stroke-dashoffset: 6;
-    }
-    50%,
-    100% {
-      stroke-dashoffset: 0;
-    }
-  }
-  @keyframes search {
-    0%,
-    100% {
-      transform: rotate(0) translateX(0);
-    }
-    30% {
-      transform: rotate(6deg) translateX(0.6px);
-    }
-    60% {
-      transform: rotate(-3deg) translateX(-0.4px);
-    }
-  }
-  @keyframes cheer {
-    0%,
-    100% {
-      transform: translateY(0) scale(1, 1);
-    }
-    20% {
-      transform: translateY(0) scale(1.02, 0.9);
-    }
-    40% {
-      transform: translateY(-2px) scale(0.96, 1.05);
-    }
-    62% {
-      transform: translateY(0) scale(1.02, 0.94);
-    }
-    80% {
-      transform: translateY(-1.6px) scale(0.98, 1.02);
-    }
-  }
-  @keyframes wing-wave {
-    0%,
-    100% {
-      transform: rotate(0deg);
-    }
-    50% {
-      transform: rotate(7deg);
-    }
-  }
-  @keyframes jump {
-    40% {
-      transform: translateY(-3px) scale(0.97, 1.04);
-    }
-  }
-  @keyframes stretch {
-    30% {
-      transform: scale(0.92, 1.1);
-    }
-    50% {
-      transform: scale(0.92, 1.1) rotate(-4deg);
-    }
-    70% {
-      transform: scale(0.92, 1.1) rotate(4deg);
-    }
-    88% {
-      transform: scale(1.01, 0.96);
-    }
-  }
-  @keyframes fidget {
-    0%,
-    70%,
-    100% {
-      transform: translateX(0);
-    }
-    78% {
-      transform: translateX(-1.2px);
-    }
-    86% {
-      transform: translateX(1.2px);
-    }
-  }
-  @keyframes sleep {
-    0%,
-    100% {
-      transform: scale(1, 1);
-    }
-    50% {
-      transform: scale(1.03, 0.97);
-    }
-  }
-
-  /* Reduced motion: the pose alone carries the state. */
-  @media (prefers-reduced-motion: reduce) {
-    .bird * {
-      animation: none !important;
-      transition: none !important;
-    }
-  }
-</style>
