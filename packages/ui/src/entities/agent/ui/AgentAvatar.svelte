@@ -67,7 +67,7 @@
   aria-hidden={label === undefined ? 'true' : undefined}
   data-pose={pose}
 >
-  <svg viewBox="-20 -20 40 40" class={['disc', pose === 'paused' && 'paused']}>
+  <svg viewBox="-20 -20 40 40" class={['disc', pose === 'paused' && 'gray']}>
     <defs>
       <clipPath id={discClip}><circle r="20" /></clipPath>
     </defs>
@@ -123,7 +123,8 @@
   .fill {
     fill: color-mix(in oklab, var(--hue) 18%, var(--background));
   }
-  .paused {
+  /* Not `paused`: tw-animate-css declares a global .paused. */
+  .gray {
     filter: grayscale(1);
   }
   .mark {

@@ -19,9 +19,6 @@
   bind:value
   bind:ref
   data-slot="command"
-  class={cn(
-    'flex max-h-[300px] scroll-pt-11 flex-col overflow-y-auto p-1 text-foreground',
-    className,
-  )}
+  class={cn('flex max-h-75 scroll-pt-11 flex-col overflow-y-auto p-1 text-foreground', className)}
   {...restProps}
 />

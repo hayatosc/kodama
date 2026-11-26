@@ -144,7 +144,7 @@
     },
   }}
 >
-  <div class="mx-auto max-w-[390px] py-4">
+  <div class="mx-auto max-w-97.5 py-4">
     <Composer
       agentName="assistant"
       running
@@ -171,7 +171,7 @@
     },
   }}
 >
-  <div class="mx-auto flex max-w-[720px] flex-col gap-6 py-4">
+  <div class="mx-auto flex max-w-180 flex-col gap-6 py-4">
     <div class="flex flex-col gap-3">
       {#each log as entry (entry.id)}
         {#if entry.role === 'user'}

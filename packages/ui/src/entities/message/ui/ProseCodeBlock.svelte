@@ -30,7 +30,7 @@
   {...restProps}
 >
   <figcaption
-    class="flex h-[30px] items-center justify-between border-b border-border ps-3 pe-1.5 font-mono text-xs text-muted-foreground"
+    class="flex h-7.5 items-center justify-between border-b border-border ps-3 pe-1.5 font-mono text-xs text-muted-foreground"
   >
     {language}
     <CopyButton for={codeId} what={`${language} のコード`} />

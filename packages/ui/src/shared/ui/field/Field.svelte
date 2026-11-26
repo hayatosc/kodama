@@ -59,7 +59,7 @@
       : [
           'relative min-h-11 flex-row items-center gap-3 [&>[data-slot=field-content]]:flex-1',
           "[&_[data-slot=field-label]]:cursor-pointer [&_[data-slot=field-label]]:after:absolute [&_[data-slot=field-label]]:after:inset-0 [&_[data-slot=field-label]]:after:content-['']",
-          '[&>input]:relative [&>input]:z-[1] [&>[data-slot=switch]]:z-[1]',
+          '[&>input]:relative [&>input]:z-[1] [&>[data-slot=checkbox]]:z-[1] [&>[data-slot=switch]]:z-[1]',
         ],
     className,
   )}

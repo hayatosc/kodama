@@ -17,166 +17,118 @@
 <!--
   The look of Markdown rendered in an agent's reply (design/components/Prose). It only styles
   what it is given, block elements as Markdown renders them; turning Markdown into elements
-  comes with Streamdown. h1 and h2 look like h3. Wrap a code block in ProseCodeBlock and a table
-  in ProseTable.
+  comes with Streamdown. Long URLs and code break where they must, so a reply never widens a
+  phone screen. Wrap a code block in ProseCodeBlock and a table in ProseTable. The elements are
+  not Prose's own, so they cannot carry classes: the scoped style below dresses them with @apply.
 -->
 <div
   bind:this={ref}
   data-slot="prose"
   data-streaming={streaming || undefined}
-  class={cn('prose text-base leading-7 text-foreground', className)}
+  class={cn('prose text-base leading-7 wrap-anywhere text-foreground', className)}
   {...restProps}
 >
   {@render children?.()}
 </div>
 
 <style>
-  /* Long URLs and code break where they must, so a reply never widens a phone screen. */
-  .prose {
-    overflow-wrap: anywhere;
-  }
+  @reference '../../../app/styles/index.css';
 
   .prose :global(:where(h1, h2, h3, h4, p, ul, ol, blockquote, figure, table, hr)) {
-    margin-block: 0;
+    @apply my-0;
   }
 
   /*
    * The rhythm between blocks. Text follows text 8px apart. Code blocks, quotes, tables, and
-   * rules stand apart from the text, 16px on each side. A heading opens a section: 24px (h3) or
-   * 16px (h4) from what comes before, and 4px above its own text (8px above a boxed block), so it
-   * reads with what follows.
-   * The selectors are in :where() so the rules weigh the same and the later one wins.
+   * rules stand apart from the text, 16px on each side. A heading opens a section: 24px (h1 to h3)
+   * or 16px (h4) from what comes before, and 4px above its own text (8px above a boxed block), so
+   * it reads with what follows. The selectors are in :where() so the rules weigh the same and the
+   * later one wins.
    */
   .prose > :global(:where(* + *)) {
-    margin-block-start: var(--spacing-2);
+    @apply mt-2;
   }
 
   .prose > :global(:where(* + :is(figure, blockquote, [data-slot='prose-table'], hr))),
   .prose > :global(:where(:is(figure, blockquote, [data-slot='prose-table'], hr) + *)) {
-    margin-block-start: var(--spacing-4);
+    @apply mt-4;
   }
 
   .prose > :global(:where(* + :is(h1, h2, h3))) {
-    margin-block-start: var(--spacing-6);
+    @apply mt-6;
   }
 
   .prose > :global(:where(* + h4)) {
-    margin-block-start: var(--spacing-4);
+    @apply mt-4;
   }
 
   .prose > :global(:where(:is(h1, h2, h3, h4) + *)) {
-    margin-block-start: var(--spacing-1);
+    @apply mt-1;
   }
 
   .prose
     > :global(
       :where(:is(h1, h2, h3, h4) + :is(figure, blockquote, [data-slot='prose-table'], hr))
     ) {
-    margin-block-start: var(--spacing-2);
+    @apply mt-2;
   }
 
+  /* h1 and h2 look like h3. */
   .prose :global(:is(h1, h2, h3)) {
-    font-size: 18px;
-    font-weight: 600;
-    line-height: 28px;
+    @apply text-lg leading-7 font-semibold;
   }
 
   .prose :global(h4) {
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 28px;
-  }
-
-  .prose :global(:is(ul, ol)) {
-    padding-inline-start: 20px;
+    @apply text-base leading-7 font-semibold;
   }
 
   .prose :global(ul) {
-    list-style: disc;
+    @apply list-disc ps-5;
   }
 
   .prose :global(ol) {
-    list-style: decimal;
+    @apply list-decimal ps-5;
   }
 
   .prose :global(li + li) {
-    margin-block-start: var(--spacing-1);
+    @apply mt-1;
   }
 
   .prose :global(strong) {
-    font-weight: 600;
+    @apply font-semibold;
   }
 
   .prose :global(a) {
-    color: var(--live);
-    text-decoration: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
+    @apply text-live underline decoration-1 underline-offset-2;
   }
 
   .prose :global(:not(pre) > code) {
-    padding-inline: var(--spacing-1);
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    font-family: var(--font-mono);
-    font-size: 14px;
+    @apply rounded-sm bg-accent px-1 font-mono text-sm/7;
   }
 
   .prose :global(blockquote) {
-    padding-inline-start: var(--spacing-3);
-    border-inline-start: 2px solid var(--input);
-    color: var(--muted-foreground);
+    @apply border-s-2 border-s-input ps-3 text-muted-foreground;
   }
 
   .prose :global(table) {
-    inline-size: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-    line-height: 20px;
+    @apply w-full border-collapse text-sm leading-5;
   }
 
   .prose :global(th) {
-    font-weight: 400;
-    text-align: start;
-    color: var(--muted-foreground);
+    @apply text-start font-normal text-muted-foreground;
   }
 
   .prose :global(:is(th, td)) {
-    padding: 6px 8px;
-    border-block-end: 1px solid var(--border);
+    @apply border-b border-border px-2 py-1.5;
   }
 
   .prose :global(hr) {
-    border: 0;
-    border-block-start: 1px solid var(--border);
+    @apply border-x-0 border-t border-b-0 border-border;
   }
 
   /* The caret is generated content with no text, so screen readers pass over it. */
   .prose[data-streaming] > :global(:last-child)::after {
     content: '';
-    display: inline-block;
-    inline-size: 7px;
-    block-size: 15px;
-    margin-inline-start: 2px;
-    vertical-align: -2px;
-    background: var(--foreground);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .prose[data-streaming] > :global(:last-child)::after {
-      animation: blink 1s steps(2) infinite;
-    }
-  }
-
-  @keyframes blink {
-    50% {
-      opacity: 0.35;
-    }
-  }
-
-  @media (forced-colors: active) {
-    .prose[data-streaming] > :global(:last-child)::after {
-      background: CanvasText;
-    }
+    @apply ms-0.5 inline-block h-3.75 w-1.75 bg-foreground translate-y-0.5 forced-colors:bg-[CanvasText] motion-safe:animate-caret;
   }
 </style>

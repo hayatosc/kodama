@@ -76,7 +76,7 @@
   aria-label="エージェントの詳細"
   data-slot="profile-panel"
   class={cn(
-    'flex h-full w-[320px] flex-col gap-4 overflow-y-auto border-s border-border bg-background p-4',
+    'flex h-full w-80 flex-col gap-4 overflow-y-auto border-s border-border bg-background p-4',
     className,
   )}
 >
@@ -157,9 +157,7 @@
                   class="h-auto w-full flex-col items-stretch gap-0.5 rounded-lg px-2.5 py-2 text-start font-normal whitespace-normal"
                 >
                   <span class="flex items-center gap-2 text-xs leading-4 text-muted-foreground">
-                    <Badge class="h-[18px] px-1.5 text-[11px]"
-                      >{MEMORY_KIND_WORDS[memory.kind]}</Badge
-                    >
+                    <Badge class="h-4.5 px-1.5 text-xs">{MEMORY_KIND_WORDS[memory.kind]}</Badge>
                     <span
                       >{memory.source} ·
                       <time datetime={memory.at}>{formatMemoryDate(memory.at)}</time></span

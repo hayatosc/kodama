@@ -11,13 +11,17 @@
   }: ComponentProps<typeof Input> = $props()
 </script>
 
-<!-- The group's input: no border or ring of its own, since the group draws them. -->
+<!--
+  The group's input: no border or ring of its own, since the group draws them. Chromium and
+  Safari draw their own clear button in a search field; the group places its own controls in
+  addons, so the browser's button would only add a second, off-design one.
+-->
 <Input
   bind:ref
   bind:value
   data-slot="input-group-input"
   class={cn(
-    'h-full flex-1 rounded-none border-0 bg-transparent px-2 focus-visible:outline-none first:ps-3 last:pe-3 pointer-coarse:h-full',
+    'h-full flex-1 rounded-none border-0 bg-transparent px-2 focus-visible:outline-none first:ps-3 last:pe-3 pointer-coarse:h-full [&::-webkit-search-cancel-button]:appearance-none',
     className,
   )}
   {...restProps}

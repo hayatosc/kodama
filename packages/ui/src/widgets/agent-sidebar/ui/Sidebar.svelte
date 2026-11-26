@@ -48,7 +48,7 @@
   }
 
   const rowLink = cn(
-    'flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-start text-foreground transition-colors duration-[120ms] hover:bg-accent aria-[current=true]:bg-muted',
+    'flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-start text-foreground transition-colors duration-120 hover:bg-accent aria-[current=true]:bg-muted',
     focusRing,
   )
 </script>
@@ -63,7 +63,7 @@
 <nav
   aria-label="エージェント"
   data-slot="sidebar"
-  class={cn('flex h-full w-[280px] flex-col gap-0.5 bg-sidebar p-3', className)}
+  class={cn('flex h-full w-70 flex-col gap-0.5 bg-sidebar p-3', className)}
 >
   <div class="flex justify-end gap-2 pb-2">
     <Button variant="secondary" size="icon-sm" class="rounded-full bg-background" aria-label="検索">
@@ -124,7 +124,7 @@
                 >
                 {#if agent.unread > 0}
                   <span
-                    class="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center self-center rounded-full border border-transparent bg-live px-[5px] text-[11px] font-semibold text-primary-foreground"
+                    class="inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center self-center rounded-full border border-transparent bg-live px-1.25 text-xs font-semibold text-primary-foreground"
                     ><span class="sr-only">未読 </span>{formatUnread(agent.unread)}<span
                       class="sr-only">件</span
                     ></span

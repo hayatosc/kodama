@@ -109,12 +109,14 @@
 >
   <summary
     class={cn(
-      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base [contain:inline-size] transition-colors duration-[120ms] hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
+      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base [contain:inline-size] transition-colors duration-120 hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
       focusRing,
     )}
   >
     {#if props.state === 'running'}
-      <span class="running-dot mx-1 size-2 shrink-0 rounded-full bg-running" aria-hidden="true"
+      <span
+        class="mx-1 size-2 shrink-0 rounded-full bg-running motion-safe:animate-running"
+        aria-hidden="true"
       ></span>
     {:else}
       <ChevronRight
@@ -172,7 +174,14 @@
           <span>結果{props.resultSize ? ` · ${props.resultSize}` : ''}</span>
           <CopyButton for={resultId} what="結果" />
         </div>
-        <div class={cn(long && !showAll && 'clamp')}>
+        <!-- Clipped to five lines with a fade into the muted section; 「すべて表示」 lifts the clip. -->
+        <div
+          class={cn(
+            long &&
+              !showAll &&
+              'relative max-h-26 overflow-hidden after:absolute after:inset-x-0 after:bottom-0 after:h-10 after:bg-[linear-gradient(transparent,var(--muted))]',
+          )}
+        >
           <pre
             id={resultId}
             {@attach measure}
@@ -195,33 +204,3 @@
     {/if}
   </div>
 </details>
-
-<style>
-  /* Five lines and a fade into the muted section; 「すべて表示」 lifts the clip. */
-  .clamp {
-    position: relative;
-    max-block-size: 104px;
-    overflow: hidden;
-  }
-
-  .clamp::after {
-    content: '';
-    position: absolute;
-    inset-inline: 0;
-    inset-block-end: 0;
-    block-size: 40px;
-    background: linear-gradient(transparent, var(--muted));
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .running-dot {
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-  }
-
-  @keyframes pulse {
-    50% {
-      opacity: 0.35;
-    }
-  }
-</style>

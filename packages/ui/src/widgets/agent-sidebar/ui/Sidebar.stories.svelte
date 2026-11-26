@@ -113,7 +113,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <div class="h-[760px]">
+  <div class="h-190">
     <Sidebar
       {main}
       {agents}

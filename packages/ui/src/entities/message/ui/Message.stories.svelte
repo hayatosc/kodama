@@ -36,7 +36,7 @@
   name="Kinds"
   parameters={{ docs: { description: { story: 'The four kinds of message.' } } }}
 >
-  <div class="flex max-w-[960px] flex-col gap-3">
+  <div class="flex max-w-240 flex-col gap-3">
     <Message role="user">Durable Objects のアラーム、来週の発表用にまとめておいて</Message>
     <Message role="thinking">research に論文側を頼んでくる。</Message>
     <Message role="assistant">
@@ -60,9 +60,9 @@
     },
   }}
 >
-  <div class="flex max-w-[960px] flex-col gap-3">
+  <div class="flex max-w-240 flex-col gap-3">
     <Message role="user">Durable Objects のアラーム、来週の発表用にまとめておいて</Message>
-    <div class="flex max-w-[560px] flex-col items-start gap-2">
+    <div class="flex max-w-140 flex-col items-start gap-2">
       <Message role="thinking">research に論文側を頼んでくる。</Message>
       <ToolCall
         class="w-full"

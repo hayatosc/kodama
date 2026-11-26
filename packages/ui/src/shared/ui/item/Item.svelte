@@ -31,7 +31,7 @@
   data-slot="item"
   class={cn(
     itemVariants({ variant, size }),
-    'relative transition-colors duration-[120ms] has-[[data-slot=item-title]>:is(a,button):hover]:bg-accent',
+    'relative transition-colors duration-120 has-[[data-slot=item-title]>:is(a,button):hover]:bg-accent',
     '[&_[data-slot=item-actions]]:relative [&_[data-slot=item-actions]]:z-[1]',
     className,
   )}

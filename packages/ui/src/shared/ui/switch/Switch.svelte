@@ -36,7 +36,7 @@
   In forced colors mode, the transparent borders turn into outlines, so the track and the knob's
   position still show.
 -->
-<span data-slot="switch" class={cn('relative inline-flex h-5 w-[34px] shrink-0', className)}>
+<span data-slot="switch" class={cn('relative inline-flex h-5 w-8.5 shrink-0', className)}>
   <input
     bind:this={ref}
     bind:checked

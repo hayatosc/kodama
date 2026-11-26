@@ -12,10 +12,35 @@
 @import '@fontsource/geist-mono/600.css';
 /* In the base layer so utilities still override the type-* classes it declares. */
 @import '../../shared/styles/tokens.css' layer(base);
-/* After the reset, so the native dialog, popover, and select styles build on it. */
-@import '../../shared/styles/native.css' layer(components);
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Anchor positioning (viewport-aware-dropdowns) and its absence. Popovers, menus, and tooltips are
+ * tethered to their trigger with anchored:; where it is missing, placeWithoutAnchor
+ * (src/shared/lib/top-layer.ts) sets fixed coordinates by the trigger as it opens.
+ */
+@custom-variant anchored {
+  @supports (position-area: block-end) {
+    @slot;
+  }
+}
+
+@custom-variant unanchored {
+  @supports not (position-area: block-end) {
+    @slot;
+  }
+}
+
+/*
+ * The customizable select (branded-select-styling). Where appearance: base-select is missing, the
+ * select keeps its trigger styles and opens the system menu.
+ */
+@custom-variant base-select {
+  @supports (appearance: base-select) {
+    @slot;
+  }
+}
 
 @theme {
   /* One easing for every transition that names none (unslop — Motion): ease-out. */
@@ -27,12 +52,48 @@
    * with motion-safe: so it never runs under a reduced-motion request.
    */
   --animate-blink: blink 1.6s ease-in-out 3;
+  /* The dot of a run in progress (StatusBadge, ToolCall, ActivityFeed): it blinks while it runs. */
+  --animate-running: blink 1.6s ease-in-out infinite;
+  /* Message's typing dots, each started 0.2s after the one before. */
+  --animate-typing: blink 1.2s ease-in-out infinite;
+  /* Prose's streaming caret. */
+  --animate-caret: blink 1s steps(2) infinite;
 
   @keyframes blink {
     50% {
       opacity: 0.35;
     }
   }
+
+  @keyframes progress-indeterminate {
+    from,
+    to {
+      inline-size: 30%;
+      margin-right: auto;
+    }
+    from {
+      translate: -100%;
+    }
+    to {
+      translate: 100cqi;
+    }
+  }
+  @keyframes spinner-turn {
+    to {
+      rotate: 1turn;
+    }
+  }
+}
+
+/*
+ * Progress's indeterminate fill, which exists only through this animation (progress guide), and
+ * Spinner's turn. Under a reduced-motion request both slow down rather than stop, through
+ * --progress-duration and --spinner-duration. Inline, so those resolve on the element itself.
+ */
+@theme inline {
+  --animate-progress: progress-indeterminate var(--progress-duration) infinite linear
+    var(--progress-direction, normal);
+  --animate-spinner: spinner-turn var(--spinner-duration) linear infinite;
 }
 
 @theme inline {
@@ -78,6 +139,16 @@
 }
 
 @layer base {
+  /* Native controls, scrollbars, and the fallback select menu follow the theme. */
+  :root,
+  [data-theme='light'] {
+    color-scheme: light;
+  }
+
+  [data-theme='dark'] {
+    color-scheme: dark;
+  }
+
   /* kiso gives form controls a 1px border; Kodama controls opt into borders with utilities. */
   :where(button, input, select, textarea, ::file-selector-button) {
     border-width: 0;

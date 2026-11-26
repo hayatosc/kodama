@@ -12,7 +12,7 @@ import { type VariantProps, tv } from 'tailwind-variants'
  */
 export const badgeVariants = tv({
   base: [
-    'inline-flex h-[22px] w-fit shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2',
+    'inline-flex h-5.5 w-fit shrink-0 items-center gap-1.5 rounded-md border border-transparent px-2',
     "text-xs font-semibold whitespace-nowrap [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3",
   ],
   variants: {

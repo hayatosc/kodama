@@ -98,16 +98,14 @@
   it is empty it stays one line, so a placeholder too long for a narrow screen is cut off with an
   ellipsis rather than wrapping.
 -->
-<div data-slot="composer" class={cn('mx-auto w-full max-w-[720px]', className)}>
+<div data-slot="composer" class={cn('mx-auto w-full max-w-180', className)}>
   {#if sheetOpen}
     <div
       role="group"
       aria-label="キュー"
       class="relative z-0 mx-5 -mb-px flex flex-col gap-0.5 rounded-t-xl border border-b-0 border-border bg-card px-1.5 pt-1.5 pb-2"
     >
-      <div
-        class="flex min-h-[22px] items-center gap-3 px-2 pt-0.5 pb-1 text-xs text-muted-foreground"
-      >
+      <div class="flex min-h-5.5 items-center gap-3 px-2 pt-0.5 pb-1 text-xs text-muted-foreground">
         {#if queue.length > 0}
           <span class="shrink-0 whitespace-nowrap">キュー {queue.length}</span>
         {/if}
@@ -115,7 +113,7 @@
           <button
             type="button"
             class={cn(
-              'h-7 cursor-pointer rounded-full border border-input px-3 text-sm font-semibold text-foreground transition-colors duration-[120ms] hover:bg-accent',
+              'h-7 cursor-pointer rounded-full border border-input px-3 text-sm font-semibold text-foreground transition-colors duration-120 hover:bg-accent',
               queue.length > 0 && 'ms-auto',
               focusRing,
             )}
@@ -138,14 +136,14 @@
             <li
               class="flex h-8 items-center gap-2 rounded-md ps-2 pe-0.5 text-sm text-foreground hover:bg-accent"
             >
-              <span class="w-3.5 font-mono text-[11px] text-muted-foreground" aria-hidden="true"
+              <span class="w-3.5 font-mono text-xs text-muted-foreground" aria-hidden="true"
                 >{index + 1}</span
               >
               <span class="min-w-0 flex-1 truncate">{item}</span>
               <Button
                 variant="ghost"
                 size="icon-sm"
-                class="size-[26px] rounded-full text-muted-foreground hover:text-foreground"
+                class="size-6.5 rounded-full text-muted-foreground hover:text-foreground"
                 aria-label={`${index + 1} 件目をキューから外す`}
                 onclick={() => remove(index)}
               >
@@ -158,7 +156,7 @@
     </div>
   {/if}
   <form
-    class="relative z-10 flex items-end gap-1 rounded-[24px] border border-border bg-background p-[7px] shadow-lg transition-colors duration-[120ms] focus-within:border-input"
+    class="relative z-10 flex items-end gap-1 rounded-3xl border border-border bg-background p-1.75 shadow-lg transition-colors duration-120 focus-within:border-input"
     onsubmit={(event) => {
       event.preventDefault()
       send()
