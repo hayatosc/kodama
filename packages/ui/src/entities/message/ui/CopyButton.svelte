@@ -96,7 +96,7 @@
     aria-label={`${what}を${label}`}
     data-state={status}
     class={cn(
-      'inline-flex h-[22px] min-w-6 cursor-pointer items-center gap-1 rounded-sm px-1.5 font-sans text-xs text-muted-foreground transition-colors duration-[120ms] hover:bg-accent hover:text-foreground data-[state=failed]:text-destructive',
+      'inline-flex h-5.5 min-w-6 cursor-pointer items-center gap-1 rounded-sm px-1.5 font-sans text-xs text-muted-foreground transition-colors duration-120 hover:bg-accent hover:text-foreground data-[state=failed]:text-destructive',
       focusRing,
     )}
     {@attach listen}

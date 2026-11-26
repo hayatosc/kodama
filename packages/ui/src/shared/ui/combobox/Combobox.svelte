@@ -87,7 +87,7 @@
     data-slot="combobox-trigger"
     class={cn(
       variant === 'field'
-        ? 'h-9 w-[220px] justify-between px-2.5 text-sm font-normal'
+        ? 'h-9 w-55 justify-between px-2.5 text-sm font-normal'
         : 'h-7 max-w-full gap-1 rounded-md px-2 text-sm font-normal',
       className,
     )}
@@ -100,7 +100,7 @@
     </span>
     <ChevronDownIcon class="text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
   </Popover.Trigger>
-  <Popover.Content class="w-[260px] p-0" align={variant === 'field' ? 'start' : 'end'}>
+  <Popover.Content class="w-65 p-0" align={variant === 'field' ? 'start' : 'end'}>
     <Command.Root>
       <Command.Input placeholder="検索" aria-label={`${label}を検索`} data-autofocus />
       <Command.List>

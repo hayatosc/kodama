@@ -75,7 +75,7 @@
   data-align={align}
   style={`position-anchor: --${popover.id}`}
   class={cn(
-    'min-w-[220px] rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
+    'min-w-55 rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
     'opacity-0 transition-[opacity,scale,display,overlay] duration-150 transition-discrete motion-reduce:duration-100',
     'open:not-data-closing:opacity-100 starting:open:not-data-closing:opacity-0',
     'motion-safe:scale-96 motion-safe:open:not-data-closing:scale-100 motion-safe:starting:open:not-data-closing:scale-96',

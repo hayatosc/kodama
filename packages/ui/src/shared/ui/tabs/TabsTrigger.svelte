@@ -20,7 +20,7 @@
   data-slot="tabs-trigger"
   class={cn(
     'relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm font-semibold whitespace-nowrap',
-    'text-muted-foreground transition-colors duration-[120ms] hover:text-foreground',
+    'text-muted-foreground transition-colors duration-120 hover:text-foreground',
     'data-[state=active]:bg-muted data-[state=active]:text-foreground',
     "after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:content-['']",
     'data-[state=active]:after:border data-[state=active]:after:border-input',

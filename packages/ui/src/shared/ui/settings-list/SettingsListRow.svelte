@@ -34,7 +34,7 @@
 </script>
 
 <div data-slot="settings-row" class={cn(settingsRow, className)}>
-  <span class="flex min-w-0 flex-col py-[7px]">
+  <span class="flex min-w-0 flex-col py-1.75">
     <label for={`${id}-control`}>{label}</label>
     {#if hint}
       <span id={`${id}-description`} class="text-xs text-muted-foreground">{hint}</span>

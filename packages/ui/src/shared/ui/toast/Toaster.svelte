@@ -106,7 +106,7 @@
   data-slot="toaster"
   class={cn(
     'inset-auto end-0 bottom-0 m-0 max-h-dvh w-full overflow-y-auto border-0 bg-transparent p-4',
-    'sm:w-[392px]',
+    'sm:w-98',
     className,
   )}
   {@attach followToasts}

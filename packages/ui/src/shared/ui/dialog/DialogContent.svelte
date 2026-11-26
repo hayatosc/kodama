@@ -121,7 +121,7 @@
   aria-describedby={dialog.described ? `${dialog.id}-description` : undefined}
   data-slot="dialog-content"
   class={cn(
-    'm-auto max-h-[calc(100%-2rem)] w-[400px] max-w-[calc(100%-2rem)] overflow-y-auto',
+    'm-auto max-h-[calc(100%-2rem)] w-100 max-w-[calc(100%-2rem)] overflow-y-auto',
     'rounded-xl border border-border bg-popover p-6 text-foreground shadow-lg',
     'open:flex open:flex-col open:gap-6',
     showCloseButton && '[&>[data-slot=dialog-header]]:pr-8',

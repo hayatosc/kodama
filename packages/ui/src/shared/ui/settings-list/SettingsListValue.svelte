@@ -22,7 +22,7 @@
 
 <!-- A read-only value at the right edge, muted. -->
 <div data-slot="settings-row" class={cn(settingsRow, className)}>
-  <span class="flex min-w-0 flex-col py-[7px]">
+  <span class="flex min-w-0 flex-col py-1.75">
     <span>{label}</span>
     {#if hint}<span class="text-xs text-muted-foreground">{hint}</span>{/if}
   </span>

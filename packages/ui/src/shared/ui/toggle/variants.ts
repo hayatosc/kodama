@@ -16,7 +16,7 @@ export const toggleVariants = tv({
   base: [
     'inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-transparent',
     'text-sm font-semibold whitespace-nowrap text-muted-foreground select-none',
-    'transition-[color,background-color,border-color] duration-[120ms] ease-out',
+    'transition-[color,background-color,border-color] duration-120 ease-out',
     'hover:bg-accent hover:text-foreground',
     'aria-pressed:border-input aria-pressed:bg-accent aria-pressed:text-foreground',
     'forced-colors:aria-pressed:bg-[Highlight] forced-colors:aria-pressed:text-[HighlightText]',

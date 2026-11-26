@@ -37,8 +37,8 @@
   const dots: Record<RunState, string> = {
     live: 'bg-live',
     running: 'bg-running motion-safe:animate-running',
-    queued: 'border-[1.5px] border-muted-foreground',
-    paused: 'rounded-[2px] border-[1.5px] border-muted-foreground',
+    queued: 'border border-muted-foreground',
+    paused: 'rounded-xs border border-muted-foreground',
     error: 'bg-destructive',
     done: 'bg-muted-foreground',
     archived: 'bg-muted-foreground',

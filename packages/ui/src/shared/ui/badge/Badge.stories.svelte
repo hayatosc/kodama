@@ -89,15 +89,11 @@
       <span aria-hidden="true" class="size-2 rounded-full bg-running"></span>実行中
     </Badge>
     <Badge>
-      <span
-        aria-hidden="true"
-        class="size-2 rounded-full shadow-[inset_0_0_0_1.5px_var(--muted-foreground)]"
+      <span aria-hidden="true" class="size-2 rounded-full border border-muted-foreground"
       ></span>待機中
     </Badge>
     <Badge>
-      <span
-        aria-hidden="true"
-        class="size-2 rounded-[2px] shadow-[inset_0_0_0_1.5px_var(--muted-foreground)]"
+      <span aria-hidden="true" class="size-2 rounded-xs border border-muted-foreground"
       ></span>一時停止
     </Badge>
   </div>

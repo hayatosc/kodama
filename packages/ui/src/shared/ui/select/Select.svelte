@@ -37,10 +37,10 @@
    */
   const customizable = [
     'base-select:[appearance:base-select] base-select:[&::picker-icon]:hidden',
-    'base-select:[&_option]:flex base-select:[&_option]:min-h-9 base-select:[&_option]:cursor-pointer base-select:[&_option]:items-center base-select:[&_option]:gap-2 base-select:[&_option]:rounded-lg base-select:[&_option]:px-2 base-select:[&_option]:py-1.5 base-select:[&_option]:text-[14px] base-select:[&_option]:leading-5 base-select:[&_option]:text-foreground',
+    'base-select:[&_option]:flex base-select:[&_option]:min-h-9 base-select:[&_option]:cursor-pointer base-select:[&_option]:items-center base-select:[&_option]:gap-2 base-select:[&_option]:rounded-lg base-select:[&_option]:px-2 base-select:[&_option]:py-1.5 base-select:[&_option]:text-sm base-select:[&_option]:leading-5 base-select:[&_option]:text-foreground',
     'base-select:[&_option:is(:hover,:focus-visible,:checked)]:bg-accent base-select:[&_option:checked]:font-semibold base-select:[&_option:focus-visible]:outline-2 base-select:[&_option:focus-visible]:-outline-offset-2 base-select:[&_option:focus-visible]:outline-ring base-select:[&_option:disabled]:cursor-not-allowed base-select:[&_option:disabled]:text-muted-foreground',
     'base-select:[&_option::checkmark]:order-1 base-select:[&_option::checkmark]:ms-auto',
-    'base-select:[&_optgroup]:pt-1.5 base-select:[&_optgroup]:text-[12px] base-select:[&_optgroup]:leading-4 base-select:[&_optgroup]:font-normal base-select:[&_optgroup]:text-muted-foreground base-select:[&_optgroup>option]:mt-1',
+    'base-select:[&_optgroup]:pt-1.5 base-select:[&_optgroup]:text-xs base-select:[&_optgroup]:leading-4 base-select:[&_optgroup]:font-normal base-select:[&_optgroup]:text-muted-foreground base-select:[&_optgroup>option]:mt-1',
     'base-select:[&_hr]:-mx-1 base-select:[&_hr]:my-1 base-select:[&_hr]:border-x-0 base-select:[&_hr]:border-t base-select:[&_hr]:border-b-0 base-select:[&_hr]:border-border',
   ]
 
@@ -50,7 +50,7 @@
    * side has more room, which puts it above a trigger in the lower half for no reason.
    */
   const picker =
-    '[&::picker(select)]:my-1 [&::picker(select)]:max-h-[260px] [&::picker(select)]:rounded-xl [&::picker(select)]:border [&::picker(select)]:border-border [&::picker(select)]:bg-popover [&::picker(select)]:p-1 [&::picker(select)]:text-foreground [&::picker(select)]:opacity-0 [&::picker(select)]:shadow-lg [&::picker(select)]:transition-[opacity,display,overlay] [&::picker(select)]:duration-150 [&::picker(select)]:transition-discrete [&::picker(select)]:[appearance:base-select] [&::picker(select)]:[min-inline-size:anchor-size(width)] [&::picker(select)]:[position-try-order:normal] open:[&::picker(select)]:opacity-100 starting:open:[&::picker(select)]:opacity-0'
+    '[&::picker(select)]:my-1 [&::picker(select)]:max-h-65 [&::picker(select)]:rounded-xl [&::picker(select)]:border [&::picker(select)]:border-border [&::picker(select)]:bg-popover [&::picker(select)]:p-1 [&::picker(select)]:text-foreground [&::picker(select)]:opacity-0 [&::picker(select)]:shadow-lg [&::picker(select)]:transition-[opacity,display,overlay] [&::picker(select)]:duration-150 [&::picker(select)]:transition-discrete [&::picker(select)]:[appearance:base-select] [&::picker(select)]:[min-inline-size:anchor-size(width)] [&::picker(select)]:[position-try-order:normal] open:[&::picker(select)]:opacity-100 starting:open:[&::picker(select)]:opacity-0'
 </script>
 
 <!--
@@ -75,7 +75,7 @@
       'user-invalid:border-destructive aria-invalid:border-destructive',
       'disabled:cursor-not-allowed disabled:opacity-40 pointer-coarse:h-12',
       size === 'default'
-        ? 'h-9 min-w-[220px] rounded-lg border border-input px-2.5 base-select:pe-[34px]'
+        ? 'h-9 min-w-55 rounded-lg border border-input px-2.5 base-select:pe-8.5'
         : 'h-7 rounded-md border border-input px-2 hover:bg-accent base-select:pe-8',
       customizable,
       picker,

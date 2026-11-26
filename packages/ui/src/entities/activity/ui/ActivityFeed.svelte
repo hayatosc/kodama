@@ -52,7 +52,7 @@
     <li
       class={[
         'relative grid grid-cols-[var(--time-column)_16px_minmax(0,1fr)] items-start gap-x-3',
-        'before:absolute before:inset-y-0 before:start-[calc(var(--time-column)+var(--spacing-3)+7.5px)] before:w-px before:bg-border first:before:top-3.5 last:before:bottom-[calc(100%-14px)] forced-colors:before:bg-[CanvasText]',
+        'before:absolute before:inset-y-0 before:start-[calc(var(--time-column)+--spacing(5))] before:w-px before:-translate-x-1/2 before:bg-border rtl:before:translate-x-1/2 first:before:top-3.5 last:before:bottom-auto last:before:h-3.5 first:last:before:hidden forced-colors:before:bg-[CanvasText]',
         compact ? 'py-1' : 'py-1.5',
       ]}
     >

@@ -44,7 +44,7 @@
   class={cn(
     'peer rounded-full disabled:opacity-40',
     choiceControl,
-    'before:size-1.5 before:scale-0 before:rounded-full before:bg-primary-foreground checked:before:scale-100 forced-colors:before:bg-[CanvasText] motion-safe:before:transition-[scale] motion-safe:before:duration-[120ms]',
+    'before:size-1.5 before:scale-0 before:rounded-full before:bg-primary-foreground checked:before:scale-100 forced-colors:before:bg-[CanvasText] motion-safe:before:transition-[scale] motion-safe:before:duration-120',
     focusRing,
     className,
   )}

@@ -17,7 +17,7 @@ export const buttonVariants = tv({
   base: [
     'inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-transparent',
     'font-semibold whitespace-nowrap select-none',
-    'transition-[color,background-color,border-color,opacity,scale] duration-[120ms] ease-out',
+    'transition-[color,background-color,border-color,opacity,scale] duration-120 ease-out',
     'motion-safe:active:scale-[0.97] motion-reduce:active:opacity-80',
     'disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none',
     'aria-disabled:pointer-events-none aria-disabled:opacity-40',

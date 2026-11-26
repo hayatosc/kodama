@@ -21,7 +21,7 @@
   data-slot="accordion-trigger"
   class={cn(
     'flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden',
-    'min-h-11 rounded-md py-2 text-sm font-semibold text-foreground transition-colors duration-[120ms] hover:text-foreground/80',
+    'min-h-11 rounded-md py-2 text-sm font-semibold text-foreground transition-colors duration-120 hover:text-foreground/80',
     focusRing,
     className,
   )}

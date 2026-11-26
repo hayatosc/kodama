@@ -43,7 +43,7 @@
     data-slot="message"
     data-role="user"
     class={cn(
-      'ms-auto w-fit max-w-[70%] rounded-[20px] bg-primary px-3.5 py-[7px] text-base leading-7 font-semibold wrap-anywhere whitespace-pre-wrap text-primary-foreground',
+      'ms-auto w-fit max-w-[70%] rounded-3xl bg-primary px-3.5 py-1.75 text-base leading-7 font-semibold wrap-anywhere whitespace-pre-wrap text-primary-foreground',
       props.class,
     )}
   >
@@ -60,11 +60,11 @@
   >
     <span>{@render props.children()}</span>
     {#if props.typing}
-      <span class="inline-flex gap-[3px]" aria-hidden="true">
+      <span class="inline-flex gap-0.75" aria-hidden="true">
         {#each ['', 'motion-safe:[animation-delay:0.2s]', 'motion-safe:[animation-delay:0.4s]'] as delay (delay)}
           <i
             class={[
-              'size-[5px] rounded-full bg-muted-foreground forced-colors:bg-[CanvasText] motion-safe:animate-typing',
+              'size-1.25 rounded-full bg-muted-foreground forced-colors:bg-[CanvasText] motion-safe:animate-typing',
               delay,
             ]}
           ></i>
@@ -76,7 +76,7 @@
   <div
     data-slot="message"
     data-role="assistant"
-    class={cn('w-fit max-w-[min(560px,100%)] rounded-2xl bg-muted px-3.5 py-2.5', props.class)}
+    class={cn('w-fit max-w-140 rounded-2xl bg-muted px-3.5 py-2.5', props.class)}
   >
     <Prose streaming={props.streaming}>{@render props.children()}</Prose>
   </div>
@@ -85,7 +85,7 @@
     data-slot="message"
     data-role="peer"
     class={cn(
-      'w-fit max-w-[min(560px,100%)] rounded-2xl border border-border bg-background px-3.5 py-2.5',
+      'w-fit max-w-140 rounded-2xl border border-border bg-background px-3.5 py-2.5',
       props.class,
     )}
   >

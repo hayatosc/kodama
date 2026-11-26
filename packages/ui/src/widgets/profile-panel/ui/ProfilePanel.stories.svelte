@@ -114,7 +114,7 @@
 </script>
 
 {#snippet template(args: Parameters<typeof ProfilePanel>[1])}
-  <div class="flex h-[820px] justify-end">
+  <div class="flex h-205 justify-end">
     <ProfilePanel {...args} tools={args.tools?.map((tool) => ({ ...tool }))} />
   </div>
 {/snippet}

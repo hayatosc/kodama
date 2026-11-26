@@ -66,7 +66,7 @@ Each Durable Object can have one alarm set at a time.`
     },
   }}
 >
-  <div class="flex max-w-[560px] flex-col gap-3">
+  <div class="flex max-w-140 flex-col gap-3">
     <ToolCall
       name="web_search"
       summary="&quot;Durable Objects alarms&quot;"

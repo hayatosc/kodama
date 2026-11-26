@@ -28,7 +28,7 @@
 
   /** A mark over the box, scaled in with its state. */
   const mark =
-    'pointer-events-none col-start-1 row-start-1 size-2.5 scale-0 text-primary-foreground motion-safe:transition-[scale] motion-safe:duration-[120ms]'
+    'pointer-events-none col-start-1 row-start-1 size-2.5 scale-0 text-primary-foreground motion-safe:transition-[scale] motion-safe:duration-120'
 </script>
 
 <!--

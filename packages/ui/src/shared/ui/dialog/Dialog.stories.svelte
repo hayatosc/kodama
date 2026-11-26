@@ -159,7 +159,7 @@
 >
   <Dialog.Root>
     <Dialog.Trigger>利用規約を読む</Dialog.Trigger>
-    <Dialog.Content class="w-[480px] max-w-full">
+    <Dialog.Content class="w-120 max-w-full">
       <Dialog.Header>
         <Dialog.Title>利用規約</Dialog.Title>
         <Dialog.Description>2026 年 11 月 1 日改定</Dialog.Description>

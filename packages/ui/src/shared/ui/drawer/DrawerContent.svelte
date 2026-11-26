@@ -33,9 +33,9 @@
     side === 'bottom' &&
       'motion-safe:translate-y-full motion-safe:starting:open:not-data-closing:translate-y-full',
     side === 'right' &&
-      'ms-auto me-0 my-0 h-full max-h-full w-[min(400px,100%-3rem)] border-0 border-s',
+      'ms-auto me-0 my-0 h-full max-h-full w-100 max-w-[calc(100%-3rem)] border-0 border-s',
     side === 'left' &&
-      'ms-0 me-auto my-0 h-full max-h-full w-[min(400px,100%-3rem)] border-0 border-e',
+      'ms-0 me-auto my-0 h-full max-h-full w-100 max-w-[calc(100%-3rem)] border-0 border-e',
     side === 'bottom' &&
       'mx-0 mt-auto mb-0 max-h-[calc(100%-3rem)] w-full rounded-t-xl border-0 border-t pb-[max(24px,env(safe-area-inset-bottom))]',
     className,

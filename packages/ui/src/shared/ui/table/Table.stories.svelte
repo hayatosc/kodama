@@ -61,7 +61,7 @@
 </Story>
 
 <Story name="Usage" asChild>
-  <div class="w-[560px] max-w-full">
+  <div class="w-140 max-w-full">
     <Table.Root label="エージェントごとの利用状況">
       <Table.Caption>11 月 1 日〜11 月 10 日の利用状況</Table.Caption>
       <Table.Header>
@@ -116,7 +116,7 @@
     },
   }}
 >
-  <div class="w-[280px] max-w-full">
+  <div class="w-70 max-w-full">
     <Table.Root label="エージェントごとの利用状況（狭い列）">
       <Table.Caption>利用状況</Table.Caption>
       <Table.Header>

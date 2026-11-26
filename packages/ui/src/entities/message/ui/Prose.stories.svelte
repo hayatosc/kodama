@@ -20,7 +20,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <Prose class="max-w-[560px]">
+  <Prose class="max-w-140">
     <p>Durable Objects には <strong>1 オブジェクトにつき 1 つ</strong>のアラームを設定できます。</p>
   </Prose>
 </Story>
@@ -32,7 +32,7 @@
     docs: { description: { story: 'Each element Markdown renders, inside an agent’s bubble.' } },
   }}
 >
-  <div class="max-w-[560px] rounded-2xl bg-muted px-3.5 py-2.5">
+  <div class="max-w-140 rounded-2xl bg-muted px-3.5 py-2.5">
     <Prose>
       <h3>アラームの基本</h3>
       <p>
@@ -80,7 +80,7 @@
     },
   }}
 >
-  <div class="max-w-[560px] rounded-2xl bg-muted px-3.5 py-2.5">
+  <div class="max-w-140 rounded-2xl bg-muted px-3.5 py-2.5">
     <Prose streaming>
       <h3>アラームの基本</h3>
       <p>Durable Objects には 1 オブジェクトにつき 1 つのアラームを</p>

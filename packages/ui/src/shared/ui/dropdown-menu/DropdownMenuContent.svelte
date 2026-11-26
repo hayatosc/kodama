@@ -79,7 +79,7 @@
   popover="auto"
   data-slot="dropdown-menu-content"
   class={cn(
-    'min-w-[200px] rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
+    'min-w-50 rounded-xl border border-border bg-popover p-1 text-foreground shadow-lg',
     'anchored:inset-auto anchored:my-1 anchored:[position-area:block-end_span-inline-end] anchored:[position-try-fallbacks:flip-block,flip-inline,flip-block_flip-inline] unanchored:fixed unanchored:inset-auto unanchored:m-0',
     'opacity-0 transition-[opacity,translate,display,overlay] duration-150 transition-discrete',
     'open:opacity-100 open:duration-100 starting:open:opacity-0',

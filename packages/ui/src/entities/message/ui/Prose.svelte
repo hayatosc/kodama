@@ -75,11 +75,11 @@
 
   /* h1 and h2 look like h3. */
   .prose :global(:is(h1, h2, h3)) {
-    @apply text-[18px] leading-7 font-semibold;
+    @apply text-lg leading-7 font-semibold;
   }
 
   .prose :global(h4) {
-    @apply text-[16px] leading-7 font-semibold;
+    @apply text-base leading-7 font-semibold;
   }
 
   .prose :global(ul) {
@@ -103,7 +103,7 @@
   }
 
   .prose :global(:not(pre) > code) {
-    @apply rounded-sm bg-accent px-1 font-mono text-[14px];
+    @apply rounded-sm bg-accent px-1 font-mono text-sm/7;
   }
 
   .prose :global(blockquote) {
@@ -111,7 +111,7 @@
   }
 
   .prose :global(table) {
-    @apply w-full border-collapse text-[14px] leading-5;
+    @apply w-full border-collapse text-sm leading-5;
   }
 
   .prose :global(th) {
@@ -129,6 +129,6 @@
   /* The caret is generated content with no text, so screen readers pass over it. */
   .prose[data-streaming] > :global(:last-child)::after {
     content: '';
-    @apply ms-0.5 inline-block h-[15px] w-[7px] bg-foreground align-[-2px] forced-colors:bg-[CanvasText] motion-safe:animate-caret;
+    @apply ms-0.5 inline-block h-3.75 w-1.75 bg-foreground translate-y-0.5 forced-colors:bg-[CanvasText] motion-safe:animate-caret;
   }
 </style>

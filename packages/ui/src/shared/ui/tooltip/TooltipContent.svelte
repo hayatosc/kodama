@@ -36,7 +36,7 @@
   popover="hint"
   data-slot="tooltip-content"
   class={cn(
-    'max-w-[280px] rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md',
+    'max-w-70 rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md',
     'forced-colors:border forced-colors:border-[CanvasText]',
     'anchored:inset-auto anchored:my-1.5 anchored:[position-area:block-start] anchored:[position-try-fallbacks:flip-block] unanchored:fixed unanchored:inset-auto unanchored:m-0',
     'opacity-0 transition-[opacity,translate,display,overlay] duration-150 transition-discrete',

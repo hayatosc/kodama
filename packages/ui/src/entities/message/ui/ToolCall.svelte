@@ -109,7 +109,7 @@
 >
   <summary
     class={cn(
-      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base [contain:inline-size] transition-colors duration-[120ms] hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
+      '-mx-2 flex h-9 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-base [contain:inline-size] transition-colors duration-120 hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden',
       focusRing,
     )}
   >
@@ -179,7 +179,7 @@
           class={cn(
             long &&
               !showAll &&
-              'relative max-h-[104px] overflow-hidden after:absolute after:inset-x-0 after:bottom-0 after:h-10 after:bg-[linear-gradient(transparent,var(--muted))]',
+              'relative max-h-26 overflow-hidden after:absolute after:inset-x-0 after:bottom-0 after:h-10 after:bg-[linear-gradient(transparent,var(--muted))]',
           )}
         >
           <pre
