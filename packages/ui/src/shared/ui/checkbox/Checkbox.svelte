@@ -40,7 +40,8 @@
   class={cn(
     'peer',
     choiceControl,
-    'rounded-sm checked:before:mask-check-heavy indeterminate:before:mask-dash',
+    'rounded-sm checked:before:mask-check-heavy',
+    'indeterminate:border-primary indeterminate:bg-primary indeterminate:before:scale-100 indeterminate:before:mask-dash',
     focusRing,
     className,
   )}
