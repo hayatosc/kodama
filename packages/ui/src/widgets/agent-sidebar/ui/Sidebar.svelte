@@ -88,7 +88,7 @@
     <AgentAvatar color={main.avatar.color} pose={main.avatar.pose} size={56} />
     <span class="min-w-0 flex-1">
       <span class="block text-xs text-muted-foreground">メイン</span>
-      <span class="block font-display text-lg leading-7 font-semibold tracking-[-0.01em]"
+      <span class="block truncate font-display text-lg leading-7 font-semibold tracking-[-0.01em]"
         >{main.slug}</span
       >
       <span class="block truncate text-sm text-muted-foreground"

@@ -42,7 +42,8 @@
 
   let open = $state(false)
 
-  // Inside a Field or a settings row, the trigger takes the field's id and description.
+  // Inside a Field or a settings row, the trigger takes the field's id, description, and invalid
+  // state.
   const field = getFieldState()
   const attributes = $derived(fieldControlAttributes(field, {}))
 
@@ -82,6 +83,7 @@
     id={attributes.id}
     aria-labelledby={`${labelId} ${valueId}`}
     aria-describedby={attributes['aria-describedby']}
+    aria-invalid={attributes['aria-invalid']}
     data-slot="combobox-trigger"
     class={cn(
       variant === 'field'
