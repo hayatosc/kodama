@@ -21,7 +21,7 @@
   for={htmlFor ?? (field ? `${field.id}-control` : undefined)}
   class={cn(
     'inline-flex items-center gap-2 text-sm leading-5 font-semibold text-foreground select-none',
-    'peer-disabled:cursor-not-allowed peer-disabled:opacity-40',
+    'peer-disabled:cursor-not-allowed peer-disabled:opacity-40 peer-has-[:disabled]:cursor-not-allowed peer-has-[:disabled]:opacity-40',
     className,
   )}
   {...restProps}

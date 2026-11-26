@@ -1,4 +1,5 @@
 <script lang="ts">
+  import CheckIcon from '@lucide/svelte/icons/check'
   import { type WithElementRef } from '#shared/lib/utils.js'
   import { getDropdownMenuRadioState, getDropdownMenuState } from './context.js'
   import { CHECKED_CLOSE_DELAY, closeMenu, focusOnPointer, menuItemClass } from './menu.js'
@@ -42,5 +43,6 @@
   onpointermove={focusOnPointer}
   {...restProps}
 >
+  {#if group.value === value}<CheckIcon aria-hidden="true" strokeWidth={2.5} />{/if}
   {@render children?.()}
 </button>

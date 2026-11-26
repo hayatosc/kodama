@@ -28,8 +28,8 @@
 </script>
 
 <!--
-  A native radio with the checkbox's look, round and with a dot. Put it before its label, or in a
-  horizontal Field, which links the label and description to it.
+  A native radio with the checkbox's look, round, with a dot drawn as its ::before. Put it before
+  its label, or in a horizontal Field, which links the label and description to it.
 -->
 <input
   bind:this={ref}
@@ -42,9 +42,9 @@
   disabled={disabled ?? group.disabled}
   onchange={() => (group.value = value)}
   class={cn(
-    'peer',
+    'peer rounded-full disabled:opacity-40',
     choiceControl,
-    'rounded-full before:size-1.5 before:mask-dot',
+    'before:size-1.5 before:scale-0 before:rounded-full before:bg-primary-foreground checked:before:scale-100 forced-colors:before:bg-[CanvasText] motion-safe:before:transition-[scale] motion-safe:before:duration-[120ms]',
     focusRing,
     className,
   )}

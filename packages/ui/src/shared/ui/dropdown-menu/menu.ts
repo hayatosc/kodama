@@ -88,8 +88,8 @@ export function focusOnPointer(event: PointerEvent & { currentTarget: HTMLElemen
 
 /**
  * A menu row: a fixed 16px leading slot that holds the item's icon or, on a checked item, the
- * check mark, drawn from aria-checked so the mark and the announced state never disagree (menu
- * guide). Labels line up either way.
+ * check mark, shown from the same state as aria-checked so the mark and the announced state never
+ * disagree (menu guide). Labels line up either way.
  */
 export function menuItemClass(
   variant: 'default' | 'destructive',
@@ -104,7 +104,6 @@ export function menuItemClass(
     'disabled:pointer-events-none disabled:opacity-40',
     'aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground aria-disabled:hover:bg-transparent',
     "before:size-4 before:shrink-0 before:content-[''] has-[>svg]:before:hidden",
-    'aria-checked:before:bg-current aria-checked:before:mask-check forced-colors:aria-checked:before:bg-[CanvasText]',
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
     variant === 'destructive' && 'text-destructive [&_svg]:text-destructive',
     className,
