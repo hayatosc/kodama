@@ -167,7 +167,7 @@
     },
   }}
 >
-  <div class="flex w-80 items-center justify-between gap-3 text-sm">
+  <div class="flex w-80 max-w-full items-center justify-between gap-3 text-sm">
     <label for="select-language">言語</label>
     <Select.Root id="select-language" name="language" size="sm" bind:value={language}>
       <Select.Item value="ja">日本語</Select.Item>

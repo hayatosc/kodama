@@ -22,13 +22,13 @@
 </script>
 
 <Story name="Default" asChild>
-  <Card.Root class="w-80">
+  <Card.Root class="w-80 max-w-full">
     <Card.Content>今週の会話は 128 件です</Card.Content>
   </Card.Root>
 </Story>
 
 <Story name="Usage summary" asChild>
-  <Card.Root class="w-80">
+  <Card.Root class="w-80 max-w-full">
     <Card.Header>
       <Card.Title>今週の利用状況</Card.Title>
       <Card.Description>11 月 4 日〜11 月 10 日</Card.Description>
@@ -52,7 +52,7 @@
     },
   }}
 >
-  <Card.Root class="w-80">
+  <Card.Root class="w-80 max-w-full">
     <Card.Header>
       <Card.Title>朝の要約</Card.Title>
       <Card.Description>毎日 7:00 に実行</Card.Description>

@@ -26,7 +26,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Field.Root class="w-72">
+    <Field.Root class="w-72 max-w-full">
       <Field.Label>音量</Field.Label>
       <Slider {...args} name="volume" />
     </Field.Root>
@@ -45,7 +45,7 @@
     },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <div class="flex items-center justify-between">
       <Field.Label>温度</Field.Label>
       <output class="font-mono text-sm tabular-nums">{temperature.toFixed(1)}</output>
@@ -69,7 +69,7 @@
     docs: { description: { story: 'A value with a unit, spoken through `aria-valuetext`.' } },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <div class="flex items-center justify-between">
       <Field.Label>会話の保存期間</Field.Label>
       <output class="text-sm tabular-nums">{retention} 日</output>
@@ -86,7 +86,7 @@
 
 <Story name="Disabled" args={{ disabled: true }}>
   {#snippet template(args)}
-    <Field.Root class="w-72">
+    <Field.Root class="w-72 max-w-full">
       <Field.Label>音量</Field.Label>
       <Slider {...args} name="volume-locked" />
     </Field.Root>

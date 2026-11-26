@@ -20,7 +20,7 @@
 </script>
 
 <Story name="Above a field" asChild>
-  <div class="flex w-72 flex-col gap-1.5">
+  <div class="flex w-72 max-w-full flex-col gap-1.5">
     <Label for="label-email">メールアドレス</Label>
     <Input id="label-email" type="email" name="email" autocomplete="email" />
   </div>

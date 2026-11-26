@@ -38,7 +38,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <Accordion.Root class="w-96" aria-label="よくある質問">
+  <Accordion.Root class="w-96 max-w-full" aria-label="よくある質問">
     {#each questions as item (item.q)}
       <Accordion.Item>
         <Accordion.Trigger>{item.q}</Accordion.Trigger>
@@ -60,7 +60,7 @@
     },
   }}
 >
-  <Accordion.Root type="single" class="w-96" aria-label="よくある質問">
+  <Accordion.Root type="single" class="w-96 max-w-full" aria-label="よくある質問">
     {#each questions as item, index (item.q)}
       <Accordion.Item open={index === 0}>
         <Accordion.Trigger>{item.q}</Accordion.Trigger>
@@ -82,7 +82,7 @@
     },
   }}
 >
-  <Accordion.Item class="w-96 border-0" bind:open>
+  <Accordion.Item class="w-96 max-w-full border-0" bind:open>
     <Accordion.Trigger class="font-normal">
       詳しい設定（{open ? '開いています' : '閉じています'}）
     </Accordion.Trigger>

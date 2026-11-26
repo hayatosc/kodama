@@ -28,7 +28,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Field.Root class="w-72">
+    <Field.Root class="w-72 max-w-full">
       <Field.Label>表示名</Field.Label>
       <Input {...args} name="display-name" autocomplete="nickname" />
     </Field.Root>
@@ -47,7 +47,7 @@
     },
   }}
 >
-  <Field.Group class="w-72">
+  <Field.Group class="w-72 max-w-full">
     <Field.Root>
       <Field.Label>メールアドレス</Field.Label>
       <Input
@@ -81,7 +81,7 @@
     },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <Field.Label>ユーザー名</Field.Label>
     <Input
       name="username"
@@ -108,7 +108,7 @@
     },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <Field.Label>連絡先メールアドレス <span aria-hidden="true">*</span></Field.Label>
     <Input type="email" name="contact" autocomplete="email" required />
   </Field.Root>
@@ -116,7 +116,7 @@
 
 <Story name="Disabled" args={{ disabled: true, value: 'assistant' }}>
   {#snippet template(args)}
-    <Field.Root class="w-72">
+    <Field.Root class="w-72 max-w-full">
       <Field.Label>識別子</Field.Label>
       <Input {...args} name="slug" />
       <Field.Description>作成後は変更できません</Field.Description>

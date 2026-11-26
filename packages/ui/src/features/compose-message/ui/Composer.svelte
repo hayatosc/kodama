@@ -94,7 +94,9 @@
   The input floating at the bottom of a conversation (design/components/Composer), centered in
   the 720px column. While the agent runs, typing opens a sheet above the input that offers Tab to
   queue; the sheet also lists the queue. The input grows with its lines (field-sizing; where that
-  is missing it keeps one line and scrolls), and its 24px corners make a pill at one line.
+  is missing it keeps one line and scrolls), and its 24px corners make a pill at one line. While
+  it is empty it stays one line, so a placeholder too long for a narrow screen is cut off with an
+  ellipsis rather than wrapping.
 -->
 <div data-slot="composer" class={cn('mx-auto w-full max-w-[720px]', className)}>
   {#if sheetOpen}
@@ -107,7 +109,7 @@
         class="flex min-h-[22px] items-center gap-3 px-2 pt-0.5 pb-1 text-xs text-muted-foreground"
       >
         {#if queue.length > 0}
-          <span>キュー {queue.length}</span>
+          <span class="shrink-0 whitespace-nowrap">キュー {queue.length}</span>
         {/if}
         {#if canQueue && mobile}
           <button
@@ -124,7 +126,9 @@
             ><KeyboardKey.Root>Tab</KeyboardKey.Root> でキューに追加</span
           >
         {:else}
-          <span class="ms-auto">実行が終わったら順に送ります</span>
+          <span class="ms-auto min-w-0 text-end [word-break:keep-all]"
+            >実行が終わったら<wbr />順に送ります</span
+          >
         {/if}
       </div>
       {#if queue.length > 0}
@@ -170,7 +174,7 @@
       {placeholder}
       aria-label={placeholder}
       aria-describedby={canQueue && !mobile ? hintId : undefined}
-      class="max-h-[8lh] min-w-0 flex-1 resize-none self-center bg-transparent px-2 py-1 text-base leading-6 text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
+      class="max-h-[8lh] min-w-0 flex-1 resize-none self-center bg-transparent px-2 py-1 text-base leading-6 text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground placeholder-shown:h-8 placeholder-shown:overflow-hidden placeholder-shown:text-ellipsis placeholder-shown:whitespace-nowrap placeholder-shown:[field-sizing:fixed]"
       {onkeydown}></textarea>
     {#if running && !typed}
       <Button size="icon-sm" class="rounded-full" aria-label="停止" onclick={oncancel}>

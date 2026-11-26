@@ -23,13 +23,13 @@
 </script>
 
 <Story name="Default" asChild>
-  <Empty.Root class="w-96">
+  <Empty.Root class="w-96 max-w-full">
     <Empty.Title>会話はまだありません</Empty.Title>
   </Empty.Root>
 </Story>
 
 <Story name="With an action" asChild>
-  <Empty.Root class="w-96 border border-dashed border-border">
+  <Empty.Root class="w-96 max-w-full border border-dashed border-border">
     <Empty.Media><BrainIcon strokeWidth={1.75} aria-hidden="true" /></Empty.Media>
     <Empty.Title>記憶はまだありません</Empty.Title>
     <Empty.Description>
@@ -48,7 +48,7 @@
     docs: { description: { story: 'An empty search: what was searched, and a way back.' } },
   }}
 >
-  <Empty.Root class="w-96">
+  <Empty.Root class="w-96 max-w-full">
     <Empty.Media><SearchXIcon strokeWidth={1.75} aria-hidden="true" /></Empty.Media>
     <Empty.Title>「請求書」に一致する会話はありません</Empty.Title>
     <Empty.Description>別の言葉で探すか、絞り込みを外してください</Empty.Description>

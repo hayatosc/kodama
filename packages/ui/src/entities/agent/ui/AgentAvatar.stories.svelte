@@ -130,11 +130,11 @@
     },
   }}
 >
-  <table class="border-separate border-spacing-x-5 border-spacing-y-3">
+  <table class="border-separate border-spacing-x-2 border-spacing-y-3 sm:border-spacing-x-5">
     <tbody>
       {#each ['idle', 'write', 'live', 'tilt', 'sleep'] as const as pose (pose)}
         <tr>
-          <td><code class="mono-xs">{pose}</code></td>
+          <td class="whitespace-nowrap"><code class="mono-xs">{pose}</code></td>
           {#each [72, 56, 36, 20] as const as size (size)}
             <td class="align-middle">
               <AgentAvatar

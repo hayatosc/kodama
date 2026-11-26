@@ -27,7 +27,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <InputGroup.Root class="w-72">
+  <InputGroup.Root class="w-72 max-w-full">
     <InputGroup.Addon><SearchIcon strokeWidth={1.75} aria-hidden="true" /></InputGroup.Addon>
     <InputGroup.Input aria-label="検索" placeholder="検索" />
   </InputGroup.Root>
@@ -45,7 +45,7 @@
     },
   }}
 >
-  <search class="w-72">
+  <search class="w-72 max-w-full">
     <Field.Root>
       <Field.Label class="sr-only">会話を検索</Field.Label>
       <InputGroup.Root>
@@ -77,7 +77,7 @@
     docs: { description: { story: 'A fixed prefix and a unit, outside the value itself.' } },
   }}
 >
-  <Field.Group class="w-72">
+  <Field.Group class="w-72 max-w-full">
     <Field.Root>
       <Field.Label>Webhook の URL</Field.Label>
       <InputGroup.Root>
@@ -104,7 +104,7 @@
     docs: { description: { story: 'A key hint at the end, for a field with a shortcut.' } },
   }}
 >
-  <Field.Root class="w-72">
+  <Field.Root class="w-72 max-w-full">
     <Field.Label class="sr-only">コマンドを検索</Field.Label>
     <InputGroup.Root>
       <InputGroup.Addon><SearchIcon strokeWidth={1.75} aria-hidden="true" /></InputGroup.Addon>

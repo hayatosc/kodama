@@ -19,7 +19,7 @@
 </script>
 
 <Story name="Default" asChild>
-  <div class="w-[260px] rounded-xl border border-border bg-popover">
+  <div class="w-[260px] max-w-full rounded-xl border border-border bg-popover">
     <Command.Root>
       <Command.Input placeholder="検索" aria-label="エージェントを検索" />
       <Command.List>

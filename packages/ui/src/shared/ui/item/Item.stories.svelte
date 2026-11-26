@@ -37,7 +37,7 @@
 
 <Story name="Default">
   {#snippet template(args)}
-    <Item.Root {...args} class="w-96">
+    <Item.Root {...args} class="w-96 max-w-full">
       <Item.Content>
         <Item.Title>朝の要約</Item.Title>
       </Item.Content>
@@ -47,7 +47,7 @@
 
 <Story name="With a switch">
   {#snippet template(args)}
-    <Item.Root {...args} class="w-96">
+    <Item.Root {...args} class="w-96 max-w-full">
       <Item.Media><BellIcon strokeWidth={1.75} aria-hidden="true" /></Item.Media>
       <Item.Content>
         <Item.Title>朝の要約</Item.Title>
@@ -70,7 +70,7 @@
     },
   }}
 >
-  <Item.Group class="w-96 gap-1">
+  <Item.Group class="w-96 max-w-full gap-1">
     {#each files as file (file.name)}
       <Item.Root size="sm">
         <Item.Media><FileTextIcon strokeWidth={1.75} aria-hidden="true" /></Item.Media>
@@ -97,7 +97,7 @@
     },
   }}
 >
-  <Item.Group class="w-96 gap-2">
+  <Item.Group class="w-96 max-w-full gap-2">
     <Item.Root variant="outline">
       <Item.Content>
         <Item.Title>Anthropic <Badge variant="live">接続済み</Badge></Item.Title>

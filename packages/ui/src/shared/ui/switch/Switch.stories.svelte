@@ -52,7 +52,7 @@
     },
   }}
 >
-  <div class="flex w-80 items-start justify-between gap-4">
+  <div class="flex w-80 max-w-full items-start justify-between gap-4">
     <div class="flex flex-col gap-0.5">
       <label for="switch-sync" class="cursor-pointer text-sm font-semibold">デバイス間で同期</label>
       <p id="switch-sync-description" class="text-xs text-muted-foreground">
@@ -83,7 +83,7 @@
     },
   }}
 >
-  <fieldset class="flex w-72 flex-col">
+  <fieldset class="flex w-72 max-w-full flex-col">
     <legend class="mb-1 text-xs text-muted-foreground">通知</legend>
     {#each settings as setting (setting.id)}
       <label class="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm">
