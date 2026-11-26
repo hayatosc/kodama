@@ -95,9 +95,10 @@ and `#shared/*` aliases.
   keyframes and their `--animate-*` names in `@theme`, the `anchored:`, `unanchored:`, and
   `base-select:` variants for anchor positioning and the customizable select. Icons, the check
   marks and chevrons of native controls included, are `@lucide/svelte` components; where an
-  element cannot hold one (`<input>`, `<select>`), a wrapper holds both, as Switch does. The
-  agent illustrations (`Bird`, `Birdhouse`, `AgentAvatar`) are the exception: their SVG strokes
-  and pose keyframes belong to them alone, so they stay in each one's scoped `<style>`.
+  element cannot hold one (`<input>`, `<select>`), a wrapper holds both, as Switch does. Two
+  kinds of component keep a scoped `<style>`: the agent illustrations (`Bird`, `Birdhouse`,
+  `AgentAvatar`), whose SVG strokes and pose keyframes belong to them alone, and `Prose`, whose
+  Markdown elements are not its own to put classes on, so its style dresses them with `@apply`.
 - `src/shared/lib/user-invalid.ts`: keeps `aria-invalid` in step with `:user-invalid`, so an error shows
   only after the user has interacted, and is announced as well as seen.
 - `src/shared/lib/top-layer.ts`: the dialog fallbacks for browsers without `overlay` (the exit
